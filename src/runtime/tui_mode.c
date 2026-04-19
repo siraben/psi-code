@@ -1,5 +1,6 @@
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -55,6 +56,13 @@ struct psi_tui_state {
     int height;
 };
 
+struct psi_tui_stdio_guard {
+    int active;
+    int stdout_saved;
+    int stderr_saved;
+    int null_fd;
+};
+
 static const long PSI_TUI_MAX_RENDER_TEXT = 8192l;
 
 static int psi_tui_add_entry(
@@ -65,6 +73,61 @@ static int psi_tui_add_entry(
     int is_error
 );
 static void psi_tui_redraw(struct psi_tui_state *state);
+
+static int psi_tui_stdio_guard_begin(struct psi_tui_stdio_guard *guard) {
+    if (guard == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    guard->active = 0;
+    guard->stdout_saved = -1;
+    guard->stderr_saved = -1;
+    guard->null_fd = -1;
+
+    guard->null_fd = open("/dev/null", O_WRONLY);
+    if (guard->null_fd < 0) {
+        return PSI_STATUS_ERROR;
+    }
+
+    guard->stdout_saved = dup(STDOUT_FILENO);
+    guard->stderr_saved = dup(STDERR_FILENO);
+    if (guard->stdout_saved < 0 || guard->stderr_saved < 0) {
+        if (guard->stdout_saved >= 0) {
+            close(guard->stdout_saved);
+        }
+        if (guard->stderr_saved >= 0) {
+            close(guard->stderr_saved);
+        }
+        close(guard->null_fd);
+        return PSI_STATUS_ERROR;
+    }
+
+    if (dup2(guard->null_fd, STDOUT_FILENO) < 0 || dup2(guard->null_fd, STDERR_FILENO) < 0) {
+        close(guard->stdout_saved);
+        close(guard->stderr_saved);
+        close(guard->null_fd);
+        return PSI_STATUS_ERROR;
+    }
+
+    guard->active = 1;
+    return PSI_STATUS_OK;
+}
+
+static void psi_tui_stdio_guard_end(struct psi_tui_stdio_guard *guard) {
+    if (guard == NULL || !guard->active) {
+        return;
+    }
+
+    dup2(guard->stdout_saved, STDOUT_FILENO);
+    dup2(guard->stderr_saved, STDERR_FILENO);
+    close(guard->stdout_saved);
+    close(guard->stderr_saved);
+    close(guard->null_fd);
+    guard->active = 0;
+    guard->stdout_saved = -1;
+    guard->stderr_saved = -1;
+    guard->null_fd = -1;
+}
 
 static void psi_tui_free_entry(struct psi_tui_entry *entry) {
     if (entry == NULL) {
@@ -1216,6 +1279,7 @@ static int psi_tui_handle_command(struct psi_tui_state *state, const char *line)
     char *summary_text;
     long keep_recent;
     int status;
+    struct psi_tui_stdio_guard stdio_guard;
 
     action_name = NULL;
     action_text = NULL;
@@ -1240,7 +1304,16 @@ static int psi_tui_handle_command(struct psi_tui_state *state, const char *line)
         psi_tui_add_entry(state, PSI_TUI_ENTRY_INFO, NULL, action_text != NULL ? action_text : "", 0);
         psi_tui_set_status(state, "", 0);
     } else if (action_name != NULL && strcmp(action_name, "compact") == 0) {
+        stdio_guard.active = 0;
+        if (psi_tui_stdio_guard_begin(&stdio_guard) != PSI_STATUS_OK) {
+            psi_tui_set_status(state, "failed to isolate terminal output", 1);
+            free(action_name);
+            free(action_text);
+            free(summary_text);
+            return PSI_STATUS_ERROR;
+        }
         status = psi_agent_runtime_compact(&state->runtime, (size_t)keep_recent, &summary_text);
+        psi_tui_stdio_guard_end(&stdio_guard);
         if (status != PSI_STATUS_OK) {
             psi_tui_set_status(state, "failed to compact session", 1);
         } else if (psi_agent_runtime_save(&state->runtime) != PSI_STATUS_OK) {
@@ -1265,6 +1338,7 @@ static int psi_tui_submit(struct psi_tui_state *state) {
     char *response_text;
     int status;
     struct psi_agent_observer observer;
+    struct psi_tui_stdio_guard stdio_guard;
 
     if (state == NULL || state->busy || state->input_length == 0u) {
         return PSI_STATUS_OK;
@@ -1296,7 +1370,16 @@ static int psi_tui_submit(struct psi_tui_state *state) {
     observer.on_tool_call = psi_tui_observer_tool_call;
     observer.on_tool_result = psi_tui_observer_tool_result;
     response_text = NULL;
+    stdio_guard.active = 0;
+    if (psi_tui_stdio_guard_begin(&stdio_guard) != PSI_STATUS_OK) {
+        state->busy = 0;
+        psi_tui_set_status(state, "failed to isolate terminal output", 1);
+        free(line);
+        psi_tui_redraw(state);
+        return PSI_STATUS_ERROR;
+    }
     status = psi_agent_runtime_turn_with_observer(&state->runtime, line, &observer, &response_text);
+    psi_tui_stdio_guard_end(&stdio_guard);
     state->busy = 0;
 
     if (status != PSI_STATUS_OK) {
