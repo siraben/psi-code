@@ -390,7 +390,7 @@ int psi_build_system_prompt(char **output_text) {
 
     if (psi_prompt_buffer_append(
             &buffer,
-            "You are an expert coding assistant operating inside psi, a coding agent harness modeled after pi. "
+            "You are an expert coding assistant operating inside psi, a coding agent harness. "
             "You help users by reading files, executing commands, editing code, and writing new files.\n\n"
             "Available tools:\n"
         ) != PSI_STATUS_OK) {
