@@ -3,6 +3,7 @@
 #include <string.h>
 #include <curl/curl.h>
 #include <cjson/cJSON.h>
+#include "psi/agent.h"
 #include "psi/anthropic.h"
 #include "psi/common.h"
 #include "psi/tool.h"
@@ -37,6 +38,7 @@ struct psi_stream_state {
     size_t block_capacity;
     int wrote_text;
     char *error_message;
+    struct psi_agent_observer *observer;
 };
 
 static void psi_string_buffer_init(struct psi_string_buffer *buffer) {
@@ -134,6 +136,7 @@ static void psi_stream_state_init(struct psi_stream_state *state) {
     state->block_capacity = 0u;
     state->wrote_text = 0;
     state->error_message = NULL;
+    state->observer = NULL;
 }
 
 static void psi_stream_state_free(struct psi_stream_state *state) {
@@ -276,8 +279,12 @@ static int psi_stream_dispatch_event(struct psi_stream_state *state) {
                     }
                     block->text = next_text;
                     strcat(block->text, text->valuestring);
-                    fputs(text->valuestring, stdout);
-                    fflush(stdout);
+                    if (state->observer != NULL && state->observer->on_assistant_text_delta != NULL) {
+                        state->observer->on_assistant_text_delta(state->observer->userdata, text->valuestring);
+                    } else {
+                        fputs(text->valuestring, stdout);
+                        fflush(stdout);
+                    }
                     state->wrote_text = 1;
                 }
             } else if (cJSON_IsString(type) && type->valuestring != NULL &&
@@ -1088,6 +1095,7 @@ int psi_anthropic_agent_turn_with_prompt(
     struct psi_vm *vm,
     struct psi_host_context *host,
     const char *user_text,
+    struct psi_agent_observer *observer,
     const char *model,
     long max_tokens,
     const char *system_prompt,
@@ -1159,6 +1167,7 @@ int psi_anthropic_agent_turn_with_prompt(
     while (loop_count < 32) {
         loop_count++;
         psi_stream_state_init(&stream_state);
+        stream_state.observer = observer;
         if (psi_anthropic_build_request_json(resolved_model, max_tokens, system_prompt, messages, tools, &request_json) != PSI_STATUS_OK) {
             cJSON_Delete(tools);
             cJSON_Delete(messages);
@@ -1310,6 +1319,10 @@ int psi_anthropic_agent_turn_with_prompt(
                 return PSI_STATUS_ERROR;
             }
 
+            if (observer != NULL && observer->on_tool_call != NULL) {
+                observer->on_tool_call(observer->userdata, id->valuestring, name->valuestring, input_json);
+            }
+
             if (psi_tool_call_json(host, name->valuestring, input_json, &tool_output) != PSI_STATUS_OK) {
                 free(input_json);
                 cJSON_Delete(tool_results_message);
@@ -1320,6 +1333,10 @@ int psi_anthropic_agent_turn_with_prompt(
                 return PSI_STATUS_ERROR;
             }
             free(input_json);
+
+            if (observer != NULL && observer->on_tool_result != NULL) {
+                observer->on_tool_result(observer->userdata, id->valuestring, name->valuestring, tool_output);
+            }
 
             if (psi_anthropic_append_session_tool_result(session, id->valuestring, name->valuestring, tool_output) != PSI_STATUS_OK) {
                 free(tool_output);
@@ -1356,9 +1373,10 @@ int psi_anthropic_agent_turn(
     struct psi_vm *vm,
     struct psi_host_context *host,
     const char *user_text,
+    struct psi_agent_observer *observer,
     const char *model,
     long max_tokens,
     char **output_text
 ) {
-    return psi_anthropic_agent_turn_with_prompt(session, vm, host, user_text, model, max_tokens, "", output_text);
+    return psi_anthropic_agent_turn_with_prompt(session, vm, host, user_text, observer, model, max_tokens, "", output_text);
 }

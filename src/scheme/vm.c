@@ -607,6 +607,40 @@ static int psi_vm_call_procedure1(struct psi_vm *vm, const char *procedure_name,
     return PSI_STATUS_OK;
 }
 
+static int psi_vm_call_procedure2(
+    struct psi_vm *vm,
+    const char *procedure_name,
+    sexp argument1,
+    sexp argument2,
+    sexp *value_out
+) {
+    sexp symbol;
+    sexp procedure;
+    sexp args;
+    sexp value;
+
+    if (vm == NULL || procedure_name == NULL || value_out == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    symbol = sexp_intern(vm->ctx, procedure_name, -1);
+    procedure = sexp_env_ref(vm->ctx, vm->env, symbol, SEXP_FALSE);
+    if (procedure == SEXP_FALSE) {
+        fprintf(stderr, "undefined Scheme procedure: %s\n", procedure_name);
+        return PSI_STATUS_ERROR;
+    }
+
+    args = sexp_list2(vm->ctx, argument1, argument2);
+    value = sexp_apply(vm->ctx, procedure, args);
+    if (sexp_exceptionp(value)) {
+        sexp_print_exception(vm->ctx, value, sexp_current_error_port(vm->ctx));
+        return PSI_STATUS_ERROR;
+    }
+
+    *value_out = value;
+    return PSI_STATUS_OK;
+}
+
 static int psi_vm_call_procedure0(struct psi_vm *vm, const char *procedure_name, sexp *value_out) {
     sexp symbol;
     sexp procedure;
@@ -890,6 +924,50 @@ int psi_vm_active_tool_specs_json(struct psi_vm *vm, const char *user_text, char
     cJSON_Delete(anthropic_tools);
     cJSON_Delete(json_value);
     return *output_json != NULL ? PSI_STATUS_OK : PSI_STATUS_ERROR;
+}
+
+int psi_vm_render_event_json(
+    struct psi_vm *vm,
+    const char *event_name,
+    const char *payload_json,
+    char **output_text
+) {
+    cJSON *payload_root;
+    sexp payload_value;
+    sexp rendered_value;
+
+    if (vm == NULL || event_name == NULL || output_text == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    *output_text = NULL;
+    if (payload_json == NULL || payload_json[0] == '\0') {
+        payload_value = SEXP_NULL;
+    } else {
+        payload_root = cJSON_Parse(payload_json);
+        if (payload_root == NULL) {
+            return PSI_STATUS_ERROR;
+        }
+        payload_value = psi_vm_cjson_to_sexp(vm->ctx, payload_root);
+        cJSON_Delete(payload_root);
+    }
+
+    if (psi_vm_call_procedure2(
+            vm,
+            "psi-handle-event",
+            sexp_intern(vm->ctx, event_name, -1),
+            payload_value,
+            &rendered_value
+        ) != PSI_STATUS_OK) {
+        return PSI_STATUS_ERROR;
+    }
+
+    if (rendered_value == SEXP_FALSE || rendered_value == SEXP_NULL) {
+        *output_text = psi_strdup("");
+        return *output_text != NULL ? PSI_STATUS_OK : PSI_STATUS_ERROR;
+    }
+
+    return psi_vm_extract_string(vm->ctx, rendered_value, output_text);
 }
 
 int psi_vm_parse_command(

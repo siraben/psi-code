@@ -60,7 +60,12 @@ void psi_agent_runtime_configure(struct psi_agent_runtime *runtime, const char *
     runtime->max_tokens = max_tokens > 0l ? max_tokens : 4096l;
 }
 
-int psi_agent_runtime_turn(struct psi_agent_runtime *runtime, const char *user_text, char **response_text) {
+int psi_agent_runtime_turn_with_observer(
+    struct psi_agent_runtime *runtime,
+    const char *user_text,
+    struct psi_agent_observer *observer,
+    char **response_text
+) {
     char *system_prompt;
     int status;
 
@@ -85,6 +90,7 @@ int psi_agent_runtime_turn(struct psi_agent_runtime *runtime, const char *user_t
         &runtime->vm,
         &runtime->vm.host,
         user_text,
+        observer,
         runtime->model,
         runtime->max_tokens,
         system_prompt,
@@ -92,6 +98,10 @@ int psi_agent_runtime_turn(struct psi_agent_runtime *runtime, const char *user_t
     );
     free(system_prompt);
     return status;
+}
+
+int psi_agent_runtime_turn(struct psi_agent_runtime *runtime, const char *user_text, char **response_text) {
+    return psi_agent_runtime_turn_with_observer(runtime, user_text, NULL, response_text);
 }
 
 int psi_agent_runtime_compact(

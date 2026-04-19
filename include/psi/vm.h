@@ -21,6 +21,12 @@ int psi_vm_call_string_procedure(struct psi_vm *vm, const char *procedure_name, 
 int psi_vm_call_procedure0_to_string(struct psi_vm *vm, const char *procedure_name, char **output_text);
 int psi_vm_tool_specs_json(struct psi_vm *vm, char **output_json);
 int psi_vm_active_tool_specs_json(struct psi_vm *vm, const char *user_text, char **output_json);
+int psi_vm_render_event_json(
+    struct psi_vm *vm,
+    const char *event_name,
+    const char *payload_json,
+    char **output_text
+);
 int psi_vm_parse_command(
     struct psi_vm *vm,
     const char *line,
