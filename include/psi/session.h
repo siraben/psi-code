@@ -24,5 +24,7 @@ int psi_session_load(struct psi_session *session, const char *path);
 int psi_session_save(struct psi_session *session);
 int psi_session_set_path(struct psi_session *session, const char *path);
 int psi_session_compact(struct psi_session *session, size_t keep_recent, const char *summary_text);
+int psi_session_clear(struct psi_session *session);
+enum psi_message_role psi_session_role_from_name(const char *role_name);
 
 #endif

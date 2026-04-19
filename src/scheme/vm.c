@@ -3,9 +3,12 @@
 #include <string.h>
 #include <cjson/cJSON.h>
 #include "psi/host_ops.h"
+#include "psi/process.h"
 #include "psi/prompt.h"
 #include "psi/session.h"
 #include "psi/vm.h"
+
+static const long PSI_VM_FILE_WRITE_MAX_BYTES = 16777216l; /* 16 MiB */
 
 static struct psi_host_context *psi_current_host = NULL;
 
@@ -548,6 +551,146 @@ static sexp psi_foreign_session_messages(sexp ctx, sexp self, sexp n) {
     return result;
 }
 
+static sexp psi_foreign_process_run(sexp ctx, sexp self, sexp n, sexp command) {
+    char *command_copy;
+    char *output_text;
+    int exit_status;
+    int truncated;
+    sexp result;
+
+    PSI_UNUSED(n);
+
+    if (!sexp_stringp(command)) {
+        return sexp_type_exception(ctx, self, SEXP_STRING, command);
+    }
+
+    command_copy = psi_strdup_n(sexp_string_data(command), (size_t)sexp_string_size(command));
+    if (command_copy == NULL) {
+        return sexp_user_exception(ctx, self, "out of memory while preparing command", command);
+    }
+
+    output_text = NULL;
+    exit_status = -1;
+    truncated = 0;
+    if (psi_process_run_shell(command_copy, &output_text, &exit_status, &truncated) != PSI_STATUS_OK) {
+        free(command_copy);
+        free(output_text);
+        return sexp_user_exception(ctx, self, "failed to run shell command", command);
+    }
+    free(command_copy);
+
+    result = SEXP_NULL;
+    sexp_push(ctx, result, psi_vm_make_alist_entry(ctx, "truncated", truncated ? SEXP_TRUE : SEXP_FALSE));
+    sexp_push(ctx, result, psi_vm_make_alist_entry(ctx, "status", sexp_make_fixnum((sexp_sint_t)exit_status)));
+    sexp_push(
+        ctx,
+        result,
+        psi_vm_make_alist_entry(ctx, "output", sexp_c_string(ctx, output_text != NULL ? output_text : "", -1))
+    );
+    free(output_text);
+    return result;
+}
+
+static sexp psi_foreign_file_write(sexp ctx, sexp self, sexp n, sexp path, sexp content) {
+    FILE *file;
+    size_t length;
+
+    PSI_UNUSED(n);
+
+    if (!sexp_stringp(path)) {
+        return sexp_type_exception(ctx, self, SEXP_STRING, path);
+    }
+    if (!sexp_stringp(content)) {
+        return sexp_type_exception(ctx, self, SEXP_STRING, content);
+    }
+
+    length = (size_t)sexp_string_size(content);
+    if ((long)length > PSI_VM_FILE_WRITE_MAX_BYTES) {
+        return SEXP_FALSE;
+    }
+
+    {
+        char *path_copy;
+
+        path_copy = psi_strdup_n(sexp_string_data(path), (size_t)sexp_string_size(path));
+        if (path_copy == NULL) {
+            return sexp_user_exception(ctx, self, "out of memory while preparing path", path);
+        }
+
+        file = fopen(path_copy, "wb");
+        free(path_copy);
+    }
+    if (file == NULL) {
+        return SEXP_FALSE;
+    }
+
+    if (length > 0u && fwrite(sexp_string_data(content), 1u, length, file) != length) {
+        fclose(file);
+        return SEXP_FALSE;
+    }
+    if (fclose(file) != 0) {
+        return SEXP_FALSE;
+    }
+    return SEXP_TRUE;
+}
+
+static sexp psi_foreign_session_append_bang(sexp ctx, sexp self, sexp n, sexp role, sexp text, sexp data) {
+    struct psi_session *session;
+    char *role_copy;
+    char *text_copy;
+    char *data_copy;
+    enum psi_message_role role_kind;
+    int status;
+
+    PSI_UNUSED(n);
+
+    if (!sexp_stringp(role)) {
+        return sexp_type_exception(ctx, self, SEXP_STRING, role);
+    }
+    if (!sexp_stringp(text)) {
+        return sexp_type_exception(ctx, self, SEXP_STRING, text);
+    }
+
+    session = psi_current_host != NULL ? psi_current_host->session : NULL;
+    if (session == NULL) {
+        return SEXP_FALSE;
+    }
+
+    role_copy = psi_strdup_n(sexp_string_data(role), (size_t)sexp_string_size(role));
+    text_copy = psi_strdup_n(sexp_string_data(text), (size_t)sexp_string_size(text));
+    data_copy = sexp_stringp(data)
+        ? psi_strdup_n(sexp_string_data(data), (size_t)sexp_string_size(data))
+        : NULL;
+    if (role_copy == NULL || text_copy == NULL ||
+        (sexp_stringp(data) && data_copy == NULL)) {
+        free(role_copy);
+        free(text_copy);
+        free(data_copy);
+        return sexp_user_exception(ctx, self, "out of memory while preparing session entry", SEXP_FALSE);
+    }
+
+    role_kind = psi_session_role_from_name(role_copy);
+    status = psi_session_append_with_data(session, role_kind, text_copy, data_copy);
+    free(role_copy);
+    free(text_copy);
+    free(data_copy);
+    return status == PSI_STATUS_OK ? SEXP_TRUE : SEXP_FALSE;
+}
+
+static sexp psi_foreign_session_clear_bang(sexp ctx, sexp self, sexp n) {
+    struct psi_session *session;
+
+    PSI_UNUSED(ctx);
+    PSI_UNUSED(self);
+    PSI_UNUSED(n);
+
+    session = psi_current_host != NULL ? psi_current_host->session : NULL;
+    if (session == NULL) {
+        return SEXP_FALSE;
+    }
+    return psi_session_clear(session) == PSI_STATUS_OK ? SEXP_TRUE : SEXP_FALSE;
+}
+
 static int psi_vm_extract_string(sexp ctx, sexp value, char **output_text) {
     sexp printed;
     char *copy;
@@ -777,6 +920,10 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
     sexp_define_foreign(vm->ctx, vm->env, "psi-file-exists?", 1, psi_foreign_file_exists);
     sexp_define_foreign(vm->ctx, vm->env, "psi-runtime-info", 0, psi_foreign_runtime_info);
     sexp_define_foreign(vm->ctx, vm->env, "psi-session-messages", 0, psi_foreign_session_messages);
+    sexp_define_foreign(vm->ctx, vm->env, "psi-process-run", 1, psi_foreign_process_run);
+    sexp_define_foreign(vm->ctx, vm->env, "psi-file-write", 2, psi_foreign_file_write);
+    sexp_define_foreign(vm->ctx, vm->env, "psi-session-append!", 3, psi_foreign_session_append_bang);
+    sexp_define_foreign(vm->ctx, vm->env, "psi-session-clear!", 0, psi_foreign_session_clear_bang);
 
     return psi_vm_load_bootstrap(vm);
 }
@@ -983,10 +1130,80 @@ int psi_vm_parse_command(
         return PSI_STATUS_ERROR;
     }
     value = SEXP_FALSE;
-    if (psi_vm_call_procedure1(vm, "psi-handle-command", sexp_c_string(vm->ctx, line, -1), &value) != PSI_STATUS_OK) {
+    if (psi_vm_call_procedure1(vm, "psi-handle-command-list", sexp_c_string(vm->ctx, line, -1), &value) != PSI_STATUS_OK) {
         return PSI_STATUS_ERROR;
     }
     return psi_vm_parse_action_list(vm, value, action_name, action_text, action_number);
+}
+
+int psi_vm_dispatch_tool_json(
+    struct psi_vm *vm,
+    const char *tool_name,
+    const char *input_json,
+    char **output_json
+) {
+    cJSON *input_root;
+    sexp name_sexp;
+    sexp input_sexp;
+    sexp result_sexp;
+    cJSON *result_json;
+
+    if (vm == NULL || tool_name == NULL || output_json == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    *output_json = NULL;
+    input_root = (input_json != NULL && input_json[0] != '\0')
+        ? cJSON_Parse(input_json)
+        : cJSON_CreateObject();
+    if (input_root == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    name_sexp = sexp_c_string(vm->ctx, tool_name, -1);
+    input_sexp = psi_vm_cjson_to_sexp(vm->ctx, input_root);
+    cJSON_Delete(input_root);
+
+    if (psi_vm_call_procedure2(
+            vm,
+            "psi-tool-dispatch-alist",
+            name_sexp,
+            input_sexp,
+            &result_sexp
+        ) != PSI_STATUS_OK) {
+        return PSI_STATUS_ERROR;
+    }
+
+    result_json = psi_vm_sexp_to_cjson(vm->ctx, result_sexp);
+    if (result_json == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+    *output_json = cJSON_PrintUnformatted(result_json);
+    cJSON_Delete(result_json);
+    return *output_json != NULL ? PSI_STATUS_OK : PSI_STATUS_ERROR;
+}
+
+int psi_vm_session_compact(
+    struct psi_vm *vm,
+    long keep_recent,
+    const char *summary_text
+) {
+    sexp result;
+
+    if (vm == NULL || summary_text == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    if (psi_vm_call_procedure2(
+            vm,
+            "psi-session-do-compact",
+            sexp_make_fixnum((sexp_sint_t)keep_recent),
+            sexp_c_string(vm->ctx, summary_text, -1),
+            &result
+        ) != PSI_STATUS_OK) {
+        return PSI_STATUS_ERROR;
+    }
+    return (result == SEXP_FALSE) ? PSI_STATUS_ERROR : PSI_STATUS_OK;
 }
 
 int psi_vm_build_compaction_request(

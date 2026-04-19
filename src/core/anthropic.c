@@ -6,7 +6,7 @@
 #include "psi/agent.h"
 #include "psi/anthropic.h"
 #include "psi/common.h"
-#include "psi/tool.h"
+#include "psi/vm.h"
 #include "psi/vm.h"
 
 struct psi_http_buffer {
@@ -1323,7 +1323,7 @@ int psi_anthropic_agent_turn_with_prompt(
                 observer->on_tool_call(observer->userdata, id->valuestring, name->valuestring, input_json);
             }
 
-            if (psi_tool_call_json(host, name->valuestring, input_json, &tool_output) != PSI_STATUS_OK) {
+            if (psi_vm_dispatch_tool_json(host->vm, name->valuestring, input_json, &tool_output) != PSI_STATUS_OK) {
                 free(input_json);
                 cJSON_Delete(tool_results_message);
                 cJSON_Delete(content);

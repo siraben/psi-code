@@ -151,7 +151,7 @@ int psi_agent_runtime_compact(
         return status;
     }
 
-    status = psi_session_compact(&runtime->session, keep_recent, summary);
+    status = psi_vm_session_compact(&runtime->vm, (long)keep_recent, summary);
     if (status != PSI_STATUS_OK) {
         free(summary);
         return status;

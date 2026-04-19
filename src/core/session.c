@@ -109,6 +109,19 @@ static cJSON *psi_session_make_message(const struct psi_message *message) {
     return root;
 }
 
+static enum psi_message_role psi_session_parse_role(const char *role_name);
+
+enum psi_message_role psi_session_role_from_name(const char *role_name) {
+    return psi_session_parse_role(role_name);
+}
+
+int psi_session_clear(struct psi_session *session) {
+    if (session == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+    return psi_session_clear_messages(session);
+}
+
 static enum psi_message_role psi_session_parse_role(const char *role_name) {
     if (role_name == NULL) {
         return PSI_MESSAGE_CUSTOM;

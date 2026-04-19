@@ -71,7 +71,70 @@ static int psi_tui_add_entry(
     const char *text,
     int is_error
 );
+static int psi_tui_build_render_lines(
+    struct psi_tui_state *state,
+    struct psi_tui_render_line **lines_out,
+    size_t *count_out
+);
+static void psi_tui_render_free_lines(struct psi_tui_render_line *lines, size_t count);
 static void psi_tui_redraw(struct psi_tui_state *state);
+
+static int psi_tui_transcript_height(const struct psi_tui_state *state) {
+    int height;
+
+    if (state == NULL) {
+        return 1;
+    }
+    height = state->height - 6;
+    if (height < 1) {
+        height = 1;
+    }
+    return height;
+}
+
+static int psi_tui_max_scroll_offset(struct psi_tui_state *state) {
+    struct psi_tui_render_line *lines;
+    size_t line_count;
+    int max_scroll;
+    int transcript_height;
+
+    if (state == NULL) {
+        return 0;
+    }
+
+    lines = NULL;
+    line_count = 0u;
+    if (psi_tui_build_render_lines(state, &lines, &line_count) != PSI_STATUS_OK) {
+        return state->scroll_offset > 0 ? state->scroll_offset : 0;
+    }
+
+    transcript_height = psi_tui_transcript_height(state);
+    max_scroll = (int)line_count - transcript_height;
+    if (max_scroll < 0) {
+        max_scroll = 0;
+    }
+    psi_tui_render_free_lines(lines, line_count);
+    return max_scroll;
+}
+
+static void psi_tui_scroll_by(struct psi_tui_state *state, int delta) {
+    int next_offset;
+    int max_scroll;
+
+    if (state == NULL || delta == 0) {
+        return;
+    }
+
+    next_offset = state->scroll_offset + delta;
+    if (next_offset < 0) {
+        next_offset = 0;
+    }
+    max_scroll = psi_tui_max_scroll_offset(state);
+    if (next_offset > max_scroll) {
+        next_offset = max_scroll;
+    }
+    state->scroll_offset = next_offset;
+}
 
 static int psi_tui_stdio_guard_begin(struct psi_tui_stdio_guard *guard) {
     if (guard == NULL) {
@@ -1030,6 +1093,15 @@ static void psi_tui_redraw(struct psi_tui_state *state) {
     lines = NULL;
     line_count = 0u;
     if (psi_tui_build_render_lines(state, &lines, &line_count) == PSI_STATUS_OK) {
+        int max_scroll;
+
+        max_scroll = (int)line_count - transcript_height;
+        if (max_scroll < 0) {
+            max_scroll = 0;
+        }
+        if (state->scroll_offset > max_scroll) {
+            state->scroll_offset = max_scroll;
+        }
         first_line = (int)line_count - transcript_height - state->scroll_offset;
         if (first_line < 0) {
             first_line = 0;
@@ -1054,7 +1126,8 @@ static void psi_tui_redraw(struct psi_tui_state *state) {
     psi_tui_draw_line(
         status_row,
         state->status_text != NULL ? state->status_text :
-            (state->busy ? "Working..." : "Enter to submit, PageUp/PageDown to scroll, Ctrl+D or /quit to exit"),
+            (state->busy ? "Working... Up/Down, PageUp/PageDown, or mouse wheel scroll" :
+                "Enter to submit, Up/Down or PageUp/PageDown to scroll, Ctrl+D or /quit to exit"),
         state->status_is_error ? 6 : 7,
         state->status_is_error ? A_BOLD : A_DIM
     );
@@ -1548,6 +1621,8 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
     nonl();
     noecho();
     keypad(stdscr, TRUE);
+    mouseinterval(0);
+    mousemask(ALL_MOUSE_EVENTS, NULL);
     scrollok(stdscr, FALSE);
     set_escdelay(25);
     psi_tui_init_colors();
@@ -1561,6 +1636,54 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
         }
 
         if (ch == KEY_RESIZE) {
+            psi_tui_redraw(&state);
+            continue;
+        }
+        if (ch == KEY_MOUSE) {
+            MEVENT event;
+
+            if (getmouse(&event) == OK) {
+#ifdef BUTTON4_PRESSED
+                if ((event.bstate & BUTTON4_PRESSED) != 0u) {
+                    psi_tui_scroll_by(&state, 3);
+                }
+#endif
+#ifdef BUTTON4_CLICKED
+                if ((event.bstate & BUTTON4_CLICKED) != 0u) {
+                    psi_tui_scroll_by(&state, 3);
+                }
+#endif
+#ifdef BUTTON5_PRESSED
+                if ((event.bstate & BUTTON5_PRESSED) != 0u) {
+                    psi_tui_scroll_by(&state, -3);
+                }
+#endif
+#ifdef BUTTON5_CLICKED
+                if ((event.bstate & BUTTON5_CLICKED) != 0u) {
+                    psi_tui_scroll_by(&state, -3);
+                }
+#endif
+            }
+            psi_tui_redraw(&state);
+            continue;
+        }
+        if (ch == KEY_PPAGE) {
+            psi_tui_scroll_by(&state, state.height > 8 ? state.height / 2 : 4);
+            psi_tui_redraw(&state);
+            continue;
+        }
+        if (ch == KEY_NPAGE) {
+            psi_tui_scroll_by(&state, -(state.height > 8 ? state.height / 2 : 4));
+            psi_tui_redraw(&state);
+            continue;
+        }
+        if (ch == KEY_UP) {
+            psi_tui_scroll_by(&state, 1);
+            psi_tui_redraw(&state);
+            continue;
+        }
+        if (ch == KEY_DOWN) {
+            psi_tui_scroll_by(&state, -1);
             psi_tui_redraw(&state);
             continue;
         }
@@ -1598,13 +1721,6 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
             state.cursor = 0u;
         } else if (ch == KEY_END || ch == 5) {
             state.cursor = state.input_length;
-        } else if (ch == KEY_PPAGE) {
-            state.scroll_offset += (state.height > 8 ? state.height / 2 : 4);
-        } else if (ch == KEY_NPAGE) {
-            state.scroll_offset -= (state.height > 8 ? state.height / 2 : 4);
-            if (state.scroll_offset < 0) {
-                state.scroll_offset = 0;
-            }
         } else if (ch == '\n' || ch == '\r' || ch == KEY_ENTER) {
             status = psi_tui_submit(&state);
             if (status != PSI_STATUS_OK) {

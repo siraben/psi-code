@@ -40,5 +40,16 @@ int psi_vm_build_compaction_request(
     char **system_prompt,
     char **user_prompt
 );
+int psi_vm_dispatch_tool_json(
+    struct psi_vm *vm,
+    const char *tool_name,
+    const char *input_json,
+    char **output_json
+);
+int psi_vm_session_compact(
+    struct psi_vm *vm,
+    long keep_recent,
+    const char *summary_text
+);
 
 #endif

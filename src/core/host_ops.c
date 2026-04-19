@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include "psi/host_ops.h"
 #include "psi/session.h"
-#include "psi/tool.h"
+#include "psi/vm.h"
 
 static const long PSI_HOST_READ_FILE_MAX_BYTES = 262144l;
 
@@ -76,7 +76,10 @@ int psi_host_call(struct psi_host_context *context, struct psi_host_call *call) 
         case PSI_HOST_OP_READ_FILE:
             return psi_host_read_file(call);
         case PSI_HOST_OP_TOOL_CALL:
-            return psi_tool_call_json(context, call->name, call->input_text, &call->output_text);
+            if (context == NULL || context->vm == NULL) {
+                return PSI_STATUS_ERROR;
+            }
+            return psi_vm_dispatch_tool_json(context->vm, call->name, call->input_text, &call->output_text);
         default:
             return PSI_STATUS_ERROR;
     }
