@@ -388,6 +388,36 @@ static int lfn_json_decode(lua_State *L) {
     return 1;
 }
 
+static int lfn_session_fork(lua_State *L) {
+    lua_Integer at_count = luaL_checkinteger(L, 1);
+    const char *out_path = luaL_checkstring(L, 2);
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    struct psi_session *s = host ? host->session : NULL;
+    int status;
+
+    if (!s) { lua_pushboolean(L, 0); return 1; }
+    if (at_count < 0) at_count = 0;
+    status = psi_session_fork_to(s, (size_t)at_count, out_path);
+    lua_pushboolean(L, status == PSI_STATUS_OK ? 1 : 0);
+    return 1;
+}
+
+static int lfn_session_parent_id(lua_State *L) {
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    struct psi_session *s = host ? host->session : NULL;
+    if (!s || !s->parent_id) { lua_pushnil(L); return 1; }
+    lua_pushstring(L, s->parent_id);
+    return 1;
+}
+
+static int lfn_session_id(lua_State *L) {
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    struct psi_session *s = host ? host->session : NULL;
+    if (!s || !s->id) { lua_pushnil(L); return 1; }
+    lua_pushstring(L, s->id);
+    return 1;
+}
+
 static int lfn_is_aborted(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
     lua_pushboolean(L,
@@ -526,6 +556,9 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("process_run",           lfn_process_run);
     PSI_REG("session_append",        lfn_session_append);
     PSI_REG("session_clear",         lfn_session_clear);
+    PSI_REG("session_fork",          lfn_session_fork);
+    PSI_REG("session_id",            lfn_session_id);
+    PSI_REG("session_parent_id",     lfn_session_parent_id);
     PSI_REG("is_aborted",            lfn_is_aborted);
     PSI_REG("json_encode",           lfn_json_encode);
     PSI_REG("json_decode",           lfn_json_decode);

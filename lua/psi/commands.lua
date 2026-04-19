@@ -21,6 +21,24 @@ local function is_compact_command(line)
   return ch == " " or ch == "\t"
 end
 
+local function is_fork_command(line)
+  if not prelude.starts_with(line, "/fork") then return false end
+  if #line == 5 then return true end
+  local ch = line:sub(6, 6)
+  return ch == " " or ch == "\t"
+end
+
+local function parse_fork_count(line)
+  local rest = prelude.trim(line:sub(6))
+  if #rest == 0 then return psi.session_message_count() end
+  return tonumber(rest) or psi.session_message_count()
+end
+
+local function fork_output_path()
+  local id = psi.session_id() or tostring(os.time())
+  return "sessions/fork-" .. id .. "-" .. tostring(os.time()) .. ".jsonl"
+end
+
 local function session_status()
   return "session-messages: " .. tostring(psi.session_message_count())
 end
@@ -37,6 +55,15 @@ function M.handle(line)
   end
   if is_compact_command(line) then
     return records.new_command_action("compact", parse_compact_count(line))
+  end
+  if is_fork_command(line) then
+    local keep = parse_fork_count(line)
+    local out = fork_output_path()
+    local ok = psi.session_fork(keep, out)
+    local msg = ok
+      and ("forked " .. tostring(keep) .. " entries to " .. out)
+       or  "fork failed"
+    return records.new_command_action("print", msg)
   end
   return nil
 end

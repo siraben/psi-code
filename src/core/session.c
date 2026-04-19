@@ -89,6 +89,9 @@ static cJSON *psi_session_make_header(const struct psi_session *session) {
     cJSON_AddStringToObject(root, "type", "session");
     cJSON_AddNumberToObject(root, "version", 1.0);
     cJSON_AddStringToObject(root, "id", session->id);
+    if (session->parent_id != NULL) {
+        cJSON_AddStringToObject(root, "parent", session->parent_id);
+    }
     return root;
 }
 
@@ -157,6 +160,7 @@ void psi_session_init(struct psi_session *session) {
     session->capacity = 0u;
     session->id = NULL;
     session->path = NULL;
+    session->parent_id = NULL;
 }
 
 void psi_session_free(struct psi_session *session) {
@@ -167,8 +171,10 @@ void psi_session_free(struct psi_session *session) {
     psi_session_clear_messages(session);
     free(session->id);
     free(session->path);
+    free(session->parent_id);
     session->id = NULL;
     session->path = NULL;
+    session->parent_id = NULL;
 }
 
 int psi_session_append(struct psi_session *session, enum psi_message_role role, const char *text) {
@@ -274,6 +280,7 @@ int psi_session_load(struct psi_session *session, const char *path) {
         type = cJSON_GetObjectItemCaseSensitive(root, "type");
         if (cJSON_IsString(type) && type->valuestring != NULL) {
             if (strcmp(type->valuestring, "session") == 0) {
+                cJSON *parent;
                 id = cJSON_GetObjectItemCaseSensitive(root, "id");
                 if (cJSON_IsString(id) && id->valuestring != NULL) {
                     free(session->id);
@@ -283,6 +290,11 @@ int psi_session_load(struct psi_session *session, const char *path) {
                         fclose(file);
                         return PSI_STATUS_ERROR;
                     }
+                }
+                parent = cJSON_GetObjectItemCaseSensitive(root, "parent");
+                if (cJSON_IsString(parent) && parent->valuestring != NULL) {
+                    free(session->parent_id);
+                    session->parent_id = psi_strdup(parent->valuestring);
                 }
             } else if (strcmp(type->valuestring, "message") == 0) {
                 role = cJSON_GetObjectItemCaseSensitive(root, "role");
@@ -425,5 +437,77 @@ int psi_session_compact(struct psi_session *session, size_t keep_recent, const c
     session->messages = next_messages;
     session->count = kept_count + 1u;
     session->capacity = kept_count + 1u;
+    return PSI_STATUS_OK;
+}
+
+int psi_session_fork_to(
+    const struct psi_session *session,
+    size_t at_count,
+    const char *out_path
+) {
+    FILE *file;
+    size_t index;
+    cJSON *header;
+    cJSON *entry;
+    char *line;
+    char buffer[64];
+    static unsigned long fork_counter = 0ul;
+
+    if (session == NULL || out_path == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+    if (at_count > session->count) {
+        at_count = session->count;
+    }
+
+    if (psi_session_ensure_parent_dir(out_path) != PSI_STATUS_OK) {
+        return PSI_STATUS_ERROR;
+    }
+
+    file = fopen(out_path, "w");
+    if (file == NULL) {
+        perror("fopen");
+        return PSI_STATUS_ERROR;
+    }
+
+    header = cJSON_CreateObject();
+    if (header == NULL) {
+        fclose(file);
+        return PSI_STATUS_ERROR;
+    }
+    fork_counter++;
+    sprintf(buffer, "%lu-fork-%lu", (unsigned long)time(NULL), fork_counter);
+    cJSON_AddStringToObject(header, "type", "session");
+    cJSON_AddNumberToObject(header, "version", 1.0);
+    cJSON_AddStringToObject(header, "id", buffer);
+    if (session->id != NULL) {
+        cJSON_AddStringToObject(header, "parent", session->id);
+    }
+    line = cJSON_PrintUnformatted(header);
+    cJSON_Delete(header);
+    if (line == NULL) {
+        fclose(file);
+        return PSI_STATUS_ERROR;
+    }
+    fprintf(file, "%s\n", line);
+    free(line);
+
+    for (index = 0u; index < at_count; index++) {
+        entry = psi_session_make_message(&session->messages[index]);
+        if (entry == NULL) {
+            fclose(file);
+            return PSI_STATUS_ERROR;
+        }
+        line = cJSON_PrintUnformatted(entry);
+        cJSON_Delete(entry);
+        if (line == NULL) {
+            fclose(file);
+            return PSI_STATUS_ERROR;
+        }
+        fprintf(file, "%s\n", line);
+        free(line);
+    }
+
+    fclose(file);
     return PSI_STATUS_OK;
 }

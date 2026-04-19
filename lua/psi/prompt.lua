@@ -134,6 +134,7 @@ M.HELP_TEXT = table.concat({
   "/help          show available commands\n",
   "/quit          exit the shell\n",
   "/compact [N]   summarize older context and keep the most recent N messages\n",
+  "/fork [N]      save the first N entries of the session to a new file\n",
   "/system-prompt print the current coding-agent system prompt\n",
   "/session       show the current session message count",
 })
