@@ -41,8 +41,9 @@ enum psi_tui_event_kind {
     PSI_TUI_EVENT_TEXT_DELTA = 0,
     PSI_TUI_EVENT_TOOL_CALL = 1,
     PSI_TUI_EVENT_TOOL_RESULT = 2,
-    PSI_TUI_EVENT_TURN_DONE = 3,
-    PSI_TUI_EVENT_COMPACT_DONE = 4
+    PSI_TUI_EVENT_TOOL_PROGRESS = 3,
+    PSI_TUI_EVENT_TURN_DONE = 4,
+    PSI_TUI_EVENT_COMPACT_DONE = 5
 };
 
 struct psi_tui_event {
@@ -93,6 +94,9 @@ struct psi_tui_state {
     struct psi_tui_event *event_tail;
     char *turn_line;
     long compact_keep_recent;
+    /* Index of the live tool-output entry receiving streaming progress
+     * chunks, or -1 when no tool is currently streaming. Main thread only. */
+    int streaming_tool_index;
 };
 
 struct psi_tui_stdio_guard {
@@ -1339,6 +1343,32 @@ static void psi_tui_observer_tool_call(void *userdata, const char *tool_call_id,
     psi_tui_push_event(state, event);
 }
 
+static void psi_tui_observer_tool_progress(void *userdata, const char *tool_call_id, const char *chunk, size_t len) {
+    struct psi_tui_state *state;
+    struct psi_tui_event *event;
+    char *copy;
+
+    PSI_UNUSED(tool_call_id);
+    state = (struct psi_tui_state *)userdata;
+    if (state == NULL || chunk == NULL || len == 0u) {
+        return;
+    }
+    copy = (char *)malloc(len + 1u);
+    if (copy == NULL) {
+        return;
+    }
+    memcpy(copy, chunk, len);
+    copy[len] = '\0';
+
+    event = psi_tui_event_new(PSI_TUI_EVENT_TOOL_PROGRESS);
+    if (event == NULL) {
+        free(copy);
+        return;
+    }
+    event->text = copy;
+    psi_tui_push_event(state, event);
+}
+
 static void psi_tui_observer_tool_result(void *userdata, const char *tool_call_id, const char *tool_name, const char *output_json) {
     struct psi_tui_state *state;
     char *summary;
@@ -1533,6 +1563,7 @@ static void *psi_tui_run_turn(struct psi_tui_state *state) {
     observer.on_assistant_text_delta = psi_tui_observer_text_delta;
     observer.on_tool_call = psi_tui_observer_tool_call;
     observer.on_tool_result = psi_tui_observer_tool_result;
+    observer.on_tool_progress = psi_tui_observer_tool_progress;
 
     response_text = NULL;
     save_failed = 0;
@@ -1694,12 +1725,35 @@ static void psi_tui_drain_events(struct psi_tui_state *state) {
                 break;
             case PSI_TUI_EVENT_TOOL_CALL:
                 psi_tui_finish_streaming_assistant(state);
+                state->streaming_tool_index = -1;
                 psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_CALL,
                                   event->tool_name, event->text, 0);
                 break;
+            case PSI_TUI_EVENT_TOOL_PROGRESS:
+                if (state->streaming_tool_index < 0) {
+                    state->streaming_tool_index =
+                        psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_RESULT, NULL, "", 0);
+                }
+                psi_tui_append_entry_text(state, state->streaming_tool_index,
+                                          event->text != NULL ? event->text : "");
+                break;
             case PSI_TUI_EVENT_TOOL_RESULT:
-                psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_RESULT,
-                                  event->tool_name, event->text, event->is_error);
+                /* If we streamed progress for this call, replace the live
+                 * entry with the final formatted render. Otherwise add a
+                 * fresh result entry. */
+                if (state->streaming_tool_index >= 0 &&
+                    (size_t)state->streaming_tool_index < state->entry_count) {
+                    struct psi_tui_entry *entry = &state->entries[state->streaming_tool_index];
+                    free(entry->title);
+                    free(entry->text);
+                    entry->title = event->tool_name != NULL ? psi_strdup(event->tool_name) : NULL;
+                    entry->text = event->text != NULL ? psi_strdup(event->text) : psi_strdup("");
+                    entry->is_error = event->is_error;
+                } else {
+                    psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_RESULT,
+                                      event->tool_name, event->text, event->is_error);
+                }
+                state->streaming_tool_index = -1;
                 break;
             case PSI_TUI_EVENT_TURN_DONE:
                 if (state->worker_thread_valid) {
@@ -1850,6 +1904,7 @@ static void psi_tui_state_init(struct psi_tui_state *state, const struct psi_cli
     memset(state, 0, sizeof(*state));
     state->options = options;
     state->streaming_assistant_index = -1;
+    state->streaming_tool_index = -1;
     state->running = 1;
     pthread_mutex_init(&state->event_lock, NULL);
 }

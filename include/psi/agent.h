@@ -10,6 +10,9 @@ struct psi_agent_observer {
     void (*on_assistant_text_delta)(void *userdata, const char *text);
     void (*on_tool_call)(void *userdata, const char *tool_call_id, const char *tool_name, const char *input_json);
     void (*on_tool_result)(void *userdata, const char *tool_call_id, const char *tool_name, const char *output_json);
+    /* Fires from inside long-running tools (shell processes) as output chunks arrive.
+     * Optional: may be NULL. `chunk` is not NUL-terminated; use `len`. */
+    void (*on_tool_progress)(void *userdata, const char *tool_call_id, const char *chunk, size_t len);
 };
 
 struct psi_agent_runtime {

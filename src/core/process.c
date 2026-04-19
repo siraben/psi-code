@@ -40,7 +40,14 @@ static int psi_process_append_bytes(char **buffer, size_t *length, size_t *capac
     return PSI_STATUS_OK;
 }
 
-int psi_process_run_shell(const char *command, char **output_text, int *exit_status, int *truncated) {
+int psi_process_run_shell(
+    const char *command,
+    char **output_text,
+    int *exit_status,
+    int *truncated,
+    psi_process_progress_cb on_chunk,
+    void *userdata
+) {
 #ifndef _WIN32
     int pipe_fds[2];
     pid_t child_pid;
@@ -90,6 +97,10 @@ int psi_process_run_shell(const char *command, char **output_text, int *exit_sta
             break;
         }
 
+        if (on_chunk != NULL) {
+            on_chunk(userdata, read_buffer, (size_t)read_count);
+        }
+
         if (output_length < PSI_PROCESS_OUTPUT_MAX_BYTES) {
             to_copy = (size_t)read_count;
             if (output_length + to_copy > PSI_PROCESS_OUTPUT_MAX_BYTES) {
@@ -136,6 +147,8 @@ int psi_process_run_shell(const char *command, char **output_text, int *exit_sta
 #else
     int status;
 
+    PSI_UNUSED(on_chunk);
+    PSI_UNUSED(userdata);
     if (command == NULL || output_text == NULL || exit_status == NULL || truncated == NULL) {
         return PSI_STATUS_ERROR;
     }

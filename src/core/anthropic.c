@@ -1323,14 +1323,24 @@ int psi_anthropic_agent_turn_with_prompt(
                 observer->on_tool_call(observer->userdata, id->valuestring, name->valuestring, input_json);
             }
 
-            if (psi_vm_dispatch_tool_json(host->vm, name->valuestring, input_json, &tool_output) != PSI_STATUS_OK) {
-                free(input_json);
-                cJSON_Delete(tool_results_message);
-                cJSON_Delete(content);
-                psi_stream_state_free(&stream_state);
-                cJSON_Delete(tools);
-                cJSON_Delete(messages);
-                return PSI_STATUS_ERROR;
+            /* Publish observer + id so FFI primitives running inside the
+             * tool (psi.process_run) can stream progress events back to
+             * the observer. */
+            host->active_observer = observer;
+            host->active_tool_id = id->valuestring;
+            {
+                int tool_status = psi_vm_dispatch_tool_json(host->vm, name->valuestring, input_json, &tool_output);
+                host->active_observer = NULL;
+                host->active_tool_id = NULL;
+                if (tool_status != PSI_STATUS_OK) {
+                    free(input_json);
+                    cJSON_Delete(tool_results_message);
+                    cJSON_Delete(content);
+                    psi_stream_state_free(&stream_state);
+                    cJSON_Delete(tools);
+                    cJSON_Delete(messages);
+                    return PSI_STATUS_ERROR;
+                }
             }
             free(input_json);
 

@@ -8,6 +8,7 @@
 #include <lauxlib.h>
 #include <lualib.h>
 
+#include "psi/agent.h"
 #include "psi/common.h"
 #include "psi/host_ops.h"
 #include "psi/message.h"
@@ -19,7 +20,12 @@
 static const long PSI_VM_FILE_WRITE_MAX_BYTES = 16777216l;
 static const long PSI_VM_READ_FILE_MAX_BYTES  = 262144l;
 
-static struct psi_host_context *psi_current_host = NULL;
+/* Host context is stored in the Lua state's extraspace so FFI primitives
+ * can recover it from their lua_State* rather than a file-static. Keeps
+ * the door open for multiple VMs and makes cross-thread reasoning easier:
+ * each Lua state owns exactly one host, and the worker thread is the
+ * only one calling Lua while that host is active. */
+#define PSI_VM_HOST(L) (*(struct psi_host_context **)lua_getextraspace(L))
 
 /* ------------------------------------------------------------------
  * cJSON <-> Lua table conversion
@@ -193,7 +199,8 @@ static int lfn_log(lua_State *L) {
 }
 
 static int lfn_session_message_count(lua_State *L) {
-    struct psi_session *s = psi_current_host ? psi_current_host->session : NULL;
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    struct psi_session *s = host ? host->session : NULL;
     lua_pushinteger(L, s ? (lua_Integer)s->count : 0);
     return 1;
 }
@@ -278,13 +285,34 @@ static int lfn_file_exists(lua_State *L) {
     return 1;
 }
 
+static void psi_vm_process_progress(void *userdata, const char *chunk, size_t len) {
+    struct psi_host_context *host = (struct psi_host_context *)userdata;
+    if (host == NULL || host->active_observer == NULL) return;
+    if (host->active_observer->on_tool_progress == NULL) return;
+    host->active_observer->on_tool_progress(
+        host->active_observer->userdata,
+        host->active_tool_id,
+        chunk,
+        len
+    );
+}
+
 static int lfn_process_run(lua_State *L) {
     const char *command = luaL_checkstring(L, 1);
     char *output = NULL;
     int status = -1;
     int truncated = 0;
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    psi_process_progress_cb on_chunk = NULL;
+    void *on_chunk_userdata = NULL;
 
-    if (psi_process_run_shell(command, &output, &status, &truncated) != PSI_STATUS_OK) {
+    if (host != NULL && host->active_observer != NULL &&
+        host->active_observer->on_tool_progress != NULL) {
+        on_chunk = psi_vm_process_progress;
+        on_chunk_userdata = host;
+    }
+
+    if (psi_process_run_shell(command, &output, &status, &truncated, on_chunk, on_chunk_userdata) != PSI_STATUS_OK) {
         free(output);
         return luaL_error(L, "failed to run shell command");
     }
@@ -303,12 +331,14 @@ static int lfn_session_append(lua_State *L) {
     const char *role = luaL_checkstring(L, 1);
     const char *text = luaL_checkstring(L, 2);
     const char *data = NULL;
+    struct psi_host_context *host;
     struct psi_session *s;
     int status;
 
     if (lua_type(L, 3) == LUA_TSTRING) data = lua_tostring(L, 3);
 
-    s = psi_current_host ? psi_current_host->session : NULL;
+    host = PSI_VM_HOST(L);
+    s = host ? host->session : NULL;
     if (!s) { lua_pushboolean(L, 0); return 1; }
     status = psi_session_append_with_data(s, psi_session_role_from_name(role), text, data);
     lua_pushboolean(L, status == PSI_STATUS_OK ? 1 : 0);
@@ -316,14 +346,16 @@ static int lfn_session_append(lua_State *L) {
 }
 
 static int lfn_session_clear(lua_State *L) {
-    struct psi_session *s = psi_current_host ? psi_current_host->session : NULL;
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    struct psi_session *s = host ? host->session : NULL;
     if (!s) { lua_pushboolean(L, 0); return 1; }
     lua_pushboolean(L, psi_session_clear(s) == PSI_STATUS_OK ? 1 : 0);
     return 1;
 }
 
 static int lfn_session_messages(lua_State *L) {
-    struct psi_session *s = psi_current_host ? psi_current_host->session : NULL;
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    struct psi_session *s = host ? host->session : NULL;
     size_t i;
 
     lua_newtable(L);
@@ -352,10 +384,12 @@ static int lfn_runtime_info(lua_State *L) {
         "tool_call",
         NULL
     };
+    struct psi_host_context *host;
     char *date;
     char *cwd;
     int i;
 
+    host = PSI_VM_HOST(L);
     date = psi_prompt_current_date();
     cwd  = psi_prompt_current_working_directory();
     if (!date || !cwd) {
@@ -368,8 +402,8 @@ static int lfn_runtime_info(lua_State *L) {
     lua_pushstring(L, PSI_VERSION);
     lua_setfield(L, -2, "version");
 
-    if (psi_current_host && psi_current_host->vm && psi_current_host->vm->boot_file) {
-        lua_pushstring(L, psi_current_host->vm->boot_file);
+    if (host && host->vm && host->vm->boot_file) {
+        lua_pushstring(L, host->vm->boot_file);
     } else {
         lua_pushnil(L);
     }
@@ -382,7 +416,7 @@ static int lfn_runtime_info(lua_State *L) {
     lua_setfield(L, -2, "current-working-directory");
 
     {
-        struct psi_session *s = psi_current_host ? psi_current_host->session : NULL;
+        struct psi_session *s = host ? host->session : NULL;
         lua_pushinteger(L, s ? (lua_Integer)s->count : 0);
         lua_setfield(L, -2, "session-message-count");
     }
@@ -484,7 +518,7 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
     if (!vm->L) return PSI_STATUS_ERROR;
     luaL_openlibs(vm->L);
 
-    psi_current_host = &vm->host;
+    PSI_VM_HOST(vm->L) = &vm->host;
 
     if (psi_vm_apply_package_path(vm->L, boot_file) != PSI_STATUS_OK) {
         lua_close(vm->L);
@@ -506,17 +540,17 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
 
 void psi_vm_destroy(struct psi_vm *vm) {
     if (!vm || !vm->L) return;
+    PSI_VM_HOST(vm->L) = NULL;
     lua_close(vm->L);
     vm->L = NULL;
     vm->host.session = NULL;
     vm->host.vm = NULL;
-    psi_current_host = NULL;
 }
 
 void psi_vm_bind_session(struct psi_vm *vm, struct psi_session *session) {
     if (!vm) return;
     vm->host.session = session;
-    psi_current_host = &vm->host;
+    /* host pointer in extraspace already points at vm->host from init */
 }
 
 /* ------------------------------------------------------------------

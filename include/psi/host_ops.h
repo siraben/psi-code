@@ -17,6 +17,11 @@ enum psi_host_op_kind {
 struct psi_host_context {
     struct psi_session *session;
     struct psi_vm *vm;
+    /* Set by the agent loop while a tool is dispatching so primitives
+     * (e.g. psi.process_run) can stream progress events back to the
+     * observer. Both fields are NULL outside of tool dispatch. */
+    struct psi_agent_observer *active_observer;
+    const char *active_tool_id;
 };
 
 struct psi_host_call {
