@@ -48,7 +48,8 @@
           buildInputs = [
             chibi
             pkgs.cjson
-            pkgs.readline
+            pkgs.curl
+            pkgs.libedit
             pkgs.ncurses
           ];
 
@@ -70,8 +71,9 @@
             pkgs.pkg-config
             pkgs.clang
             pkgs.cjson
+            pkgs.curl
             pkgs.gdb
-            pkgs.readline
+            pkgs.libedit
             pkgs.ncurses
             chibi
           ];

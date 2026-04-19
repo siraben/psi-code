@@ -6,6 +6,53 @@
 #include "psi/tool.h"
 
 static const long PSI_TOOL_FILE_MAX_BYTES = 262144l;
+static const struct psi_tool_definition psi_builtin_tools[] = {
+    {
+        "read",
+        "Read the contents of a file. Use this to inspect source files, configuration, and other project assets.",
+        "Read file contents",
+        {
+            "Use read to examine files instead of cat or sed.",
+            NULL
+        }
+    },
+    {
+        "bash",
+        "Execute a shell command in the current working directory and return its output.",
+        "Execute bash commands (ls, grep, find, tests, git, build commands)",
+        {
+            "Use bash for commands such as ls, rg, find, git, and tests.",
+            NULL
+        }
+    },
+    {
+        "edit",
+        "Edit a single file using exact text replacement. Prefer small, precise edits over broad rewrites.",
+        "Make precise file edits with exact text replacement, including multiple disjoint edits in one call",
+        {
+            "Use edit for precise changes where old text can be matched exactly.",
+            "When changing multiple separate locations in one file, use one edit call with multiple entries in edits[].",
+            "Keep edits[].oldText as small as possible while still being unique in the file.",
+            NULL
+        }
+    },
+    {
+        "write",
+        "Write content to a file. Creates the file if it does not exist and overwrites it if it does.",
+        "Create or overwrite files",
+        {
+            "Use write for new files or full rewrites.",
+            NULL
+        }
+    }
+};
+
+const struct psi_tool_definition *psi_tool_definitions(size_t *count) {
+    if (count != NULL) {
+        *count = sizeof(psi_builtin_tools) / sizeof(psi_builtin_tools[0]);
+    }
+    return psi_builtin_tools;
+}
 
 static char *psi_tool_error_json(const char *tool_name, const char *message) {
     cJSON *root;
@@ -78,6 +125,25 @@ static int psi_tool_read_file_contents(const char *path, char **text_out) {
     return PSI_STATUS_OK;
 }
 
+static int psi_tool_write_file_contents(const char *path, const char *text) {
+    FILE *file;
+    size_t length;
+
+    file = fopen(path, "wb");
+    if (file == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    length = strlen(text);
+    if (fwrite(text, 1u, length, file) != length) {
+        fclose(file);
+        return PSI_STATUS_ERROR;
+    }
+
+    fclose(file);
+    return PSI_STATUS_OK;
+}
+
 static char *psi_tool_call_read(cJSON *input) {
     const cJSON *path;
     cJSON *root;
@@ -109,27 +175,23 @@ static char *psi_tool_call_read(cJSON *input) {
 static char *psi_tool_call_write(cJSON *input) {
     const cJSON *path;
     const cJSON *text;
-    FILE *file;
     cJSON *root;
 
     path = cJSON_GetObjectItemCaseSensitive(input, "path");
-    text = cJSON_GetObjectItemCaseSensitive(input, "text");
+    text = cJSON_GetObjectItemCaseSensitive(input, "content");
+    if (!cJSON_IsString(text) || text->valuestring == NULL) {
+        text = cJSON_GetObjectItemCaseSensitive(input, "text");
+    }
     if (!cJSON_IsString(path) || path->valuestring == NULL) {
         return psi_tool_error_json("write", "missing string field: path");
     }
     if (!cJSON_IsString(text) || text->valuestring == NULL) {
-        return psi_tool_error_json("write", "missing string field: text");
+        return psi_tool_error_json("write", "missing string field: content");
     }
 
-    file = fopen(path->valuestring, "wb");
-    if (file == NULL) {
-        return psi_tool_error_json("write", "could not open file for writing");
-    }
-    if (fwrite(text->valuestring, 1u, strlen(text->valuestring), file) != strlen(text->valuestring)) {
-        fclose(file);
+    if (psi_tool_write_file_contents(path->valuestring, text->valuestring) != PSI_STATUS_OK) {
         return psi_tool_error_json("write", "could not write full file");
     }
-    fclose(file);
 
     root = cJSON_CreateObject();
     if (root == NULL) {
@@ -172,26 +234,62 @@ static char *psi_tool_replace_once(const char *original, const char *old_text, c
     return result;
 }
 
+static char *psi_tool_apply_edits(const char *original, const cJSON *edits, double *replacement_count) {
+    char *current_text;
+    char *next_text;
+    const cJSON *edit_entry;
+    const cJSON *old_text;
+    const cJSON *new_text;
+
+    current_text = psi_strdup(original);
+    if (current_text == NULL) {
+        return NULL;
+    }
+
+    *replacement_count = 0.0;
+    cJSON_ArrayForEach(edit_entry, edits) {
+        if (!cJSON_IsObject(edit_entry)) {
+            free(current_text);
+            return NULL;
+        }
+
+        old_text = cJSON_GetObjectItemCaseSensitive(edit_entry, "oldText");
+        new_text = cJSON_GetObjectItemCaseSensitive(edit_entry, "newText");
+        if (!cJSON_IsString(old_text) || old_text->valuestring == NULL ||
+            !cJSON_IsString(new_text) || new_text->valuestring == NULL) {
+            free(current_text);
+            return NULL;
+        }
+
+        next_text = psi_tool_replace_once(current_text, old_text->valuestring, new_text->valuestring);
+        free(current_text);
+        if (next_text == NULL) {
+            return NULL;
+        }
+
+        current_text = next_text;
+        *replacement_count += 1.0;
+    }
+
+    return current_text;
+}
+
 static char *psi_tool_call_edit(cJSON *input) {
     const cJSON *path;
     const cJSON *old_text;
     const cJSON *new_text;
+    const cJSON *edits;
     char *original;
     char *edited;
-    FILE *file;
     cJSON *root;
+    double replacements;
 
     path = cJSON_GetObjectItemCaseSensitive(input, "path");
     old_text = cJSON_GetObjectItemCaseSensitive(input, "oldText");
     new_text = cJSON_GetObjectItemCaseSensitive(input, "newText");
+    edits = cJSON_GetObjectItemCaseSensitive(input, "edits");
     if (!cJSON_IsString(path) || path->valuestring == NULL) {
         return psi_tool_error_json("edit", "missing string field: path");
-    }
-    if (!cJSON_IsString(old_text) || old_text->valuestring == NULL) {
-        return psi_tool_error_json("edit", "missing string field: oldText");
-    }
-    if (!cJSON_IsString(new_text) || new_text->valuestring == NULL) {
-        return psi_tool_error_json("edit", "missing string field: newText");
     }
 
     original = NULL;
@@ -199,23 +297,30 @@ static char *psi_tool_call_edit(cJSON *input) {
         return psi_tool_error_json("edit", "could not read file");
     }
 
-    edited = psi_tool_replace_once(original, old_text->valuestring, new_text->valuestring);
+    replacements = 0.0;
+    if (cJSON_IsArray(edits)) {
+        edited = psi_tool_apply_edits(original, edits, &replacements);
+    } else {
+        if (!cJSON_IsString(old_text) || old_text->valuestring == NULL) {
+            free(original);
+            return psi_tool_error_json("edit", "missing string field: oldText");
+        }
+        if (!cJSON_IsString(new_text) || new_text->valuestring == NULL) {
+            free(original);
+            return psi_tool_error_json("edit", "missing string field: newText");
+        }
+        edited = psi_tool_replace_once(original, old_text->valuestring, new_text->valuestring);
+        replacements = 1.0;
+    }
     free(original);
     if (edited == NULL) {
         return psi_tool_error_json("edit", "target text not found");
     }
 
-    file = fopen(path->valuestring, "wb");
-    if (file == NULL) {
-        free(edited);
-        return psi_tool_error_json("edit", "could not open file for writing");
-    }
-    if (fwrite(edited, 1u, strlen(edited), file) != strlen(edited)) {
-        fclose(file);
+    if (psi_tool_write_file_contents(path->valuestring, edited) != PSI_STATUS_OK) {
         free(edited);
         return psi_tool_error_json("edit", "could not write full file");
     }
-    fclose(file);
 
     root = cJSON_CreateObject();
     if (root == NULL) {
@@ -225,7 +330,7 @@ static char *psi_tool_call_edit(cJSON *input) {
     cJSON_AddBoolToObject(root, "ok", 1);
     cJSON_AddStringToObject(root, "tool", "edit");
     cJSON_AddStringToObject(root, "path", path->valuestring);
-    cJSON_AddNumberToObject(root, "replacements", 1.0);
+    cJSON_AddNumberToObject(root, "replacements", replacements);
     free(edited);
     return psi_tool_success_json(root);
 }
@@ -252,6 +357,95 @@ static char *psi_tool_call_bash(cJSON *input) {
     cJSON_AddNumberToObject(root, "status", (double)status);
     cJSON_AddStringToObject(root, "note", "uses C system(); shell semantics and status encoding are platform-dependent");
     return psi_tool_success_json(root);
+}
+
+int psi_tool_schemas_json(char **output_json) {
+    cJSON *tools;
+    cJSON *tool;
+    cJSON *schema;
+    cJSON *properties;
+    cJSON *required;
+
+    if (output_json == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    *output_json = NULL;
+    tools = cJSON_CreateArray();
+    if (tools == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    tool = cJSON_CreateObject();
+    schema = cJSON_CreateObject();
+    properties = cJSON_CreateObject();
+    required = cJSON_CreateArray();
+    cJSON_AddStringToObject(tool, "name", "read");
+    cJSON_AddStringToObject(tool, "description", psi_builtin_tools[0].description);
+    cJSON_AddStringToObject(schema, "type", "object");
+    cJSON_AddItemToObject(schema, "properties", properties);
+    cJSON_AddItemToObject(schema, "required", required);
+    cJSON_AddItemToObject(properties, "path", cJSON_Parse("{\"type\":\"string\"}"));
+    cJSON_AddItemToArray(required, cJSON_CreateString("path"));
+    cJSON_AddItemToObject(tool, "input_schema", schema);
+    cJSON_AddItemToArray(tools, tool);
+
+    tool = cJSON_CreateObject();
+    schema = cJSON_CreateObject();
+    properties = cJSON_CreateObject();
+    required = cJSON_CreateArray();
+    cJSON_AddStringToObject(tool, "name", "bash");
+    cJSON_AddStringToObject(tool, "description", psi_builtin_tools[1].description);
+    cJSON_AddStringToObject(schema, "type", "object");
+    cJSON_AddItemToObject(schema, "properties", properties);
+    cJSON_AddItemToObject(schema, "required", required);
+    cJSON_AddItemToObject(properties, "command", cJSON_Parse("{\"type\":\"string\"}"));
+    cJSON_AddItemToObject(properties, "timeout", cJSON_Parse("{\"type\":\"number\"}"));
+    cJSON_AddItemToArray(required, cJSON_CreateString("command"));
+    cJSON_AddItemToObject(tool, "input_schema", schema);
+    cJSON_AddItemToArray(tools, tool);
+
+    tool = cJSON_CreateObject();
+    schema = cJSON_CreateObject();
+    properties = cJSON_CreateObject();
+    required = cJSON_CreateArray();
+    cJSON_AddStringToObject(tool, "name", "edit");
+    cJSON_AddStringToObject(tool, "description", psi_builtin_tools[2].description);
+    cJSON_AddStringToObject(schema, "type", "object");
+    cJSON_AddItemToObject(schema, "properties", properties);
+    cJSON_AddItemToObject(schema, "required", required);
+    cJSON_AddItemToObject(properties, "path", cJSON_Parse("{\"type\":\"string\"}"));
+    cJSON_AddItemToObject(
+        properties,
+        "edits",
+        cJSON_Parse(
+            "{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"oldText\":{\"type\":\"string\"},\"newText\":{\"type\":\"string\"}},\"required\":[\"oldText\",\"newText\"]}}"
+        )
+    );
+    cJSON_AddItemToArray(required, cJSON_CreateString("path"));
+    cJSON_AddItemToArray(required, cJSON_CreateString("edits"));
+    cJSON_AddItemToObject(tool, "input_schema", schema);
+    cJSON_AddItemToArray(tools, tool);
+
+    tool = cJSON_CreateObject();
+    schema = cJSON_CreateObject();
+    properties = cJSON_CreateObject();
+    required = cJSON_CreateArray();
+    cJSON_AddStringToObject(tool, "name", "write");
+    cJSON_AddStringToObject(tool, "description", psi_builtin_tools[3].description);
+    cJSON_AddStringToObject(schema, "type", "object");
+    cJSON_AddItemToObject(schema, "properties", properties);
+    cJSON_AddItemToObject(schema, "required", required);
+    cJSON_AddItemToObject(properties, "path", cJSON_Parse("{\"type\":\"string\"}"));
+    cJSON_AddItemToObject(properties, "content", cJSON_Parse("{\"type\":\"string\"}"));
+    cJSON_AddItemToArray(required, cJSON_CreateString("path"));
+    cJSON_AddItemToArray(required, cJSON_CreateString("content"));
+    cJSON_AddItemToObject(tool, "input_schema", schema);
+    cJSON_AddItemToArray(tools, tool);
+
+    *output_json = cJSON_PrintUnformatted(tools);
+    cJSON_Delete(tools);
+    return *output_json != NULL ? PSI_STATUS_OK : PSI_STATUS_ERROR;
 }
 
 int psi_tool_call_json(const char *tool_name, const char *input_json, char **output_json) {

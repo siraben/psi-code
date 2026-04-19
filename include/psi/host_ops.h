@@ -10,7 +10,8 @@ enum psi_host_op_kind {
     PSI_HOST_OP_LOG = 1,
     PSI_HOST_OP_SESSION_MESSAGE_COUNT = 2,
     PSI_HOST_OP_READ_FILE = 3,
-    PSI_HOST_OP_TOOL_CALL = 4
+    PSI_HOST_OP_TOOL_CALL = 4,
+    PSI_HOST_OP_SYSTEM_PROMPT = 5
 };
 
 struct psi_host_context {

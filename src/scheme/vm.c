@@ -135,6 +135,26 @@ static sexp psi_foreign_tool_call(sexp ctx, sexp self, sexp n, sexp tool_name, s
     return result_value;
 }
 
+static sexp psi_foreign_system_prompt(sexp ctx, sexp self, sexp n) {
+    struct psi_host_call call;
+    sexp result_value;
+    int status;
+
+    PSI_UNUSED(n);
+
+    call.kind = PSI_HOST_OP_SYSTEM_PROMPT;
+    call.name = NULL;
+    call.input_text = NULL;
+    status = psi_host_call(psi_current_host, &call);
+    if (status != PSI_STATUS_OK || call.output_text == NULL) {
+        return sexp_user_exception(ctx, self, "host system-prompt operation failed", SEXP_FALSE);
+    }
+
+    result_value = sexp_c_string(ctx, call.output_text, -1);
+    free(call.output_text);
+    return result_value;
+}
+
 static int psi_vm_extract_string(sexp ctx, sexp value, char **output_text) {
     sexp printed;
     char *copy;
@@ -212,6 +232,7 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
     sexp_define_foreign(vm->ctx, vm->env, "psi-session-message-count", 0, psi_foreign_session_message_count);
     sexp_define_foreign(vm->ctx, vm->env, "psi-read-file", 1, psi_foreign_read_file);
     sexp_define_foreign(vm->ctx, vm->env, "psi-tool-call", 2, psi_foreign_tool_call);
+    sexp_define_foreign(vm->ctx, vm->env, "psi-system-prompt", 0, psi_foreign_system_prompt);
 
     return psi_vm_load_bootstrap(vm);
 }
@@ -275,6 +296,32 @@ int psi_vm_call_string_procedure(struct psi_vm *vm, const char *procedure_name, 
 
     args = sexp_list1(vm->ctx, sexp_c_string(vm->ctx, argument ? argument : "", -1));
     value = sexp_apply(vm->ctx, procedure, args);
+    if (sexp_exceptionp(value)) {
+        sexp_print_exception(vm->ctx, value, sexp_current_error_port(vm->ctx));
+        return PSI_STATUS_ERROR;
+    }
+
+    return psi_vm_extract_string(vm->ctx, value, output_text);
+}
+
+int psi_vm_call_procedure0_to_string(struct psi_vm *vm, const char *procedure_name, char **output_text) {
+    sexp symbol;
+    sexp procedure;
+    sexp value;
+
+    if (vm == NULL || procedure_name == NULL || output_text == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    *output_text = NULL;
+    symbol = sexp_intern(vm->ctx, procedure_name, -1);
+    procedure = sexp_env_ref(vm->ctx, vm->env, symbol, SEXP_FALSE);
+    if (procedure == SEXP_FALSE) {
+        fprintf(stderr, "undefined Scheme procedure: %s\n", procedure_name);
+        return PSI_STATUS_ERROR;
+    }
+
+    value = sexp_apply(vm->ctx, procedure, SEXP_NULL);
     if (sexp_exceptionp(value)) {
         sexp_print_exception(vm->ctx, value, sexp_current_error_port(vm->ctx));
         return PSI_STATUS_ERROR;

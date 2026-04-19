@@ -309,7 +309,7 @@ This is the first implementation target because it exercises:
 
 Interactive mode should come after the core session and tool loop exist.
 
-Initial interactive mode can use `readline`.
+Initial interactive mode can use `libedit`.
 Richer terminal rendering can later add `ncurses` where it is actually useful.
 
 The important rule is that the UI must consume host events rather than becoming
@@ -363,7 +363,7 @@ Build system choices:
 The flake should:
 
 - build Chibi-Scheme from source
-- expose a dev shell with compiler, make, pkg-config, readline, ncurses
+- expose a dev shell with compiler, make, pkg-config, libedit, ncurses
 - build `psi`
 
 The host should be compiled as C89 by default.
@@ -384,12 +384,12 @@ The host should be compiled as C89 by default.
 
 - persistent session log
 - basic `read`, `write`, `edit`, `bash`
+- first Anthropic-backed model-facing turn loop
 - provider abstraction
-- model-facing turn loop
 
 ### milestone 3
 
-- interactive mode with readline
+- interactive mode with libedit
 - command parsing
 - project context loading
 - simple skill loading
@@ -412,4 +412,3 @@ The first code in this repository should prove four things:
 
 That is enough to start building the real harness without committing to the
 wrong boundaries.
-

@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <editline/readline.h>
+#include "psi/anthropic.h"
 #include "psi/runtime.h"
 #include "psi/session.h"
 #include "psi/vm.h"
@@ -90,10 +92,13 @@ int psi_run_print_mode(const struct psi_cli_options *options) {
 int psi_run_repl(const struct psi_cli_options *options) {
     struct psi_vm vm;
     struct psi_session session;
-    char line[4096];
+    char *line;
+    char *eval_input;
     char *output_text;
     int status;
 
+    line = NULL;
+    eval_input = NULL;
     output_text = NULL;
     psi_session_init(&session);
     if (options->session_file != NULL) {
@@ -115,19 +120,35 @@ int psi_run_repl(const struct psi_cli_options *options) {
     printf("type Scheme expressions, or :quit to exit\n");
 
     for (;;) {
-        printf("psi> ");
-        fflush(stdout);
-
-        if (fgets(line, sizeof(line), stdin) == NULL) {
+        line = readline("psi> ");
+        if (line == NULL) {
             break;
         }
 
-        if (strcmp(line, ":quit\n") == 0 || strcmp(line, ":q\n") == 0) {
+        if (strcmp(line, ":quit") == 0 || strcmp(line, ":q") == 0) {
+            free(line);
+            line = NULL;
             break;
+        }
+
+        if (line[0] != '\0') {
+            add_history(line);
         }
 
         if (psi_session_append(&session, PSI_MESSAGE_USER, line) != PSI_STATUS_OK) {
             fprintf(stderr, "failed to append REPL input to session\n");
+            free(line);
+            line = NULL;
+            status = PSI_STATUS_ERROR;
+            break;
+        }
+
+        free(eval_input);
+        eval_input = psi_strdup(line);
+        free(line);
+        line = NULL;
+        if (eval_input == NULL) {
+            fprintf(stderr, "failed to copy REPL input\n");
             status = PSI_STATUS_ERROR;
             break;
         }
@@ -135,7 +156,7 @@ int psi_run_repl(const struct psi_cli_options *options) {
         free(output_text);
         output_text = NULL;
 
-        status = psi_vm_eval_to_string(&vm, line, &output_text);
+        status = psi_vm_eval_to_string(&vm, eval_input, &output_text);
         if (status != PSI_STATUS_OK) {
             free(output_text);
             output_text = NULL;
@@ -159,10 +180,73 @@ int psi_run_repl(const struct psi_cli_options *options) {
         }
     }
 
+    free(line);
+    free(eval_input);
     free(output_text);
     psi_vm_destroy(&vm);
     psi_session_free(&session);
     return status == PSI_STATUS_OK ? PSI_STATUS_OK : PSI_STATUS_ERROR;
+}
+
+int psi_run_system_prompt_mode(const struct psi_cli_options *options) {
+    struct psi_vm vm;
+    char *output_text;
+    int status;
+
+    output_text = NULL;
+    status = psi_vm_init(&vm, options->boot_file, stdin, stdout, stderr);
+    if (status != PSI_STATUS_OK) {
+        return status;
+    }
+
+    status = psi_vm_call_procedure0_to_string(&vm, "psi-handle-system-prompt", &output_text);
+    if (status == PSI_STATUS_OK && output_text != NULL) {
+        printf("%s\n", output_text);
+    }
+
+    free(output_text);
+    psi_vm_destroy(&vm);
+    return status;
+}
+
+int psi_run_agent_mode(const struct psi_cli_options *options) {
+    struct psi_session session;
+    char *response_text;
+    int status;
+
+    response_text = NULL;
+    psi_session_init(&session);
+    if (options->session_file != NULL) {
+        if (psi_session_load(&session, options->session_file) != PSI_STATUS_OK) {
+            fprintf(stderr, "failed to load session file: %s\n", options->session_file);
+            psi_session_free(&session);
+            return PSI_STATUS_ERROR;
+        }
+    }
+
+    if (psi_session_append(&session, PSI_MESSAGE_USER, options->payload) != PSI_STATUS_OK) {
+        fprintf(stderr, "failed to append user message\n");
+        psi_session_free(&session);
+        return PSI_STATUS_ERROR;
+    }
+
+    status = psi_anthropic_agent_turn(&session, options->model, options->max_tokens, &response_text);
+    if (status != PSI_STATUS_OK) {
+        psi_session_free(&session);
+        free(response_text);
+        return status;
+    }
+
+    if (psi_session_save(&session) != PSI_STATUS_OK) {
+        fprintf(stderr, "failed to save session file\n");
+        psi_session_free(&session);
+        free(response_text);
+        return PSI_STATUS_ERROR;
+    }
+
+    psi_session_free(&session);
+    free(response_text);
+    return PSI_STATUS_OK;
 }
 
 static int psi_run_by_mode(const struct psi_cli_options *options) {
@@ -173,6 +257,10 @@ static int psi_run_by_mode(const struct psi_cli_options *options) {
             return psi_run_eval_mode(options);
         case PSI_CLI_MODE_REPL:
             return psi_run_repl(options);
+        case PSI_CLI_MODE_SYSTEM_PROMPT:
+            return psi_run_system_prompt_mode(options);
+        case PSI_CLI_MODE_AGENT:
+            return psi_run_agent_mode(options);
         default:
             return PSI_STATUS_ERROR;
     }

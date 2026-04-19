@@ -14,3 +14,6 @@
   (if (string? value)
       value
       (psi-object->string value)))
+
+(define (psi-handle-system-prompt)
+  (psi-system-prompt))
