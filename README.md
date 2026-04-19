@@ -33,6 +33,7 @@ Build with Nix:
 nix build
 ./result/bin/psi --help
 ./result/bin/psi --eval '(+ 1 2 3)'
+./result/bin/psi --eval '(psi-read-file "README.md")'
 ./result/bin/psi --print 'hello'
 ./result/bin/psi --session /tmp/psi-session.jsonl --print 'hello again'
 ```
@@ -43,6 +44,7 @@ For local development:
 nix develop
 make
 ./build/psi --eval '(+ 1 2 3)'
+./build/psi --eval '(psi-read-file "README.md")'
 ./build/psi --print 'hello'
 ./build/psi --session .psi/session.jsonl --print 'hello again'
 ```

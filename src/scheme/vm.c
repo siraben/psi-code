@@ -5,6 +5,7 @@
 #include "psi/vm.h"
 
 static struct psi_session *psi_current_session = NULL;
+static const long PSI_READ_FILE_MAX_BYTES = 262144l;
 
 static sexp psi_foreign_version(sexp ctx, sexp self, sexp n) {
     PSI_UNUSED(self);
@@ -36,6 +37,77 @@ static sexp psi_foreign_session_message_count(sexp ctx, sexp self, sexp n) {
     }
 
     return sexp_make_fixnum((sexp_sint_t)psi_current_session->count);
+}
+
+static sexp psi_foreign_read_file(sexp ctx, sexp self, sexp n, sexp path) {
+    FILE *file;
+    long size;
+    size_t read_size;
+    char *buffer;
+    char *path_buffer;
+    sexp path_value;
+
+    PSI_UNUSED(n);
+
+    if (!sexp_stringp(path)) {
+        return sexp_type_exception(ctx, self, SEXP_STRING, path);
+    }
+
+    path_buffer = psi_strdup_n(sexp_string_data(path), (size_t)sexp_string_size(path));
+    if (path_buffer == NULL) {
+        return sexp_user_exception(ctx, self, "out of memory while preparing file path", path);
+    }
+
+    path_value = sexp_c_string(ctx, path_buffer, -1);
+    file = fopen(path_buffer, "rb");
+    if (file == NULL) {
+        free(path_buffer);
+        return sexp_file_exception(ctx, self, "could not open file", path_value);
+    }
+
+    if (fseek(file, 0l, SEEK_END) != 0) {
+        fclose(file);
+        free(path_buffer);
+        return sexp_file_exception(ctx, self, "could not seek file", path_value);
+    }
+
+    size = ftell(file);
+    if (size < 0l) {
+        fclose(file);
+        free(path_buffer);
+        return sexp_file_exception(ctx, self, "could not determine file size", path_value);
+    }
+    if (size > PSI_READ_FILE_MAX_BYTES) {
+        fclose(file);
+        free(path_buffer);
+        return sexp_user_exception(ctx, self, "file exceeds read limit", path_value);
+    }
+
+    if (fseek(file, 0l, SEEK_SET) != 0) {
+        fclose(file);
+        free(path_buffer);
+        return sexp_file_exception(ctx, self, "could not rewind file", path_value);
+    }
+
+    buffer = (char *)malloc((size_t)size + 1u);
+    if (buffer == NULL) {
+        fclose(file);
+        free(path_buffer);
+        return sexp_user_exception(ctx, self, "out of memory while reading file", path_value);
+    }
+
+    read_size = fread(buffer, 1u, (size_t)size, file);
+    fclose(file);
+    free(path_buffer);
+    if (read_size != (size_t)size) {
+        free(buffer);
+        return sexp_file_exception(ctx, self, "could not read full file", path_value);
+    }
+
+    buffer[size] = '\0';
+    path_value = sexp_c_string(ctx, buffer, (sexp_sint_t)size);
+    free(buffer);
+    return path_value;
 }
 
 static int psi_vm_extract_string(sexp ctx, sexp value, char **output_text) {
@@ -113,6 +185,7 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
     sexp_define_foreign(vm->ctx, vm->env, "psi-version", 0, psi_foreign_version);
     sexp_define_foreign(vm->ctx, vm->env, "psi-log", 1, psi_foreign_log);
     sexp_define_foreign(vm->ctx, vm->env, "psi-session-message-count", 0, psi_foreign_session_message_count);
+    sexp_define_foreign(vm->ctx, vm->env, "psi-read-file", 1, psi_foreign_read_file);
 
     return psi_vm_load_bootstrap(vm);
 }
