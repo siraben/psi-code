@@ -945,14 +945,14 @@ static int psi_tui_entry_style(
             *attrs = 0;
             return PSI_STATUS_OK;
         case PSI_TUI_ENTRY_TOOL_CALL:
-            *prefix_first = "[tool] ";
-            *prefix_rest = "       ";
+            *prefix_first = "  ";
+            *prefix_rest = "  ";
             *color_pair = 4;
-            *attrs = A_BOLD;
+            *attrs = 0;
             return PSI_STATUS_OK;
         case PSI_TUI_ENTRY_TOOL_RESULT:
-            *prefix_first = entry->is_error ? "[error] " : "[result] ";
-            *prefix_rest = entry->is_error ? "        " : "         ";
+            *prefix_first = "  ";
+            *prefix_rest = "  ";
             *color_pair = entry->is_error ? 6 : 5;
             *attrs = 0;
             return PSI_STATUS_OK;
@@ -1968,8 +1968,9 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
     nonl();
     noecho();
     keypad(stdscr, TRUE);
-    mouseinterval(0);
-    mousemask(ALL_MOUSE_EVENTS, NULL);
+    /* Leave the mouse to the terminal so click-drag text selection and
+     * clipboard copy work. Users scroll the transcript with PgUp/PgDn
+     * or the arrow keys. */
     scrollok(stdscr, FALSE);
     set_escdelay(25);
     psi_tui_init_colors();
@@ -1987,34 +1988,6 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
         }
 
         if (ch == KEY_RESIZE) {
-            psi_tui_redraw(&state);
-            continue;
-        }
-        if (ch == KEY_MOUSE) {
-            MEVENT event;
-
-            if (getmouse(&event) == OK) {
-#ifdef BUTTON4_PRESSED
-                if ((event.bstate & BUTTON4_PRESSED) != 0u) {
-                    psi_tui_scroll_by(&state, 3);
-                }
-#endif
-#ifdef BUTTON4_CLICKED
-                if ((event.bstate & BUTTON4_CLICKED) != 0u) {
-                    psi_tui_scroll_by(&state, 3);
-                }
-#endif
-#ifdef BUTTON5_PRESSED
-                if ((event.bstate & BUTTON5_PRESSED) != 0u) {
-                    psi_tui_scroll_by(&state, -3);
-                }
-#endif
-#ifdef BUTTON5_CLICKED
-                if ((event.bstate & BUTTON5_CLICKED) != 0u) {
-                    psi_tui_scroll_by(&state, -3);
-                }
-#endif
-            }
             psi_tui_redraw(&state);
             continue;
         }
