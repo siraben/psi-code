@@ -1,0 +1,51 @@
+-- psi.commands: slash-command dispatch.
+
+local records = require("psi.records")
+local prelude = require("psi.prelude")
+local prompt = require("psi.prompt")
+
+local M = {}
+
+local COMPACT_DEFAULT = 12
+
+local function parse_compact_count(line)
+  local rest = prelude.trim(line:sub(9))
+  if #rest == 0 then return COMPACT_DEFAULT end
+  return tonumber(rest) or COMPACT_DEFAULT
+end
+
+local function is_compact_command(line)
+  if not prelude.starts_with(line, "/compact") then return false end
+  if #line == 8 then return true end
+  local ch = line:sub(9, 9)
+  return ch == " " or ch == "\t"
+end
+
+local function session_status()
+  return "session-messages: " .. tostring(psi.session_message_count())
+end
+
+function M.handle(line)
+  if line == "/help" or line == "/h" then
+    return records.new_command_action("print", prompt.help_text())
+  end
+  if line == "/session" then
+    return records.new_command_action("print", session_status())
+  end
+  if line == "/system-prompt" then
+    return records.new_command_action("print", prompt.system_prompt())
+  end
+  if is_compact_command(line) then
+    return records.new_command_action("compact", parse_compact_count(line))
+  end
+  return nil
+end
+
+-- Bridge for C: returns either nil or a {kind-string, payload} sequence.
+function M.handle_command_list(line)
+  local action = M.handle(line)
+  if not action then return nil end
+  return records.command_action_to_list(action)
+end
+
+return M

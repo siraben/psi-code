@@ -26,8 +26,8 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
     args->version = arg_lit0(NULL, "version", "show version");
     args->tui = arg_lit0(NULL, "tui", "run the full-screen interactive TUI");
     args->print = arg_str0(NULL, "print", "TEXT", "run the bootstrap print-mode handler");
-    args->eval = arg_str0(NULL, "eval", "EXPR", "evaluate a Scheme expression and print the result");
-    args->boot = arg_str0(NULL, "boot", "FILE", "override the Scheme bootstrap file");
+    args->eval = arg_str0(NULL, "eval", "EXPR", "evaluate a Lua expression and print the result");
+    args->boot = arg_str0(NULL, "boot", "FILE", "override the Lua bootstrap file");
     args->system_prompt = arg_lit0(NULL, "system-prompt", "print the default coding-agent system prompt");
     args->agent = arg_str0(NULL, "agent", "TEXT", "run a single Anthropic-backed coding-agent turn");
     args->model = arg_str0(NULL, "model", "MODEL", "model to use with --agent");
@@ -107,7 +107,7 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
 
     options->mode = PSI_CLI_MODE_REPL;
     options->payload = NULL;
-    options->boot_file = PSI_SCHEME_BOOT_FILE;
+    options->boot_file = PSI_LUA_BOOT_FILE;
     options->session_file = NULL;
     options->model = NULL;
     options->max_tokens = 4096l;

@@ -79,7 +79,7 @@ int psi_agent_runtime_turn_with_observer(
     }
 
     system_prompt = NULL;
-    status = psi_vm_call_procedure0_to_string(&runtime->vm, "psi-build-system-prompt", &system_prompt);
+    status = psi_vm_call_procedure0_to_string(&runtime->vm, "psi.prompt.system_prompt", &system_prompt);
     if (status != PSI_STATUS_OK) {
         free(system_prompt);
         return status;

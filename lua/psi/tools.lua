@@ -1,0 +1,311 @@
+-- psi.tools: built-in tool implementations.
+--
+-- Each tool is a records.Tool registered into the registry. Implementations
+-- receive a plain table input (parsed from JSON by the C FFI glue) and
+-- return a records.ToolResult.
+
+local records = require("psi.records")
+local registry = require("psi.tool_registry")
+local shell = require("psi.tool_shell")
+local io_lib = require("psi.io")
+local prelude = require("psi.prelude")
+
+local M = {}
+
+-- ---------- schema helpers ----------
+
+local function schema_type(t) return {type = t} end
+
+local function schema_object(properties, required)
+  return {
+    type = "object",
+    properties = properties,
+    required = required,
+  }
+end
+
+-- ---------- read ----------
+
+local function impl_read(input)
+  local path = registry.require_string(input, "path")
+  if not path then return records.tool_failure("read", "missing string field: path") end
+  local text = psi.read_file(path)
+  return records.new_tool_result(true, "read", nil, {path = path, text = text})
+end
+
+-- ---------- write ----------
+
+local function impl_write(input)
+  local path = registry.require_string(input, "path")
+  local content = input.content or input.text
+  if not path then return records.tool_failure("write", "missing string field: path") end
+  if type(content) ~= "string" then
+    return records.tool_failure("write", "missing string field: content")
+  end
+  if not psi.file_write(path, content) then
+    return records.tool_failure("write", "could not write full file")
+  end
+  return records.new_tool_result(true, "write", nil, {
+    path = path,
+    bytes_written = #content,
+  })
+end
+
+-- ---------- edit ----------
+
+local function apply_edits(text, edits)
+  local current, count = text, 0
+  for _, entry in ipairs(edits) do
+    if type(entry) ~= "table" then return nil, nil end
+    local old_text, new_text = entry.oldText, entry.newText
+    if type(old_text) ~= "string" or type(new_text) ~= "string" then return nil, nil end
+    local next_text = prelude.replace_first(current, old_text, new_text)
+    if not next_text then return nil, nil end
+    current = next_text
+    count = count + 1
+  end
+  return current, count
+end
+
+local function impl_edit(input)
+  local path = registry.require_string(input, "path")
+  if not path then return records.tool_failure("edit", "missing string field: path") end
+  local edits = input.edits
+  local old_text, new_text = input.oldText, input.newText
+  local original = io_lib.safe_read(path)
+  if not original then return records.tool_failure("edit", "could not read file") end
+
+  local edited, replacements
+  if type(edits) == "table" and #edits > 0 then
+    edited, replacements = apply_edits(original, edits)
+  elseif type(old_text) == "string" and type(new_text) == "string" then
+    edited = prelude.replace_first(original, old_text, new_text)
+    replacements = edited and 1 or nil
+  elseif type(old_text) ~= "string" then
+    return records.tool_failure("edit", "missing string field: oldText")
+  elseif type(new_text) ~= "string" then
+    return records.tool_failure("edit", "missing string field: newText")
+  end
+
+  if not edited then return records.tool_failure("edit", "target text not found") end
+  if not psi.file_write(path, edited) then
+    return records.tool_failure("edit", "could not write full file")
+  end
+  return records.new_tool_result(true, "edit", nil, {
+    path = path,
+    replacements = replacements,
+  })
+end
+
+-- ---------- bash ----------
+
+local function impl_bash(input)
+  local command = registry.require_string(input, "command")
+  if not command then return records.tool_failure("bash", "missing string field: command") end
+  return shell.run_tool("bash", command, nil, true)
+end
+
+-- ---------- grep ----------
+
+local function build_grep_command(pattern, path, glob, limit, context, ignore_case, literal)
+  local parts = {
+    "command -v rg >/dev/null 2>&1 || { echo 'rg is required for grep' >&2; exit 127; }; ",
+    "rg -n --no-heading --color never --hidden --max-count ", tostring(limit),
+  }
+  if context and context > 0 then parts[#parts+1] = " -C " .. tostring(context) end
+  if ignore_case then parts[#parts+1] = " -i" end
+  if literal then parts[#parts+1] = " -F" end
+  if glob then parts[#parts+1] = " --glob " .. shell.quote(glob) end
+  parts[#parts+1] = " " .. shell.quote(pattern)
+  parts[#parts+1] = " " .. shell.quote(path)
+  return table.concat(parts)
+end
+
+local function impl_grep(input)
+  local pattern = registry.require_string(input, "pattern")
+  if not pattern then return records.tool_failure("grep", "missing string field: pattern") end
+  local path = registry.optional_string(input, "path", ".")
+  local glob = type(input.glob) == "string" and input.glob or nil
+  local limit = registry.optional_number(input, "limit", 100)
+  local context = registry.optional_number(input, "context", 0)
+  local ignore_case = registry.optional_boolean(input, "ignoreCase", false)
+  local literal = registry.optional_boolean(input, "literal", false)
+  local command = build_grep_command(pattern, path, glob, limit, context, ignore_case, literal)
+  return shell.run_tool("grep", command, path, true)
+end
+
+-- ---------- find ----------
+
+local function impl_find(input)
+  local pattern = registry.require_string(input, "pattern")
+  if not pattern then return records.tool_failure("find", "missing string field: pattern") end
+  local path = registry.optional_string(input, "path", ".")
+  local limit = registry.optional_number(input, "limit", 1000)
+  local command = "command -v fd >/dev/null 2>&1 || " ..
+    "{ echo 'fd is required for find' >&2; exit 127; }; " ..
+    "fd --hidden --max-results " .. tostring(limit) ..
+    " --glob " .. shell.quote(pattern) ..
+    " " .. shell.quote(path)
+  return shell.run_tool("find", command, path, true)
+end
+
+-- ---------- ls ----------
+
+local function impl_ls(input)
+  local path = registry.optional_string(input, "path", ".")
+  local limit = registry.optional_number(input, "limit", 500)
+  local command = "ls -1A " .. shell.quote(path) ..
+    " | sed -n '1," .. tostring(limit) .. "p'"
+  return shell.run_tool("ls", command, path, true)
+end
+
+-- ---------- lua (runtime inspect / eval) ----------
+
+local function eval_to_string(expression)
+  local chunk, err = load("return " .. expression, "=eval", "t")
+  if not chunk then
+    chunk, err = load(expression, "=eval", "t")
+  end
+  if not chunk then return err or "load error" end
+  local ok, value = pcall(chunk)
+  if not ok then return "error: " .. tostring(value) end
+  if type(value) == "string" then return value end
+  return tostring(value)
+end
+
+local function impl_lua(input)
+  local mode = registry.optional_string(input, "mode", "summary")
+  local expression = input.expression or input.code
+  if mode == "summary" or mode == "inspect" then
+    return records.new_tool_result(true, "lua", nil, {
+      mode = mode,
+      result = require("psi.prompt").runtime_summary(),
+    })
+  elseif mode == "eval" then
+    if type(expression) ~= "string" then
+      return records.tool_failure("lua", "missing string field: expression")
+    end
+    return records.new_tool_result(true, "lua", nil, {
+      mode = mode,
+      expression = expression,
+      result = eval_to_string(expression),
+    })
+  end
+  return records.tool_failure("lua", "unsupported mode")
+end
+
+-- ---------- registrations ----------
+
+local edit_item_schema = schema_object({
+  oldText = schema_type("string"),
+  newText = schema_type("string"),
+}, {"oldText", "newText"})
+
+registry.register(records.new_tool(
+  "read",
+  "Read the contents of a file. Use this to inspect source files, configuration, and other project assets.",
+  "Read file contents",
+  {"Use read to examine files instead of cat or sed."},
+  schema_object({path = schema_type("string")}, {"path"}),
+  impl_read))
+
+registry.register(records.new_tool(
+  "bash",
+  "Execute a shell command in the current working directory and return its output.",
+  "Execute bash commands (ls, rg, find, tests, git, build commands)",
+  {"Use bash for commands such as ls, rg, find, git, and tests."},
+  schema_object({
+    command = schema_type("string"),
+    timeout = schema_type("number"),
+  }, {"command"}),
+  impl_bash))
+
+registry.register(records.new_tool(
+  "edit",
+  "Edit a single file using exact text replacement. Prefer small, precise edits over broad rewrites.",
+  "Make precise file edits with exact text replacement, including multiple disjoint edits in one call",
+  {
+    "Use edit for precise changes where old text can be matched exactly.",
+    "When changing multiple separate locations in one file, use one edit call with multiple entries in edits[].",
+    "Keep edits[].oldText as small as possible while still being unique in the file.",
+  },
+  schema_object({
+    path = schema_type("string"),
+    edits = {type = "array", items = edit_item_schema},
+  }, {"path", "edits"}),
+  impl_edit))
+
+registry.register(records.new_tool(
+  "write",
+  "Write content to a file. Creates the file if it does not exist and overwrites it if it does.",
+  "Create or overwrite files",
+  {"Use write for new files or full rewrites."},
+  schema_object({
+    path = schema_type("string"),
+    content = schema_type("string"),
+  }, {"path", "content"}),
+  impl_write))
+
+registry.register(records.new_tool(
+  "grep",
+  "Search file contents for a pattern and return matching lines with file paths and line numbers.",
+  "Search file contents for patterns (prefer this over broad shell grep)",
+  {"Prefer grep over bash when searching file contents."},
+  schema_object({
+    pattern = schema_type("string"),
+    path = schema_type("string"),
+    glob = schema_type("string"),
+    ignoreCase = schema_type("boolean"),
+    literal = schema_type("boolean"),
+    context = schema_type("number"),
+    limit = schema_type("number"),
+  }, {"pattern"}),
+  impl_grep))
+
+registry.register(records.new_tool(
+  "find",
+  "Find files by glob pattern relative to a directory.",
+  "Find files by glob pattern",
+  {"Prefer find over bash when locating files."},
+  schema_object({
+    pattern = schema_type("string"),
+    path = schema_type("string"),
+    limit = schema_type("number"),
+  }, {"pattern"}),
+  impl_find))
+
+registry.register(records.new_tool(
+  "ls",
+  "List directory contents.",
+  "List directory contents",
+  {"Prefer ls over bash for a quick directory listing."},
+  schema_object({
+    path = schema_type("string"),
+    limit = schema_type("number"),
+  }, {}),
+  impl_ls))
+
+registry.register(records.new_tool(
+  "lua",
+  "Inspect or evaluate expressions in psi's embedded Lua runtime. Use this to inspect loaded helpers, prompt state, tool specs, or runtime environment.",
+  "Inspect or evaluate the embedded Lua runtime and helper environment",
+  {
+    "Use lua with mode summary to inspect the current runtime and helper environment.",
+    "Use lua with mode eval and an expression string to inspect or interact with psi's Lua state.",
+  },
+  schema_object({
+    mode = schema_type("string"),
+    expression = schema_type("string"),
+    code = schema_type("string"),
+  }, {}),
+  impl_lua))
+
+-- Expose the registry surface on this module so boot.lua can publish it
+-- as psi.tools.* (C glue calls psi.tools.dispatch_alist etc.)
+M.dispatch = registry.dispatch
+M.dispatch_alist = registry.dispatch_alist
+M.select_specs = registry.select_specs
+M.all = registry.all
+M.find = registry.find
+
+return M

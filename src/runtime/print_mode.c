@@ -213,7 +213,7 @@ int psi_run_print_mode(const struct psi_cli_options *options) {
     }
     psi_vm_bind_session(&vm, &session);
 
-    status = psi_vm_call_string_procedure(&vm, "psi-handle-print", options->payload, &reply_text);
+    status = psi_vm_call_string_procedure(&vm, "psi.prompt.handle_print", options->payload, &reply_text);
     if (status != PSI_STATUS_OK) {
         psi_vm_destroy(&vm);
         psi_session_free(&session);
@@ -370,7 +370,7 @@ int psi_run_system_prompt_mode(const struct psi_cli_options *options) {
         return status;
     }
 
-    status = psi_vm_call_procedure0_to_string(&vm, "psi-handle-system-prompt", &output_text);
+    status = psi_vm_call_procedure0_to_string(&vm, "psi.prompt.system_prompt", &output_text);
     if (status == PSI_STATUS_OK && output_text != NULL) {
         printf("%s\n", output_text);
     }

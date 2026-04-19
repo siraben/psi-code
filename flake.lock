@@ -1,21 +1,5 @@
 {
   "nodes": {
-    "chibi-src": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1776217515,
-        "narHash": "sha256-jjK2odaQXHWhK3FlJR7TEVSk1Ipr5BLnyqeF3pUoUwY=",
-        "owner": "ashinn",
-        "repo": "chibi-scheme",
-        "rev": "97faa0bf2d123c558d7ab79216906567c44cb03c",
-        "type": "github"
-      },
-      "original": {
-        "owner": "ashinn",
-        "repo": "chibi-scheme",
-        "type": "github"
-      }
-    },
     "flake-utils": {
       "inputs": {
         "systems": "systems"
@@ -52,7 +36,6 @@
     },
     "root": {
       "inputs": {
-        "chibi-src": "chibi-src",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs"
       }

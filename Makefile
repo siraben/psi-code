@@ -10,14 +10,14 @@ CFLAGS ?= -O2
 CPPFLAGS ?=
 LDFLAGS ?=
 
-BASE_CFLAGS = -std=c89 -pedantic -Wall -Wextra -Werror
-LOCAL_CPPFLAGS = -Iinclude -DPSI_SCHEME_BOOT_FILE=\"$(SCHEME_BOOT_FILE)\" $(shell $(PKG_CONFIG) --cflags chibi-scheme libcjson)
+BASE_CFLAGS = -std=c99 -Wall -Wextra -Werror
+LOCAL_CPPFLAGS = -Iinclude -DPSI_LUA_BOOT_FILE=\"$(LUA_BOOT_FILE)\" $(shell $(PKG_CONFIG) --cflags lua5.4 libcjson)
 LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) --cflags libedit)
 LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) --cflags libcurl)
 LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) --cflags ncursesw 2>/dev/null || $(PKG_CONFIG) --cflags ncurses 2>/dev/null)
-LOCAL_LDFLAGS = $(shell $(PKG_CONFIG) --libs chibi-scheme libcjson libedit libcurl) $(shell $(PKG_CONFIG) --libs ncursesw 2>/dev/null || $(PKG_CONFIG) --libs ncurses 2>/dev/null) -largtable3
+LOCAL_LDFLAGS = $(shell $(PKG_CONFIG) --libs lua5.4 libcjson libedit libcurl) $(shell $(PKG_CONFIG) --libs ncursesw 2>/dev/null || $(PKG_CONFIG) --libs ncurses 2>/dev/null) -largtable3
 
-SCHEME_BOOT_FILE ?= $(abspath scheme/boot.scm)
+LUA_BOOT_FILE ?= $(abspath lua/boot.lua)
 
 BUILD_DIR = build
 TARGET = $(BUILD_DIR)/psi
@@ -35,7 +35,7 @@ SOURCES = \
 	src/runtime/cli.c \
 	src/runtime/print_mode.c \
 	src/runtime/tui_mode.c \
-	src/scheme/vm.c
+	src/lua/vm.c
 
 OBJECTS = \
 	$(BUILD_DIR)/main.o \
@@ -96,14 +96,15 @@ $(BUILD_DIR)/print_mode.o: src/runtime/print_mode.c include/psi/common.h include
 $(BUILD_DIR)/tui_mode.o: src/runtime/tui_mode.c include/psi/agent.h include/psi/common.h include/psi/message.h include/psi/runtime.h include/psi/session.h include/psi/vm.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/vm.o: src/scheme/vm.c include/psi/common.h include/psi/host_ops.h include/psi/process.h include/psi/prompt.h include/psi/session.h include/psi/vm.h
+$(BUILD_DIR)/vm.o: src/lua/vm.c include/psi/common.h include/psi/host_ops.h include/psi/message.h include/psi/process.h include/psi/prompt.h include/psi/session.h include/psi/vm.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
 install: $(TARGET)
-	mkdir -p $(DESTDIR)$(BINDIR) $(DESTDIR)$(INCLUDEDIR)/psi $(DESTDIR)$(SHAREDIR)
+	mkdir -p $(DESTDIR)$(BINDIR) $(DESTDIR)$(INCLUDEDIR)/psi $(DESTDIR)$(SHAREDIR)/psi
 	cp $(TARGET) $(DESTDIR)$(BINDIR)/psi
 	cp include/psi/*.h $(DESTDIR)$(INCLUDEDIR)/psi/
-	cp scheme/boot.scm $(DESTDIR)$(SHAREDIR)/boot.scm
+	cp lua/boot.lua $(DESTDIR)$(SHAREDIR)/boot.lua
+	cp lua/psi/*.lua $(DESTDIR)$(SHAREDIR)/psi/
 
 clean:
 	rm -rf $(BUILD_DIR)

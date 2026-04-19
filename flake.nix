@@ -4,35 +4,13 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    chibi-src = {
-      url = "github:ashinn/chibi-scheme";
-      flake = false;
-    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, chibi-src }:
+  outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
           inherit system;
-        };
-
-        chibi = pkgs.stdenv.mkDerivation rec {
-          pname = "chibi-scheme";
-          version = "git";
-          src = chibi-src;
-
-          nativeBuildInputs = [
-            pkgs.gnumake
-          ];
-
-          buildPhase = ''
-            make PREFIX=$out
-          '';
-
-          installPhase = ''
-            make PREFIX=$out install
-          '';
         };
       in {
         packages.default = pkgs.stdenv.mkDerivation {
@@ -47,10 +25,10 @@
 
           buildInputs = [
             pkgs.argtable
-            chibi
             pkgs.cjson
             pkgs.curl
             pkgs.libedit
+            pkgs.lua5_4
             pkgs.ncurses
           ];
 
@@ -58,7 +36,7 @@
             "PREFIX=$(out)"
             "CC=${pkgs.stdenv.cc.targetPrefix}cc"
             "PKG_CONFIG=${pkgs.pkg-config}/bin/pkg-config"
-            "SCHEME_BOOT_FILE=$(out)/share/psi/boot.scm"
+            "LUA_BOOT_FILE=$(out)/share/psi/boot.lua"
           ];
 
           installPhase = ''
@@ -76,12 +54,12 @@
             pkgs.curl
             pkgs.gdb
             pkgs.libedit
+            pkgs.lua5_4
             pkgs.ncurses
-            chibi
           ];
 
           shellHook = ''
-            export PSI_SCHEME_BOOT_FILE="$PWD/scheme/boot.scm"
+            export PSI_LUA_BOOT_FILE="$PWD/lua/boot.lua"
           '';
         };
       });

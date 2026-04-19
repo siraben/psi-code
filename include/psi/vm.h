@@ -2,13 +2,12 @@
 #define PSI_VM_H
 
 #include <stdio.h>
-#include <chibi/eval.h>
+#include <lua.h>
 #include "psi/common.h"
 #include "psi/host_ops.h"
 
 struct psi_vm {
-    sexp ctx;
-    sexp env;
+    lua_State *L;
     const char *boot_file;
     struct psi_host_context host;
 };
