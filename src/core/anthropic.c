@@ -3,10 +3,10 @@
 #include <string.h>
 #include <curl/curl.h>
 #include <cjson/cJSON.h>
+#include "psi/abort.h"
 #include "psi/agent.h"
 #include "psi/anthropic.h"
 #include "psi/common.h"
-#include "psi/vm.h"
 #include "psi/vm.h"
 
 struct psi_http_buffer {
@@ -822,11 +822,25 @@ static int psi_anthropic_session_to_messages(const struct psi_session *session, 
     return PSI_STATUS_OK;
 }
 
+static int psi_anthropic_xferinfo(
+    void *clientp,
+    curl_off_t dltotal, curl_off_t dlnow,
+    curl_off_t ultotal, curl_off_t ulnow
+) {
+    struct psi_abort_signal *abort_signal = (struct psi_abort_signal *)clientp;
+    (void)dltotal; (void)dlnow; (void)ultotal; (void)ulnow;
+    if (psi_abort_signal_is_triggered(abort_signal)) {
+        return 1; /* non-zero aborts the transfer */
+    }
+    return 0;
+}
+
 static int psi_anthropic_http_stream(
     const char *base_url,
     const char *api_key,
     const char *request_json,
     struct psi_stream_state *state,
+    struct psi_abort_signal *abort_signal,
     long *status_code
 ) {
     CURL *curl;
@@ -882,6 +896,9 @@ static int psi_anthropic_http_stream(
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)strlen(request_json));
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, psi_curl_stream_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)state);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, psi_anthropic_xferinfo);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, (void *)abort_signal);
 
     code = curl_easy_perform(curl);
     if (code == CURLE_OK) {
@@ -894,6 +911,9 @@ static int psi_anthropic_http_stream(
     free(api_key_header);
     free(url);
 
+    if (code == CURLE_ABORTED_BY_CALLBACK) {
+        return PSI_STATUS_ERROR;
+    }
     if (code != CURLE_OK) {
         return PSI_STATUS_ERROR;
     }
@@ -905,6 +925,7 @@ static int psi_anthropic_http_json(
     const char *api_key,
     const char *request_json,
     struct psi_http_buffer *response_buffer,
+    struct psi_abort_signal *abort_signal,
     long *status_code
 ) {
     CURL *curl;
@@ -962,6 +983,9 @@ static int psi_anthropic_http_json(
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)strlen(request_json));
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, psi_curl_buffer_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)response_buffer);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, psi_anthropic_xferinfo);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, (void *)abort_signal);
 
     code = curl_easy_perform(curl);
     if (code == CURLE_OK) {
@@ -1012,6 +1036,7 @@ int psi_anthropic_complete_text(
     long max_tokens,
     const char *system_prompt,
     const char *user_text,
+    struct psi_abort_signal *abort_signal,
     char **output_text
 ) {
     const char *api_key;
@@ -1067,7 +1092,7 @@ int psi_anthropic_complete_text(
         return PSI_STATUS_ERROR;
     }
 
-    status = psi_anthropic_http_json(base_url, api_key, request_json, &response_buffer, &status_code);
+    status = psi_anthropic_http_json(base_url, api_key, request_json, &response_buffer, abort_signal, &status_code);
     free(request_json);
     if (status != PSI_STATUS_OK) {
         free(response_buffer.data);
@@ -1099,6 +1124,7 @@ int psi_anthropic_agent_turn_with_prompt(
     const char *model,
     long max_tokens,
     const char *system_prompt,
+    struct psi_abort_signal *abort_signal,
     char **output_text
 ) {
     const char *api_key;
@@ -1174,7 +1200,7 @@ int psi_anthropic_agent_turn_with_prompt(
             return PSI_STATUS_ERROR;
         }
 
-        if (psi_anthropic_http_stream(base_url, api_key, request_json, &stream_state, &status_code) != PSI_STATUS_OK) {
+        if (psi_anthropic_http_stream(base_url, api_key, request_json, &stream_state, abort_signal, &status_code) != PSI_STATUS_OK) {
             free(request_json);
             psi_stream_state_free(&stream_state);
             cJSON_Delete(tools);
@@ -1386,7 +1412,8 @@ int psi_anthropic_agent_turn(
     struct psi_agent_observer *observer,
     const char *model,
     long max_tokens,
+    struct psi_abort_signal *abort_signal,
     char **output_text
 ) {
-    return psi_anthropic_agent_turn_with_prompt(session, vm, host, user_text, observer, model, max_tokens, "", output_text);
+    return psi_anthropic_agent_turn_with_prompt(session, vm, host, user_text, observer, model, max_tokens, "", abort_signal, output_text);
 }

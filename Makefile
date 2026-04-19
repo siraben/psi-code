@@ -24,6 +24,7 @@ TARGET = $(BUILD_DIR)/psi
 
 SOURCES = \
 	src/main.c \
+	src/core/abort.c \
 	src/core/agent.c \
 	src/core/common.c \
 	src/core/anthropic.c \
@@ -39,6 +40,7 @@ SOURCES = \
 
 OBJECTS = \
 	$(BUILD_DIR)/main.o \
+	$(BUILD_DIR)/abort.o \
 	$(BUILD_DIR)/agent.o \
 	$(BUILD_DIR)/common.o \
 	$(BUILD_DIR)/anthropic.o \
@@ -63,7 +65,10 @@ $(TARGET): $(BUILD_DIR) $(OBJECTS)
 $(BUILD_DIR)/main.o: src/main.c include/psi/common.h include/psi/runtime.h include/psi/session.h include/psi/vm.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/agent.o: src/core/agent.c include/psi/agent.h include/psi/anthropic.h include/psi/common.h include/psi/session.h
+$(BUILD_DIR)/abort.o: src/core/abort.c include/psi/abort.h include/psi/common.h
+	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/agent.o: src/core/agent.c include/psi/abort.h include/psi/agent.h include/psi/anthropic.h include/psi/common.h include/psi/session.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/common.o: src/core/common.c include/psi/common.h

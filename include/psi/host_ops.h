@@ -22,6 +22,10 @@ struct psi_host_context {
      * observer. Both fields are NULL outside of tool dispatch. */
     struct psi_agent_observer *active_observer;
     const char *active_tool_id;
+    /* Live cancellation token. Set at turn start, cleared at turn end.
+     * FFI primitives check this and bail rather than continuing a
+     * blocking op after the user pressed Esc. */
+    struct psi_abort_signal *abort_signal;
 };
 
 struct psi_host_call {

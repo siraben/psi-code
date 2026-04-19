@@ -1,11 +1,16 @@
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #ifndef _WIN32
+#include <fcntl.h>
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
+#include "psi/abort.h"
 #include "psi/common.h"
 #include "psi/process.h"
 
@@ -46,7 +51,8 @@ int psi_process_run_shell(
     int *exit_status,
     int *truncated,
     psi_process_progress_cb on_chunk,
-    void *userdata
+    void *userdata,
+    struct psi_abort_signal *abort_signal
 ) {
 #ifndef _WIN32
     int pipe_fds[2];
@@ -91,48 +97,77 @@ int psi_process_run_shell(
     }
 
     close(pipe_fds[1]);
-    for (;;) {
-        read_count = read(pipe_fds[0], read_buffer, sizeof(read_buffer));
-        if (read_count <= 0) {
-            break;
+    /* Put the read end in non-blocking mode so we can poll the abort
+     * signal while the child runs. Without this, a child that never
+     * writes output would ignore Esc for its full lifetime. */
+    {
+        int flags = fcntl(pipe_fds[0], F_GETFL, 0);
+        if (flags != -1) {
+            fcntl(pipe_fds[0], F_SETFL, flags | O_NONBLOCK);
         }
+    }
+    {
+        int aborted = 0;
+        for (;;) {
+            if (psi_abort_signal_is_triggered(abort_signal)) {
+                aborted = 1;
+                kill(child_pid, SIGTERM);
+                break;
+            }
+            read_count = read(pipe_fds[0], read_buffer, sizeof(read_buffer));
+            if (read_count < 0) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+                    struct timespec delay;
+                    delay.tv_sec = 0;
+                    delay.tv_nsec = 20 * 1000000; /* 20ms */
+                    nanosleep(&delay, NULL);
+                    continue;
+                }
+                break;
+            }
+            if (read_count == 0) {
+                break;
+            }
 
-        if (on_chunk != NULL) {
-            on_chunk(userdata, read_buffer, (size_t)read_count);
-        }
+            if (on_chunk != NULL) {
+                on_chunk(userdata, read_buffer, (size_t)read_count);
+            }
 
-        if (output_length < PSI_PROCESS_OUTPUT_MAX_BYTES) {
-            to_copy = (size_t)read_count;
-            if (output_length + to_copy > PSI_PROCESS_OUTPUT_MAX_BYTES) {
-                to_copy = PSI_PROCESS_OUTPUT_MAX_BYTES - output_length;
+            if (output_length < PSI_PROCESS_OUTPUT_MAX_BYTES) {
+                to_copy = (size_t)read_count;
+                if (output_length + to_copy > PSI_PROCESS_OUTPUT_MAX_BYTES) {
+                    to_copy = PSI_PROCESS_OUTPUT_MAX_BYTES - output_length;
+                    *truncated = 1;
+                }
+                if (psi_process_append_bytes(&output_buffer, &output_length, &output_capacity, read_buffer, to_copy) != PSI_STATUS_OK) {
+                    close(pipe_fds[0]);
+                    waitpid(child_pid, &wait_status, 0);
+                    free(output_buffer);
+                    return PSI_STATUS_ERROR;
+                }
+                if ((size_t)read_count > to_copy) {
+                    *truncated = 1;
+                }
+            } else {
                 *truncated = 1;
             }
-            if (psi_process_append_bytes(&output_buffer, &output_length, &output_capacity, read_buffer, to_copy) != PSI_STATUS_OK) {
-                close(pipe_fds[0]);
-                waitpid(child_pid, &wait_status, 0);
-                free(output_buffer);
-                return PSI_STATUS_ERROR;
-            }
-            if ((size_t)read_count > to_copy) {
-                *truncated = 1;
-            }
+        }
+        close(pipe_fds[0]);
+
+        if (waitpid(child_pid, &wait_status, 0) < 0) {
+            free(output_buffer);
+            return PSI_STATUS_ERROR;
+        }
+
+        if (aborted) {
+            *exit_status = 130; /* SIGINT convention */
+        } else if (WIFEXITED(wait_status)) {
+            *exit_status = WEXITSTATUS(wait_status);
+        } else if (WIFSIGNALED(wait_status)) {
+            *exit_status = 128 + WTERMSIG(wait_status);
         } else {
-            *truncated = 1;
+            *exit_status = -1;
         }
-    }
-    close(pipe_fds[0]);
-
-    if (waitpid(child_pid, &wait_status, 0) < 0) {
-        free(output_buffer);
-        return PSI_STATUS_ERROR;
-    }
-
-    if (WIFEXITED(wait_status)) {
-        *exit_status = WEXITSTATUS(wait_status);
-    } else if (WIFSIGNALED(wait_status)) {
-        *exit_status = 128 + WTERMSIG(wait_status);
-    } else {
-        *exit_status = -1;
     }
 
     if (output_buffer == NULL) {
@@ -149,6 +184,7 @@ int psi_process_run_shell(
 
     PSI_UNUSED(on_chunk);
     PSI_UNUSED(userdata);
+    PSI_UNUSED(abort_signal);
     if (command == NULL || output_text == NULL || exit_status == NULL || truncated == NULL) {
         return PSI_STATUS_ERROR;
     }

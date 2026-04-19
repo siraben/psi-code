@@ -8,6 +8,7 @@
 #include <lauxlib.h>
 #include <lualib.h>
 
+#include "psi/abort.h"
 #include "psi/agent.h"
 #include "psi/common.h"
 #include "psi/host_ops.h"
@@ -312,7 +313,10 @@ static int lfn_process_run(lua_State *L) {
         on_chunk_userdata = host;
     }
 
-    if (psi_process_run_shell(command, &output, &status, &truncated, on_chunk, on_chunk_userdata) != PSI_STATUS_OK) {
+    if (psi_process_run_shell(
+            command, &output, &status, &truncated,
+            on_chunk, on_chunk_userdata,
+            host ? host->abort_signal : NULL) != PSI_STATUS_OK) {
         free(output);
         return luaL_error(L, "failed to run shell command");
     }
@@ -342,6 +346,13 @@ static int lfn_session_append(lua_State *L) {
     if (!s) { lua_pushboolean(L, 0); return 1; }
     status = psi_session_append_with_data(s, psi_session_role_from_name(role), text, data);
     lua_pushboolean(L, status == PSI_STATUS_OK ? 1 : 0);
+    return 1;
+}
+
+static int lfn_is_aborted(lua_State *L) {
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    lua_pushboolean(L,
+        host != NULL && psi_abort_signal_is_triggered(host->abort_signal) ? 1 : 0);
     return 1;
 }
 
@@ -476,6 +487,7 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("process_run",           lfn_process_run);
     PSI_REG("session_append",        lfn_session_append);
     PSI_REG("session_clear",         lfn_session_clear);
+    PSI_REG("is_aborted",            lfn_is_aborted);
     PSI_REG("tool_call",             lfn_tool_call);
 
 #undef PSI_REG

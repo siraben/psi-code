@@ -1,6 +1,7 @@
 #ifndef PSI_AGENT_H
 #define PSI_AGENT_H
 
+#include "psi/abort.h"
 #include "psi/common.h"
 #include "psi/session.h"
 #include "psi/vm.h"
@@ -38,11 +39,13 @@ int psi_agent_runtime_turn_with_observer(
     struct psi_agent_runtime *runtime,
     const char *user_text,
     struct psi_agent_observer *observer,
+    struct psi_abort_signal *abort_signal,
     char **response_text
 );
 int psi_agent_runtime_compact(
     struct psi_agent_runtime *runtime,
     size_t keep_recent,
+    struct psi_abort_signal *abort_signal,
     char **summary_text
 );
 int psi_agent_runtime_save(struct psi_agent_runtime *runtime);

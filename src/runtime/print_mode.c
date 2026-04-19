@@ -147,7 +147,7 @@ static int psi_run_agent_turn_with_cli_hooks(
     observer.on_tool_call = psi_cli_observer_tool_call;
     observer.on_tool_result = psi_cli_observer_tool_result;
 
-    status = psi_agent_runtime_turn_with_observer(runtime, user_text, &observer, response_text);
+    status = psi_agent_runtime_turn_with_observer(runtime, user_text, &observer, NULL, response_text);
     if (status != PSI_STATUS_OK) {
         return status;
     }
@@ -312,7 +312,7 @@ int psi_run_repl(const struct psi_cli_options *options) {
                 if (strcmp(action_name, "compact") == 0) {
                     free(summary_text);
                     summary_text = NULL;
-                    status = psi_agent_runtime_compact(&runtime, (size_t)keep_recent, &summary_text);
+                    status = psi_agent_runtime_compact(&runtime, (size_t)keep_recent, NULL, &summary_text);
                     if (status != PSI_STATUS_OK) {
                         fprintf(stderr, "failed to compact session\n");
                         break;
@@ -440,7 +440,7 @@ int psi_run_compact_mode(const struct psi_cli_options *options) {
         return PSI_STATUS_ERROR;
     }
 
-    status = psi_agent_runtime_compact(&runtime, (size_t)options->keep_recent, &summary_text);
+    status = psi_agent_runtime_compact(&runtime, (size_t)options->keep_recent, NULL, &summary_text);
     if (status != PSI_STATUS_OK) {
         psi_agent_runtime_free(&runtime);
         free(summary_text);

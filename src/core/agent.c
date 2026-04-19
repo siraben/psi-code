@@ -64,6 +64,7 @@ int psi_agent_runtime_turn_with_observer(
     struct psi_agent_runtime *runtime,
     const char *user_text,
     struct psi_agent_observer *observer,
+    struct psi_abort_signal *abort_signal,
     char **response_text
 ) {
     char *system_prompt;
@@ -85,6 +86,7 @@ int psi_agent_runtime_turn_with_observer(
         return status;
     }
 
+    runtime->vm.host.abort_signal = abort_signal;
     status = psi_anthropic_agent_turn_with_prompt(
         &runtime->session,
         &runtime->vm,
@@ -94,19 +96,22 @@ int psi_agent_runtime_turn_with_observer(
         runtime->model,
         runtime->max_tokens,
         system_prompt,
+        abort_signal,
         response_text
     );
+    runtime->vm.host.abort_signal = NULL;
     free(system_prompt);
     return status;
 }
 
 int psi_agent_runtime_turn(struct psi_agent_runtime *runtime, const char *user_text, char **response_text) {
-    return psi_agent_runtime_turn_with_observer(runtime, user_text, NULL, response_text);
+    return psi_agent_runtime_turn_with_observer(runtime, user_text, NULL, NULL, response_text);
 }
 
 int psi_agent_runtime_compact(
     struct psi_agent_runtime *runtime,
     size_t keep_recent,
+    struct psi_abort_signal *abort_signal,
     char **summary_text
 ) {
     char *system_prompt;
@@ -138,13 +143,16 @@ int psi_agent_runtime_compact(
         return status;
     }
 
+    runtime->vm.host.abort_signal = abort_signal;
     status = psi_anthropic_complete_text(
         runtime->model,
         runtime->max_tokens < 1024l ? runtime->max_tokens : 1024l,
         system_prompt,
         user_prompt,
+        abort_signal,
         &summary
     );
+    runtime->vm.host.abort_signal = NULL;
     free(system_prompt);
     free(user_prompt);
     if (status != PSI_STATUS_OK) {

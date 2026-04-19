@@ -1,6 +1,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <locale.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -97,6 +98,10 @@ struct psi_tui_state {
     /* Index of the live tool-output entry receiving streaming progress
      * chunks, or -1 when no tool is currently streaming. Main thread only. */
     int streaming_tool_index;
+    /* Cancellation token shared with the worker. Main thread triggers it
+     * when the user presses Esc; the worker polls it inside curl transfer
+     * hooks and psi_process_run_shell. */
+    struct psi_abort_signal abort_signal;
 };
 
 struct psi_tui_stdio_guard {
@@ -1571,7 +1576,8 @@ static void *psi_tui_run_turn(struct psi_tui_state *state) {
     status = psi_tui_stdio_guard_begin(&stdio_guard);
     if (status == PSI_STATUS_OK) {
         status = psi_agent_runtime_turn_with_observer(
-            &state->runtime, state->turn_line, &observer, &response_text);
+            &state->runtime, state->turn_line, &observer,
+            &state->abort_signal, &response_text);
         if (status == PSI_STATUS_OK) {
             if (psi_agent_runtime_save(&state->runtime) != PSI_STATUS_OK) {
                 save_failed = 1;
@@ -1605,7 +1611,8 @@ static void *psi_tui_run_compact(struct psi_tui_state *state) {
     status = psi_tui_stdio_guard_begin(&stdio_guard);
     if (status == PSI_STATUS_OK) {
         status = psi_agent_runtime_compact(
-            &state->runtime, (size_t)state->compact_keep_recent, &summary);
+            &state->runtime, (size_t)state->compact_keep_recent,
+            &state->abort_signal, &summary);
         if (status == PSI_STATUS_OK) {
             if (psi_agent_runtime_save(&state->runtime) != PSI_STATUS_OK) {
                 save_failed = 1;
@@ -1668,6 +1675,7 @@ static int psi_tui_submit(struct psi_tui_state *state) {
     free(state->turn_line);
     state->turn_line = line;
     state->worker_task = PSI_TUI_TASK_TURN;
+    psi_abort_signal_reset(&state->abort_signal);
     if (pthread_create(&state->worker_thread, NULL, psi_tui_worker_main, state) != 0) {
         state->busy = 0;
         state->worker_task = PSI_TUI_TASK_NONE;
@@ -1689,6 +1697,7 @@ static int psi_tui_start_compact(struct psi_tui_state *state, long keep_recent) 
     state->busy = 1;
     state->compact_keep_recent = keep_recent;
     state->worker_task = PSI_TUI_TASK_COMPACT;
+    psi_abort_signal_reset(&state->abort_signal);
     psi_tui_set_status(state, "Compacting...", 0);
     psi_tui_redraw(state);
     if (pthread_create(&state->worker_thread, NULL, psi_tui_worker_main, state) != 0) {
@@ -1906,6 +1915,7 @@ static void psi_tui_state_init(struct psi_tui_state *state, const struct psi_cli
     state->streaming_assistant_index = -1;
     state->streaming_tool_index = -1;
     state->running = 1;
+    psi_abort_signal_init(&state->abort_signal);
     pthread_mutex_init(&state->event_lock, NULL);
 }
 
@@ -1963,6 +1973,7 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
     }
     psi_tui_rebuild_from_session(&state);
 
+    setlocale(LC_ALL, "");
     initscr();
     raw();
     nonl();
@@ -2009,6 +2020,18 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
         if (ch == KEY_DOWN) {
             psi_tui_scroll_by(&state, -1);
             psi_tui_redraw(&state);
+            continue;
+        }
+
+        /* Esc while busy: trigger the abort signal. Worker stops its
+         * curl transfer, kills any child process, and pushes TURN_DONE /
+         * COMPACT_DONE so the UI unblocks. Esc when idle: no-op. */
+        if (ch == 27) {
+            if (state.busy) {
+                psi_abort_signal_trigger(&state.abort_signal);
+                psi_tui_set_status(&state, "aborting...", 0);
+                psi_tui_redraw(&state);
+            }
             continue;
         }
 
