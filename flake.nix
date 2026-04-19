@@ -50,11 +50,15 @@
             pkgs.gnumake
             pkgs.pkg-config
             pkgs.clang
+            pkgs.clang-tools
+            pkgs.cppcheck
             pkgs.cjson
             pkgs.curl
             pkgs.gdb
             pkgs.libedit
             pkgs.lua5_4
+            pkgs.lua54Packages.luacheck
+            pkgs.stylua
             pkgs.ncurses
           ];
 

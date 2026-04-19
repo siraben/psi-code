@@ -54,10 +54,8 @@ function M.colored_diff(before_text, after_text)
   local after_middle  = middle_lines(after, pc, sc)
 
   local before_ctx = prelude.take_right(prelude.take(before, pc), 2)
-  local after_ctx  = {}
-  local after_trim = prelude.take(prelude.reverse(after), sc)
-  after_trim = prelude.reverse(after_trim)
-  after_ctx = prelude.take(after_trim, 2)
+  local after_trim = prelude.reverse(prelude.take(prelude.reverse(after), sc))
+  local after_ctx = prelude.take(after_trim, 2)
 
   local rendered = {}
   for _, l in ipairs(context_lines(before_ctx, ansi.dim("  "))) do rendered[#rendered+1] = l end

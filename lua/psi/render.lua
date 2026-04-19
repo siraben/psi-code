@@ -1,7 +1,6 @@
 -- psi.render: hooks, tool-frame tracking, event rendering.
 
 local records = require("psi.records")
-local prelude = require("psi.prelude")
 local ansi = require("psi.ansi")
 local diff = require("psi.diff")
 local io_lib = require("psi.io")

@@ -1,0 +1,22 @@
+---
+# Conservative clang-tidy preset for psi's C sources.
+# Enable widely-useful check families; disable a few noisy or C++-only ones.
+Checks: >
+  -*,
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  misc-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-function-cognitive-complexity,
+  -bugprone-easily-swappable-parameters,
+  -misc-include-cleaner,
+  -cert-err33-c
+WarningsAsErrors: ''
+HeaderFilterRegex: 'include/psi/.*\.h$'
+FormatStyle: file
+...
