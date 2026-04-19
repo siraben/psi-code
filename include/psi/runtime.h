@@ -11,7 +11,8 @@ enum psi_cli_mode {
     PSI_CLI_MODE_REPL = 4,
     PSI_CLI_MODE_SYSTEM_PROMPT = 5,
     PSI_CLI_MODE_AGENT = 6,
-    PSI_CLI_MODE_COMPACT = 7
+    PSI_CLI_MODE_COMPACT = 7,
+    PSI_CLI_MODE_TUI = 8
 };
 
 struct psi_cli_options {
@@ -28,6 +29,7 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv);
 void psi_cli_usage(const char *program_name);
 int psi_run_print_mode(const struct psi_cli_options *options);
 int psi_run_repl(const struct psi_cli_options *options);
+int psi_run_tui_mode(const struct psi_cli_options *options);
 int psi_run_system_prompt_mode(const struct psi_cli_options *options);
 int psi_run_agent_mode(const struct psi_cli_options *options);
 int psi_run_compact_mode(const struct psi_cli_options *options);

@@ -473,6 +473,8 @@ static int psi_run_by_mode(const struct psi_cli_options *options) {
             return psi_run_agent_mode(options);
         case PSI_CLI_MODE_COMPACT:
             return psi_run_compact_mode(options);
+        case PSI_CLI_MODE_TUI:
+            return psi_run_tui_mode(options);
         default:
             return PSI_STATUS_ERROR;
     }

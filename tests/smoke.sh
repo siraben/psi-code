@@ -27,12 +27,16 @@ grep '^alpha gamma$' "$TOOL_FILE"
 "$ROOT_DIR/build/psi" --eval "(begin (psi-handle-event 'tool-call (list (cons 'id \"w1\") (cons 'tool \"write\") (cons 'input (list (cons 'path \"$TOOL_FILE\") (cons 'content \"delta\"))))) (let ((result (psi-tool-call \"write\" (list (cons 'path \"$TOOL_FILE\") (cons 'content \"delta\"))))) (psi-handle-event 'tool-result (list (cons 'id \"w1\") (cons 'tool \"write\") (cons 'result result)))))" | grep 'delta'
 "$ROOT_DIR/build/psi" --system-prompt | grep '^Available tools:$'
 "$ROOT_DIR/build/psi" --system-prompt | grep 'scheme: Inspect or evaluate the embedded Scheme runtime'
+"$ROOT_DIR/build/psi" --help | grep -- '--tui'
 mkdir -p "$CONTEXT_DIR"
 printf '%s\n' 'Project rule: keep changes minimal.' >"$CONTEXT_DIR/AGENTS.md"
 (cd "$CONTEXT_DIR" && "$ROOT_DIR/build/psi" --system-prompt) | grep 'Project rule: keep changes minimal.'
 "$ROOT_DIR/build/psi" --print 'hello' | grep 'prompt: hello'
 "$ROOT_DIR/build/psi" --print 'hello' | grep 'session-messages: 1'
 printf ':quit\n' | "$ROOT_DIR/build/psi" >/dev/null
+if command -v script >/dev/null 2>&1; then
+    printf '/quit\n' | script -qec "$ROOT_DIR/build/psi --tui" /dev/null >/dev/null
+fi
 "$ROOT_DIR/build/psi" --session "$SESSION_FILE" --print 'one' >/dev/null
 "$ROOT_DIR/build/psi" --session "$SESSION_FILE" --print 'two' | grep 'session-messages: 3'
 grep '"type":"session"' "$SESSION_FILE"

@@ -14,7 +14,8 @@ BASE_CFLAGS = -std=c89 -pedantic -Wall -Wextra -Werror
 LOCAL_CPPFLAGS = -Iinclude -DPSI_SCHEME_BOOT_FILE=\"$(SCHEME_BOOT_FILE)\" $(shell $(PKG_CONFIG) --cflags chibi-scheme libcjson)
 LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) --cflags libedit)
 LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) --cflags libcurl)
-LOCAL_LDFLAGS = $(shell $(PKG_CONFIG) --libs chibi-scheme libcjson libedit libcurl) -largtable3
+LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) --cflags ncursesw 2>/dev/null || $(PKG_CONFIG) --cflags ncurses 2>/dev/null)
+LOCAL_LDFLAGS = $(shell $(PKG_CONFIG) --libs chibi-scheme libcjson libedit libcurl) $(shell $(PKG_CONFIG) --libs ncursesw 2>/dev/null || $(PKG_CONFIG) --libs ncurses 2>/dev/null) -largtable3
 
 SCHEME_BOOT_FILE ?= $(abspath scheme/boot.scm)
 
@@ -34,6 +35,7 @@ SOURCES = \
 	src/core/session.c \
 	src/runtime/cli.c \
 	src/runtime/print_mode.c \
+	src/runtime/tui_mode.c \
 	src/scheme/vm.c
 
 OBJECTS = \
@@ -49,6 +51,7 @@ OBJECTS = \
 	$(BUILD_DIR)/session.o \
 	$(BUILD_DIR)/cli.o \
 	$(BUILD_DIR)/print_mode.o \
+	$(BUILD_DIR)/tui_mode.o \
 	$(BUILD_DIR)/vm.o
 
 all: $(TARGET)
@@ -93,6 +96,9 @@ $(BUILD_DIR)/cli.o: src/runtime/cli.c include/psi/common.h include/psi/runtime.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/print_mode.o: src/runtime/print_mode.c include/psi/common.h include/psi/message.h include/psi/runtime.h include/psi/session.h include/psi/vm.h
+	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/tui_mode.o: src/runtime/tui_mode.c include/psi/agent.h include/psi/common.h include/psi/message.h include/psi/runtime.h include/psi/session.h include/psi/vm.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/vm.o: src/scheme/vm.c include/psi/common.h include/psi/vm.h

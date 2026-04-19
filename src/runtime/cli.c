@@ -7,6 +7,7 @@
 struct psi_cli_argtable {
     struct arg_lit *help;
     struct arg_lit *version;
+    struct arg_lit *tui;
     struct arg_str *print;
     struct arg_str *eval;
     struct arg_str *boot;
@@ -17,12 +18,13 @@ struct psi_cli_argtable {
     struct arg_int *compact;
     struct arg_str *session;
     struct arg_end *end;
-    void *table[12];
+    void *table[13];
 };
 
 static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
     args->help = arg_lit0("h", "help", "show help");
     args->version = arg_lit0(NULL, "version", "show version");
+    args->tui = arg_lit0(NULL, "tui", "run the full-screen interactive TUI");
     args->print = arg_str0(NULL, "print", "TEXT", "run the bootstrap print-mode handler");
     args->eval = arg_str0(NULL, "eval", "EXPR", "evaluate a Scheme expression and print the result");
     args->boot = arg_str0(NULL, "boot", "FILE", "override the Scheme bootstrap file");
@@ -36,16 +38,17 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
 
     args->table[0] = args->help;
     args->table[1] = args->version;
-    args->table[2] = args->print;
-    args->table[3] = args->eval;
-    args->table[4] = args->boot;
-    args->table[5] = args->system_prompt;
-    args->table[6] = args->agent;
-    args->table[7] = args->model;
-    args->table[8] = args->max_tokens;
-    args->table[9] = args->compact;
-    args->table[10] = args->session;
-    args->table[11] = args->end;
+    args->table[2] = args->tui;
+    args->table[3] = args->print;
+    args->table[4] = args->eval;
+    args->table[5] = args->boot;
+    args->table[6] = args->system_prompt;
+    args->table[7] = args->agent;
+    args->table[8] = args->model;
+    args->table[9] = args->max_tokens;
+    args->table[10] = args->compact;
+    args->table[11] = args->session;
+    args->table[12] = args->end;
 
     return arg_nullcheck(args->table) == 0 ? PSI_STATUS_OK : PSI_STATUS_ERROR;
 }
@@ -87,6 +90,7 @@ static int psi_cli_count_modes(const struct psi_cli_argtable *args) {
     count += args->system_prompt->count > 0 ? 1 : 0;
     count += args->agent->count > 0 ? 1 : 0;
     count += args->compact->count > 0 ? 1 : 0;
+    count += args->tui->count > 0 ? 1 : 0;
     return count;
 }
 
@@ -149,6 +153,8 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     if (args.print->count > 0) {
         options->mode = PSI_CLI_MODE_PRINT;
         options->payload = args.print->sval[0];
+    } else if (args.tui->count > 0) {
+        options->mode = PSI_CLI_MODE_TUI;
     } else if (args.eval->count > 0) {
         options->mode = PSI_CLI_MODE_EVAL;
         options->payload = args.eval->sval[0];

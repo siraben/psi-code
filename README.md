@@ -27,10 +27,11 @@ This repository currently contains:
 - a default coding-agent system prompt assembled from tools, cwd, date, and local `AGENTS.md` / `CLAUDE.md`
 - a streamed Anthropic-backed `--agent` mode with host tool execution and session logging
 - a default interactive coding-agent shell backed by the same streamed agent loop
+- a full-screen `--tui` mode backed by the same streamed agent loop and Scheme hook renderers
 - manual session compaction through `--compact` and `/compact`
 
-It still does not contain the full `pi` session tree model, TUI, RPC protocol,
-or skills/extensions layer. Those are described in the architecture document and
+It still does not contain the full `pi` session tree model, RPC protocol, or
+skills/extensions layer. Those are described in the architecture document and
 will be built incrementally.
 
 ## Quick start
@@ -47,6 +48,7 @@ nix build
 ./result/bin/psi --system-prompt
 ANTHROPIC_API_KEY=... ./result/bin/psi --agent 'Read README.md and summarize this repository.'
 ANTHROPIC_API_KEY=... ./result/bin/psi --session /tmp/psi-session.jsonl
+ANTHROPIC_API_KEY=... ./result/bin/psi --tui --session /tmp/psi-session.jsonl
 ANTHROPIC_API_KEY=... ./result/bin/psi --session /tmp/psi-session.jsonl --compact 12
 ./result/bin/psi --print 'hello'
 ./result/bin/psi --session /tmp/psi-session.jsonl --print 'hello again'
@@ -64,6 +66,7 @@ make
 ./build/psi --system-prompt
 set -a && . ./.env.local && ./build/psi --agent 'Say exactly: psi streaming test'
 set -a && . ./.env.local && ./build/psi --session .psi/session.jsonl
+set -a && . ./.env.local && ./build/psi --tui --session .psi/session.jsonl
 set -a && . ./.env.local && ./build/psi --session .psi/session.jsonl --compact 12
 ./build/psi --print 'hello'
 ./build/psi --session .psi/session.jsonl --print 'hello again'
@@ -102,8 +105,9 @@ Messages API, streams text to stdout as it arrives, executes built-in host
 tools, and persists user/tool/assistant events in the session log. Starting
 `psi` with no explicit mode now opens the same agent loop in an interactive
 shell with `/help`, `/session`, `/system-prompt`, `/compact`, and `/quit`.
-The default model is `claude-opus-4-7`, overridable via `--model` or
-`PSI_ANTHROPIC_MODEL`.
+`--tui` opens a full-screen ncurses view over the same runtime and uses the
+same Scheme hook renderers for tool execution blocks and diffs. The default
+model is `claude-opus-4-7`, overridable via `--model` or `PSI_ANTHROPIC_MODEL`.
 
 Session files are still flat JSONL, but assistant messages can now persist an
 extra structured payload so replay into Anthropic is less lossy than the
@@ -111,7 +115,8 @@ original plain-text-only form.
 
 Current limitations of `--agent`:
 
-- no TUI or RPC mode yet
+- the TUI is still much smaller than `pi`'s interactive mode
+- no RPC mode yet
 - no streaming resume/retry logic
 - session persistence is still flat JSONL rather than a full branch tree
 - compaction is manual and summary-based, not `pi`'s fuller token-aware system
