@@ -1118,6 +1118,18 @@ static void psi_tui_observer_text_delta(void *userdata, const char *text) {
     psi_tui_redraw(state);
 }
 
+static void psi_tui_finish_streaming_assistant(struct psi_tui_state *state) {
+    if (state == NULL || state->streaming_assistant_index < 0) {
+        return;
+    }
+    if ((size_t)state->streaming_assistant_index < state->entry_count &&
+        state->entries[state->streaming_assistant_index].text != NULL &&
+        state->entries[state->streaming_assistant_index].text[0] == '\0') {
+        psi_tui_remove_entry(state, (size_t)state->streaming_assistant_index);
+    }
+    state->streaming_assistant_index = -1;
+}
+
 static void psi_tui_observer_tool_call(void *userdata, const char *tool_call_id, const char *tool_name, const char *input_json) {
     struct psi_tui_state *state;
     char *summary;
@@ -1126,6 +1138,7 @@ static void psi_tui_observer_tool_call(void *userdata, const char *tool_call_id,
     if (state == NULL || tool_name == NULL) {
         return;
     }
+    psi_tui_finish_streaming_assistant(state);
     summary = psi_tui_render_tool_call_text(state, tool_call_id, tool_name, input_json);
     if (summary != NULL) {
         psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_CALL, tool_name, summary, 0);
@@ -1374,22 +1387,12 @@ static int psi_tui_submit(struct psi_tui_state *state) {
 
     if (status != PSI_STATUS_OK) {
         psi_tui_set_status(state, "agent turn failed", 1);
-        if (state->streaming_assistant_index >= 0 &&
-            (size_t)state->streaming_assistant_index < state->entry_count &&
-            state->entries[state->streaming_assistant_index].text != NULL &&
-            state->entries[state->streaming_assistant_index].text[0] == '\0') {
-            psi_tui_remove_entry(state, (size_t)state->streaming_assistant_index);
-        }
+        psi_tui_finish_streaming_assistant(state);
         psi_tui_add_entry(state, PSI_TUI_ENTRY_ERROR, NULL, "Anthropic request failed", 1);
     } else if (psi_agent_runtime_save(&state->runtime) != PSI_STATUS_OK) {
         psi_tui_set_status(state, "failed to save session file", 1);
     } else {
-        if (state->streaming_assistant_index >= 0 &&
-            (size_t)state->streaming_assistant_index < state->entry_count &&
-            state->entries[state->streaming_assistant_index].text != NULL &&
-            state->entries[state->streaming_assistant_index].text[0] == '\0') {
-            psi_tui_remove_entry(state, (size_t)state->streaming_assistant_index);
-        }
+        psi_tui_finish_streaming_assistant(state);
         psi_tui_set_status(state, "", 0);
     }
 
