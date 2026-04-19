@@ -349,6 +349,45 @@ static int lfn_session_append(lua_State *L) {
     return 1;
 }
 
+static int lfn_json_encode(lua_State *L) {
+    cJSON *value;
+    char *encoded;
+
+    if (lua_gettop(L) < 1 || lua_isnil(L, 1)) {
+        lua_pushstring(L, "null");
+        return 1;
+    }
+    value = psi_vm_lua_value_to_json(L, 1);
+    if (value == NULL) {
+        return luaL_error(L, "failed to encode value as JSON");
+    }
+    encoded = cJSON_PrintUnformatted(value);
+    cJSON_Delete(value);
+    if (encoded == NULL) {
+        return luaL_error(L, "failed to serialize JSON");
+    }
+    lua_pushstring(L, encoded);
+    free(encoded);
+    return 1;
+}
+
+static int lfn_json_decode(lua_State *L) {
+    const char *text = luaL_checkstring(L, 1);
+    cJSON *value;
+
+    if (text[0] == '\0') {
+        lua_pushnil(L);
+        return 1;
+    }
+    value = cJSON_Parse(text);
+    if (value == NULL) {
+        return luaL_error(L, "invalid JSON");
+    }
+    psi_vm_push_json_value(L, value);
+    cJSON_Delete(value);
+    return 1;
+}
+
 static int lfn_is_aborted(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
     lua_pushboolean(L,
@@ -488,6 +527,8 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("session_append",        lfn_session_append);
     PSI_REG("session_clear",         lfn_session_clear);
     PSI_REG("is_aborted",            lfn_is_aborted);
+    PSI_REG("json_encode",           lfn_json_encode);
+    PSI_REG("json_decode",           lfn_json_decode);
     PSI_REG("tool_call",             lfn_tool_call);
 
 #undef PSI_REG

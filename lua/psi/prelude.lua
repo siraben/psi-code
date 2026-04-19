@@ -95,6 +95,8 @@ end
 
 -- Tag a table as a JSON array so it serializes as `[]` even when empty.
 function M.as_array(t)
+  local existing = getmetatable(t)
+  if existing and existing.__jsontype == "array" then return t end
   return setmetatable(t or {}, {__jsontype = "array"})
 end
 
