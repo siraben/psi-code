@@ -53,6 +53,7 @@ int psi_run_print_mode(const struct psi_cli_options *options) {
         psi_session_free(&session);
         return status;
     }
+    psi_vm_bind_session(&vm, &session);
 
     status = psi_vm_call_string_procedure(&vm, "psi-handle-print", options->payload, &reply_text);
     if (status != PSI_STATUS_OK) {
@@ -108,6 +109,7 @@ int psi_run_repl(const struct psi_cli_options *options) {
         psi_session_free(&session);
         return status;
     }
+    psi_vm_bind_session(&vm, &session);
 
     printf("psi repl\n");
     printf("type Scheme expressions, or :quit to exit\n");

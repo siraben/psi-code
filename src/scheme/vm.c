@@ -1,7 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "psi/session.h"
 #include "psi/vm.h"
+
+static struct psi_session *psi_current_session = NULL;
 
 static sexp psi_foreign_version(sexp ctx, sexp self, sexp n) {
     PSI_UNUSED(self);
@@ -21,6 +24,18 @@ static sexp psi_foreign_log(sexp ctx, sexp self, sexp n, sexp message) {
             (int)sexp_string_size(message),
             sexp_string_data(message));
     return SEXP_TRUE;
+}
+
+static sexp psi_foreign_session_message_count(sexp ctx, sexp self, sexp n) {
+    PSI_UNUSED(ctx);
+    PSI_UNUSED(self);
+    PSI_UNUSED(n);
+
+    if (psi_current_session == NULL) {
+        return sexp_make_fixnum(0);
+    }
+
+    return sexp_make_fixnum((sexp_sint_t)psi_current_session->count);
 }
 
 static int psi_vm_extract_string(sexp ctx, sexp value, char **output_text) {
@@ -75,6 +90,7 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
 
     memset(vm, 0, sizeof(*vm));
     vm->boot_file = boot_file;
+    vm->session = NULL;
 
     sexp_scheme_init();
     vm->ctx = sexp_make_eval_context(NULL, NULL, NULL, 0, 0);
@@ -96,6 +112,7 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
 
     sexp_define_foreign(vm->ctx, vm->env, "psi-version", 0, psi_foreign_version);
     sexp_define_foreign(vm->ctx, vm->env, "psi-log", 1, psi_foreign_log);
+    sexp_define_foreign(vm->ctx, vm->env, "psi-session-message-count", 0, psi_foreign_session_message_count);
 
     return psi_vm_load_bootstrap(vm);
 }
@@ -108,6 +125,17 @@ void psi_vm_destroy(struct psi_vm *vm) {
     sexp_destroy_context(vm->ctx);
     vm->ctx = NULL;
     vm->env = NULL;
+    vm->session = NULL;
+    psi_current_session = NULL;
+}
+
+void psi_vm_bind_session(struct psi_vm *vm, struct psi_session *session) {
+    if (vm == NULL) {
+        return;
+    }
+
+    vm->session = session;
+    psi_current_session = session;
 }
 
 int psi_vm_eval_to_string(struct psi_vm *vm, const char *expression, char **output_text) {

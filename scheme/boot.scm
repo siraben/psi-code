@@ -7,6 +7,7 @@
   (string-append
     "psi bootstrap online\n"
     "version: " (psi-version) "\n"
+    "session-messages: " (number->string (psi-session-message-count)) "\n"
     "prompt: " prompt))
 
 (define (psi-handle-eval value)
