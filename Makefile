@@ -15,7 +15,7 @@ LOCAL_CPPFLAGS = -Iinclude -DPSI_LUA_BOOT_FILE=\"$(LUA_BOOT_FILE)\" $(shell $(PK
 LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) --cflags libedit)
 LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) --cflags libcurl)
 LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) --cflags ncursesw 2>/dev/null || $(PKG_CONFIG) --cflags ncurses 2>/dev/null)
-LOCAL_LDFLAGS = $(shell $(PKG_CONFIG) --libs lua5.4 libcjson libedit libcurl) $(shell $(PKG_CONFIG) --libs ncursesw 2>/dev/null || $(PKG_CONFIG) --libs ncurses 2>/dev/null) -largtable3
+LOCAL_LDFLAGS = $(shell $(PKG_CONFIG) --libs lua5.4 libcjson libedit libcurl) $(shell $(PKG_CONFIG) --libs ncursesw 2>/dev/null || $(PKG_CONFIG) --libs ncurses 2>/dev/null) -largtable3 -lpthread
 
 LUA_BOOT_FILE ?= $(abspath lua/boot.lua)
 

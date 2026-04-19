@@ -20,7 +20,7 @@ local function schema_object(properties, required)
   return {
     type = "object",
     properties = properties,
-    required = required,
+    required = prelude.as_array(required),
   }
 end
 

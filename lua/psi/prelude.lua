@@ -93,6 +93,11 @@ end
 
 -- ---------- paths ----------
 
+-- Tag a table as a JSON array so it serializes as `[]` even when empty.
+function M.as_array(t)
+  return setmetatable(t or {}, {__jsontype = "array"})
+end
+
 function M.path_join(base, name)
   if base == "/" then return "/" .. name end
   if base == "." then return name end
