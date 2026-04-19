@@ -58,7 +58,6 @@ struct psi_tui_state {
 
 struct psi_tui_stdio_guard {
     int active;
-    int stdout_saved;
     int stderr_saved;
     int null_fd;
 };
@@ -80,7 +79,6 @@ static int psi_tui_stdio_guard_begin(struct psi_tui_stdio_guard *guard) {
     }
 
     guard->active = 0;
-    guard->stdout_saved = -1;
     guard->stderr_saved = -1;
     guard->null_fd = -1;
 
@@ -89,12 +87,8 @@ static int psi_tui_stdio_guard_begin(struct psi_tui_stdio_guard *guard) {
         return PSI_STATUS_ERROR;
     }
 
-    guard->stdout_saved = dup(STDOUT_FILENO);
     guard->stderr_saved = dup(STDERR_FILENO);
-    if (guard->stdout_saved < 0 || guard->stderr_saved < 0) {
-        if (guard->stdout_saved >= 0) {
-            close(guard->stdout_saved);
-        }
+    if (guard->stderr_saved < 0) {
         if (guard->stderr_saved >= 0) {
             close(guard->stderr_saved);
         }
@@ -102,8 +96,7 @@ static int psi_tui_stdio_guard_begin(struct psi_tui_stdio_guard *guard) {
         return PSI_STATUS_ERROR;
     }
 
-    if (dup2(guard->null_fd, STDOUT_FILENO) < 0 || dup2(guard->null_fd, STDERR_FILENO) < 0) {
-        close(guard->stdout_saved);
+    if (dup2(guard->null_fd, STDERR_FILENO) < 0) {
         close(guard->stderr_saved);
         close(guard->null_fd);
         return PSI_STATUS_ERROR;
@@ -118,13 +111,10 @@ static void psi_tui_stdio_guard_end(struct psi_tui_stdio_guard *guard) {
         return;
     }
 
-    dup2(guard->stdout_saved, STDOUT_FILENO);
     dup2(guard->stderr_saved, STDERR_FILENO);
-    close(guard->stdout_saved);
     close(guard->stderr_saved);
     close(guard->null_fd);
     guard->active = 0;
-    guard->stdout_saved = -1;
     guard->stderr_saved = -1;
     guard->null_fd = -1;
 }

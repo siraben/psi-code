@@ -1244,7 +1244,7 @@ int psi_anthropic_agent_turn_with_prompt(
                 cJSON_Delete(messages);
                 return PSI_STATUS_ERROR;
             }
-            if (stream_state.wrote_text) {
+            if (stream_state.wrote_text && observer == NULL) {
                 fputc('\n', stdout);
             }
             *output_text = assistant_text;
