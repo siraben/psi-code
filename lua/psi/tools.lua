@@ -307,5 +307,9 @@ M.dispatch_alist = registry.dispatch_alist
 M.select_specs = registry.select_specs
 M.all = registry.all
 M.find = registry.find
+M.register = registry.register
+M.add_before_hook = registry.add_before_hook
+M.add_after_hook = registry.add_after_hook
+M.clear_hooks = registry.clear_hooks
 
 return M

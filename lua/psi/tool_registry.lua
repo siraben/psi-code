@@ -13,6 +13,8 @@ local records = require("psi.records")
 local M = {}
 
 local registry = {}
+local before_hooks = {}
+local after_hooks = {}
 
 function M.register(tool)
   for i, existing in ipairs(registry) do
@@ -41,12 +43,43 @@ function M.select_specs(user_text)
   return out
 end
 
+-- Hook registration:
+--   before(name, input) may return nil (proceed), a ToolResult record
+--     (replace the dispatch — tool impl is NOT called), or raise.
+--     Common uses: permission gating, dry-run interception, logging.
+--   after(name, input, result) may return a replacement ToolResult or
+--     nil (keep result). Common uses: redaction, output transformation.
+function M.add_before_hook(fn) before_hooks[#before_hooks + 1] = fn end
+function M.add_after_hook(fn)  after_hooks[#after_hooks + 1]  = fn  end
+function M.clear_hooks()
+  before_hooks = {}
+  after_hooks = {}
+end
+
 function M.dispatch(name, input)
-  local tool = M.find(name)
-  if not tool then
-    return records.tool_failure(name, "unknown tool")
+  input = input or {}
+  for _, hook in ipairs(before_hooks) do
+    local intercept = hook(name, input)
+    if intercept ~= nil then
+      return intercept
+    end
   end
-  return tool.impl(input or {})
+
+  local tool = M.find(name)
+  local result
+  if not tool then
+    result = records.tool_failure(name, "unknown tool")
+  else
+    result = tool.impl(input)
+  end
+
+  for _, hook in ipairs(after_hooks) do
+    local replaced = hook(name, input, result)
+    if replaced ~= nil then
+      result = replaced
+    end
+  end
+  return result
 end
 
 function M.dispatch_alist(name, input)
