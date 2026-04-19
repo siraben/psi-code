@@ -34,6 +34,7 @@ nix build
 ./result/bin/psi --help
 ./result/bin/psi --eval '(+ 1 2 3)'
 ./result/bin/psi --print 'hello'
+./result/bin/psi --session /tmp/psi-session.jsonl --print 'hello again'
 ```
 
 For local development:
@@ -43,7 +44,11 @@ nix develop
 make
 ./build/psi --eval '(+ 1 2 3)'
 ./build/psi --print 'hello'
+./build/psi --session .psi/session.jsonl --print 'hello again'
 ```
+
+Session files are explicit for now. When `--session FILE` is set, `psi` loads
+the JSONL file if it exists and rewrites it after each run.
 
 ## Layout
 
@@ -52,4 +57,3 @@ make
 - `src/`: host runtime implementation
 - `scheme/`: Scheme bootstrap and future host libraries
 - `tests/`: smoke tests
-

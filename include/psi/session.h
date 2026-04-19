@@ -7,11 +7,15 @@ struct psi_session {
     struct psi_message *messages;
     size_t count;
     size_t capacity;
+    char *id;
+    char *path;
 };
 
 void psi_session_init(struct psi_session *session);
 void psi_session_free(struct psi_session *session);
 int psi_session_append(struct psi_session *session, enum psi_message_role role, const char *text);
+int psi_session_load(struct psi_session *session, const char *path);
+int psi_session_save(struct psi_session *session);
+int psi_session_set_path(struct psi_session *session, const char *path);
 
 #endif
-

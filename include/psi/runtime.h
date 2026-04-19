@@ -15,6 +15,7 @@ struct psi_cli_options {
     enum psi_cli_mode mode;
     const char *payload;
     const char *boot_file;
+    const char *session_file;
 };
 
 int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv);
@@ -23,4 +24,3 @@ int psi_run_print_mode(const struct psi_cli_options *options);
 int psi_run_repl(const struct psi_cli_options *options);
 
 #endif
-

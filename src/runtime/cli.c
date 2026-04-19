@@ -20,6 +20,7 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     options->mode = PSI_CLI_MODE_REPL;
     options->payload = NULL;
     options->boot_file = PSI_SCHEME_BOOT_FILE;
+    options->session_file = NULL;
 
     for (index = 1; index < argc; index++) {
         if (strcmp(argv[index], "--help") == 0 || strcmp(argv[index], "-h") == 0) {
@@ -56,6 +57,14 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
             index++;
             continue;
         }
+        if (strcmp(argv[index], "--session") == 0) {
+            if (psi_cli_needs_value("--session", index, argc) != PSI_STATUS_OK) {
+                return PSI_STATUS_ERROR;
+            }
+            options->session_file = argv[index + 1];
+            index++;
+            continue;
+        }
 
         fprintf(stderr, "unknown argument: %s\n", argv[index]);
         return PSI_STATUS_ERROR;
@@ -70,5 +79,5 @@ void psi_cli_usage(const char *program_name) {
     printf("  --eval EXPR   evaluate a Scheme expression and print the result\n");
     printf("  --print TEXT  run the bootstrap print-mode handler\n");
     printf("  --boot FILE   override the Scheme bootstrap file\n");
+    printf("  --session FILE  load and save a JSONL session file\n");
 }
-
