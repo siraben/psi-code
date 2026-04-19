@@ -86,6 +86,9 @@ int psi_agent_runtime_turn_with_observer(
         return status;
     }
 
+    if (observer != NULL && observer->on_turn_start != NULL) {
+        observer->on_turn_start(observer->userdata);
+    }
     runtime->vm.host.abort_signal = abort_signal;
     status = psi_anthropic_agent_turn_with_prompt(
         &runtime->session,
@@ -100,6 +103,9 @@ int psi_agent_runtime_turn_with_observer(
         response_text
     );
     runtime->vm.host.abort_signal = NULL;
+    if (observer != NULL && observer->on_turn_end != NULL) {
+        observer->on_turn_end(observer->userdata);
+    }
     free(system_prompt);
     return status;
 }

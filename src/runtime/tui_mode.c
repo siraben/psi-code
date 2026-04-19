@@ -22,7 +22,8 @@ enum psi_tui_entry_kind {
     PSI_TUI_ENTRY_TOOL_RESULT = 3,
     PSI_TUI_ENTRY_INFO = 4,
     PSI_TUI_ENTRY_ERROR = 5,
-    PSI_TUI_ENTRY_COMPACTION = 6
+    PSI_TUI_ENTRY_COMPACTION = 6,
+    PSI_TUI_ENTRY_THINKING = 7
 };
 
 struct psi_tui_entry {
@@ -43,8 +44,9 @@ enum psi_tui_event_kind {
     PSI_TUI_EVENT_TOOL_CALL = 1,
     PSI_TUI_EVENT_TOOL_RESULT = 2,
     PSI_TUI_EVENT_TOOL_PROGRESS = 3,
-    PSI_TUI_EVENT_TURN_DONE = 4,
-    PSI_TUI_EVENT_COMPACT_DONE = 5
+    PSI_TUI_EVENT_THINKING_DELTA = 4,
+    PSI_TUI_EVENT_TURN_DONE = 5,
+    PSI_TUI_EVENT_COMPACT_DONE = 6
 };
 
 struct psi_tui_event {
@@ -98,6 +100,7 @@ struct psi_tui_state {
     /* Index of the live tool-output entry receiving streaming progress
      * chunks, or -1 when no tool is currently streaming. Main thread only. */
     int streaming_tool_index;
+    int streaming_thinking_index;
     /* Cancellation token shared with the worker. Main thread triggers it
      * when the user presses Esc; the worker polls it inside curl transfer
      * hooks and psi_process_run_shell. */
@@ -130,6 +133,8 @@ static void psi_tui_insert_char(struct psi_tui_state *state, int ch);
 static void psi_tui_delete_backward(struct psi_tui_state *state);
 static void psi_tui_delete_forward(struct psi_tui_state *state);
 static void psi_tui_delete_word_backward(struct psi_tui_state *state);
+static void psi_tui_kill_to_end(struct psi_tui_state *state);
+static void psi_tui_kill_to_start(struct psi_tui_state *state);
 static void psi_tui_free_event(struct psi_tui_event *event);
 static int psi_tui_start_compact(struct psi_tui_state *state, long keep_recent);
 
@@ -973,6 +978,12 @@ static int psi_tui_entry_style(
             *color_pair = 7;
             *attrs = A_BOLD;
             return PSI_STATUS_OK;
+        case PSI_TUI_ENTRY_THINKING:
+            *prefix_first = "";
+            *prefix_rest = "";
+            *color_pair = 7;
+            *attrs = A_DIM;
+            return PSI_STATUS_OK;
         case PSI_TUI_ENTRY_INFO:
         default:
             *prefix_first = "[info] ";
@@ -1348,6 +1359,26 @@ static void psi_tui_observer_tool_call(void *userdata, const char *tool_call_id,
     psi_tui_push_event(state, event);
 }
 
+static void psi_tui_observer_thinking_delta(void *userdata, const char *text) {
+    struct psi_tui_state *state;
+    struct psi_tui_event *event;
+
+    state = (struct psi_tui_state *)userdata;
+    if (state == NULL || text == NULL || text[0] == '\0') {
+        return;
+    }
+    event = psi_tui_event_new(PSI_TUI_EVENT_THINKING_DELTA);
+    if (event == NULL) {
+        return;
+    }
+    event->text = psi_strdup(text);
+    if (event->text == NULL) {
+        free(event);
+        return;
+    }
+    psi_tui_push_event(state, event);
+}
+
 static void psi_tui_observer_tool_progress(void *userdata, const char *tool_call_id, const char *chunk, size_t len) {
     struct psi_tui_state *state;
     struct psi_tui_event *event;
@@ -1569,6 +1600,10 @@ static void *psi_tui_run_turn(struct psi_tui_state *state) {
     observer.on_tool_call = psi_tui_observer_tool_call;
     observer.on_tool_result = psi_tui_observer_tool_result;
     observer.on_tool_progress = psi_tui_observer_tool_progress;
+    observer.on_thinking_delta = psi_tui_observer_thinking_delta;
+    observer.on_tool_call_delta = NULL;
+    observer.on_turn_start = NULL;
+    observer.on_turn_end = NULL;
 
     response_text = NULL;
     save_failed = 0;
@@ -1725,6 +1760,7 @@ static void psi_tui_drain_events(struct psi_tui_state *state) {
     while ((event = psi_tui_pop_event(state)) != NULL) {
         switch (event->kind) {
             case PSI_TUI_EVENT_TEXT_DELTA:
+                state->streaming_thinking_index = -1;
                 if (state->streaming_assistant_index < 0) {
                     state->streaming_assistant_index =
                         psi_tui_add_entry(state, PSI_TUI_ENTRY_ASSISTANT, NULL, "", 0);
@@ -1732,8 +1768,17 @@ static void psi_tui_drain_events(struct psi_tui_state *state) {
                 psi_tui_append_entry_text(state, state->streaming_assistant_index,
                                           event->text != NULL ? event->text : "");
                 break;
+            case PSI_TUI_EVENT_THINKING_DELTA:
+                if (state->streaming_thinking_index < 0) {
+                    state->streaming_thinking_index =
+                        psi_tui_add_entry(state, PSI_TUI_ENTRY_THINKING, NULL, "", 0);
+                }
+                psi_tui_append_entry_text(state, state->streaming_thinking_index,
+                                          event->text != NULL ? event->text : "");
+                break;
             case PSI_TUI_EVENT_TOOL_CALL:
                 psi_tui_finish_streaming_assistant(state);
+                state->streaming_thinking_index = -1;
                 state->streaming_tool_index = -1;
                 psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_CALL,
                                   event->tool_name, event->text, 0);
@@ -1781,6 +1826,8 @@ static void psi_tui_drain_events(struct psi_tui_state *state) {
                     psi_tui_set_status(state, "", 0);
                 }
                 state->streaming_assistant_index = -1;
+                state->streaming_thinking_index = -1;
+                state->streaming_tool_index = -1;
                 state->worker_task = PSI_TUI_TASK_NONE;
                 state->busy = 0;
                 free(state->turn_line);
@@ -1875,6 +1922,22 @@ static void psi_tui_delete_word_backward(struct psi_tui_state *state) {
     state->cursor = start;
 }
 
+/* Readline Ctrl-K: kill from cursor to end of line. */
+static void psi_tui_kill_to_end(struct psi_tui_state *state) {
+    if (state == NULL || state->input == NULL) return;
+    state->input[state->cursor] = '\0';
+    state->input_length = state->cursor;
+}
+
+/* Readline Ctrl-U: kill from start to cursor. */
+static void psi_tui_kill_to_start(struct psi_tui_state *state) {
+    if (state == NULL || state->input == NULL || state->cursor == 0u) return;
+    memmove(state->input, state->input + state->cursor,
+            state->input_length - state->cursor + 1u);
+    state->input_length -= state->cursor;
+    state->cursor = 0u;
+}
+
 static int psi_tui_init_colors(void) {
     if (!has_colors()) {
         return PSI_STATUS_ERROR;
@@ -1914,6 +1977,7 @@ static void psi_tui_state_init(struct psi_tui_state *state, const struct psi_cli
     state->options = options;
     state->streaming_assistant_index = -1;
     state->streaming_tool_index = -1;
+    state->streaming_thinking_index = -1;
     state->running = 1;
     psi_abort_signal_init(&state->abort_signal);
     pthread_mutex_init(&state->event_lock, NULL);
@@ -2038,6 +2102,12 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
         /* Input editing: allowed even while busy so the user can compose
          * their next message. Enter and Ctrl-D-exit are disabled during a
          * turn so submits stay serialized. */
+        /* Readline-style control keys. Codes are the legacy ASCII
+         * control positions:
+         *   ^A=1 home   ^B=2 left     ^D=4 delete-forward / EOF-exit
+         *   ^E=5 end    ^F=6 right    ^H=8 backspace
+         *   ^K=11 kill-to-end         ^L=12 redraw
+         *   ^U=21 kill-to-start       ^W=23 delete-word-backward */
         if (ch == 4 && state.input_length == 0u) {
             if (!state.busy) {
                 state.running = 0;
@@ -2045,24 +2115,21 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
             continue;
         } else if (ch == 4) {
             psi_tui_delete_forward(&state);
-        } else if (ch == 3) {
-            state.input[0] = '\0';
-            state.input_length = 0u;
-            state.cursor = 0u;
-            psi_tui_set_status(&state, "editor cleared", 0);
+        } else if (ch == 11) {
+            psi_tui_kill_to_end(&state);
+        } else if (ch == 12) {
+            clearok(stdscr, TRUE);
         } else if (ch == 21) {
-            state.input[0] = '\0';
-            state.input_length = 0u;
-            state.cursor = 0u;
+            psi_tui_kill_to_start(&state);
         } else if (ch == 23) {
             psi_tui_delete_word_backward(&state);
         } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
             psi_tui_delete_backward(&state);
-        } else if (ch == KEY_LEFT) {
+        } else if (ch == KEY_LEFT || ch == 2) {
             if (state.cursor > 0u) {
                 state.cursor--;
             }
-        } else if (ch == KEY_RIGHT) {
+        } else if (ch == KEY_RIGHT || ch == 6) {
             if (state.cursor < state.input_length) {
                 state.cursor++;
             }

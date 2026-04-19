@@ -305,6 +305,20 @@ static int psi_stream_dispatch_event(struct psi_stream_state *state) {
                         block->input_json = next_text;
                         strcat(block->input_json, partial_json->valuestring);
                     }
+                    if (state->observer != NULL && state->observer->on_tool_call_delta != NULL) {
+                        state->observer->on_tool_call_delta(
+                            state->observer->userdata,
+                            block->id, partial_json->valuestring);
+                    }
+                }
+            } else if (cJSON_IsString(type) && type->valuestring != NULL &&
+                       strcmp(type->valuestring, "thinking_delta") == 0) {
+                const cJSON *thinking = cJSON_GetObjectItemCaseSensitive(delta, "thinking");
+                if (cJSON_IsString(thinking) && thinking->valuestring != NULL) {
+                    if (state->observer != NULL && state->observer->on_thinking_delta != NULL) {
+                        state->observer->on_thinking_delta(
+                            state->observer->userdata, thinking->valuestring);
+                    }
                 }
             }
         }
@@ -1176,6 +1190,7 @@ int psi_anthropic_agent_turn_with_prompt(
     if (system_prompt == NULL) {
         return PSI_STATUS_ERROR;
     }
+
     if (psi_vm_active_tool_specs_json(vm, user_text, &tools_json) != PSI_STATUS_OK) {
         return PSI_STATUS_ERROR;
     }
