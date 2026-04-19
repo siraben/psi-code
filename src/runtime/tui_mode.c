@@ -41,7 +41,8 @@ enum psi_tui_event_kind {
     PSI_TUI_EVENT_TEXT_DELTA = 0,
     PSI_TUI_EVENT_TOOL_CALL = 1,
     PSI_TUI_EVENT_TOOL_RESULT = 2,
-    PSI_TUI_EVENT_TURN_DONE = 3
+    PSI_TUI_EVENT_TURN_DONE = 3,
+    PSI_TUI_EVENT_COMPACT_DONE = 4
 };
 
 struct psi_tui_event {
@@ -49,9 +50,17 @@ struct psi_tui_event {
     char *text;         /* pre-rendered display text (delta / tool summary) */
     char *tool_name;    /* tool call / tool result */
     int is_error;       /* tool result */
-    int turn_status;    /* turn done */
+    int worker_status;  /* turn/compact done status */
     char *turn_response;/* turn done: response text (owned) */
+    char *compact_summary; /* compact done: summary text (owned) */
+    int save_failed;    /* turn/compact done: session save status */
     struct psi_tui_event *next;
+};
+
+enum psi_tui_task_kind {
+    PSI_TUI_TASK_NONE = 0,
+    PSI_TUI_TASK_TURN = 1,
+    PSI_TUI_TASK_COMPACT = 2
 };
 
 struct psi_tui_state {
@@ -73,15 +82,17 @@ struct psi_tui_state {
     int width;
     int height;
 
-    /* Background-turn plumbing. Observer callbacks run on turn_thread and
-     * push pre-rendered events onto the queue under event_lock. The main
-     * loop drains the queue between getch() ticks. */
-    pthread_t turn_thread;
-    int turn_thread_valid;
+    /* Background-worker plumbing. Observer callbacks run on worker_thread
+     * and push pre-rendered events onto the queue under event_lock. The
+     * main loop drains the queue between getch() ticks. */
+    pthread_t worker_thread;
+    int worker_thread_valid;
+    enum psi_tui_task_kind worker_task;
     pthread_mutex_t event_lock;
     struct psi_tui_event *event_head;
     struct psi_tui_event *event_tail;
     char *turn_line;
+    long compact_keep_recent;
 };
 
 struct psi_tui_stdio_guard {
@@ -111,6 +122,7 @@ static void psi_tui_delete_backward(struct psi_tui_state *state);
 static void psi_tui_delete_forward(struct psi_tui_state *state);
 static void psi_tui_delete_word_backward(struct psi_tui_state *state);
 static void psi_tui_free_event(struct psi_tui_event *event);
+static int psi_tui_start_compact(struct psi_tui_state *state, long keep_recent);
 
 static int psi_tui_transcript_height(const struct psi_tui_state *state) {
     int height;
@@ -1469,14 +1481,11 @@ static void psi_tui_rebuild_from_session(struct psi_tui_state *state) {
 static int psi_tui_handle_command(struct psi_tui_state *state, const char *line) {
     char *action_name;
     char *action_text;
-    char *summary_text;
     long keep_recent;
     int status;
-    struct psi_tui_stdio_guard stdio_guard;
 
     action_name = NULL;
     action_text = NULL;
-    summary_text = NULL;
     keep_recent = 0l;
 
     if (strcmp(line, "/quit") == 0 || strcmp(line, "/q") == 0 ||
@@ -1497,71 +1506,103 @@ static int psi_tui_handle_command(struct psi_tui_state *state, const char *line)
         psi_tui_add_entry(state, PSI_TUI_ENTRY_INFO, NULL, action_text != NULL ? action_text : "", 0);
         psi_tui_set_status(state, "", 0);
     } else if (action_name != NULL && strcmp(action_name, "compact") == 0) {
-        stdio_guard.active = 0;
-        if (psi_tui_stdio_guard_begin(&stdio_guard) != PSI_STATUS_OK) {
-            psi_tui_set_status(state, "failed to isolate terminal output", 1);
-            free(action_name);
-            free(action_text);
-            free(summary_text);
-            return PSI_STATUS_ERROR;
-        }
-        status = psi_agent_runtime_compact(&state->runtime, (size_t)keep_recent, &summary_text);
-        psi_tui_stdio_guard_end(&stdio_guard);
-        if (status != PSI_STATUS_OK) {
-            psi_tui_set_status(state, "failed to compact session", 1);
-        } else if (psi_agent_runtime_save(&state->runtime) != PSI_STATUS_OK) {
-            psi_tui_set_status(state, "failed to save compacted session", 1);
-        } else {
-            PSI_UNUSED(summary_text);
-            psi_tui_rebuild_from_session(state);
-            psi_tui_set_status(state, "session compacted", 0);
-        }
+        status = psi_tui_start_compact(state, keep_recent);
     } else {
         psi_tui_set_status(state, "unknown command", 1);
     }
 
     free(action_name);
     free(action_text);
-    free(summary_text);
     return status;
 }
 
-/* Worker thread: runs the agent turn. Observer callbacks push events to
- * the queue. When the turn completes, push a TURN_DONE event carrying
- * the final status + response text. Main thread drains events, joins
- * the thread, and clears busy state. */
-static void *psi_tui_turn_worker(void *arg) {
-    struct psi_tui_state *state;
+/* Worker thread: runs whichever task was queued (turn or compact).
+ * Observer callbacks push events during a turn. After the operation
+ * completes (and the session is saved), push a TURN_DONE or
+ * COMPACT_DONE event. Main thread drains events, joins the worker,
+ * and clears busy state. */
+static void *psi_tui_run_turn(struct psi_tui_state *state) {
     struct psi_agent_observer observer;
     struct psi_tui_stdio_guard stdio_guard;
     char *response_text;
     int status;
+    int save_failed;
     struct psi_tui_event *done_event;
 
-    state = (struct psi_tui_state *)arg;
     observer.userdata = state;
     observer.on_assistant_text_delta = psi_tui_observer_text_delta;
     observer.on_tool_call = psi_tui_observer_tool_call;
     observer.on_tool_result = psi_tui_observer_tool_result;
 
     response_text = NULL;
+    save_failed = 0;
     stdio_guard.active = 0;
     status = psi_tui_stdio_guard_begin(&stdio_guard);
     if (status == PSI_STATUS_OK) {
         status = psi_agent_runtime_turn_with_observer(
             &state->runtime, state->turn_line, &observer, &response_text);
+        if (status == PSI_STATUS_OK) {
+            if (psi_agent_runtime_save(&state->runtime) != PSI_STATUS_OK) {
+                save_failed = 1;
+            }
+        }
         psi_tui_stdio_guard_end(&stdio_guard);
     }
 
     done_event = psi_tui_event_new(PSI_TUI_EVENT_TURN_DONE);
     if (done_event != NULL) {
-        done_event->turn_status = status;
+        done_event->worker_status = status;
+        done_event->save_failed = save_failed;
         done_event->turn_response = response_text;
         psi_tui_push_event(state, done_event);
     } else {
         free(response_text);
     }
     return NULL;
+}
+
+static void *psi_tui_run_compact(struct psi_tui_state *state) {
+    struct psi_tui_stdio_guard stdio_guard;
+    char *summary;
+    int status;
+    int save_failed;
+    struct psi_tui_event *done_event;
+
+    summary = NULL;
+    save_failed = 0;
+    stdio_guard.active = 0;
+    status = psi_tui_stdio_guard_begin(&stdio_guard);
+    if (status == PSI_STATUS_OK) {
+        status = psi_agent_runtime_compact(
+            &state->runtime, (size_t)state->compact_keep_recent, &summary);
+        if (status == PSI_STATUS_OK) {
+            if (psi_agent_runtime_save(&state->runtime) != PSI_STATUS_OK) {
+                save_failed = 1;
+            }
+        }
+        psi_tui_stdio_guard_end(&stdio_guard);
+    }
+
+    done_event = psi_tui_event_new(PSI_TUI_EVENT_COMPACT_DONE);
+    if (done_event != NULL) {
+        done_event->worker_status = status;
+        done_event->save_failed = save_failed;
+        done_event->compact_summary = summary;
+        psi_tui_push_event(state, done_event);
+    } else {
+        free(summary);
+    }
+    return NULL;
+}
+
+static void *psi_tui_worker_main(void *arg) {
+    struct psi_tui_state *state = (struct psi_tui_state *)arg;
+    switch (state->worker_task) {
+        case PSI_TUI_TASK_TURN:    return psi_tui_run_turn(state);
+        case PSI_TUI_TASK_COMPACT: return psi_tui_run_compact(state);
+        case PSI_TUI_TASK_NONE:
+        default:                   return NULL;
+    }
 }
 
 static int psi_tui_submit(struct psi_tui_state *state) {
@@ -1595,8 +1636,10 @@ static int psi_tui_submit(struct psi_tui_state *state) {
 
     free(state->turn_line);
     state->turn_line = line;
-    if (pthread_create(&state->turn_thread, NULL, psi_tui_turn_worker, state) != 0) {
+    state->worker_task = PSI_TUI_TASK_TURN;
+    if (pthread_create(&state->worker_thread, NULL, psi_tui_worker_main, state) != 0) {
         state->busy = 0;
+        state->worker_task = PSI_TUI_TASK_NONE;
         state->streaming_assistant_index = -1;
         psi_tui_set_status(state, "failed to spawn worker", 1);
         free(state->turn_line);
@@ -1604,7 +1647,27 @@ static int psi_tui_submit(struct psi_tui_state *state) {
         psi_tui_redraw(state);
         return PSI_STATUS_ERROR;
     }
-    state->turn_thread_valid = 1;
+    state->worker_thread_valid = 1;
+    return PSI_STATUS_OK;
+}
+
+static int psi_tui_start_compact(struct psi_tui_state *state, long keep_recent) {
+    if (state == NULL || state->busy) {
+        return PSI_STATUS_OK;
+    }
+    state->busy = 1;
+    state->compact_keep_recent = keep_recent;
+    state->worker_task = PSI_TUI_TASK_COMPACT;
+    psi_tui_set_status(state, "Compacting...", 0);
+    psi_tui_redraw(state);
+    if (pthread_create(&state->worker_thread, NULL, psi_tui_worker_main, state) != 0) {
+        state->busy = 0;
+        state->worker_task = PSI_TUI_TASK_NONE;
+        psi_tui_set_status(state, "failed to spawn worker", 1);
+        psi_tui_redraw(state);
+        return PSI_STATUS_ERROR;
+    }
+    state->worker_thread_valid = 1;
     return PSI_STATUS_OK;
 }
 
@@ -1639,24 +1702,44 @@ static void psi_tui_drain_events(struct psi_tui_state *state) {
                                   event->tool_name, event->text, event->is_error);
                 break;
             case PSI_TUI_EVENT_TURN_DONE:
-                if (state->turn_thread_valid) {
-                    pthread_join(state->turn_thread, NULL);
-                    state->turn_thread_valid = 0;
+                if (state->worker_thread_valid) {
+                    pthread_join(state->worker_thread, NULL);
+                    state->worker_thread_valid = 0;
                 }
-                if (event->turn_status != PSI_STATUS_OK) {
+                if (event->worker_status != PSI_STATUS_OK) {
                     psi_tui_set_status(state, "agent turn failed", 1);
                     psi_tui_finish_streaming_assistant(state);
                     psi_tui_add_entry(state, PSI_TUI_ENTRY_ERROR, NULL, "Anthropic request failed", 1);
-                } else if (psi_agent_runtime_save(&state->runtime) != PSI_STATUS_OK) {
+                } else if (event->save_failed) {
+                    psi_tui_finish_streaming_assistant(state);
                     psi_tui_set_status(state, "failed to save session file", 1);
                 } else {
                     psi_tui_finish_streaming_assistant(state);
                     psi_tui_set_status(state, "", 0);
                 }
                 state->streaming_assistant_index = -1;
+                state->worker_task = PSI_TUI_TASK_NONE;
                 state->busy = 0;
                 free(state->turn_line);
                 state->turn_line = NULL;
+                break;
+            case PSI_TUI_EVENT_COMPACT_DONE:
+                if (state->worker_thread_valid) {
+                    pthread_join(state->worker_thread, NULL);
+                    state->worker_thread_valid = 0;
+                }
+                if (event->worker_status != PSI_STATUS_OK) {
+                    psi_tui_set_status(state, "failed to compact session", 1);
+                } else {
+                    psi_tui_rebuild_from_session(state);
+                    if (event->save_failed) {
+                        psi_tui_set_status(state, "failed to save compacted session", 1);
+                    } else {
+                        psi_tui_set_status(state, "session compacted", 0);
+                    }
+                }
+                state->worker_task = PSI_TUI_TASK_NONE;
+                state->busy = 0;
                 break;
         }
         psi_tui_free_event(event);
@@ -1741,7 +1824,7 @@ static int psi_tui_init_colors(void) {
     init_pair(4, COLOR_YELLOW, -1);
     init_pair(5, COLOR_GREEN, -1);
     init_pair(6, COLOR_RED, -1);
-    init_pair(7, COLOR_BLACK, -1);
+    init_pair(7, -1, -1); /* info: default foreground for portability across light/dark terminals */
     return PSI_STATUS_OK;
 }
 
@@ -1952,9 +2035,9 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
 
     /* If a turn is still in flight at shutdown, wait for it to finish so
      * the worker doesn't touch freed state. */
-    if (state.turn_thread_valid) {
-        pthread_join(state.turn_thread, NULL);
-        state.turn_thread_valid = 0;
+    if (state.worker_thread_valid) {
+        pthread_join(state.worker_thread, NULL);
+        state.worker_thread_valid = 0;
     }
 
     endwin();
