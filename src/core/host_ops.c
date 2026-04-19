@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "psi/host_ops.h"
-#include "psi/prompt.h"
 #include "psi/session.h"
 #include "psi/tool.h"
 
@@ -78,8 +77,6 @@ int psi_host_call(struct psi_host_context *context, struct psi_host_call *call) 
             return psi_host_read_file(call);
         case PSI_HOST_OP_TOOL_CALL:
             return psi_tool_call_json(call->name, call->input_text, &call->output_text);
-        case PSI_HOST_OP_SYSTEM_PROMPT:
-            return psi_build_system_prompt(&call->output_text);
         default:
             return PSI_STATUS_ERROR;
     }

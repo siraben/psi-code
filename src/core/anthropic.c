@@ -5,7 +5,6 @@
 #include <cjson/cJSON.h>
 #include "psi/anthropic.h"
 #include "psi/common.h"
-#include "psi/prompt.h"
 #include "psi/tool.h"
 
 struct psi_http_buffer {
@@ -538,6 +537,24 @@ static int psi_anthropic_response_has_tool_use(const cJSON *content) {
     return 0;
 }
 
+static int psi_anthropic_content_has_block_type(const cJSON *content, const char *block_type) {
+    const cJSON *block;
+    const cJSON *type;
+
+    if (!cJSON_IsArray(content) || block_type == NULL) {
+        return 0;
+    }
+
+    cJSON_ArrayForEach(block, content) {
+        type = cJSON_GetObjectItemCaseSensitive(block, "type");
+        if (cJSON_IsString(type) && type->valuestring != NULL && strcmp(type->valuestring, block_type) == 0) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static int psi_anthropic_tool_result_is_error(const char *tool_output) {
     cJSON *root;
     cJSON *ok;
@@ -632,6 +649,8 @@ static int psi_anthropic_session_to_messages(const struct psi_session *session, 
     index = 0u;
     while (index < session->count) {
         if (session->messages[index].role == PSI_MESSAGE_USER || session->messages[index].role == PSI_MESSAGE_ASSISTANT) {
+            int skip_tool_calls;
+
             message = cJSON_CreateObject();
             if (session->messages[index].data_json != NULL) {
                 content = cJSON_Parse(session->messages[index].data_json);
@@ -649,9 +668,16 @@ static int psi_anthropic_session_to_messages(const struct psi_session *session, 
                 "role",
                 session->messages[index].role == PSI_MESSAGE_USER ? "user" : "assistant"
             );
+            skip_tool_calls = session->messages[index].role == PSI_MESSAGE_ASSISTANT &&
+                psi_anthropic_content_has_block_type(content, "tool_use");
             cJSON_AddItemToObject(message, "content", content);
             cJSON_AddItemToArray(messages, message);
             index++;
+            if (skip_tool_calls) {
+                while (index < session->count && session->messages[index].role == PSI_MESSAGE_TOOL_CALL) {
+                    index++;
+                }
+            }
             continue;
         }
 
@@ -1056,10 +1082,11 @@ int psi_anthropic_complete_text(
     return status;
 }
 
-int psi_anthropic_agent_turn(
+int psi_anthropic_agent_turn_with_prompt(
     struct psi_session *session,
     const char *model,
     long max_tokens,
+    const char *system_prompt,
     char **output_text
 ) {
     const char *api_key;
@@ -1076,7 +1103,6 @@ int psi_anthropic_agent_turn(
     cJSON *type;
     cJSON *input;
     cJSON *tool_result_block;
-    char *system_prompt;
     char *tools_json;
     char *request_json;
     char *assistant_text;
@@ -1094,7 +1120,6 @@ int psi_anthropic_agent_turn(
     }
 
     *output_text = NULL;
-    system_prompt = NULL;
     tools_json = NULL;
     request_json = NULL;
     assistant_text = NULL;
@@ -1110,21 +1135,18 @@ int psi_anthropic_agent_turn(
         return PSI_STATUS_ERROR;
     }
 
-    if (psi_build_system_prompt(&system_prompt) != PSI_STATUS_OK) {
+    if (system_prompt == NULL) {
         return PSI_STATUS_ERROR;
     }
     if (psi_tool_schemas_json(&tools_json) != PSI_STATUS_OK) {
-        free(system_prompt);
         return PSI_STATUS_ERROR;
     }
     tools = cJSON_Parse(tools_json);
     free(tools_json);
     if (tools == NULL) {
-        free(system_prompt);
         return PSI_STATUS_ERROR;
     }
     if (psi_anthropic_session_to_messages(session, &messages) != PSI_STATUS_OK) {
-        free(system_prompt);
         cJSON_Delete(tools);
         return PSI_STATUS_ERROR;
     }
@@ -1134,7 +1156,6 @@ int psi_anthropic_agent_turn(
         loop_count++;
         psi_stream_state_init(&stream_state);
         if (psi_anthropic_build_request_json(resolved_model, max_tokens, system_prompt, messages, tools, &request_json) != PSI_STATUS_OK) {
-            free(system_prompt);
             cJSON_Delete(tools);
             cJSON_Delete(messages);
             return PSI_STATUS_ERROR;
@@ -1143,7 +1164,6 @@ int psi_anthropic_agent_turn(
         if (psi_anthropic_http_stream(base_url, api_key, request_json, &stream_state, &status_code) != PSI_STATUS_OK) {
             free(request_json);
             psi_stream_state_free(&stream_state);
-            free(system_prompt);
             cJSON_Delete(tools);
             cJSON_Delete(messages);
             return PSI_STATUS_ERROR;
@@ -1159,7 +1179,6 @@ int psi_anthropic_agent_turn(
                 stream_state.raw_response.data != NULL ? stream_state.raw_response.data : ""
             );
             psi_stream_state_free(&stream_state);
-            free(system_prompt);
             cJSON_Delete(tools);
             cJSON_Delete(messages);
             return PSI_STATUS_ERROR;
@@ -1168,7 +1187,6 @@ int psi_anthropic_agent_turn(
         if (stream_state.error_message != NULL) {
             fprintf(stderr, "Anthropic stream error: %s\n", stream_state.error_message);
             psi_stream_state_free(&stream_state);
-            free(system_prompt);
             cJSON_Delete(tools);
             cJSON_Delete(messages);
             return PSI_STATUS_ERROR;
@@ -1176,7 +1194,6 @@ int psi_anthropic_agent_turn(
 
         if (psi_stream_state_to_content(&stream_state, &content) != PSI_STATUS_OK) {
             psi_stream_state_free(&stream_state);
-            free(system_prompt);
             cJSON_Delete(tools);
             cJSON_Delete(messages);
             return PSI_STATUS_ERROR;
@@ -1190,7 +1207,6 @@ int psi_anthropic_agent_turn(
         if (psi_anthropic_extract_text(content, &assistant_text) != PSI_STATUS_OK) {
             cJSON_Delete(content);
             psi_stream_state_free(&stream_state);
-            free(system_prompt);
             cJSON_Delete(tools);
             cJSON_Delete(messages);
             return PSI_STATUS_ERROR;
@@ -1200,7 +1216,6 @@ int psi_anthropic_agent_turn(
             free(assistant_text);
             cJSON_Delete(content);
             psi_stream_state_free(&stream_state);
-            free(system_prompt);
             cJSON_Delete(tools);
             cJSON_Delete(messages);
             return PSI_STATUS_ERROR;
@@ -1212,7 +1227,6 @@ int psi_anthropic_agent_turn(
                 free(assistant_content_json);
                 cJSON_Delete(content);
                 psi_stream_state_free(&stream_state);
-                free(system_prompt);
                 cJSON_Delete(tools);
                 cJSON_Delete(messages);
                 return PSI_STATUS_ERROR;
@@ -1224,7 +1238,6 @@ int psi_anthropic_agent_turn(
             free(assistant_content_json);
             cJSON_Delete(content);
             psi_stream_state_free(&stream_state);
-            free(system_prompt);
             cJSON_Delete(tools);
             cJSON_Delete(messages);
             return PSI_STATUS_OK;
@@ -1236,7 +1249,6 @@ int psi_anthropic_agent_turn(
             free(assistant_content_json);
             cJSON_Delete(content);
             psi_stream_state_free(&stream_state);
-            free(system_prompt);
             cJSON_Delete(tools);
             cJSON_Delete(messages);
             return PSI_STATUS_ERROR;
@@ -1261,7 +1273,6 @@ int psi_anthropic_agent_turn(
                 cJSON_Delete(tool_results_message);
                 cJSON_Delete(content);
                 psi_stream_state_free(&stream_state);
-                free(system_prompt);
                 cJSON_Delete(tools);
                 cJSON_Delete(messages);
                 return PSI_STATUS_ERROR;
@@ -1274,7 +1285,6 @@ int psi_anthropic_agent_turn(
                 cJSON_Delete(tool_results_message);
                 cJSON_Delete(content);
                 psi_stream_state_free(&stream_state);
-                free(system_prompt);
                 cJSON_Delete(tools);
                 cJSON_Delete(messages);
                 return PSI_STATUS_ERROR;
@@ -1291,7 +1301,6 @@ int psi_anthropic_agent_turn(
                 cJSON_Delete(tool_results_message);
                 cJSON_Delete(content);
                 psi_stream_state_free(&stream_state);
-                free(system_prompt);
                 cJSON_Delete(tools);
                 cJSON_Delete(messages);
                 return PSI_STATUS_ERROR;
@@ -1302,7 +1311,6 @@ int psi_anthropic_agent_turn(
                 cJSON_Delete(tool_results_message);
                 cJSON_Delete(content);
                 psi_stream_state_free(&stream_state);
-                free(system_prompt);
                 cJSON_Delete(tools);
                 cJSON_Delete(messages);
                 return PSI_STATUS_ERROR;
@@ -1314,7 +1322,6 @@ int psi_anthropic_agent_turn(
                 cJSON_Delete(tool_results_message);
                 cJSON_Delete(content);
                 psi_stream_state_free(&stream_state);
-                free(system_prompt);
                 cJSON_Delete(tools);
                 cJSON_Delete(messages);
                 return PSI_STATUS_ERROR;
@@ -1335,8 +1342,16 @@ int psi_anthropic_agent_turn(
     }
 
     fprintf(stderr, "Anthropic tool loop exceeded 32 iterations\n");
-    free(system_prompt);
     cJSON_Delete(tools);
     cJSON_Delete(messages);
     return PSI_STATUS_ERROR;
+}
+
+int psi_anthropic_agent_turn(
+    struct psi_session *session,
+    const char *model,
+    long max_tokens,
+    char **output_text
+) {
+    return psi_anthropic_agent_turn_with_prompt(session, model, max_tokens, "", output_text);
 }

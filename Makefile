@@ -14,7 +14,7 @@ BASE_CFLAGS = -std=c89 -pedantic -Wall -Wextra -Werror
 LOCAL_CPPFLAGS = -Iinclude -DPSI_SCHEME_BOOT_FILE=\"$(SCHEME_BOOT_FILE)\" $(shell $(PKG_CONFIG) --cflags chibi-scheme libcjson)
 LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) --cflags libedit)
 LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) --cflags libcurl)
-LOCAL_LDFLAGS = $(shell $(PKG_CONFIG) --libs chibi-scheme libcjson libedit libcurl)
+LOCAL_LDFLAGS = $(shell $(PKG_CONFIG) --libs chibi-scheme libcjson libedit libcurl) -largtable3
 
 SCHEME_BOOT_FILE ?= $(abspath scheme/boot.scm)
 

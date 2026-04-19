@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "psi/host_ops.h"
+#include "psi/prompt.h"
 #include "psi/session.h"
 #include "psi/tool.h"
 #include "psi/vm.h"
@@ -135,24 +136,189 @@ static sexp psi_foreign_tool_call(sexp ctx, sexp self, sexp n, sexp tool_name, s
     return result_value;
 }
 
-static sexp psi_foreign_system_prompt(sexp ctx, sexp self, sexp n) {
-    struct psi_host_call call;
-    sexp result_value;
-    int status;
+static sexp psi_vm_make_alist_entry(sexp ctx, const char *key, sexp value) {
+    return sexp_cons(ctx, sexp_intern(ctx, key, -1), value);
+}
 
+static sexp psi_foreign_current_date(sexp ctx, sexp self, sexp n) {
+    char *date_text;
+    sexp result;
+
+    PSI_UNUSED(self);
     PSI_UNUSED(n);
 
-    call.kind = PSI_HOST_OP_SYSTEM_PROMPT;
-    call.name = NULL;
-    call.input_text = NULL;
-    status = psi_host_call(psi_current_host, &call);
-    if (status != PSI_STATUS_OK || call.output_text == NULL) {
-        return sexp_user_exception(ctx, self, "host system-prompt operation failed", SEXP_FALSE);
+    date_text = psi_prompt_current_date();
+    if (date_text == NULL) {
+        return sexp_user_exception(ctx, self, "failed to get current date", SEXP_FALSE);
+    }
+    result = sexp_c_string(ctx, date_text, -1);
+    free(date_text);
+    return result;
+}
+
+static sexp psi_foreign_current_working_directory(sexp ctx, sexp self, sexp n) {
+    char *cwd;
+    sexp result;
+
+    PSI_UNUSED(self);
+    PSI_UNUSED(n);
+
+    cwd = psi_prompt_current_working_directory();
+    if (cwd == NULL) {
+        return sexp_user_exception(ctx, self, "failed to get current working directory", SEXP_FALSE);
+    }
+    result = sexp_c_string(ctx, cwd, -1);
+    free(cwd);
+    return result;
+}
+
+static sexp psi_foreign_parent_directory(sexp ctx, sexp self, sexp n, sexp path) {
+    char *path_copy;
+    char *parent;
+    sexp result;
+
+    PSI_UNUSED(self);
+    PSI_UNUSED(n);
+
+    if (!sexp_stringp(path)) {
+        return sexp_type_exception(ctx, self, SEXP_STRING, path);
     }
 
-    result_value = sexp_c_string(ctx, call.output_text, -1);
-    free(call.output_text);
-    return result_value;
+    path_copy = psi_strdup_n(sexp_string_data(path), (size_t)sexp_string_size(path));
+    if (path_copy == NULL) {
+        return sexp_user_exception(ctx, self, "out of memory while preparing path", path);
+    }
+    parent = psi_prompt_parent_directory(path_copy);
+    free(path_copy);
+    if (parent == NULL) {
+        return sexp_user_exception(ctx, self, "failed to get parent directory", SEXP_FALSE);
+    }
+    result = sexp_c_string(ctx, parent, -1);
+    free(parent);
+    return result;
+}
+
+static sexp psi_foreign_file_exists(sexp ctx, sexp self, sexp n, sexp path) {
+    char *path_copy;
+    int exists;
+
+    PSI_UNUSED(ctx);
+    PSI_UNUSED(self);
+    PSI_UNUSED(n);
+
+    if (!sexp_stringp(path)) {
+        return sexp_type_exception(ctx, self, SEXP_STRING, path);
+    }
+
+    path_copy = psi_strdup_n(sexp_string_data(path), (size_t)sexp_string_size(path));
+    if (path_copy == NULL) {
+        return sexp_user_exception(ctx, self, "out of memory while preparing path", path);
+    }
+    exists = psi_prompt_file_exists(path_copy);
+    free(path_copy);
+    return exists ? SEXP_TRUE : SEXP_FALSE;
+}
+
+static sexp psi_foreign_tool_definitions(sexp ctx, sexp self, sexp n) {
+    const struct psi_tool_definition *definitions;
+    sexp result;
+    sexp entry;
+    sexp guidelines;
+    size_t count;
+    size_t index;
+    size_t guideline_index;
+
+    PSI_UNUSED(self);
+    PSI_UNUSED(n);
+
+    definitions = psi_tool_definitions(&count);
+    result = SEXP_NULL;
+    for (index = count; index > 0u; index--) {
+        guidelines = SEXP_NULL;
+        guideline_index = 0u;
+        while (definitions[index - 1u].prompt_guidelines[guideline_index] != NULL) {
+            guideline_index++;
+        }
+        while (guideline_index > 0u) {
+            guideline_index--;
+            sexp_push(
+                ctx,
+                guidelines,
+                sexp_c_string(ctx, definitions[index - 1u].prompt_guidelines[guideline_index], -1)
+            );
+        }
+
+        entry = SEXP_NULL;
+        sexp_push(ctx, entry, psi_vm_make_alist_entry(ctx, "prompt-guidelines", guidelines));
+        sexp_push(
+            ctx,
+            entry,
+            psi_vm_make_alist_entry(ctx, "prompt-snippet", sexp_c_string(ctx, definitions[index - 1u].prompt_snippet, -1))
+        );
+        sexp_push(
+            ctx,
+            entry,
+            psi_vm_make_alist_entry(ctx, "description", sexp_c_string(ctx, definitions[index - 1u].description, -1))
+        );
+        sexp_push(ctx, entry, psi_vm_make_alist_entry(ctx, "name", sexp_c_string(ctx, definitions[index - 1u].name, -1)));
+        sexp_push(ctx, result, entry);
+    }
+
+    return result;
+}
+
+static sexp psi_foreign_session_messages(sexp ctx, sexp self, sexp n) {
+    struct psi_session *session;
+    sexp result;
+    sexp entry;
+    size_t index;
+
+    PSI_UNUSED(self);
+    PSI_UNUSED(n);
+
+    session = psi_current_host != NULL ? psi_current_host->session : NULL;
+    if (session == NULL) {
+        return SEXP_NULL;
+    }
+
+    result = SEXP_NULL;
+    for (index = session->count; index > 0u; index--) {
+        entry = SEXP_NULL;
+        sexp_push(
+            ctx,
+            entry,
+            psi_vm_make_alist_entry(
+                ctx,
+                "data",
+                session->messages[index - 1u].data_json != NULL ?
+                    sexp_c_string(ctx, session->messages[index - 1u].data_json, -1) :
+                    SEXP_FALSE
+            )
+        );
+        sexp_push(
+            ctx,
+            entry,
+            psi_vm_make_alist_entry(
+                ctx,
+                "text",
+                session->messages[index - 1u].text != NULL ?
+                    sexp_c_string(ctx, session->messages[index - 1u].text, -1) :
+                    sexp_c_string(ctx, "", -1)
+            )
+        );
+        sexp_push(
+            ctx,
+            entry,
+            psi_vm_make_alist_entry(
+                ctx,
+                "role",
+                sexp_c_string(ctx, psi_message_role_name(session->messages[index - 1u].role), -1)
+            )
+        );
+        sexp_push(ctx, result, entry);
+    }
+
+    return result;
 }
 
 static int psi_vm_extract_string(sexp ctx, sexp value, char **output_text) {
@@ -183,6 +349,90 @@ static int psi_vm_extract_string(sexp ctx, sexp value, char **output_text) {
     }
 
     *output_text = copy;
+    return PSI_STATUS_OK;
+}
+
+static int psi_vm_call_procedure1(struct psi_vm *vm, const char *procedure_name, sexp argument, sexp *value_out) {
+    sexp symbol;
+    sexp procedure;
+    sexp args;
+    sexp value;
+
+    if (vm == NULL || procedure_name == NULL || value_out == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    symbol = sexp_intern(vm->ctx, procedure_name, -1);
+    procedure = sexp_env_ref(vm->ctx, vm->env, symbol, SEXP_FALSE);
+    if (procedure == SEXP_FALSE) {
+        fprintf(stderr, "undefined Scheme procedure: %s\n", procedure_name);
+        return PSI_STATUS_ERROR;
+    }
+
+    args = sexp_list1(vm->ctx, argument);
+    value = sexp_apply(vm->ctx, procedure, args);
+    if (sexp_exceptionp(value)) {
+        sexp_print_exception(vm->ctx, value, sexp_current_error_port(vm->ctx));
+        return PSI_STATUS_ERROR;
+    }
+
+    *value_out = value;
+    return PSI_STATUS_OK;
+}
+
+static int psi_vm_parse_action_list(
+    struct psi_vm *vm,
+    sexp value,
+    char **action_name,
+    char **action_text,
+    long *action_number
+) {
+    sexp payload_value;
+
+    if (action_name == NULL || action_text == NULL || action_number == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    *action_name = NULL;
+    *action_text = NULL;
+    *action_number = 0l;
+
+    if (value == SEXP_FALSE) {
+        return PSI_STATUS_OK;
+    }
+    if (!sexp_pairp(value) || !sexp_stringp(sexp_car(value))) {
+        fprintf(stderr, "invalid Scheme command result\n");
+        return PSI_STATUS_ERROR;
+    }
+
+    if (psi_vm_extract_string(vm->ctx, sexp_car(value), action_name) != PSI_STATUS_OK) {
+        return PSI_STATUS_ERROR;
+    }
+
+    if (strcmp(*action_name, "print") == 0) {
+        if (!sexp_pairp(sexp_cdr(value)) || !sexp_stringp(sexp_cadr(value))) {
+            fprintf(stderr, "invalid Scheme print action\n");
+            free(*action_name);
+            *action_name = NULL;
+            return PSI_STATUS_ERROR;
+        }
+        payload_value = sexp_cadr(value);
+        if (psi_vm_extract_string(vm->ctx, payload_value, action_text) != PSI_STATUS_OK) {
+            free(*action_name);
+            *action_name = NULL;
+            return PSI_STATUS_ERROR;
+        }
+    } else if (strcmp(*action_name, "compact") == 0) {
+        if (!sexp_pairp(sexp_cdr(value)) || !sexp_fixnump(sexp_cadr(value))) {
+            fprintf(stderr, "invalid Scheme compact action\n");
+            free(*action_name);
+            *action_name = NULL;
+            return PSI_STATUS_ERROR;
+        }
+        payload_value = sexp_cadr(value);
+        *action_number = (long)sexp_unbox_fixnum(payload_value);
+    }
+
     return PSI_STATUS_OK;
 }
 
@@ -232,7 +482,12 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
     sexp_define_foreign(vm->ctx, vm->env, "psi-session-message-count", 0, psi_foreign_session_message_count);
     sexp_define_foreign(vm->ctx, vm->env, "psi-read-file", 1, psi_foreign_read_file);
     sexp_define_foreign(vm->ctx, vm->env, "psi-tool-call", 2, psi_foreign_tool_call);
-    sexp_define_foreign(vm->ctx, vm->env, "psi-system-prompt", 0, psi_foreign_system_prompt);
+    sexp_define_foreign(vm->ctx, vm->env, "psi-current-date", 0, psi_foreign_current_date);
+    sexp_define_foreign(vm->ctx, vm->env, "psi-current-working-directory", 0, psi_foreign_current_working_directory);
+    sexp_define_foreign(vm->ctx, vm->env, "psi-parent-directory", 1, psi_foreign_parent_directory);
+    sexp_define_foreign(vm->ctx, vm->env, "psi-file-exists?", 1, psi_foreign_file_exists);
+    sexp_define_foreign(vm->ctx, vm->env, "psi-tool-definitions", 0, psi_foreign_tool_definitions);
+    sexp_define_foreign(vm->ctx, vm->env, "psi-session-messages", 0, psi_foreign_session_messages);
 
     return psi_vm_load_bootstrap(vm);
 }
@@ -276,9 +531,6 @@ int psi_vm_eval_to_string(struct psi_vm *vm, const char *expression, char **outp
 }
 
 int psi_vm_call_string_procedure(struct psi_vm *vm, const char *procedure_name, const char *argument, char **output_text) {
-    sexp symbol;
-    sexp procedure;
-    sexp args;
     sexp value;
 
     if (vm == NULL || procedure_name == NULL || output_text == NULL) {
@@ -286,18 +538,12 @@ int psi_vm_call_string_procedure(struct psi_vm *vm, const char *procedure_name, 
     }
 
     *output_text = NULL;
-
-    symbol = sexp_intern(vm->ctx, procedure_name, -1);
-    procedure = sexp_env_ref(vm->ctx, vm->env, symbol, SEXP_FALSE);
-    if (procedure == SEXP_FALSE) {
-        fprintf(stderr, "undefined Scheme procedure: %s\n", procedure_name);
-        return PSI_STATUS_ERROR;
-    }
-
-    args = sexp_list1(vm->ctx, sexp_c_string(vm->ctx, argument ? argument : "", -1));
-    value = sexp_apply(vm->ctx, procedure, args);
-    if (sexp_exceptionp(value)) {
-        sexp_print_exception(vm->ctx, value, sexp_current_error_port(vm->ctx));
+    if (psi_vm_call_procedure1(
+            vm,
+            procedure_name,
+            sexp_c_string(vm->ctx, argument ? argument : "", -1),
+            &value
+        ) != PSI_STATUS_OK) {
         return PSI_STATUS_ERROR;
     }
 
@@ -328,4 +574,64 @@ int psi_vm_call_procedure0_to_string(struct psi_vm *vm, const char *procedure_na
     }
 
     return psi_vm_extract_string(vm->ctx, value, output_text);
+}
+
+int psi_vm_parse_command(
+    struct psi_vm *vm,
+    const char *line,
+    char **action_name,
+    char **action_text,
+    long *action_number
+) {
+    sexp value;
+
+    if (vm == NULL || line == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+    value = SEXP_FALSE;
+    if (psi_vm_call_procedure1(vm, "psi-handle-command", sexp_c_string(vm->ctx, line, -1), &value) != PSI_STATUS_OK) {
+        return PSI_STATUS_ERROR;
+    }
+    return psi_vm_parse_action_list(vm, value, action_name, action_text, action_number);
+}
+
+int psi_vm_build_compaction_request(
+    struct psi_vm *vm,
+    long keep_recent,
+    char **system_prompt,
+    char **user_prompt
+) {
+    sexp value;
+
+    if (vm == NULL || system_prompt == NULL || user_prompt == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    *system_prompt = NULL;
+    *user_prompt = NULL;
+    value = SEXP_FALSE;
+    if (psi_vm_call_procedure1(
+            vm,
+            "psi-build-compaction-request",
+            sexp_make_fixnum((sexp_sint_t)keep_recent),
+            &value
+        ) != PSI_STATUS_OK) {
+        return PSI_STATUS_ERROR;
+    }
+
+    if (!sexp_pairp(value) || !sexp_pairp(sexp_cdr(value)) ||
+        !sexp_stringp(sexp_car(value)) || !sexp_stringp(sexp_cadr(value))) {
+        fprintf(stderr, "invalid Scheme compaction request\n");
+        return PSI_STATUS_ERROR;
+    }
+
+    if (psi_vm_extract_string(vm->ctx, sexp_car(value), system_prompt) != PSI_STATUS_OK) {
+        return PSI_STATUS_ERROR;
+    }
+    if (psi_vm_extract_string(vm->ctx, sexp_cadr(value), user_prompt) != PSI_STATUS_OK) {
+        free(*system_prompt);
+        *system_prompt = NULL;
+        return PSI_STATUS_ERROR;
+    }
+    return PSI_STATUS_OK;
 }

@@ -19,5 +19,18 @@ void psi_vm_bind_session(struct psi_vm *vm, struct psi_session *session);
 int psi_vm_eval_to_string(struct psi_vm *vm, const char *expression, char **output_text);
 int psi_vm_call_string_procedure(struct psi_vm *vm, const char *procedure_name, const char *argument, char **output_text);
 int psi_vm_call_procedure0_to_string(struct psi_vm *vm, const char *procedure_name, char **output_text);
+int psi_vm_parse_command(
+    struct psi_vm *vm,
+    const char *line,
+    char **action_name,
+    char **action_text,
+    long *action_number
+);
+int psi_vm_build_compaction_request(
+    struct psi_vm *vm,
+    long keep_recent,
+    char **system_prompt,
+    char **user_prompt
+);
 
 #endif

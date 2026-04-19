@@ -46,6 +46,7 @@
           ];
 
           buildInputs = [
+            pkgs.argtable
             chibi
             pkgs.cjson
             pkgs.curl
@@ -67,6 +68,7 @@
 
         devShells.default = pkgs.mkShell {
           packages = [
+            pkgs.argtable
             pkgs.gnumake
             pkgs.pkg-config
             pkgs.clang
