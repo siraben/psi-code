@@ -103,6 +103,9 @@ static cJSON *psi_session_make_message(const struct psi_message *message) {
     cJSON_AddStringToObject(root, "type", "message");
     cJSON_AddStringToObject(root, "role", psi_message_role_name(message->role));
     cJSON_AddStringToObject(root, "text", message->text ? message->text : "");
+    if (message->data_json != NULL) {
+        cJSON_AddStringToObject(root, "data", message->data_json);
+    }
     return root;
 }
 
@@ -156,6 +159,15 @@ void psi_session_free(struct psi_session *session) {
 }
 
 int psi_session_append(struct psi_session *session, enum psi_message_role role, const char *text) {
+    return psi_session_append_with_data(session, role, text, NULL);
+}
+
+int psi_session_append_with_data(
+    struct psi_session *session,
+    enum psi_message_role role,
+    const char *text,
+    const char *data_json
+) {
     struct psi_message *new_messages;
     size_t new_capacity;
 
@@ -173,8 +185,10 @@ int psi_session_append(struct psi_session *session, enum psi_message_role role, 
         session->capacity = new_capacity;
     }
 
-    psi_message_init(&session->messages[session->count], role, text);
-    if (session->messages[session->count].text == NULL) {
+    psi_message_init_with_data(&session->messages[session->count], role, text, data_json);
+    if ((text != NULL && session->messages[session->count].text == NULL) ||
+        (data_json != NULL && session->messages[session->count].data_json == NULL)) {
+        psi_message_free(&session->messages[session->count]);
         return PSI_STATUS_ERROR;
     }
 
@@ -213,6 +227,7 @@ int psi_session_load(struct psi_session *session, const char *path) {
     cJSON *id;
     cJSON *role;
     cJSON *text;
+    cJSON *data;
     int status;
 
     if (session == NULL || path == NULL) {
@@ -259,11 +274,13 @@ int psi_session_load(struct psi_session *session, const char *path) {
             } else if (strcmp(type->valuestring, "message") == 0) {
                 role = cJSON_GetObjectItemCaseSensitive(root, "role");
                 text = cJSON_GetObjectItemCaseSensitive(root, "text");
+                data = cJSON_GetObjectItemCaseSensitive(root, "data");
                 if (cJSON_IsString(text) && text->valuestring != NULL) {
-                    status = psi_session_append(
+                    status = psi_session_append_with_data(
                         session,
                         psi_session_parse_role(cJSON_IsString(role) ? role->valuestring : NULL),
-                        text->valuestring
+                        text->valuestring,
+                        cJSON_IsString(data) ? data->valuestring : NULL
                     );
                     if (status != PSI_STATUS_OK) {
                         cJSON_Delete(root);
@@ -340,5 +357,60 @@ int psi_session_save(struct psi_session *session) {
     }
 
     fclose(file);
+    return PSI_STATUS_OK;
+}
+
+int psi_session_compact(struct psi_session *session, size_t keep_recent, const char *summary_text) {
+    struct psi_message *next_messages;
+    size_t kept_count;
+    size_t total_count;
+    size_t offset;
+    size_t index;
+
+    if (session == NULL || summary_text == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    total_count = session->count;
+    if (keep_recent > total_count) {
+        keep_recent = total_count;
+    }
+    kept_count = keep_recent;
+    offset = total_count - kept_count;
+
+    next_messages = (struct psi_message *)calloc(kept_count + 1u, sizeof(struct psi_message));
+    if (next_messages == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    psi_message_init(&next_messages[0], PSI_MESSAGE_COMPACTION_SUMMARY, summary_text);
+    if (next_messages[0].text == NULL) {
+        free(next_messages);
+        return PSI_STATUS_ERROR;
+    }
+
+    for (index = 0u; index < kept_count; index++) {
+        psi_message_init_with_data(
+            &next_messages[index + 1u],
+            session->messages[offset + index].role,
+            session->messages[offset + index].text,
+            session->messages[offset + index].data_json
+        );
+        if ((session->messages[offset + index].text != NULL && next_messages[index + 1u].text == NULL) ||
+            (session->messages[offset + index].data_json != NULL && next_messages[index + 1u].data_json == NULL)) {
+            size_t rollback;
+
+            for (rollback = 0u; rollback <= index; rollback++) {
+                psi_message_free(&next_messages[rollback]);
+            }
+            free(next_messages);
+            return PSI_STATUS_ERROR;
+        }
+    }
+
+    psi_session_clear_messages(session);
+    session->messages = next_messages;
+    session->count = kept_count + 1u;
+    session->capacity = kept_count + 1u;
     return PSI_STATUS_OK;
 }

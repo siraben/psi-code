@@ -23,10 +23,12 @@ TARGET = $(BUILD_DIR)/psi
 
 SOURCES = \
 	src/main.c \
+	src/core/agent.c \
 	src/core/common.c \
 	src/core/anthropic.c \
 	src/core/host_ops.c \
 	src/core/message.c \
+	src/core/process.c \
 	src/core/prompt.c \
 	src/core/tool.c \
 	src/core/session.c \
@@ -36,10 +38,12 @@ SOURCES = \
 
 OBJECTS = \
 	$(BUILD_DIR)/main.o \
+	$(BUILD_DIR)/agent.o \
 	$(BUILD_DIR)/common.o \
 	$(BUILD_DIR)/anthropic.o \
 	$(BUILD_DIR)/host_ops.o \
 	$(BUILD_DIR)/message.o \
+	$(BUILD_DIR)/process.o \
 	$(BUILD_DIR)/prompt.o \
 	$(BUILD_DIR)/tool.o \
 	$(BUILD_DIR)/session.o \
@@ -58,6 +62,9 @@ $(TARGET): $(BUILD_DIR) $(OBJECTS)
 $(BUILD_DIR)/main.o: src/main.c include/psi/common.h include/psi/runtime.h include/psi/session.h include/psi/vm.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/agent.o: src/core/agent.c include/psi/agent.h include/psi/anthropic.h include/psi/common.h include/psi/session.h
+	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
+
 $(BUILD_DIR)/common.o: src/core/common.c include/psi/common.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
@@ -68,6 +75,9 @@ $(BUILD_DIR)/host_ops.o: src/core/host_ops.c include/psi/common.h include/psi/ho
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/message.o: src/core/message.c include/psi/common.h include/psi/message.h
+	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/process.o: src/core/process.c include/psi/common.h include/psi/process.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/prompt.o: src/core/prompt.c include/psi/common.h include/psi/prompt.h

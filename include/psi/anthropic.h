@@ -10,5 +10,12 @@ int psi_anthropic_agent_turn(
     long max_tokens,
     char **output_text
 );
+int psi_anthropic_complete_text(
+    const char *model,
+    long max_tokens,
+    const char *system_prompt,
+    const char *user_text,
+    char **output_text
+);
 
 #endif

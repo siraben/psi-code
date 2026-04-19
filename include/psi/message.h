@@ -16,11 +16,17 @@ enum psi_message_role {
 struct psi_message {
     enum psi_message_role role;
     char *text;
+    char *data_json;
 };
 
 void psi_message_init(struct psi_message *message, enum psi_message_role role, const char *text);
+void psi_message_init_with_data(
+    struct psi_message *message,
+    enum psi_message_role role,
+    const char *text,
+    const char *data_json
+);
 void psi_message_free(struct psi_message *message);
 const char *psi_message_role_name(enum psi_message_role role);
 
 #endif
-

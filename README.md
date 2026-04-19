@@ -26,10 +26,12 @@ This repository currently contains:
 - a working print/eval slice with structured host tools exposed to Scheme
 - a default coding-agent system prompt assembled from tools, cwd, date, and local `AGENTS.md` / `CLAUDE.md`
 - a streamed Anthropic-backed `--agent` mode with host tool execution and session logging
+- a default interactive coding-agent shell backed by the same streamed agent loop
+- manual session compaction through `--compact` and `/compact`
 
 It still does not contain the full `pi` session tree model, TUI, RPC protocol,
-or compaction system. Those are described in the architecture document and will
-be built incrementally.
+or skills/extensions layer. Those are described in the architecture document and
+will be built incrementally.
 
 ## Quick start
 
@@ -43,6 +45,8 @@ nix build
 ./result/bin/psi --eval '(psi-tool-call "read" "{\"path\":\"README.md\"}")'
 ./result/bin/psi --system-prompt
 ANTHROPIC_API_KEY=... ./result/bin/psi --agent 'Read README.md and summarize this repository.'
+ANTHROPIC_API_KEY=... ./result/bin/psi --session /tmp/psi-session.jsonl
+ANTHROPIC_API_KEY=... ./result/bin/psi --session /tmp/psi-session.jsonl --compact 12
 ./result/bin/psi --print 'hello'
 ./result/bin/psi --session /tmp/psi-session.jsonl --print 'hello again'
 ```
@@ -57,6 +61,8 @@ make
 ./build/psi --eval '(psi-tool-call "bash" "{\"command\":\"true\"}")'
 ./build/psi --system-prompt
 set -a && . ./.env.local && ./build/psi --agent 'Say exactly: psi streaming test'
+set -a && . ./.env.local && ./build/psi --session .psi/session.jsonl
+set -a && . ./.env.local && ./build/psi --session .psi/session.jsonl --compact 12
 ./build/psi --print 'hello'
 ./build/psi --session .psi/session.jsonl --print 'hello again'
 ```
@@ -70,9 +76,14 @@ Current structured host tools exposed through `psi-tool-call`:
 - `write`
 - `edit`
 - `bash`
+- `grep`
+- `find`
+- `ls`
 
-`bash` currently uses C `system()`, which keeps it C89-friendly but means shell
-behavior and status encoding are platform-dependent.
+`bash`, `grep`, `find`, and `ls` now run through a small host process layer that
+captures output and exit status. The POSIX implementation uses `fork`/`exec`,
+which is pragmatic but not strict C89 portability; the Windows fallback still
+uses `system()`.
 
 `--system-prompt` is the current bridge from scaffold to usable harness behavior.
 It emits the default coding-agent prompt that `psi` would hand to a model,
@@ -80,18 +91,24 @@ including discovered `AGENTS.md` / `CLAUDE.md` files from the current working
 directory upward.
 
 `--agent` is the first real coding-agent loop. It currently targets Anthropic's
-Messages API, streams text to stdout as it arrives, executes built-in host tools
-(`read`, `write`, `edit`, `bash`), and persists user/tool/assistant events in
-the session log. The default model is `claude-opus-4-7`, overridable via
-`--model` or `PSI_ANTHROPIC_MODEL`.
+Messages API, streams text to stdout as it arrives, executes built-in host
+tools, and persists user/tool/assistant events in the session log. Starting
+`psi` with no explicit mode now opens the same agent loop in an interactive
+shell with `/help`, `/session`, `/system-prompt`, `/compact`, and `/quit`.
+The default model is `claude-opus-4-7`, overridable via `--model` or
+`PSI_ANTHROPIC_MODEL`.
+
+Session files are still flat JSONL, but assistant messages can now persist an
+extra structured payload so replay into Anthropic is less lossy than the
+original plain-text-only form.
 
 Current limitations of `--agent`:
 
 - no TUI or RPC mode yet
 - no streaming resume/retry logic
 - session persistence is still flat JSONL rather than a full branch tree
-- only the four core coding tools are exposed
-- `bash` still uses C `system()`
+- compaction is manual and summary-based, not `pi`'s fuller token-aware system
+- only Anthropic is wired today; there is no provider abstraction yet
 
 ## Layout
 

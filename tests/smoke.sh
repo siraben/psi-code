@@ -16,7 +16,10 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 grep '^alpha beta$' "$TOOL_FILE"
 "$ROOT_DIR/build/psi" --eval "(psi-tool-call \"edit\" \"{\\\"path\\\":\\\"$TOOL_FILE\\\",\\\"oldText\\\":\\\"beta\\\",\\\"newText\\\":\\\"gamma\\\"}\")" | grep '"tool":"edit"'
 grep '^alpha gamma$' "$TOOL_FILE"
-"$ROOT_DIR/build/psi" --eval '(psi-tool-call "bash" "{\"command\":\"true\"}")' | grep '"tool":"bash"'
+"$ROOT_DIR/build/psi" --eval '(psi-tool-call "bash" "{\"command\":\"printf hello\"}")' | grep '"output":"hello"'
+"$ROOT_DIR/build/psi" --eval "(psi-tool-call \"grep\" \"{\\\"pattern\\\":\\\"alpha gamma\\\",\\\"path\\\":\\\"$TOOL_FILE\\\",\\\"literal\\\":true}\")" | grep '"tool":"grep"'
+"$ROOT_DIR/build/psi" --eval '(psi-tool-call "find" "{\"pattern\":\"*.md\",\"path\":\".\",\"limit\":5}")' | grep '"tool":"find"'
+"$ROOT_DIR/build/psi" --eval '(psi-tool-call "ls" "{\"path\":\".\",\"limit\":5}")' | grep '"tool":"ls"'
 "$ROOT_DIR/build/psi" --system-prompt | grep '^Available tools:$'
 mkdir -p "$CONTEXT_DIR"
 printf '%s\n' 'Project rule: keep changes minimal.' >"$CONTEXT_DIR/AGENTS.md"
@@ -34,6 +37,9 @@ if [ "${ANTHROPIC_API_KEY:-}" != "" ]; then
     AGENT_SESSION="$TMP_DIR/agent-session.jsonl"
     "$ROOT_DIR/build/psi" --agent 'Say exactly: psi live agent smoke' --model "${PSI_ANTHROPIC_MODEL:-claude-opus-4-7}" --max-tokens 32 | grep 'psi live agent smoke'
     "$ROOT_DIR/build/psi" --session "$AGENT_SESSION" --agent 'Read README.md and reply with exactly: tool smoke ok' --model "${PSI_ANTHROPIC_MODEL:-claude-opus-4-7}" --max-tokens 128 | grep 'tool smoke ok'
+    "$ROOT_DIR/build/psi" --session "$AGENT_SESSION" --agent 'Reply with exactly: second turn ok' --model "${PSI_ANTHROPIC_MODEL:-claude-opus-4-7}" --max-tokens 64 | grep 'second turn ok'
     grep '"role":"tool-call"' "$AGENT_SESSION"
     grep '"role":"tool-result"' "$AGENT_SESSION"
+    "$ROOT_DIR/build/psi" --session "$AGENT_SESSION" --compact 4 --model "${PSI_ANTHROPIC_MODEL:-claude-opus-4-7}" --max-tokens 256 | grep .
+    grep '"role":"compaction-summary"' "$AGENT_SESSION"
 fi

@@ -2,12 +2,22 @@
 #include "psi/message.h"
 
 void psi_message_init(struct psi_message *message, enum psi_message_role role, const char *text) {
+    psi_message_init_with_data(message, role, text, NULL);
+}
+
+void psi_message_init_with_data(
+    struct psi_message *message,
+    enum psi_message_role role,
+    const char *text,
+    const char *data_json
+) {
     if (message == NULL) {
         return;
     }
 
     message->role = role;
-    message->text = psi_strdup(text);
+    message->text = text != NULL ? psi_strdup(text) : NULL;
+    message->data_json = data_json != NULL ? psi_strdup(data_json) : NULL;
 }
 
 void psi_message_free(struct psi_message *message) {
@@ -16,7 +26,9 @@ void psi_message_free(struct psi_message *message) {
     }
 
     free(message->text);
+    free(message->data_json);
     message->text = NULL;
+    message->data_json = NULL;
 }
 
 const char *psi_message_role_name(enum psi_message_role role) {
@@ -39,4 +51,3 @@ const char *psi_message_role_name(enum psi_message_role role) {
             return "unknown";
     }
 }
-

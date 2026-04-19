@@ -23,6 +23,7 @@ int main(int argc, char **argv) {
         case PSI_CLI_MODE_REPL:
         case PSI_CLI_MODE_SYSTEM_PROMPT:
         case PSI_CLI_MODE_AGENT:
+        case PSI_CLI_MODE_COMPACT:
             return psi_run_print_mode_dispatch(&options) == PSI_STATUS_OK ? 0 : 1;
         default:
             psi_cli_usage(argv[0]);

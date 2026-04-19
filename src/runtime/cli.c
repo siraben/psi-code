@@ -24,6 +24,7 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     options->session_file = NULL;
     options->model = NULL;
     options->max_tokens = 4096l;
+    options->keep_recent = 12l;
 
     for (index = 1; index < argc; index++) {
         if (strcmp(argv[index], "--help") == 0 || strcmp(argv[index], "-h") == 0) {
@@ -89,6 +90,18 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
             index++;
             continue;
         }
+        if (strcmp(argv[index], "--compact") == 0) {
+            options->mode = PSI_CLI_MODE_COMPACT;
+            if (index + 1 < argc && argv[index + 1][0] != '-') {
+                options->keep_recent = strtol(argv[index + 1], NULL, 10);
+                if (options->keep_recent < 0l) {
+                    fprintf(stderr, "invalid value for --compact: %s\n", argv[index + 1]);
+                    return PSI_STATUS_ERROR;
+                }
+                index++;
+            }
+            continue;
+        }
         if (strcmp(argv[index], "--system-prompt") == 0) {
             options->mode = PSI_CLI_MODE_SYSTEM_PROMPT;
             continue;
@@ -111,7 +124,7 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
 
 void psi_cli_usage(const char *program_name) {
     printf(
-        "usage: %s [--help] [--version] [--boot FILE] [--eval EXPR] [--print TEXT] [--system-prompt] [--agent TEXT]\n",
+        "usage: %s [--help] [--version] [--boot FILE] [--eval EXPR] [--print TEXT] [--system-prompt] [--agent TEXT] [--compact [N]]\n",
         program_name
     );
     printf("\n");
@@ -119,6 +132,7 @@ void psi_cli_usage(const char *program_name) {
     printf("  --print TEXT  run the bootstrap print-mode handler\n");
     printf("  --system-prompt  print the default coding-agent system prompt\n");
     printf("  --agent TEXT  run a single Anthropic-backed coding-agent turn\n");
+    printf("  --compact [N]  compact the current session, keeping the most recent N messages (default: 12)\n");
     printf("  --model MODEL  model to use with --agent (default: env or claude-opus-4-7)\n");
     printf("  --max-tokens N  max output tokens for --agent (default: 4096)\n");
     printf("  --boot FILE   override the Scheme bootstrap file\n");

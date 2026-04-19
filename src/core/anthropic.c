@@ -405,6 +405,18 @@ static size_t psi_curl_stream_callback(void *contents, size_t size, size_t nmemb
     return total_size;
 }
 
+static size_t psi_curl_buffer_callback(void *contents, size_t size, size_t nmemb, void *userp) {
+    size_t total_size;
+    struct psi_http_buffer *buffer;
+
+    total_size = size * nmemb;
+    buffer = (struct psi_http_buffer *)userp;
+    if (psi_stream_append_raw(buffer, (const char *)contents, total_size) != PSI_STATUS_OK) {
+        return 0u;
+    }
+    return total_size;
+}
+
 static int psi_stream_state_to_content(const struct psi_stream_state *state, cJSON **content_out) {
     cJSON *content;
     cJSON *block;
@@ -500,6 +512,16 @@ static int psi_anthropic_extract_text(const cJSON *content, char **text_out) {
     }
     psi_string_buffer_free(&buffer);
     return *text_out != NULL ? PSI_STATUS_OK : PSI_STATUS_ERROR;
+}
+
+static int psi_anthropic_extract_response_text(const cJSON *response, char **text_out) {
+    const cJSON *content;
+
+    content = cJSON_GetObjectItemCaseSensitive(response, "content");
+    if (!cJSON_IsArray(content)) {
+        return PSI_STATUS_ERROR;
+    }
+    return psi_anthropic_extract_text(content, text_out);
 }
 
 static int psi_anthropic_response_has_tool_use(const cJSON *content) {
@@ -611,7 +633,11 @@ static int psi_anthropic_session_to_messages(const struct psi_session *session, 
     while (index < session->count) {
         if (session->messages[index].role == PSI_MESSAGE_USER || session->messages[index].role == PSI_MESSAGE_ASSISTANT) {
             message = cJSON_CreateObject();
-            content = cJSON_CreateString(session->messages[index].text ? session->messages[index].text : "");
+            if (session->messages[index].data_json != NULL) {
+                content = cJSON_Parse(session->messages[index].data_json);
+            } else {
+                content = cJSON_CreateString(session->messages[index].text ? session->messages[index].text : "");
+            }
             if (message == NULL || content == NULL) {
                 cJSON_Delete(message);
                 cJSON_Delete(content);
@@ -623,6 +649,22 @@ static int psi_anthropic_session_to_messages(const struct psi_session *session, 
                 "role",
                 session->messages[index].role == PSI_MESSAGE_USER ? "user" : "assistant"
             );
+            cJSON_AddItemToObject(message, "content", content);
+            cJSON_AddItemToArray(messages, message);
+            index++;
+            continue;
+        }
+
+        if (session->messages[index].role == PSI_MESSAGE_COMPACTION_SUMMARY) {
+            message = cJSON_CreateObject();
+            content = cJSON_CreateString(session->messages[index].text ? session->messages[index].text : "");
+            if (message == NULL || content == NULL) {
+                cJSON_Delete(message);
+                cJSON_Delete(content);
+                cJSON_Delete(messages);
+                return PSI_STATUS_ERROR;
+            }
+            cJSON_AddStringToObject(message, "role", "user");
             cJSON_AddItemToObject(message, "content", content);
             cJSON_AddItemToArray(messages, message);
             index++;
@@ -824,6 +866,86 @@ static int psi_anthropic_http_stream(
     return PSI_STATUS_OK;
 }
 
+static int psi_anthropic_http_json(
+    const char *base_url,
+    const char *api_key,
+    const char *request_json,
+    struct psi_http_buffer *response_buffer,
+    long *status_code
+) {
+    CURL *curl;
+    CURLcode code;
+    struct curl_slist *headers;
+    char *url;
+    const char *separator;
+    size_t url_length;
+    char *api_key_header;
+
+    *status_code = 0l;
+    response_buffer->data = NULL;
+    response_buffer->length = 0u;
+    curl = NULL;
+    headers = NULL;
+
+    separator = base_url[strlen(base_url) - 1u] == '/' ? "" : "/";
+    url_length = strlen(base_url) + strlen(separator) + strlen("v1/messages") + 1u;
+    url = (char *)malloc(url_length);
+    if (url == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+    sprintf(url, "%s%sv1/messages", base_url, separator);
+
+    api_key_header = (char *)malloc(strlen(api_key) + strlen("x-api-key: ") + 1u);
+    if (api_key_header == NULL) {
+        free(url);
+        return PSI_STATUS_ERROR;
+    }
+    sprintf(api_key_header, "x-api-key: %s", api_key);
+
+    code = curl_global_init(CURL_GLOBAL_DEFAULT);
+    if (code != CURLE_OK) {
+        free(api_key_header);
+        free(url);
+        return PSI_STATUS_ERROR;
+    }
+
+    curl = curl_easy_init();
+    if (curl == NULL) {
+        curl_global_cleanup();
+        free(api_key_header);
+        free(url);
+        return PSI_STATUS_ERROR;
+    }
+
+    headers = curl_slist_append(headers, "content-type: application/json");
+    headers = curl_slist_append(headers, "anthropic-version: 2023-06-01");
+    headers = curl_slist_append(headers, api_key_header);
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request_json);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)strlen(request_json));
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, psi_curl_buffer_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)response_buffer);
+
+    code = curl_easy_perform(curl);
+    if (code == CURLE_OK) {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, status_code);
+    }
+
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    curl_global_cleanup();
+    free(api_key_header);
+    free(url);
+
+    if (code != CURLE_OK) {
+        return PSI_STATUS_ERROR;
+    }
+    return PSI_STATUS_OK;
+}
+
 static int psi_anthropic_build_request_json(
     const char *model,
     long max_tokens,
@@ -851,6 +973,89 @@ static int psi_anthropic_build_request_json(
     return *request_json != NULL ? PSI_STATUS_OK : PSI_STATUS_ERROR;
 }
 
+int psi_anthropic_complete_text(
+    const char *model,
+    long max_tokens,
+    const char *system_prompt,
+    const char *user_text,
+    char **output_text
+) {
+    const char *api_key;
+    const char *base_url;
+    const char *resolved_model;
+    cJSON *request;
+    cJSON *messages;
+    cJSON *message;
+    char *request_json;
+    struct psi_http_buffer response_buffer;
+    long status_code;
+    cJSON *response;
+    int status;
+
+    if (system_prompt == NULL || user_text == NULL || output_text == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    *output_text = NULL;
+    request_json = NULL;
+    response_buffer.data = NULL;
+    response_buffer.length = 0u;
+    resolved_model = model != NULL ? model : psi_anthropic_env_or_default("PSI_ANTHROPIC_MODEL", "claude-opus-4-7");
+    api_key = getenv("ANTHROPIC_API_KEY");
+    base_url = psi_anthropic_env_or_default("PSI_ANTHROPIC_BASE_URL", "https://api.anthropic.com/");
+    if (api_key == NULL || api_key[0] == '\0') {
+        fprintf(stderr, "ANTHROPIC_API_KEY is not set\n");
+        return PSI_STATUS_ERROR;
+    }
+
+    request = cJSON_CreateObject();
+    messages = cJSON_CreateArray();
+    message = cJSON_CreateObject();
+    if (request == NULL || messages == NULL || message == NULL) {
+        cJSON_Delete(request);
+        cJSON_Delete(messages);
+        cJSON_Delete(message);
+        return PSI_STATUS_ERROR;
+    }
+
+    cJSON_AddStringToObject(message, "role", "user");
+    cJSON_AddStringToObject(message, "content", user_text);
+    cJSON_AddItemToArray(messages, message);
+
+    cJSON_AddStringToObject(request, "model", resolved_model);
+    cJSON_AddNumberToObject(request, "max_tokens", (double)max_tokens);
+    cJSON_AddStringToObject(request, "system", system_prompt);
+    cJSON_AddItemToObject(request, "messages", messages);
+    cJSON_AddBoolToObject(request, "stream", 0);
+    request_json = cJSON_PrintUnformatted(request);
+    cJSON_Delete(request);
+    if (request_json == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    status = psi_anthropic_http_json(base_url, api_key, request_json, &response_buffer, &status_code);
+    free(request_json);
+    if (status != PSI_STATUS_OK) {
+        free(response_buffer.data);
+        return PSI_STATUS_ERROR;
+    }
+    if (status_code < 200l || status_code >= 300l) {
+        fprintf(stderr, "Anthropic API request failed (%ld): %s\n", status_code, response_buffer.data != NULL ? response_buffer.data : "");
+        free(response_buffer.data);
+        return PSI_STATUS_ERROR;
+    }
+
+    response = cJSON_Parse(response_buffer.data != NULL ? response_buffer.data : "");
+    free(response_buffer.data);
+    if (response == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    status = psi_anthropic_extract_response_text(response, output_text);
+    cJSON_Delete(response);
+    return status;
+}
+
 int psi_anthropic_agent_turn(
     struct psi_session *session,
     const char *model,
@@ -875,6 +1080,7 @@ int psi_anthropic_agent_turn(
     char *tools_json;
     char *request_json;
     char *assistant_text;
+    char *assistant_content_json;
     char *input_json;
     char *tool_output;
     const cJSON *id;
@@ -892,6 +1098,7 @@ int psi_anthropic_agent_turn(
     tools_json = NULL;
     request_json = NULL;
     assistant_text = NULL;
+    assistant_content_json = NULL;
     messages = NULL;
     tools = NULL;
     resolved_model = model != NULL ? model : psi_anthropic_env_or_default("PSI_ANTHROPIC_MODEL", "claude-opus-4-7");
@@ -988,10 +1195,21 @@ int psi_anthropic_agent_turn(
             cJSON_Delete(messages);
             return PSI_STATUS_ERROR;
         }
+        assistant_content_json = cJSON_PrintUnformatted(content);
+        if (assistant_content_json == NULL) {
+            free(assistant_text);
+            cJSON_Delete(content);
+            psi_stream_state_free(&stream_state);
+            free(system_prompt);
+            cJSON_Delete(tools);
+            cJSON_Delete(messages);
+            return PSI_STATUS_ERROR;
+        }
 
         if (!psi_anthropic_response_has_tool_use(content)) {
-            if (psi_session_append(session, PSI_MESSAGE_ASSISTANT, assistant_text) != PSI_STATUS_OK) {
+            if (psi_session_append_with_data(session, PSI_MESSAGE_ASSISTANT, assistant_text, assistant_content_json) != PSI_STATUS_OK) {
                 free(assistant_text);
+                free(assistant_content_json);
                 cJSON_Delete(content);
                 psi_stream_state_free(&stream_state);
                 free(system_prompt);
@@ -1003,6 +1221,7 @@ int psi_anthropic_agent_turn(
                 fputc('\n', stdout);
             }
             *output_text = assistant_text;
+            free(assistant_content_json);
             cJSON_Delete(content);
             psi_stream_state_free(&stream_state);
             free(system_prompt);
@@ -1011,8 +1230,10 @@ int psi_anthropic_agent_turn(
             return PSI_STATUS_OK;
         }
 
-        if (assistant_text[0] != '\0' && psi_session_append(session, PSI_MESSAGE_ASSISTANT, assistant_text) != PSI_STATUS_OK) {
+        if (assistant_text[0] != '\0' &&
+            psi_session_append_with_data(session, PSI_MESSAGE_ASSISTANT, assistant_text, assistant_content_json) != PSI_STATUS_OK) {
             free(assistant_text);
+            free(assistant_content_json);
             cJSON_Delete(content);
             psi_stream_state_free(&stream_state);
             free(system_prompt);
@@ -1021,7 +1242,9 @@ int psi_anthropic_agent_turn(
             return PSI_STATUS_ERROR;
         }
         free(assistant_text);
+        free(assistant_content_json);
         assistant_text = NULL;
+        assistant_content_json = NULL;
 
         tool_results_message = cJSON_CreateObject();
         tool_results_content = cJSON_CreateArray();
