@@ -361,7 +361,7 @@ int psi_build_system_prompt(char **output_text) {
     struct psi_prompt_buffer buffer;
     struct psi_context_file *context_files;
     const struct psi_tool_definition *tool_definitions;
-    char *guidelines[16];
+    char *guidelines[32];
     size_t guideline_count;
     char *cwd;
     size_t index;
@@ -390,7 +390,7 @@ int psi_build_system_prompt(char **output_text) {
 
     if (psi_prompt_buffer_append(
             &buffer,
-            "You are an expert coding assistant operating inside psi, a coding agent harness. "
+            "You are an expert coding assistant operating inside psi, a coding agent harness modeled after pi. "
             "You help users by reading files, executing commands, editing code, and writing new files.\n\n"
             "Available tools:\n"
         ) != PSI_STATUS_OK) {
@@ -413,7 +413,9 @@ int psi_build_system_prompt(char **output_text) {
 
     if (psi_prompt_add_guideline(&guidelines[0], &guideline_count, "Be concise in your responses.") != PSI_STATUS_OK ||
         psi_prompt_add_guideline(&guidelines[0], &guideline_count, "Show file paths clearly when working with files.") != PSI_STATUS_OK ||
-        psi_prompt_add_guideline(&guidelines[0], &guideline_count, "Prefer minimal, targeted changes over broad rewrites.") != PSI_STATUS_OK) {
+        psi_prompt_add_guideline(&guidelines[0], &guideline_count, "Prefer minimal, targeted changes over broad rewrites.") != PSI_STATUS_OK ||
+        psi_prompt_add_guideline(&guidelines[0], &guideline_count, "Do not overwrite or revert user changes unless the user asks for it.") != PSI_STATUS_OK ||
+        psi_prompt_add_guideline(&guidelines[0], &guideline_count, "When a portability or C89 constraint matters, call it out explicitly instead of silently assuming POSIX is acceptable.") != PSI_STATUS_OK) {
         psi_prompt_free_guidelines(&guidelines[0], guideline_count);
         psi_prompt_buffer_free(&buffer);
         free(cwd);
