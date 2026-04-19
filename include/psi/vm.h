@@ -4,14 +4,13 @@
 #include <stdio.h>
 #include <chibi/eval.h>
 #include "psi/common.h"
-
-struct psi_session;
+#include "psi/host_ops.h"
 
 struct psi_vm {
     sexp ctx;
     sexp env;
     const char *boot_file;
-    struct psi_session *session;
+    struct psi_host_context host;
 };
 
 int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *output, FILE *error_output);

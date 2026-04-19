@@ -17,9 +17,10 @@ This repository currently contains:
 
 - an architecture document in [docs/architecture.md](docs/architecture.md)
 - a Nix flake that builds Chibi-Scheme and `psi`
+- `cJSON` for JSON session records and structured tool payloads
 - a C89 project scaffold
 - a minimal embedded Scheme runtime
-- a working print/eval slice for proving the host <-> Scheme boundary
+- a working print/eval slice with structured host tools exposed to Scheme
 
 It does not yet contain the full `pi` session model, TUI, RPC protocol, or
 compaction system. Those are described in the architecture document and will be
@@ -34,6 +35,7 @@ nix build
 ./result/bin/psi --help
 ./result/bin/psi --eval '(+ 1 2 3)'
 ./result/bin/psi --eval '(psi-read-file "README.md")'
+./result/bin/psi --eval '(psi-tool-call "read" "{\"path\":\"README.md\"}")'
 ./result/bin/psi --print 'hello'
 ./result/bin/psi --session /tmp/psi-session.jsonl --print 'hello again'
 ```
@@ -45,12 +47,23 @@ nix develop
 make
 ./build/psi --eval '(+ 1 2 3)'
 ./build/psi --eval '(psi-read-file "README.md")'
+./build/psi --eval '(psi-tool-call "bash" "{\"command\":\"true\"}")'
 ./build/psi --print 'hello'
 ./build/psi --session .psi/session.jsonl --print 'hello again'
 ```
 
 Session files are explicit for now. When `--session FILE` is set, `psi` loads
 the JSONL file if it exists and rewrites it after each run.
+
+Current structured host tools exposed through `psi-tool-call`:
+
+- `read`
+- `write`
+- `edit`
+- `bash`
+
+`bash` currently uses C `system()`, which keeps it C89-friendly but means shell
+behavior and status encoding are platform-dependent.
 
 ## Layout
 

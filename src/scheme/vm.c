@@ -1,19 +1,34 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "psi/host_ops.h"
 #include "psi/session.h"
+#include "psi/tool.h"
 #include "psi/vm.h"
 
-static struct psi_session *psi_current_session = NULL;
-static const long PSI_READ_FILE_MAX_BYTES = 262144l;
+static struct psi_host_context *psi_current_host = NULL;
 
 static sexp psi_foreign_version(sexp ctx, sexp self, sexp n) {
+    struct psi_host_call call;
+    int status;
+
     PSI_UNUSED(self);
     PSI_UNUSED(n);
-    return sexp_c_string(ctx, PSI_VERSION, -1);
+    call.kind = PSI_HOST_OP_VERSION;
+    call.input_text = NULL;
+    status = psi_host_call(psi_current_host, &call);
+    if (status != PSI_STATUS_OK || call.output_text == NULL) {
+        return sexp_user_exception(ctx, self, "host version operation failed", SEXP_FALSE);
+    }
+
+    self = sexp_c_string(ctx, call.output_text, -1);
+    free(call.output_text);
+    return self;
 }
 
 static sexp psi_foreign_log(sexp ctx, sexp self, sexp n, sexp message) {
+    struct psi_host_call call;
+
     PSI_UNUSED(self);
     PSI_UNUSED(n);
 
@@ -21,31 +36,41 @@ static sexp psi_foreign_log(sexp ctx, sexp self, sexp n, sexp message) {
         return sexp_type_exception(ctx, self, SEXP_STRING, message);
     }
 
-    fprintf(stderr, "[psi] %.*s\n",
-            (int)sexp_string_size(message),
-            sexp_string_data(message));
+    call.kind = PSI_HOST_OP_LOG;
+    call.input_text = psi_strdup_n(sexp_string_data(message), (size_t)sexp_string_size(message));
+    if (call.input_text == NULL) {
+        return sexp_user_exception(ctx, self, "out of memory while preparing log input", message);
+    }
+    if (psi_host_call(psi_current_host, &call) != PSI_STATUS_OK) {
+        free((char *)call.input_text);
+        return sexp_user_exception(ctx, self, "host log operation failed", message);
+    }
+    free((char *)call.input_text);
     return SEXP_TRUE;
 }
 
 static sexp psi_foreign_session_message_count(sexp ctx, sexp self, sexp n) {
+    struct psi_host_call call;
+    int status;
+
     PSI_UNUSED(ctx);
     PSI_UNUSED(self);
     PSI_UNUSED(n);
 
-    if (psi_current_session == NULL) {
-        return sexp_make_fixnum(0);
+    call.kind = PSI_HOST_OP_SESSION_MESSAGE_COUNT;
+    call.input_text = NULL;
+    status = psi_host_call(psi_current_host, &call);
+    if (status != PSI_STATUS_OK) {
+        return sexp_user_exception(ctx, self, "host session-count operation failed", SEXP_FALSE);
     }
 
-    return sexp_make_fixnum((sexp_sint_t)psi_current_session->count);
+    return sexp_make_fixnum((sexp_sint_t)call.output_number);
 }
 
 static sexp psi_foreign_read_file(sexp ctx, sexp self, sexp n, sexp path) {
-    FILE *file;
-    long size;
-    size_t read_size;
-    char *buffer;
-    char *path_buffer;
+    struct psi_host_call call;
     sexp path_value;
+    int status;
 
     PSI_UNUSED(n);
 
@@ -53,61 +78,61 @@ static sexp psi_foreign_read_file(sexp ctx, sexp self, sexp n, sexp path) {
         return sexp_type_exception(ctx, self, SEXP_STRING, path);
     }
 
-    path_buffer = psi_strdup_n(sexp_string_data(path), (size_t)sexp_string_size(path));
-    if (path_buffer == NULL) {
+    call.kind = PSI_HOST_OP_READ_FILE;
+    call.input_text = psi_strdup_n(sexp_string_data(path), (size_t)sexp_string_size(path));
+    if (call.input_text == NULL) {
         return sexp_user_exception(ctx, self, "out of memory while preparing file path", path);
     }
 
-    path_value = sexp_c_string(ctx, path_buffer, -1);
-    file = fopen(path_buffer, "rb");
-    if (file == NULL) {
-        free(path_buffer);
-        return sexp_file_exception(ctx, self, "could not open file", path_value);
+    path_value = sexp_c_string(ctx, call.input_text, -1);
+    status = psi_host_call(psi_current_host, &call);
+    free((char *)call.input_text);
+    if (status != PSI_STATUS_OK || call.output_text == NULL) {
+        return sexp_file_exception(ctx, self, "host read-file operation failed", path_value);
     }
 
-    if (fseek(file, 0l, SEEK_END) != 0) {
-        fclose(file);
-        free(path_buffer);
-        return sexp_file_exception(ctx, self, "could not seek file", path_value);
-    }
-
-    size = ftell(file);
-    if (size < 0l) {
-        fclose(file);
-        free(path_buffer);
-        return sexp_file_exception(ctx, self, "could not determine file size", path_value);
-    }
-    if (size > PSI_READ_FILE_MAX_BYTES) {
-        fclose(file);
-        free(path_buffer);
-        return sexp_user_exception(ctx, self, "file exceeds read limit", path_value);
-    }
-
-    if (fseek(file, 0l, SEEK_SET) != 0) {
-        fclose(file);
-        free(path_buffer);
-        return sexp_file_exception(ctx, self, "could not rewind file", path_value);
-    }
-
-    buffer = (char *)malloc((size_t)size + 1u);
-    if (buffer == NULL) {
-        fclose(file);
-        free(path_buffer);
-        return sexp_user_exception(ctx, self, "out of memory while reading file", path_value);
-    }
-
-    read_size = fread(buffer, 1u, (size_t)size, file);
-    fclose(file);
-    free(path_buffer);
-    if (read_size != (size_t)size) {
-        free(buffer);
-        return sexp_file_exception(ctx, self, "could not read full file", path_value);
-    }
-
-    buffer[size] = '\0';
-    path_value = sexp_c_string(ctx, buffer, (sexp_sint_t)size);
-    free(buffer);
+    path_value = sexp_c_string(ctx, call.output_text, -1);
+    free(call.output_text);
     return path_value;
+}
+
+static sexp psi_foreign_tool_call(sexp ctx, sexp self, sexp n, sexp tool_name, sexp input_json) {
+    struct psi_host_call call;
+    char *name_copy;
+    char *input_copy;
+    sexp result_value;
+    int status;
+
+    PSI_UNUSED(n);
+
+    if (!sexp_stringp(tool_name)) {
+        return sexp_type_exception(ctx, self, SEXP_STRING, tool_name);
+    }
+    if (!sexp_stringp(input_json)) {
+        return sexp_type_exception(ctx, self, SEXP_STRING, input_json);
+    }
+
+    name_copy = psi_strdup_n(sexp_string_data(tool_name), (size_t)sexp_string_size(tool_name));
+    input_copy = psi_strdup_n(sexp_string_data(input_json), (size_t)sexp_string_size(input_json));
+    if (name_copy == NULL || input_copy == NULL) {
+        free(name_copy);
+        free(input_copy);
+        return sexp_user_exception(ctx, self, "out of memory while preparing tool call", SEXP_FALSE);
+    }
+
+    call.kind = PSI_HOST_OP_TOOL_CALL;
+    call.name = name_copy;
+    call.input_text = input_copy;
+    status = psi_host_call(psi_current_host, &call);
+    free(name_copy);
+    free(input_copy);
+    if (status != PSI_STATUS_OK || call.output_text == NULL) {
+        return sexp_user_exception(ctx, self, "host tool-call operation failed", SEXP_FALSE);
+    }
+
+    result_value = sexp_c_string(ctx, call.output_text, -1);
+    free(call.output_text);
+    return result_value;
 }
 
 static int psi_vm_extract_string(sexp ctx, sexp value, char **output_text) {
@@ -162,7 +187,7 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
 
     memset(vm, 0, sizeof(*vm));
     vm->boot_file = boot_file;
-    vm->session = NULL;
+    vm->host.session = NULL;
 
     sexp_scheme_init();
     vm->ctx = sexp_make_eval_context(NULL, NULL, NULL, 0, 0);
@@ -186,6 +211,7 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
     sexp_define_foreign(vm->ctx, vm->env, "psi-log", 1, psi_foreign_log);
     sexp_define_foreign(vm->ctx, vm->env, "psi-session-message-count", 0, psi_foreign_session_message_count);
     sexp_define_foreign(vm->ctx, vm->env, "psi-read-file", 1, psi_foreign_read_file);
+    sexp_define_foreign(vm->ctx, vm->env, "psi-tool-call", 2, psi_foreign_tool_call);
 
     return psi_vm_load_bootstrap(vm);
 }
@@ -198,8 +224,8 @@ void psi_vm_destroy(struct psi_vm *vm) {
     sexp_destroy_context(vm->ctx);
     vm->ctx = NULL;
     vm->env = NULL;
-    vm->session = NULL;
-    psi_current_session = NULL;
+    vm->host.session = NULL;
+    psi_current_host = NULL;
 }
 
 void psi_vm_bind_session(struct psi_vm *vm, struct psi_session *session) {
@@ -207,8 +233,8 @@ void psi_vm_bind_session(struct psi_vm *vm, struct psi_session *session) {
         return;
     }
 
-    vm->session = session;
-    psi_current_session = session;
+    vm->host.session = session;
+    psi_current_host = &vm->host;
 }
 
 int psi_vm_eval_to_string(struct psi_vm *vm, const char *expression, char **output_text) {

@@ -47,6 +47,7 @@
 
           buildInputs = [
             chibi
+            pkgs.cjson
             pkgs.readline
             pkgs.ncurses
           ];
@@ -68,6 +69,7 @@
             pkgs.gnumake
             pkgs.pkg-config
             pkgs.clang
+            pkgs.cjson
             pkgs.gdb
             pkgs.readline
             pkgs.ncurses
@@ -80,4 +82,3 @@
         };
       });
 }
-
