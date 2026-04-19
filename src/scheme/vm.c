@@ -1,10 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <cjson/cJSON.h>
 #include "psi/host_ops.h"
 #include "psi/prompt.h"
 #include "psi/session.h"
-#include "psi/tool.h"
 #include "psi/vm.h"
 
 static struct psi_host_context *psi_current_host = NULL;
@@ -97,10 +97,205 @@ static sexp psi_foreign_read_file(sexp ctx, sexp self, sexp n, sexp path) {
     return path_value;
 }
 
-static sexp psi_foreign_tool_call(sexp ctx, sexp self, sexp n, sexp tool_name, sexp input_json) {
+static sexp psi_vm_make_alist_entry(sexp ctx, const char *key, sexp value) {
+    return sexp_cons(ctx, sexp_intern(ctx, key, -1), value);
+}
+
+static char *psi_vm_symbol_name_copy(sexp ctx, sexp symbol) {
+    sexp string_value;
+
+    string_value = sexp_symbol_to_string(ctx, symbol);
+    if (!sexp_stringp(string_value)) {
+        return NULL;
+    }
+    return psi_strdup_n(sexp_string_data(string_value), (size_t)sexp_string_size(string_value));
+}
+
+static int psi_vm_is_alist(sexp value) {
+    sexp rest;
+
+    if (!sexp_pairp(value)) {
+        return 0;
+    }
+
+    rest = value;
+    while (sexp_pairp(rest)) {
+        sexp entry;
+        sexp key;
+
+        entry = sexp_car(rest);
+        if (!sexp_pairp(entry)) {
+            return 0;
+        }
+        key = sexp_car(entry);
+        if (!sexp_symbolp(key) && !sexp_stringp(key)) {
+            return 0;
+        }
+        rest = sexp_cdr(rest);
+    }
+
+    return rest == SEXP_NULL;
+}
+
+static cJSON *psi_vm_sexp_to_cjson(sexp ctx, sexp value) {
+    cJSON *node;
+    sexp rest;
+
+    if (value == SEXP_NULL) {
+        return cJSON_CreateArray();
+    }
+    if (sexp_stringp(value)) {
+        char *copy;
+        cJSON *string_json;
+
+        copy = psi_strdup_n(sexp_string_data(value), (size_t)sexp_string_size(value));
+        if (copy == NULL) {
+            return NULL;
+        }
+        string_json = cJSON_CreateString(copy);
+        free(copy);
+        return string_json;
+    }
+    if (sexp_booleanp(value)) {
+        return cJSON_CreateBool(value == SEXP_TRUE ? 1 : 0);
+    }
+    if (sexp_fixnump(value)) {
+        return cJSON_CreateNumber((double)sexp_unbox_fixnum(value));
+    }
+    if (sexp_flonump(value)) {
+        return cJSON_CreateNumber((double)sexp_flonum_value(value));
+    }
+    if (sexp_symbolp(value)) {
+        char *key_name;
+        cJSON *symbol_json;
+
+        key_name = psi_vm_symbol_name_copy(ctx, value);
+        if (key_name == NULL) {
+            return NULL;
+        }
+        symbol_json = cJSON_CreateString(key_name);
+        free(key_name);
+        return symbol_json;
+    }
+    if (sexp_pairp(value)) {
+        if (psi_vm_is_alist(value)) {
+            cJSON *object;
+
+            object = cJSON_CreateObject();
+            if (object == NULL) {
+                return NULL;
+            }
+            rest = value;
+            while (sexp_pairp(rest)) {
+                sexp entry;
+                sexp key;
+                sexp item_value;
+                char *key_name;
+                cJSON *item_json;
+
+                entry = sexp_car(rest);
+                key = sexp_car(entry);
+                item_value = sexp_cdr(entry);
+                key_name = sexp_symbolp(key) ? psi_vm_symbol_name_copy(ctx, key) :
+                    psi_strdup_n(sexp_string_data(key), (size_t)sexp_string_size(key));
+                item_json = psi_vm_sexp_to_cjson(ctx, item_value);
+                if (key_name == NULL || item_json == NULL) {
+                    free(key_name);
+                    cJSON_Delete(item_json);
+                    cJSON_Delete(object);
+                    return NULL;
+                }
+                cJSON_AddItemToObject(object, key_name, item_json);
+                free(key_name);
+                rest = sexp_cdr(rest);
+            }
+            return object;
+        }
+
+        node = cJSON_CreateArray();
+        if (node == NULL) {
+            return NULL;
+        }
+        rest = value;
+        while (sexp_pairp(rest)) {
+            cJSON *item_json;
+
+            item_json = psi_vm_sexp_to_cjson(ctx, sexp_car(rest));
+            if (item_json == NULL) {
+                cJSON_Delete(node);
+                return NULL;
+            }
+            cJSON_AddItemToArray(node, item_json);
+            rest = sexp_cdr(rest);
+        }
+        if (rest != SEXP_NULL) {
+            cJSON *tail_json;
+
+            tail_json = psi_vm_sexp_to_cjson(ctx, rest);
+            if (tail_json == NULL) {
+                cJSON_Delete(node);
+                return NULL;
+            }
+            cJSON_AddItemToArray(node, tail_json);
+        }
+        return node;
+    }
+
+    return cJSON_CreateNull();
+}
+
+static sexp psi_vm_cjson_to_sexp(sexp ctx, const cJSON *value) {
+    const cJSON *item;
+    sexp result;
+
+    if (cJSON_IsObject(value)) {
+        result = SEXP_NULL;
+        item = value->child;
+        while (item != NULL) {
+            sexp_push(
+                ctx,
+                result,
+                psi_vm_make_alist_entry(ctx, item->string, psi_vm_cjson_to_sexp(ctx, item))
+            );
+            item = item->next;
+        }
+        return result;
+    }
+    if (cJSON_IsArray(value)) {
+        int index;
+        int count;
+
+        result = SEXP_NULL;
+        count = cJSON_GetArraySize((cJSON *)value);
+        for (index = count - 1; index >= 0; index--) {
+            sexp_push(ctx, result, psi_vm_cjson_to_sexp(ctx, cJSON_GetArrayItem((cJSON *)value, index)));
+        }
+        return result;
+    }
+    if (cJSON_IsString(value) && value->valuestring != NULL) {
+        return sexp_c_string(ctx, value->valuestring, -1);
+    }
+    if (cJSON_IsBool(value)) {
+        return cJSON_IsTrue(value) ? SEXP_TRUE : SEXP_FALSE;
+    }
+    if (cJSON_IsNumber(value)) {
+        if (value->valuedouble == (double)((long)value->valuedouble)) {
+            return sexp_make_fixnum((sexp_sint_t)((long)value->valuedouble));
+        }
+        return sexp_make_flonum(ctx, value->valuedouble);
+    }
+    if (cJSON_IsNull(value)) {
+        return SEXP_FALSE;
+    }
+    return SEXP_FALSE;
+}
+
+static sexp psi_foreign_tool_call(sexp ctx, sexp self, sexp n, sexp tool_name, sexp input_value) {
     struct psi_host_call call;
     char *name_copy;
     char *input_copy;
+    cJSON *input_json;
+    cJSON *output_json;
     sexp result_value;
     int status;
 
@@ -109,12 +304,19 @@ static sexp psi_foreign_tool_call(sexp ctx, sexp self, sexp n, sexp tool_name, s
     if (!sexp_stringp(tool_name)) {
         return sexp_type_exception(ctx, self, SEXP_STRING, tool_name);
     }
-    if (!sexp_stringp(input_json)) {
-        return sexp_type_exception(ctx, self, SEXP_STRING, input_json);
-    }
 
     name_copy = psi_strdup_n(sexp_string_data(tool_name), (size_t)sexp_string_size(tool_name));
-    input_copy = psi_strdup_n(sexp_string_data(input_json), (size_t)sexp_string_size(input_json));
+    if (sexp_stringp(input_value)) {
+        input_json = cJSON_ParseWithLength(sexp_string_data(input_value), (size_t)sexp_string_size(input_value));
+    } else {
+        input_json = psi_vm_sexp_to_cjson(ctx, input_value);
+    }
+    if (input_json == NULL) {
+        free(name_copy);
+        return sexp_user_exception(ctx, self, "invalid structured tool input", input_value);
+    }
+    input_copy = cJSON_PrintUnformatted(input_json);
+    cJSON_Delete(input_json);
     if (name_copy == NULL || input_copy == NULL) {
         free(name_copy);
         free(input_copy);
@@ -131,13 +333,15 @@ static sexp psi_foreign_tool_call(sexp ctx, sexp self, sexp n, sexp tool_name, s
         return sexp_user_exception(ctx, self, "host tool-call operation failed", SEXP_FALSE);
     }
 
-    result_value = sexp_c_string(ctx, call.output_text, -1);
+    output_json = cJSON_Parse(call.output_text);
+    if (output_json == NULL) {
+        result_value = sexp_c_string(ctx, call.output_text, -1);
+    } else {
+        result_value = psi_vm_cjson_to_sexp(ctx, output_json);
+        cJSON_Delete(output_json);
+    }
     free(call.output_text);
     return result_value;
-}
-
-static sexp psi_vm_make_alist_entry(sexp ctx, const char *key, sexp value) {
-    return sexp_cons(ctx, sexp_intern(ctx, key, -1), value);
 }
 
 static sexp psi_foreign_current_date(sexp ctx, sexp self, sexp n) {
@@ -219,51 +423,74 @@ static sexp psi_foreign_file_exists(sexp ctx, sexp self, sexp n, sexp path) {
     return exists ? SEXP_TRUE : SEXP_FALSE;
 }
 
-static sexp psi_foreign_tool_definitions(sexp ctx, sexp self, sexp n) {
-    const struct psi_tool_definition *definitions;
+static sexp psi_foreign_runtime_info(sexp ctx, sexp self, sexp n) {
+    static const char *psi_runtime_primitives[] = {
+        "psi-version",
+        "psi-log",
+        "psi-session-message-count",
+        "psi-read-file",
+        "psi-tool-call",
+        "psi-current-date",
+        "psi-current-working-directory",
+        "psi-parent-directory",
+        "psi-file-exists?",
+        "psi-runtime-info",
+        "psi-session-messages",
+        NULL
+    };
+    char *date_text;
+    char *cwd;
     sexp result;
-    sexp entry;
-    sexp guidelines;
-    size_t count;
+    sexp primitive_names;
     size_t index;
-    size_t guideline_index;
 
     PSI_UNUSED(self);
     PSI_UNUSED(n);
 
-    definitions = psi_tool_definitions(&count);
-    result = SEXP_NULL;
-    for (index = count; index > 0u; index--) {
-        guidelines = SEXP_NULL;
-        guideline_index = 0u;
-        while (definitions[index - 1u].prompt_guidelines[guideline_index] != NULL) {
-            guideline_index++;
-        }
-        while (guideline_index > 0u) {
-            guideline_index--;
-            sexp_push(
-                ctx,
-                guidelines,
-                sexp_c_string(ctx, definitions[index - 1u].prompt_guidelines[guideline_index], -1)
-            );
-        }
-
-        entry = SEXP_NULL;
-        sexp_push(ctx, entry, psi_vm_make_alist_entry(ctx, "prompt-guidelines", guidelines));
-        sexp_push(
-            ctx,
-            entry,
-            psi_vm_make_alist_entry(ctx, "prompt-snippet", sexp_c_string(ctx, definitions[index - 1u].prompt_snippet, -1))
-        );
-        sexp_push(
-            ctx,
-            entry,
-            psi_vm_make_alist_entry(ctx, "description", sexp_c_string(ctx, definitions[index - 1u].description, -1))
-        );
-        sexp_push(ctx, entry, psi_vm_make_alist_entry(ctx, "name", sexp_c_string(ctx, definitions[index - 1u].name, -1)));
-        sexp_push(ctx, result, entry);
+    date_text = psi_prompt_current_date();
+    cwd = psi_prompt_current_working_directory();
+    if (date_text == NULL || cwd == NULL) {
+        free(date_text);
+        free(cwd);
+        return sexp_user_exception(ctx, self, "failed to collect runtime info", SEXP_FALSE);
     }
 
+    primitive_names = SEXP_NULL;
+    for (index = 0u; psi_runtime_primitives[index] != NULL; index++) {
+        sexp_push(ctx, primitive_names, sexp_c_string(ctx, psi_runtime_primitives[index], -1));
+    }
+
+    result = SEXP_NULL;
+    sexp_push(ctx, result, psi_vm_make_alist_entry(ctx, "primitives", primitive_names));
+    sexp_push(
+        ctx,
+        result,
+        psi_vm_make_alist_entry(
+            ctx,
+            "session-message-count",
+            sexp_make_fixnum(
+                (sexp_sint_t)(psi_current_host != NULL && psi_current_host->session != NULL ?
+                    psi_current_host->session->count : 0u)
+            )
+        )
+    );
+    sexp_push(ctx, result, psi_vm_make_alist_entry(ctx, "current-working-directory", sexp_c_string(ctx, cwd, -1)));
+    sexp_push(ctx, result, psi_vm_make_alist_entry(ctx, "current-date", sexp_c_string(ctx, date_text, -1)));
+    sexp_push(
+        ctx,
+        result,
+        psi_vm_make_alist_entry(
+            ctx,
+            "boot-file",
+            psi_current_host != NULL && psi_current_host->vm != NULL && psi_current_host->vm->boot_file != NULL ?
+                sexp_c_string(ctx, psi_current_host->vm->boot_file, -1) :
+                SEXP_FALSE
+        )
+    );
+    sexp_push(ctx, result, psi_vm_make_alist_entry(ctx, "version", sexp_c_string(ctx, PSI_VERSION, -1)));
+
+    free(date_text);
+    free(cwd);
     return result;
 }
 
@@ -380,6 +607,32 @@ static int psi_vm_call_procedure1(struct psi_vm *vm, const char *procedure_name,
     return PSI_STATUS_OK;
 }
 
+static int psi_vm_call_procedure0(struct psi_vm *vm, const char *procedure_name, sexp *value_out) {
+    sexp symbol;
+    sexp procedure;
+    sexp value;
+
+    if (vm == NULL || procedure_name == NULL || value_out == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    symbol = sexp_intern(vm->ctx, procedure_name, -1);
+    procedure = sexp_env_ref(vm->ctx, vm->env, symbol, SEXP_FALSE);
+    if (procedure == SEXP_FALSE) {
+        fprintf(stderr, "undefined Scheme procedure: %s\n", procedure_name);
+        return PSI_STATUS_ERROR;
+    }
+
+    value = sexp_apply(vm->ctx, procedure, SEXP_NULL);
+    if (sexp_exceptionp(value)) {
+        sexp_print_exception(vm->ctx, value, sexp_current_error_port(vm->ctx));
+        return PSI_STATUS_ERROR;
+    }
+
+    *value_out = value;
+    return PSI_STATUS_OK;
+}
+
 static int psi_vm_parse_action_list(
     struct psi_vm *vm,
     sexp value,
@@ -458,6 +711,7 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
     memset(vm, 0, sizeof(*vm));
     vm->boot_file = boot_file;
     vm->host.session = NULL;
+    vm->host.vm = vm;
 
     sexp_scheme_init();
     vm->ctx = sexp_make_eval_context(NULL, NULL, NULL, 0, 0);
@@ -476,6 +730,7 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
         vm->ctx = NULL;
         return PSI_STATUS_ERROR;
     }
+    psi_current_host = &vm->host;
 
     sexp_define_foreign(vm->ctx, vm->env, "psi-version", 0, psi_foreign_version);
     sexp_define_foreign(vm->ctx, vm->env, "psi-log", 1, psi_foreign_log);
@@ -486,7 +741,7 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
     sexp_define_foreign(vm->ctx, vm->env, "psi-current-working-directory", 0, psi_foreign_current_working_directory);
     sexp_define_foreign(vm->ctx, vm->env, "psi-parent-directory", 1, psi_foreign_parent_directory);
     sexp_define_foreign(vm->ctx, vm->env, "psi-file-exists?", 1, psi_foreign_file_exists);
-    sexp_define_foreign(vm->ctx, vm->env, "psi-tool-definitions", 0, psi_foreign_tool_definitions);
+    sexp_define_foreign(vm->ctx, vm->env, "psi-runtime-info", 0, psi_foreign_runtime_info);
     sexp_define_foreign(vm->ctx, vm->env, "psi-session-messages", 0, psi_foreign_session_messages);
 
     return psi_vm_load_bootstrap(vm);
@@ -501,6 +756,7 @@ void psi_vm_destroy(struct psi_vm *vm) {
     vm->ctx = NULL;
     vm->env = NULL;
     vm->host.session = NULL;
+    vm->host.vm = NULL;
     psi_current_host = NULL;
 }
 
@@ -551,8 +807,6 @@ int psi_vm_call_string_procedure(struct psi_vm *vm, const char *procedure_name, 
 }
 
 int psi_vm_call_procedure0_to_string(struct psi_vm *vm, const char *procedure_name, char **output_text) {
-    sexp symbol;
-    sexp procedure;
     sexp value;
 
     if (vm == NULL || procedure_name == NULL || output_text == NULL) {
@@ -560,20 +814,82 @@ int psi_vm_call_procedure0_to_string(struct psi_vm *vm, const char *procedure_na
     }
 
     *output_text = NULL;
-    symbol = sexp_intern(vm->ctx, procedure_name, -1);
-    procedure = sexp_env_ref(vm->ctx, vm->env, symbol, SEXP_FALSE);
-    if (procedure == SEXP_FALSE) {
-        fprintf(stderr, "undefined Scheme procedure: %s\n", procedure_name);
-        return PSI_STATUS_ERROR;
-    }
-
-    value = sexp_apply(vm->ctx, procedure, SEXP_NULL);
-    if (sexp_exceptionp(value)) {
-        sexp_print_exception(vm->ctx, value, sexp_current_error_port(vm->ctx));
+    if (psi_vm_call_procedure0(vm, procedure_name, &value) != PSI_STATUS_OK) {
         return PSI_STATUS_ERROR;
     }
 
     return psi_vm_extract_string(vm->ctx, value, output_text);
+}
+
+int psi_vm_tool_specs_json(struct psi_vm *vm, char **output_json) {
+    return psi_vm_active_tool_specs_json(vm, "", output_json);
+}
+
+int psi_vm_active_tool_specs_json(struct psi_vm *vm, const char *user_text, char **output_json) {
+    sexp value;
+    cJSON *json_value;
+    cJSON *anthropic_tools;
+    cJSON *tool_entry;
+    cJSON *filtered_entry;
+    cJSON *field;
+
+    if (vm == NULL || output_json == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    *output_json = NULL;
+    if (psi_vm_call_procedure1(
+            vm,
+            "psi-select-tool-specs",
+            sexp_c_string(vm->ctx, user_text != NULL ? user_text : "", -1),
+            &value
+        ) != PSI_STATUS_OK) {
+        return PSI_STATUS_ERROR;
+    }
+
+    json_value = psi_vm_sexp_to_cjson(vm->ctx, value);
+    if (json_value == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    if (!cJSON_IsArray(json_value)) {
+        cJSON_Delete(json_value);
+        return PSI_STATUS_ERROR;
+    }
+
+    anthropic_tools = cJSON_CreateArray();
+    if (anthropic_tools == NULL) {
+        cJSON_Delete(json_value);
+        return PSI_STATUS_ERROR;
+    }
+
+    cJSON_ArrayForEach(tool_entry, json_value) {
+        filtered_entry = cJSON_CreateObject();
+        if (filtered_entry == NULL) {
+            cJSON_Delete(anthropic_tools);
+            cJSON_Delete(json_value);
+            return PSI_STATUS_ERROR;
+        }
+
+        field = cJSON_GetObjectItemCaseSensitive(tool_entry, "name");
+        if (field != NULL) {
+            cJSON_AddItemToObject(filtered_entry, "name", cJSON_Duplicate(field, 1));
+        }
+        field = cJSON_GetObjectItemCaseSensitive(tool_entry, "description");
+        if (field != NULL) {
+            cJSON_AddItemToObject(filtered_entry, "description", cJSON_Duplicate(field, 1));
+        }
+        field = cJSON_GetObjectItemCaseSensitive(tool_entry, "input_schema");
+        if (field != NULL) {
+            cJSON_AddItemToObject(filtered_entry, "input_schema", cJSON_Duplicate(field, 1));
+        }
+        cJSON_AddItemToArray(anthropic_tools, filtered_entry);
+    }
+
+    *output_json = cJSON_PrintUnformatted(anthropic_tools);
+    cJSON_Delete(anthropic_tools);
+    cJSON_Delete(json_value);
+    return *output_json != NULL ? PSI_STATUS_OK : PSI_STATUS_ERROR;
 }
 
 int psi_vm_parse_command(

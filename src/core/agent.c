@@ -82,6 +82,9 @@ int psi_agent_runtime_turn(struct psi_agent_runtime *runtime, const char *user_t
 
     status = psi_anthropic_agent_turn_with_prompt(
         &runtime->session,
+        &runtime->vm,
+        &runtime->vm.host,
+        user_text,
         runtime->model,
         runtime->max_tokens,
         system_prompt,

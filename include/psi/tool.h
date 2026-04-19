@@ -3,15 +3,13 @@
 
 #include "psi/common.h"
 
-struct psi_tool_definition {
-    const char *name;
-    const char *description;
-    const char *prompt_snippet;
-    const char *prompt_guidelines[5];
-};
+struct psi_host_context;
 
-const struct psi_tool_definition *psi_tool_definitions(size_t *count);
-int psi_tool_call_json(const char *tool_name, const char *input_json, char **output_json);
-int psi_tool_schemas_json(char **output_json);
+int psi_tool_call_json(
+    struct psi_host_context *host,
+    const char *tool_name,
+    const char *input_json,
+    char **output_json
+);
 
 #endif

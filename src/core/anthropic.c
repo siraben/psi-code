@@ -6,6 +6,7 @@
 #include "psi/anthropic.h"
 #include "psi/common.h"
 #include "psi/tool.h"
+#include "psi/vm.h"
 
 struct psi_http_buffer {
     char *data;
@@ -1084,6 +1085,9 @@ int psi_anthropic_complete_text(
 
 int psi_anthropic_agent_turn_with_prompt(
     struct psi_session *session,
+    struct psi_vm *vm,
+    struct psi_host_context *host,
+    const char *user_text,
     const char *model,
     long max_tokens,
     const char *system_prompt,
@@ -1115,7 +1119,7 @@ int psi_anthropic_agent_turn_with_prompt(
     int loop_count;
     struct psi_stream_state stream_state;
 
-    if (session == NULL || output_text == NULL) {
+    if (session == NULL || vm == NULL || host == NULL || output_text == NULL) {
         return PSI_STATUS_ERROR;
     }
 
@@ -1138,7 +1142,7 @@ int psi_anthropic_agent_turn_with_prompt(
     if (system_prompt == NULL) {
         return PSI_STATUS_ERROR;
     }
-    if (psi_tool_schemas_json(&tools_json) != PSI_STATUS_OK) {
+    if (psi_vm_active_tool_specs_json(vm, user_text, &tools_json) != PSI_STATUS_OK) {
         return PSI_STATUS_ERROR;
     }
     tools = cJSON_Parse(tools_json);
@@ -1306,7 +1310,7 @@ int psi_anthropic_agent_turn_with_prompt(
                 return PSI_STATUS_ERROR;
             }
 
-            if (psi_tool_call_json(name->valuestring, input_json, &tool_output) != PSI_STATUS_OK) {
+            if (psi_tool_call_json(host, name->valuestring, input_json, &tool_output) != PSI_STATUS_OK) {
                 free(input_json);
                 cJSON_Delete(tool_results_message);
                 cJSON_Delete(content);
@@ -1349,9 +1353,12 @@ int psi_anthropic_agent_turn_with_prompt(
 
 int psi_anthropic_agent_turn(
     struct psi_session *session,
+    struct psi_vm *vm,
+    struct psi_host_context *host,
+    const char *user_text,
     const char *model,
     long max_tokens,
     char **output_text
 ) {
-    return psi_anthropic_agent_turn_with_prompt(session, model, max_tokens, "", output_text);
+    return psi_anthropic_agent_turn_with_prompt(session, vm, host, user_text, model, max_tokens, "", output_text);
 }

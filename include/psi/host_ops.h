@@ -4,6 +4,7 @@
 #include "psi/common.h"
 
 struct psi_session;
+struct psi_vm;
 
 enum psi_host_op_kind {
     PSI_HOST_OP_VERSION = 0,
@@ -15,6 +16,7 @@ enum psi_host_op_kind {
 
 struct psi_host_context {
     struct psi_session *session;
+    struct psi_vm *vm;
 };
 
 struct psi_host_call {

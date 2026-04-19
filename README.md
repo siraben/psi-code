@@ -42,7 +42,8 @@ nix build
 ./result/bin/psi --help
 ./result/bin/psi --eval '(+ 1 2 3)'
 ./result/bin/psi --eval '(psi-read-file "README.md")'
-./result/bin/psi --eval '(psi-tool-call "read" "{\"path\":\"README.md\"}")'
+./result/bin/psi --eval '(psi-tool-call "read" (list (cons '"'"'path "README.md")))'
+./result/bin/psi --eval '(psi-tool-call "scheme" (list (cons '"'"'mode "summary")))'
 ./result/bin/psi --system-prompt
 ANTHROPIC_API_KEY=... ./result/bin/psi --agent 'Read README.md and summarize this repository.'
 ANTHROPIC_API_KEY=... ./result/bin/psi --session /tmp/psi-session.jsonl
@@ -58,7 +59,8 @@ nix develop
 make
 ./build/psi --eval '(+ 1 2 3)'
 ./build/psi --eval '(psi-read-file "README.md")'
-./build/psi --eval '(psi-tool-call "bash" "{\"command\":\"true\"}")'
+./build/psi --eval '(psi-tool-call "bash" (list (cons '"'"'command "true")))'
+./build/psi --eval '(psi-tool-call "scheme" (list (cons '"'"'mode "eval") (cons '"'"'expression "(length (psi-tool-specs))")))'
 ./build/psi --system-prompt
 set -a && . ./.env.local && ./build/psi --agent 'Say exactly: psi streaming test'
 set -a && . ./.env.local && ./build/psi --session .psi/session.jsonl
@@ -79,6 +81,11 @@ Current structured host tools exposed through `psi-tool-call`:
 - `grep`
 - `find`
 - `ls`
+- `scheme`
+
+`psi-tool-call` now accepts structured Scheme values rather than requiring JSON
+strings, so the bootstrap and extensions can stay mostly in Scheme instead of
+serializing through stringly host APIs.
 
 `bash`, `grep`, `find`, and `ls` now run through a small host process layer that
 captures output and exit status. The POSIX implementation uses `fork`/`exec`,

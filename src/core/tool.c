@@ -3,86 +3,13 @@
 #include <string.h>
 #include <cjson/cJSON.h>
 #include "psi/common.h"
+#include "psi/host_ops.h"
 #include "psi/process.h"
 #include "psi/tool.h"
+#include "psi/vm.h"
 
 static const long PSI_TOOL_FILE_MAX_BYTES = 262144l;
 static char *psi_tool_success_json(cJSON *root);
-
-static const struct psi_tool_definition psi_builtin_tools[] = {
-    {
-        "read",
-        "Read the contents of a file. Use this to inspect source files, configuration, and other project assets.",
-        "Read file contents",
-        {
-            "Use read to examine files instead of cat or sed.",
-            NULL
-        }
-    },
-    {
-        "bash",
-        "Execute a shell command in the current working directory and return its output.",
-        "Execute bash commands (ls, grep, find, tests, git, build commands)",
-        {
-            "Use bash for commands such as ls, rg, find, git, and tests.",
-            NULL
-        }
-    },
-    {
-        "edit",
-        "Edit a single file using exact text replacement. Prefer small, precise edits over broad rewrites.",
-        "Make precise file edits with exact text replacement, including multiple disjoint edits in one call",
-        {
-            "Use edit for precise changes where old text can be matched exactly.",
-            "When changing multiple separate locations in one file, use one edit call with multiple entries in edits[].",
-            "Keep edits[].oldText as small as possible while still being unique in the file.",
-            NULL
-        }
-    },
-    {
-        "write",
-        "Write content to a file. Creates the file if it does not exist and overwrites it if it does.",
-        "Create or overwrite files",
-        {
-            "Use write for new files or full rewrites.",
-            NULL
-        }
-    },
-    {
-        "grep",
-        "Search file contents for a pattern and return matching lines with file paths and line numbers.",
-        "Search file contents for patterns (prefer this over broad shell grep)",
-        {
-            "Prefer grep over bash when searching file contents.",
-            NULL
-        }
-    },
-    {
-        "find",
-        "Find files by glob pattern relative to a directory.",
-        "Find files by glob pattern",
-        {
-            "Prefer find over bash when locating files.",
-            NULL
-        }
-    },
-    {
-        "ls",
-        "List directory contents.",
-        "List directory contents",
-        {
-            "Prefer ls over bash for a quick directory listing.",
-            NULL
-        }
-    }
-};
-
-const struct psi_tool_definition *psi_tool_definitions(size_t *count) {
-    if (count != NULL) {
-        *count = sizeof(psi_builtin_tools) / sizeof(psi_builtin_tools[0]);
-    }
-    return psi_builtin_tools;
-}
 
 static char *psi_tool_error_json(const char *tool_name, const char *message) {
     cJSON *root;
@@ -610,146 +537,70 @@ static char *psi_tool_call_ls(cJSON *input) {
     return psi_tool_shell_command_json("ls", command, path, 1);
 }
 
-int psi_tool_schemas_json(char **output_json) {
-    cJSON *tools;
-    cJSON *tool;
-    cJSON *schema;
-    cJSON *properties;
-    cJSON *required;
+static char *psi_tool_call_scheme(struct psi_host_context *host, cJSON *input) {
+    const cJSON *mode_value;
+    const cJSON *expression_value;
+    const cJSON *code_value;
+    const char *mode;
+    const char *expression;
+    char *result_text;
+    cJSON *root;
 
-    if (output_json == NULL) {
-        return PSI_STATUS_ERROR;
+    if (host == NULL || host->vm == NULL) {
+        return psi_tool_error_json("scheme", "scheme runtime is not available");
     }
 
-    *output_json = NULL;
-    tools = cJSON_CreateArray();
-    if (tools == NULL) {
-        return PSI_STATUS_ERROR;
+    mode_value = cJSON_GetObjectItemCaseSensitive(input, "mode");
+    expression_value = cJSON_GetObjectItemCaseSensitive(input, "expression");
+    code_value = cJSON_GetObjectItemCaseSensitive(input, "code");
+    mode = cJSON_IsString(mode_value) && mode_value->valuestring != NULL ? mode_value->valuestring : "summary";
+    expression = NULL;
+    if (cJSON_IsString(expression_value) && expression_value->valuestring != NULL) {
+        expression = expression_value->valuestring;
+    } else if (cJSON_IsString(code_value) && code_value->valuestring != NULL) {
+        expression = code_value->valuestring;
     }
 
-    tool = cJSON_CreateObject();
-    schema = cJSON_CreateObject();
-    properties = cJSON_CreateObject();
-    required = cJSON_CreateArray();
-    cJSON_AddStringToObject(tool, "name", "read");
-    cJSON_AddStringToObject(tool, "description", psi_builtin_tools[0].description);
-    cJSON_AddStringToObject(schema, "type", "object");
-    cJSON_AddItemToObject(schema, "properties", properties);
-    cJSON_AddItemToObject(schema, "required", required);
-    cJSON_AddItemToObject(properties, "path", cJSON_Parse("{\"type\":\"string\"}"));
-    cJSON_AddItemToArray(required, cJSON_CreateString("path"));
-    cJSON_AddItemToObject(tool, "input_schema", schema);
-    cJSON_AddItemToArray(tools, tool);
+    result_text = NULL;
+    if (strcmp(mode, "summary") == 0 || strcmp(mode, "inspect") == 0) {
+        if (psi_vm_call_procedure0_to_string(host->vm, "psi-runtime-summary", &result_text) != PSI_STATUS_OK) {
+            free(result_text);
+            return psi_tool_error_json("scheme", "failed to inspect runtime");
+        }
+    } else if (strcmp(mode, "eval") == 0) {
+        if (expression == NULL) {
+            return psi_tool_error_json("scheme", "missing string field: expression");
+        }
+        if (psi_vm_eval_to_string(host->vm, expression, &result_text) != PSI_STATUS_OK) {
+            free(result_text);
+            return psi_tool_error_json("scheme", "failed to evaluate expression");
+        }
+    } else {
+        return psi_tool_error_json("scheme", "unsupported mode");
+    }
 
-    tool = cJSON_CreateObject();
-    schema = cJSON_CreateObject();
-    properties = cJSON_CreateObject();
-    required = cJSON_CreateArray();
-    cJSON_AddStringToObject(tool, "name", "grep");
-    cJSON_AddStringToObject(tool, "description", psi_builtin_tools[4].description);
-    cJSON_AddStringToObject(schema, "type", "object");
-    cJSON_AddItemToObject(schema, "properties", properties);
-    cJSON_AddItemToObject(schema, "required", required);
-    cJSON_AddItemToObject(properties, "pattern", cJSON_Parse("{\"type\":\"string\"}"));
-    cJSON_AddItemToObject(properties, "path", cJSON_Parse("{\"type\":\"string\"}"));
-    cJSON_AddItemToObject(properties, "glob", cJSON_Parse("{\"type\":\"string\"}"));
-    cJSON_AddItemToObject(properties, "ignoreCase", cJSON_Parse("{\"type\":\"boolean\"}"));
-    cJSON_AddItemToObject(properties, "literal", cJSON_Parse("{\"type\":\"boolean\"}"));
-    cJSON_AddItemToObject(properties, "context", cJSON_Parse("{\"type\":\"number\"}"));
-    cJSON_AddItemToObject(properties, "limit", cJSON_Parse("{\"type\":\"number\"}"));
-    cJSON_AddItemToArray(required, cJSON_CreateString("pattern"));
-    cJSON_AddItemToObject(tool, "input_schema", schema);
-    cJSON_AddItemToArray(tools, tool);
-
-    tool = cJSON_CreateObject();
-    schema = cJSON_CreateObject();
-    properties = cJSON_CreateObject();
-    required = cJSON_CreateArray();
-    cJSON_AddStringToObject(tool, "name", "find");
-    cJSON_AddStringToObject(tool, "description", psi_builtin_tools[5].description);
-    cJSON_AddStringToObject(schema, "type", "object");
-    cJSON_AddItemToObject(schema, "properties", properties);
-    cJSON_AddItemToObject(schema, "required", required);
-    cJSON_AddItemToObject(properties, "pattern", cJSON_Parse("{\"type\":\"string\"}"));
-    cJSON_AddItemToObject(properties, "path", cJSON_Parse("{\"type\":\"string\"}"));
-    cJSON_AddItemToObject(properties, "limit", cJSON_Parse("{\"type\":\"number\"}"));
-    cJSON_AddItemToArray(required, cJSON_CreateString("pattern"));
-    cJSON_AddItemToObject(tool, "input_schema", schema);
-    cJSON_AddItemToArray(tools, tool);
-
-    tool = cJSON_CreateObject();
-    schema = cJSON_CreateObject();
-    properties = cJSON_CreateObject();
-    required = cJSON_CreateArray();
-    cJSON_AddStringToObject(tool, "name", "ls");
-    cJSON_AddStringToObject(tool, "description", psi_builtin_tools[6].description);
-    cJSON_AddStringToObject(schema, "type", "object");
-    cJSON_AddItemToObject(schema, "properties", properties);
-    cJSON_AddItemToObject(schema, "required", required);
-    cJSON_AddItemToObject(properties, "path", cJSON_Parse("{\"type\":\"string\"}"));
-    cJSON_AddItemToObject(properties, "limit", cJSON_Parse("{\"type\":\"number\"}"));
-    cJSON_AddItemToObject(tool, "input_schema", schema);
-    cJSON_AddItemToArray(tools, tool);
-
-    tool = cJSON_CreateObject();
-    schema = cJSON_CreateObject();
-    properties = cJSON_CreateObject();
-    required = cJSON_CreateArray();
-    cJSON_AddStringToObject(tool, "name", "bash");
-    cJSON_AddStringToObject(tool, "description", psi_builtin_tools[1].description);
-    cJSON_AddStringToObject(schema, "type", "object");
-    cJSON_AddItemToObject(schema, "properties", properties);
-    cJSON_AddItemToObject(schema, "required", required);
-    cJSON_AddItemToObject(properties, "command", cJSON_Parse("{\"type\":\"string\"}"));
-    cJSON_AddItemToObject(properties, "timeout", cJSON_Parse("{\"type\":\"number\"}"));
-    cJSON_AddItemToArray(required, cJSON_CreateString("command"));
-    cJSON_AddItemToObject(tool, "input_schema", schema);
-    cJSON_AddItemToArray(tools, tool);
-
-    tool = cJSON_CreateObject();
-    schema = cJSON_CreateObject();
-    properties = cJSON_CreateObject();
-    required = cJSON_CreateArray();
-    cJSON_AddStringToObject(tool, "name", "edit");
-    cJSON_AddStringToObject(tool, "description", psi_builtin_tools[2].description);
-    cJSON_AddStringToObject(schema, "type", "object");
-    cJSON_AddItemToObject(schema, "properties", properties);
-    cJSON_AddItemToObject(schema, "required", required);
-    cJSON_AddItemToObject(properties, "path", cJSON_Parse("{\"type\":\"string\"}"));
-    cJSON_AddItemToObject(
-        properties,
-        "edits",
-        cJSON_Parse(
-            "{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"oldText\":{\"type\":\"string\"},\"newText\":{\"type\":\"string\"}},\"required\":[\"oldText\",\"newText\"]}}"
-        )
-    );
-    cJSON_AddItemToArray(required, cJSON_CreateString("path"));
-    cJSON_AddItemToArray(required, cJSON_CreateString("edits"));
-    cJSON_AddItemToObject(tool, "input_schema", schema);
-    cJSON_AddItemToArray(tools, tool);
-
-    tool = cJSON_CreateObject();
-    schema = cJSON_CreateObject();
-    properties = cJSON_CreateObject();
-    required = cJSON_CreateArray();
-    cJSON_AddStringToObject(tool, "name", "write");
-    cJSON_AddStringToObject(tool, "description", psi_builtin_tools[3].description);
-    cJSON_AddStringToObject(schema, "type", "object");
-    cJSON_AddItemToObject(schema, "properties", properties);
-    cJSON_AddItemToObject(schema, "required", required);
-    cJSON_AddItemToObject(properties, "path", cJSON_Parse("{\"type\":\"string\"}"));
-    cJSON_AddItemToObject(properties, "content", cJSON_Parse("{\"type\":\"string\"}"));
-    cJSON_AddItemToArray(required, cJSON_CreateString("path"));
-    cJSON_AddItemToArray(required, cJSON_CreateString("content"));
-    cJSON_AddItemToObject(tool, "input_schema", schema);
-    cJSON_AddItemToArray(tools, tool);
-
-    *output_json = cJSON_PrintUnformatted(tools);
-    cJSON_Delete(tools);
-    return *output_json != NULL ? PSI_STATUS_OK : PSI_STATUS_ERROR;
+    root = cJSON_CreateObject();
+    if (root == NULL) {
+        free(result_text);
+        return NULL;
+    }
+    cJSON_AddBoolToObject(root, "ok", 1);
+    cJSON_AddStringToObject(root, "tool", "scheme");
+    cJSON_AddStringToObject(root, "mode", mode);
+    if (expression != NULL) {
+        cJSON_AddStringToObject(root, "expression", expression);
+    }
+    cJSON_AddStringToObject(root, "result", result_text != NULL ? result_text : "");
+    free(result_text);
+    return psi_tool_success_json(root);
 }
 
-int psi_tool_call_json(const char *tool_name, const char *input_json, char **output_json) {
+int psi_tool_call_json(
+    struct psi_host_context *host,
+    const char *tool_name,
+    const char *input_json,
+    char **output_json
+) {
     cJSON *input;
 
     if (output_json == NULL) {
@@ -785,6 +636,8 @@ int psi_tool_call_json(const char *tool_name, const char *input_json, char **out
         *output_json = psi_tool_call_find(input);
     } else if (strcmp(tool_name, "ls") == 0) {
         *output_json = psi_tool_call_ls(input);
+    } else if (strcmp(tool_name, "scheme") == 0) {
+        *output_json = psi_tool_call_scheme(host, input);
     } else {
         *output_json = psi_tool_error_json(tool_name, "unknown tool");
     }

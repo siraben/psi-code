@@ -76,7 +76,7 @@ int psi_host_call(struct psi_host_context *context, struct psi_host_call *call) 
         case PSI_HOST_OP_READ_FILE:
             return psi_host_read_file(call);
         case PSI_HOST_OP_TOOL_CALL:
-            return psi_tool_call_json(call->name, call->input_text, &call->output_text);
+            return psi_tool_call_json(context, call->name, call->input_text, &call->output_text);
         default:
             return PSI_STATUS_ERROR;
     }

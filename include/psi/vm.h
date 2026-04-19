@@ -19,6 +19,8 @@ void psi_vm_bind_session(struct psi_vm *vm, struct psi_session *session);
 int psi_vm_eval_to_string(struct psi_vm *vm, const char *expression, char **output_text);
 int psi_vm_call_string_procedure(struct psi_vm *vm, const char *procedure_name, const char *argument, char **output_text);
 int psi_vm_call_procedure0_to_string(struct psi_vm *vm, const char *procedure_name, char **output_text);
+int psi_vm_tool_specs_json(struct psi_vm *vm, char **output_json);
+int psi_vm_active_tool_specs_json(struct psi_vm *vm, const char *user_text, char **output_json);
 int psi_vm_parse_command(
     struct psi_vm *vm,
     const char *line,

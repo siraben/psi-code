@@ -11,16 +11,20 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 "$ROOT_DIR/build/psi" --eval '(+ 1 2 3)' | grep '^6$'
 "$ROOT_DIR/build/psi" --eval '(if (> (string-length (psi-read-file "README.md")) 0) "ok" "bad")' | grep '^ok$'
-"$ROOT_DIR/build/psi" --eval '(psi-tool-call "read" "{\"path\":\"README.md\"}")' | grep '"tool":"read"'
-"$ROOT_DIR/build/psi" --eval "(psi-tool-call \"write\" \"{\\\"path\\\":\\\"$TOOL_FILE\\\",\\\"text\\\":\\\"alpha beta\\\"}\")" | grep '"tool":"write"'
+"$ROOT_DIR/build/psi" --eval '(assq '"'"'name (car (psi-tool-specs)))' | grep 'read'
+"$ROOT_DIR/build/psi" --eval '(psi-tool-call "read" (list (cons '"'"'path "README.md")))' | grep '(tool . "read")'
+"$ROOT_DIR/build/psi" --eval "(psi-tool-call \"write\" (list (cons 'path \"$TOOL_FILE\") (cons 'text \"alpha beta\")))" | grep '(tool . "write")'
 grep '^alpha beta$' "$TOOL_FILE"
-"$ROOT_DIR/build/psi" --eval "(psi-tool-call \"edit\" \"{\\\"path\\\":\\\"$TOOL_FILE\\\",\\\"oldText\\\":\\\"beta\\\",\\\"newText\\\":\\\"gamma\\\"}\")" | grep '"tool":"edit"'
+"$ROOT_DIR/build/psi" --eval "(psi-tool-call \"edit\" (list (cons 'path \"$TOOL_FILE\") (cons 'oldText \"beta\") (cons 'newText \"gamma\")))" | grep '(tool . "edit")'
 grep '^alpha gamma$' "$TOOL_FILE"
-"$ROOT_DIR/build/psi" --eval '(psi-tool-call "bash" "{\"command\":\"printf hello\"}")' | grep '"output":"hello"'
-"$ROOT_DIR/build/psi" --eval "(psi-tool-call \"grep\" \"{\\\"pattern\\\":\\\"alpha gamma\\\",\\\"path\\\":\\\"$TOOL_FILE\\\",\\\"literal\\\":true}\")" | grep '"tool":"grep"'
-"$ROOT_DIR/build/psi" --eval '(psi-tool-call "find" "{\"pattern\":\"*.md\",\"path\":\".\",\"limit\":5}")' | grep '"tool":"find"'
-"$ROOT_DIR/build/psi" --eval '(psi-tool-call "ls" "{\"path\":\".\",\"limit\":5}")' | grep '"tool":"ls"'
+"$ROOT_DIR/build/psi" --eval '(psi-tool-call "bash" (list (cons '"'"'command "printf hello")))' | grep '(output . "hello")'
+"$ROOT_DIR/build/psi" --eval "(psi-tool-call \"grep\" (list (cons 'pattern \"alpha gamma\") (cons 'path \"$TOOL_FILE\") (cons 'literal #t)))" | grep '(tool . "grep")'
+"$ROOT_DIR/build/psi" --eval '(psi-tool-call "find" (list (cons '"'"'pattern "*.md") (cons '"'"'path ".") (cons '"'"'limit 5)))' | grep '(tool . "find")'
+"$ROOT_DIR/build/psi" --eval '(psi-tool-call "ls" (list (cons '"'"'path ".") (cons '"'"'limit 5)))' | grep '(tool . "ls")'
+"$ROOT_DIR/build/psi" --eval '(psi-tool-call "scheme" (list (cons '"'"'mode "summary")))' | grep 'psi Scheme runtime'
+"$ROOT_DIR/build/psi" --eval '(psi-tool-call "scheme" (list (cons '"'"'mode "eval") (cons '"'"'expression "(length (psi-tool-specs))")))' | grep '(result . "8")'
 "$ROOT_DIR/build/psi" --system-prompt | grep '^Available tools:$'
+"$ROOT_DIR/build/psi" --system-prompt | grep 'scheme: Inspect or evaluate the embedded Scheme runtime'
 mkdir -p "$CONTEXT_DIR"
 printf '%s\n' 'Project rule: keep changes minimal.' >"$CONTEXT_DIR/AGENTS.md"
 (cd "$CONTEXT_DIR" && "$ROOT_DIR/build/psi" --system-prompt) | grep 'Project rule: keep changes minimal.'
