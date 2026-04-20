@@ -28,7 +28,6 @@ SOURCES = \
 	src/core/agent.c \
 	src/core/common.c \
 	src/core/anthropic.c \
-	src/core/host_ops.c \
 	src/core/message.c \
 	src/core/process.c \
 	src/core/prompt.c \
@@ -44,7 +43,6 @@ OBJECTS = \
 	$(BUILD_DIR)/agent.o \
 	$(BUILD_DIR)/common.o \
 	$(BUILD_DIR)/anthropic.o \
-	$(BUILD_DIR)/host_ops.o \
 	$(BUILD_DIR)/message.o \
 	$(BUILD_DIR)/process.o \
 	$(BUILD_DIR)/prompt.o \
@@ -75,9 +73,6 @@ $(BUILD_DIR)/common.o: src/core/common.c include/psi/common.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/anthropic.o: src/core/anthropic.c include/psi/anthropic.h include/psi/common.h include/psi/prompt.h include/psi/session.h include/psi/vm.h
-	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/host_ops.o: src/core/host_ops.c include/psi/common.h include/psi/host_ops.h include/psi/session.h include/psi/vm.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/message.o: src/core/message.c include/psi/common.h include/psi/message.h
