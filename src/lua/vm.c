@@ -75,7 +75,7 @@ static void psi_vm_push_json_value(lua_State *L, const cJSON *v) {
     }
     if (cJSON_IsNumber(v)) {
         double d = v->valuedouble;
-        if (d == (double)((long long)d)) {
+        if (d == (double)(lua_Integer)d) {
             lua_pushinteger(L, (lua_Integer)d);
         } else {
             lua_pushnumber(L, d);

@@ -10,7 +10,7 @@ CFLAGS ?= -O2
 CPPFLAGS ?=
 LDFLAGS ?=
 
-BASE_CFLAGS = -std=c99 -Wall -Wextra -Werror
+BASE_CFLAGS = -std=c89 -pedantic -Wall -Wextra -Werror
 LOCAL_CPPFLAGS = -Iinclude -DPSI_LUA_BOOT_FILE=\"$(LUA_BOOT_FILE)\" $(shell $(PKG_CONFIG) --cflags lua5.4 libcjson)
 LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) --cflags libedit)
 LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) --cflags libcurl)
