@@ -2,6 +2,7 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+PSI="$ROOT_DIR/build/psi"
 TMP_DIR=$(mktemp -d)
 SESSION_FILE="$TMP_DIR/session.jsonl"
 TOOL_FILE="$TMP_DIR/tool.txt"
@@ -9,47 +10,108 @@ CONTEXT_DIR="$TMP_DIR/project"
 
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-"$ROOT_DIR/build/psi" --eval '(+ 1 2 3)' | grep '^6$'
-"$ROOT_DIR/build/psi" --eval '(if (> (string-length (psi-read-file "README.md")) 0) "ok" "bad")' | grep '^ok$'
-"$ROOT_DIR/build/psi" --eval '(assq '"'"'name (car (psi-tool-specs)))' | grep 'read'
-"$ROOT_DIR/build/psi" --eval '(psi-tool-call "read" (list (cons '"'"'path "README.md")))' | grep '(tool . "read")'
-"$ROOT_DIR/build/psi" --eval "(psi-tool-call \"write\" (list (cons 'path \"$TOOL_FILE\") (cons 'text \"alpha beta\")))" | grep '(tool . "write")'
+# ----------------------------------------------------------------------
+# Lua eval surface: basic arithmetic, host primitives, and module access.
+# ----------------------------------------------------------------------
+"$PSI" --eval 'return 1 + 2 + 3' | grep '^6$'
+"$PSI" --eval 'return #psi.read_file("README.md") > 0 and "ok" or "bad"' | grep '^ok$'
+"$PSI" --eval 'return require("psi.tools").all()[1].name' | grep '^read$'
+
+# ----------------------------------------------------------------------
+# Tool dispatch: each built-in tool produces an ok ToolResult with the
+# right `tool` field and expected side effects.
+# ----------------------------------------------------------------------
+"$PSI" --eval 'local r = require("psi.tools").dispatch("read", {path="README.md"}); return r.tool .. " " .. tostring(r.ok)' \
+    | grep '^read true$'
+
+"$PSI" --eval "local r = require('psi.tools').dispatch('write', {path='$TOOL_FILE', content='alpha beta'}); return r.tool .. ' ' .. tostring(r.ok) .. ' ' .. tostring(r.extras.bytes_written)" \
+    | grep '^write true 10$'
 grep '^alpha beta$' "$TOOL_FILE"
-"$ROOT_DIR/build/psi" --eval "(psi-tool-call \"edit\" (list (cons 'path \"$TOOL_FILE\") (cons 'oldText \"beta\") (cons 'newText \"gamma\")))" | grep '(tool . "edit")'
+
+"$PSI" --eval "local r = require('psi.tools').dispatch('edit', {path='$TOOL_FILE', oldText='beta', newText='gamma'}); return r.tool .. ' ' .. tostring(r.ok) .. ' ' .. tostring(r.extras.replacements)" \
+    | grep '^edit true 1$'
 grep '^alpha gamma$' "$TOOL_FILE"
-"$ROOT_DIR/build/psi" --eval '(psi-tool-call "bash" (list (cons '"'"'command "printf hello")))' | grep '(output . "hello")'
-"$ROOT_DIR/build/psi" --eval "(psi-tool-call \"grep\" (list (cons 'pattern \"alpha gamma\") (cons 'path \"$TOOL_FILE\") (cons 'literal #t)))" | grep '(tool . "grep")'
-"$ROOT_DIR/build/psi" --eval '(psi-tool-call "find" (list (cons '"'"'pattern "*.md") (cons '"'"'path ".") (cons '"'"'limit 5)))' | grep '(tool . "find")'
-"$ROOT_DIR/build/psi" --eval '(psi-tool-call "ls" (list (cons '"'"'path ".") (cons '"'"'limit 5)))' | grep '(tool . "ls")'
-"$ROOT_DIR/build/psi" --eval '(psi-tool-call "scheme" (list (cons '"'"'mode "summary")))' | grep 'psi Scheme runtime'
-"$ROOT_DIR/build/psi" --eval '(psi-tool-call "scheme" (list (cons '"'"'mode "eval") (cons '"'"'expression "(length (psi-tool-specs))")))' | grep '(result . "8")'
-"$ROOT_DIR/build/psi" --eval "(begin (psi-handle-event 'tool-call (list (cons 'id \"w1\") (cons 'tool \"write\") (cons 'input (list (cons 'path \"$TOOL_FILE\") (cons 'content \"delta\"))))) (let ((result (psi-tool-call \"write\" (list (cons 'path \"$TOOL_FILE\") (cons 'content \"delta\"))))) (psi-handle-event 'tool-result (list (cons 'id \"w1\") (cons 'tool \"write\") (cons 'result result)))))" | grep 'updated'
-"$ROOT_DIR/build/psi" --eval "(begin (psi-handle-event 'tool-call (list (cons 'id \"w1\") (cons 'tool \"write\") (cons 'input (list (cons 'path \"$TOOL_FILE\") (cons 'content \"delta\"))))) (let ((result (psi-tool-call \"write\" (list (cons 'path \"$TOOL_FILE\") (cons 'content \"delta\"))))) (psi-handle-event 'tool-result (list (cons 'id \"w1\") (cons 'tool \"write\") (cons 'result result)))))" | grep 'delta'
-"$ROOT_DIR/build/psi" --system-prompt | grep '^Available tools:$'
-"$ROOT_DIR/build/psi" --system-prompt | grep 'scheme: Inspect or evaluate the embedded Scheme runtime'
-"$ROOT_DIR/build/psi" --help | grep -- '--tui'
+
+"$PSI" --eval 'local r = require("psi.tools").dispatch("bash", {command="printf hello"}); return r.extras.output' \
+    | grep '^hello$'
+
+"$PSI" --eval "local r = require('psi.tools').dispatch('grep', {pattern='alpha gamma', path='$TOOL_FILE', literal=true}); return r.tool .. ' ' .. tostring(r.ok)" \
+    | grep '^grep true$'
+
+"$PSI" --eval 'local r = require("psi.tools").dispatch("find", {pattern="*.md", path=".", limit=5}); return r.tool .. " " .. tostring(r.ok) .. " " .. tostring(#r.extras.output > 0)' \
+    | grep '^find true true$'
+
+"$PSI" --eval 'local r = require("psi.tools").dispatch("ls", {path=".", limit=5}); return r.tool .. " " .. tostring(r.ok) .. " " .. tostring(#r.extras.output > 0)' \
+    | grep '^ls true true$'
+
+"$PSI" --eval 'local r = require("psi.tools").dispatch("lua", {mode="summary"}); return r.extras.result:match("psi Lua runtime")' \
+    | grep '^psi Lua runtime$'
+
+"$PSI" --eval 'local r = require("psi.tools").dispatch("lua", {mode="eval", expression="#require(\"psi.tools\").all()"}); return r.extras.result' \
+    | grep '^8$'
+
+# ----------------------------------------------------------------------
+# Render event hooks: tool-call captures a frame, tool-result renders a
+# diff. Exercises psi.render.handle_event on the write tool.
+# ----------------------------------------------------------------------
+"$PSI" --eval "
+local tools = require('psi.tools')
+local render = require('psi.render')
+render.handle_event('tool-call', {id='w1', tool='write', input={path='$TOOL_FILE', content='delta'}})
+local r = tools.dispatch('write', {path='$TOOL_FILE', content='delta'})
+return render.handle_event('tool-result', {id='w1', tool='write', result=r})
+" | grep 'updated'
+
+"$PSI" --eval "
+local tools = require('psi.tools')
+local render = require('psi.render')
+render.handle_event('tool-call', {id='w2', tool='write', input={path='$TOOL_FILE', content='delta'}})
+local r = tools.dispatch('write', {path='$TOOL_FILE', content='delta'})
+return render.handle_event('tool-result', {id='w2', tool='write', result=r})
+" | grep 'delta'
+
+# ----------------------------------------------------------------------
+# System prompt: lists the tools, picks up AGENTS.md context files.
+# ----------------------------------------------------------------------
+"$PSI" --system-prompt | grep '^Available tools:$'
+"$PSI" --system-prompt | grep 'lua: Inspect or evaluate the embedded Lua runtime'
+"$PSI" --help | grep -- '--tui'
+
 mkdir -p "$CONTEXT_DIR"
 printf '%s\n' 'Project rule: keep changes minimal.' >"$CONTEXT_DIR/AGENTS.md"
-(cd "$CONTEXT_DIR" && "$ROOT_DIR/build/psi" --system-prompt) | grep 'Project rule: keep changes minimal.'
-"$ROOT_DIR/build/psi" --print 'hello' | grep 'prompt: hello'
-"$ROOT_DIR/build/psi" --print 'hello' | grep 'session-messages: 1'
-printf ':quit\n' | "$ROOT_DIR/build/psi" >/dev/null
+(cd "$CONTEXT_DIR" && "$PSI" --system-prompt) | grep 'Project rule: keep changes minimal.'
+
+# ----------------------------------------------------------------------
+# Print and TUI modes: non-session and session round-trip.
+# ----------------------------------------------------------------------
+"$PSI" --print 'hello' | grep 'prompt: hello'
+"$PSI" --print 'hello' | grep 'session-messages: 1'
+printf ':quit\n' | "$PSI" >/dev/null
 if command -v script >/dev/null 2>&1; then
-    printf '/quit\n' | script -qec "$ROOT_DIR/build/psi --tui" /dev/null >/dev/null
+    printf '/quit\n' | script -qec "$PSI --tui" /dev/null >/dev/null
 fi
-"$ROOT_DIR/build/psi" --session "$SESSION_FILE" --print 'one' >/dev/null
-"$ROOT_DIR/build/psi" --session "$SESSION_FILE" --print 'two' | grep 'session-messages: 3'
+
+"$PSI" --session "$SESSION_FILE" --print 'one' >/dev/null
+"$PSI" --session "$SESSION_FILE" --print 'two' | grep 'session-messages: 3'
 grep '"type":"session"' "$SESSION_FILE"
 test "$(grep -c '"type":"message"' "$SESSION_FILE")" -eq 4
 grep '"text":"two"' "$SESSION_FILE"
 
+# ----------------------------------------------------------------------
+# Optional: live Anthropic turn when a key is available. Uses the same
+# coding-agent surface the TUI and --agent flag would exercise.
+# ----------------------------------------------------------------------
 if [ "${ANTHROPIC_API_KEY:-}" != "" ]; then
     AGENT_SESSION="$TMP_DIR/agent-session.jsonl"
-    "$ROOT_DIR/build/psi" --agent 'Say exactly: psi live agent smoke' --model "${PSI_ANTHROPIC_MODEL:-claude-opus-4-7}" --max-tokens 32 | grep 'psi live agent smoke'
-    "$ROOT_DIR/build/psi" --session "$AGENT_SESSION" --agent 'Read README.md and reply with exactly: tool smoke ok' --model "${PSI_ANTHROPIC_MODEL:-claude-opus-4-7}" --max-tokens 128 | grep 'tool smoke ok'
-    "$ROOT_DIR/build/psi" --session "$AGENT_SESSION" --agent 'Reply with exactly: second turn ok' --model "${PSI_ANTHROPIC_MODEL:-claude-opus-4-7}" --max-tokens 64 | grep 'second turn ok'
+    MODEL="${PSI_ANTHROPIC_MODEL:-claude-opus-4-7}"
+    "$PSI" --agent 'Say exactly: psi live agent smoke' --model "$MODEL" --max-tokens 32 \
+        | grep 'psi live agent smoke'
+    "$PSI" --session "$AGENT_SESSION" --agent 'Read README.md and reply with exactly: tool smoke ok' \
+        --model "$MODEL" --max-tokens 128 | grep 'tool smoke ok'
+    "$PSI" --session "$AGENT_SESSION" --agent 'Reply with exactly: second turn ok' \
+        --model "$MODEL" --max-tokens 64 | grep 'second turn ok'
     grep '"role":"tool-call"' "$AGENT_SESSION"
     grep '"role":"tool-result"' "$AGENT_SESSION"
-    "$ROOT_DIR/build/psi" --session "$AGENT_SESSION" --compact 4 --model "${PSI_ANTHROPIC_MODEL:-claude-opus-4-7}" --max-tokens 256 | grep .
+    "$PSI" --session "$AGENT_SESSION" --compact 4 --model "$MODEL" --max-tokens 256 | grep .
     grep '"role":"compaction-summary"' "$AGENT_SESSION"
 fi
