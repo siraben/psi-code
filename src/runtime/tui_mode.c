@@ -1450,6 +1450,9 @@ static void psi_tui_add_session_entry(struct psi_tui_state *state, const struct 
     cJSON *payload;
     cJSON *input_json;
     cJSON *result_json;
+    cJSON *content_array;
+    cJSON *block;
+    cJSON *type_field;
     const char *tool_call_id;
     const char *tool_name;
     char *summary;
@@ -1467,31 +1470,43 @@ static void psi_tui_add_session_entry(struct psi_tui_state *state, const struct 
             if (message->text != NULL && message->text[0] != '\0') {
                 psi_tui_add_entry(state, PSI_TUI_ENTRY_ASSISTANT, NULL, message->text, 0);
             }
+            /* Mirror pi: tool calls live inside the assistant message's
+             * content array. Walk the stored data_json and synthesize a
+             * tool-call entry for every tool_use block. */
+            if (message->data_json != NULL) {
+                content_array = cJSON_Parse(message->data_json);
+                cJSON_ArrayForEach(block, content_array) {
+                    type_field = cJSON_GetObjectItemCaseSensitive(block, "type");
+                    if (type_field == NULL || !cJSON_IsString(type_field)) continue;
+                    if (strcmp(type_field->valuestring, "tool_use") != 0) continue;
+                    tool_call_id = psi_tui_json_string(block, "id");
+                    tool_name = psi_tui_json_string(block, "name");
+                    input_json = cJSON_GetObjectItemCaseSensitive(block, "input");
+                    payload = cJSON_CreateObject();
+                    if (payload == NULL) continue;
+                    cJSON_AddStringToObject(payload, "id", tool_call_id != NULL ? tool_call_id : "");
+                    cJSON_AddStringToObject(payload, "tool", tool_name != NULL ? tool_name : "tool");
+                    cJSON_AddItemToObject(payload, "input",
+                        input_json != NULL ? cJSON_Duplicate(input_json, 1) : cJSON_CreateObject());
+                    summary = psi_tui_render_event_text(state, "tool-call", payload);
+                    cJSON_Delete(payload);
+                    if (summary == NULL || summary[0] == '\0') {
+                        free(summary);
+                        summary = psi_tui_format_tool_call(
+                            tool_name != NULL ? tool_name : "tool", NULL);
+                    }
+                    if (summary != NULL) {
+                        psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_CALL, tool_name, summary, 0);
+                        free(summary);
+                    }
+                }
+                cJSON_Delete(content_array);
+            }
             break;
         case PSI_MESSAGE_TOOL_CALL:
-            parsed = message->text != NULL ? cJSON_Parse(message->text) : NULL;
-            tool_call_id = parsed != NULL ? psi_tui_json_string(parsed, "id") : NULL;
-            tool_name = parsed != NULL ? psi_tui_json_string(parsed, "name") : NULL;
-            input_json = parsed != NULL ? cJSON_GetObjectItemCaseSensitive(parsed, "input") : NULL;
-            payload = cJSON_CreateObject();
-            if (payload != NULL) {
-                cJSON_AddStringToObject(payload, "id", tool_call_id != NULL ? tool_call_id : "");
-                cJSON_AddStringToObject(payload, "tool", tool_name != NULL ? tool_name : "tool");
-                cJSON_AddItemToObject(payload, "input", input_json != NULL ? cJSON_Duplicate(input_json, 1) : cJSON_CreateObject());
-                summary = psi_tui_render_event_text(state, "tool-call", payload);
-                cJSON_Delete(payload);
-            } else {
-                summary = NULL;
-            }
-            if (summary == NULL || summary[0] == '\0') {
-                free(summary);
-                summary = psi_tui_format_tool_call(tool_name != NULL ? tool_name : "tool", message->text);
-            }
-            cJSON_Delete(parsed);
-            if (summary != NULL) {
-                psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_CALL, tool_name, summary, 0);
-                free(summary);
-            }
+            /* Legacy role: no longer written by the agent loop. Ignored
+             * on replay — tool calls are reconstructed from the
+             * assistant message's content blocks above. */
             break;
         case PSI_MESSAGE_TOOL_RESULT:
             parsed = message->text != NULL ? cJSON_Parse(message->text) : NULL;

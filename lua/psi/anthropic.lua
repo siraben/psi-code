@@ -75,23 +75,20 @@ local function safe_decode(text)
 end
 
 -- Build the Anthropic messages[] array from the session's ordered
--- entries.
+-- entries. Mirrors pi's model: assistant messages carry tool_use
+-- blocks inside their content (via the stored data_json); tool-result
+-- entries are first-class user messages keyed by tool_use_id. No
+-- separate tool-call record type exists.
+--
 --   user/assistant: content = parsed data_json OR plain text.
 --   compaction-summary: fold into a single user message.
---   tool-result run: assembles a user message of tool_result blocks.
---   tool-call: display-only; the authoritative tool_use lives in the
---     preceding assistant's data field, so we filter these out before
---     assembling.
+--   tool-result run: coalesce consecutive results into one user message.
 local function build_api_messages(session)
-  local filtered = {}
-  for _, m in ipairs(session) do
-    if m.role ~= "tool-call" then filtered[#filtered + 1] = m end
-  end
   local out = {}
   local i = 1
-  local n = #filtered
+  local n = #session
   while i <= n do
-    local msg = filtered[i]
+    local msg = session[i]
     local role = msg.role
     if role == "user" or role == "assistant" then
       local decoded = safe_decode(msg.data)
@@ -103,8 +100,8 @@ local function build_api_messages(session)
       i = i + 1
     elseif role == "tool-result" then
       local content = prelude.as_array({})
-      while i <= n and filtered[i].role == "tool-result" do
-        local parsed = safe_decode(filtered[i].text)
+      while i <= n and session[i].role == "tool-result" do
+        local parsed = safe_decode(session[i].text)
         if parsed and type(parsed.tool_use_id) == "string" and type(parsed.content) == "string" then
           content[#content + 1] = {
             type = "tool_result",
@@ -362,11 +359,6 @@ function M.run_turn(opts)
       if observer.on_tool_call then
         observer.on_tool_call(tu.id, tu.name, input_json)
       end
-
-      psi.session_append("tool-call", psi.json_encode({
-        id = tu.id, name = tu.name, input = tu.input,
-      }))
-      session_mod.save()
 
       local result_alist = psi.tools.dispatch_alist(tu.name, tu.input)
       local result_json = psi.json_encode(result_alist)
