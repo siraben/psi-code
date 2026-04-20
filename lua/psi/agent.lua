@@ -42,7 +42,7 @@ function M.run_compact(opts)
     system_prompt = request[1],
     user_text = request[2],
     model = opts.model,
-    max_tokens = math.min(opts.max_tokens or 4096, 1024),
+    max_tokens = 2048,
   })
   if not ok then return false end
 

@@ -248,7 +248,7 @@ function M.complete_text(opts)
   end
   local request = {
     model = resolve_model(opts.model),
-    max_tokens = opts.max_tokens or 1024,
+    max_tokens = opts.max_tokens or 2048,
     system = opts.system_prompt or "",
     messages = prelude.as_array({
       {role = "user", content = opts.user_text or ""},
@@ -290,7 +290,7 @@ function M.run_turn(opts)
 
   local observer = opts.observer or {}
   local model = resolve_model(opts.model)
-  local max_tokens = opts.max_tokens or 4096
+  local max_tokens = opts.max_tokens or 16384
   local system_prompt = opts.system_prompt or ""
   local tool_specs = opts.tool_specs or api_tool_specs("")
   local abort_check = opts.abort_check or function() return false end

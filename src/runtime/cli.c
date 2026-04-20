@@ -110,7 +110,7 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     options->boot_file = PSI_LUA_BOOT_FILE;
     options->session_file = NULL;
     options->model = NULL;
-    options->max_tokens = 4096l;
+    options->max_tokens = 16384l;
     options->keep_recent = 12l;
 
     if (psi_cli_build_argtable(&args) != PSI_STATUS_OK) {
