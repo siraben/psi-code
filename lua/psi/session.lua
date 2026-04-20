@@ -20,6 +20,128 @@ function M.append_message(msg)
   psi.session_append(msg.role, msg.text, msg.data)
 end
 
+-- ---------- id generation ----------
+
+local id_counter = 0
+local function generate_id(prefix)
+  id_counter = id_counter + 1
+  return (prefix or "") .. tostring(os.time()) .. "-" .. tostring(id_counter)
+end
+
+-- ---------- JSONL persistence ----------
+
+local function ensure_parent_dir(path)
+  local slash = path:match("()/[^/]*$")  -- index of the last slash
+  if not slash or slash <= 1 then return end
+  local dir = path:sub(1, slash - 1)
+  os.execute("mkdir -p '" .. dir:gsub("'", "'\\''") .. "'")
+end
+
+local function write_line(file, obj)
+  file:write(psi.json_encode(obj))
+  file:write("\n")
+end
+
+local function session_header()
+  local hdr = {
+    type = "session",
+    version = 1,
+    id = psi.session_id() or "",
+  }
+  local parent = psi.session_parent_id()
+  if parent and parent ~= "" then hdr.parent = parent end
+  return hdr
+end
+
+function M.save(path)
+  if not path or path == "" then
+    path = psi.session_path()
+  end
+  if not path or path == "" then
+    -- No session file was ever associated; quietly skip (mirrors the
+    -- previous C behavior of returning success on NULL path).
+    return true
+  end
+  if not psi.session_id() or psi.session_id() == "" then
+    psi.session_set_id(generate_id(""))
+  end
+  ensure_parent_dir(path)
+
+  local f, err = io.open(path, "w")
+  if not f then return false, err end
+  write_line(f, session_header())
+  for _, m in ipairs(psi.session_messages()) do
+    local entry = {type = "message", role = m.role or "custom", text = m.text or ""}
+    if m.data then entry.data = m.data end
+    write_line(f, entry)
+  end
+  f:close()
+  return true
+end
+
+function M.load(path)
+  if not path or path == "" then return false, "no path" end
+  psi.session_set_path(path)
+
+  local f = io.open(path, "r")
+  if not f then
+    -- missing file: caller can still save later; just ensure an id.
+    if not psi.session_id() or psi.session_id() == "" then
+      psi.session_set_id(generate_id(""))
+    end
+    return true
+  end
+
+  psi.session_clear()
+  for line in f:lines() do
+    if #line > 0 then
+      local parsed = pcall(psi.json_decode, line) and psi.json_decode(line) or nil
+      if type(parsed) == "table" then
+        if parsed.type == "session" then
+          if parsed.id then psi.session_set_id(parsed.id) end
+          if parsed.parent then psi.session_set_parent_id(parsed.parent) end
+        elseif parsed.type == "message" and parsed.text then
+          psi.session_append(parsed.role or "custom", parsed.text, parsed.data)
+        end
+      end
+    end
+  end
+  f:close()
+
+  if not psi.session_id() or psi.session_id() == "" then
+    psi.session_set_id(generate_id(""))
+  end
+  return true
+end
+
+-- Write the first `at_count` messages of the current session to a new
+-- JSONL file at `out_path`, stamped with a fresh id whose parent is
+-- the current session's id. Current session is not modified.
+function M.fork(at_count, out_path)
+  if not out_path or out_path == "" then return false, "no path" end
+  local messages = psi.session_messages()
+  if at_count > #messages then at_count = #messages end
+  if at_count < 0 then at_count = 0 end
+  ensure_parent_dir(out_path)
+
+  local f, err = io.open(out_path, "w")
+  if not f then return false, err end
+  write_line(f, {
+    type = "session",
+    version = 1,
+    id = generate_id("fork-"),
+    parent = psi.session_id(),
+  })
+  for i = 1, at_count do
+    local m = messages[i]
+    local entry = {type = "message", role = m.role or "custom", text = m.text or ""}
+    if m.data then entry.data = m.data end
+    write_line(f, entry)
+  end
+  f:close()
+  return true
+end
+
 -- ---------- file-op tracking for compaction provenance ----------
 --
 -- An after-hook accumulates read/modified paths as tools fire. When a

@@ -193,19 +193,6 @@ int psi_run_print_mode(const struct psi_cli_options *options) {
 
     reply_text = NULL;
     psi_session_init(&session);
-    if (options->session_file != NULL) {
-        if (psi_session_load(&session, options->session_file) != PSI_STATUS_OK) {
-            fprintf(stderr, "failed to load session file: %s\n", options->session_file);
-            psi_session_free(&session);
-            return PSI_STATUS_ERROR;
-        }
-    }
-
-    if (psi_session_append(&session, PSI_MESSAGE_USER, options->payload) != PSI_STATUS_OK) {
-        fprintf(stderr, "failed to append user message\n");
-        psi_session_free(&session);
-        return PSI_STATUS_ERROR;
-    }
 
     status = psi_vm_init(&vm, options->boot_file, stdin, stdout, stderr);
     if (status != PSI_STATUS_OK) {
@@ -213,6 +200,22 @@ int psi_run_print_mode(const struct psi_cli_options *options) {
         return status;
     }
     psi_vm_bind_session(&vm, &session);
+
+    if (options->session_file != NULL) {
+        if (psi_vm_session_load(&vm, options->session_file) != PSI_STATUS_OK) {
+            fprintf(stderr, "failed to load session file: %s\n", options->session_file);
+            psi_vm_destroy(&vm);
+            psi_session_free(&session);
+            return PSI_STATUS_ERROR;
+        }
+    }
+
+    if (psi_session_append(&session, PSI_MESSAGE_USER, options->payload) != PSI_STATUS_OK) {
+        fprintf(stderr, "failed to append user message\n");
+        psi_vm_destroy(&vm);
+        psi_session_free(&session);
+        return PSI_STATUS_ERROR;
+    }
 
     status = psi_vm_call_string_procedure(&vm, "psi.prompt.handle_print", options->payload, &reply_text);
     if (status != PSI_STATUS_OK) {
@@ -230,7 +233,7 @@ int psi_run_print_mode(const struct psi_cli_options *options) {
         return PSI_STATUS_ERROR;
     }
 
-    if (psi_session_save(&session) != PSI_STATUS_OK) {
+    if (options->session_file != NULL && psi_vm_session_save(&vm, NULL) != PSI_STATUS_OK) {
         fprintf(stderr, "failed to save session file\n");
         psi_vm_destroy(&vm);
         psi_session_free(&session);

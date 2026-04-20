@@ -40,7 +40,7 @@ void psi_agent_runtime_free(struct psi_agent_runtime *runtime) {
 int psi_agent_runtime_load_session(struct psi_agent_runtime *runtime, const char *path) {
     if (runtime == NULL) return PSI_STATUS_ERROR;
     if (path == NULL) return PSI_STATUS_OK;
-    return psi_session_load(&runtime->session, path);
+    return psi_vm_session_load(&runtime->vm, path);
 }
 
 void psi_agent_runtime_configure(struct psi_agent_runtime *runtime, const char *model, long max_tokens) {
@@ -92,5 +92,5 @@ int psi_agent_runtime_compact(
 
 int psi_agent_runtime_save(struct psi_agent_runtime *runtime) {
     if (runtime == NULL) return PSI_STATUS_ERROR;
-    return psi_session_save(&runtime->session);
+    return psi_vm_session_save(&runtime->vm, NULL);
 }

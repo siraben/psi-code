@@ -28,9 +28,7 @@ SOURCES = \
 	src/core/agent.c \
 	src/core/common.c \
 	src/core/anthropic.c \
-	src/core/message.c \
 	src/core/process.c \
-	src/core/prompt.c \
 	src/core/session.c \
 	src/runtime/cli.c \
 	src/runtime/print_mode.c \
@@ -43,9 +41,7 @@ OBJECTS = \
 	$(BUILD_DIR)/agent.o \
 	$(BUILD_DIR)/common.o \
 	$(BUILD_DIR)/anthropic.o \
-	$(BUILD_DIR)/message.o \
 	$(BUILD_DIR)/process.o \
-	$(BUILD_DIR)/prompt.o \
 	$(BUILD_DIR)/session.o \
 	$(BUILD_DIR)/cli.o \
 	$(BUILD_DIR)/print_mode.o \
@@ -72,16 +68,10 @@ $(BUILD_DIR)/agent.o: src/core/agent.c include/psi/abort.h include/psi/agent.h i
 $(BUILD_DIR)/common.o: src/core/common.c include/psi/common.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/anthropic.o: src/core/anthropic.c include/psi/anthropic.h include/psi/common.h include/psi/prompt.h include/psi/session.h include/psi/vm.h
-	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/message.o: src/core/message.c include/psi/common.h include/psi/message.h
+$(BUILD_DIR)/anthropic.o: src/core/anthropic.c include/psi/abort.h include/psi/anthropic.h include/psi/common.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/process.o: src/core/process.c include/psi/common.h include/psi/process.h
-	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/prompt.o: src/core/prompt.c include/psi/common.h include/psi/prompt.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/session.o: src/core/session.c include/psi/common.h include/psi/message.h include/psi/session.h
@@ -96,7 +86,7 @@ $(BUILD_DIR)/print_mode.o: src/runtime/print_mode.c include/psi/common.h include
 $(BUILD_DIR)/tui_mode.o: src/runtime/tui_mode.c include/psi/agent.h include/psi/common.h include/psi/message.h include/psi/runtime.h include/psi/session.h include/psi/vm.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/vm.o: src/lua/vm.c include/psi/common.h include/psi/host_ops.h include/psi/message.h include/psi/process.h include/psi/prompt.h include/psi/session.h include/psi/vm.h
+$(BUILD_DIR)/vm.o: src/lua/vm.c include/psi/common.h include/psi/host_ops.h include/psi/message.h include/psi/process.h include/psi/session.h include/psi/vm.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
 install: $(TARGET)

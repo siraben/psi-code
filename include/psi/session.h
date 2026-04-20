@@ -3,15 +3,17 @@
 
 #include "psi/message.h"
 
+/* Session state: a growable array of messages plus identity. The Lua
+ * layer drives everything (JSONL I/O, compaction, fork) through the
+ * psi.session_* FFI primitives declared in src/lua/vm.c; this C struct
+ * is just the storage holding the current in-memory view. */
+
 struct psi_session {
     struct psi_message *messages;
     size_t count;
     size_t capacity;
     char *id;
     char *path;
-    /* ID of the session this one forked from, or NULL if it's a root.
-     * Persisted in the session header and carried across load/save so
-     * tooling can walk the branch tree. */
     char *parent_id;
 };
 
@@ -24,19 +26,10 @@ int psi_session_append_with_data(
     const char *text,
     const char *data_json
 );
-int psi_session_load(struct psi_session *session, const char *path);
-int psi_session_save(struct psi_session *session);
+int psi_session_set_id(struct psi_session *session, const char *id);
 int psi_session_set_path(struct psi_session *session, const char *path);
-int psi_session_compact(struct psi_session *session, size_t keep_recent, const char *summary_text);
+int psi_session_set_parent_id(struct psi_session *session, const char *parent_id);
 int psi_session_clear(struct psi_session *session);
 enum psi_message_role psi_session_role_from_name(const char *role_name);
-/* Write the first `at_count` messages of `session` to a new JSONL file
- * at `out_path`, stamped with a fresh session id and parent_id set to
- * the source session's id. Does not modify `session`. */
-int psi_session_fork_to(
-    const struct psi_session *session,
-    size_t at_count,
-    const char *out_path
-);
 
 #endif

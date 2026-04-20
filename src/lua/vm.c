@@ -8,6 +8,10 @@
 #include <lauxlib.h>
 #include <lualib.h>
 
+#include <time.h>
+#include <unistd.h>
+#include <sys/stat.h>
+
 #include "psi/abort.h"
 #include "psi/agent.h"
 #include "psi/anthropic.h"
@@ -15,9 +19,60 @@
 #include "psi/host_ops.h"
 #include "psi/message.h"
 #include "psi/process.h"
-#include "psi/prompt.h"
 #include "psi/session.h"
 #include "psi/vm.h"
+
+/* ------------------------------------------------------------------
+ * Tiny OS-level helpers used by the FFI date/cwd/file_exists primitives
+ * and by runtime_info. Returns a fresh heap string the caller must free,
+ * or NULL on failure.
+ * ------------------------------------------------------------------ */
+
+static char *psi_vm_current_date(void) {
+    char buffer[32];
+    time_t now = time(NULL);
+    struct tm *lt = localtime(&now);
+    if (lt == NULL) return NULL;
+    snprintf(buffer, sizeof(buffer), "%04d-%02d-%02d",
+             lt->tm_year + 1900, lt->tm_mon + 1, lt->tm_mday);
+    return psi_strdup(buffer);
+}
+
+static char *psi_vm_current_cwd(void) {
+    size_t size = 256u;
+    char *buf;
+    for (;;) {
+        buf = (char *)malloc(size);
+        if (buf == NULL) return NULL;
+        if (getcwd(buf, size) != NULL) return buf;
+        free(buf);
+        if (size >= 8192u) return psi_strdup(".");
+        size *= 2u;
+    }
+}
+
+static char *psi_vm_parent_directory(const char *path) {
+    const char *slash;
+    size_t len;
+    char *out;
+
+    if (path == NULL || path[0] == '\0') return psi_strdup(".");
+    slash = strrchr(path, '/');
+    if (slash == NULL) return psi_strdup(".");
+    if (slash == path) return psi_strdup("/");
+    len = (size_t)(slash - path);
+    out = (char *)malloc(len + 1u);
+    if (out == NULL) return NULL;
+    memcpy(out, path, len);
+    out[len] = '\0';
+    return out;
+}
+
+static int psi_vm_file_exists(const char *path) {
+    struct stat st;
+    if (path == NULL || path[0] == '\0') return 0;
+    return stat(path, &st) == 0 ? 1 : 0;
+}
 
 static const long PSI_VM_FILE_WRITE_MAX_BYTES = 16777216l;
 static const long PSI_VM_READ_FILE_MAX_BYTES  = 262144l;
@@ -251,7 +306,7 @@ static int lfn_file_write(lua_State *L) {
 }
 
 static int lfn_current_date(lua_State *L) {
-    char *d = psi_prompt_current_date();
+    char *d = psi_vm_current_date();
     if (!d) { lua_pushnil(L); return 1; }
     lua_pushstring(L, d);
     free(d);
@@ -259,7 +314,7 @@ static int lfn_current_date(lua_State *L) {
 }
 
 static int lfn_cwd(lua_State *L) {
-    char *p = psi_prompt_current_working_directory();
+    char *p = psi_vm_current_cwd();
     if (!p) { lua_pushnil(L); return 1; }
     lua_pushstring(L, p);
     free(p);
@@ -268,13 +323,7 @@ static int lfn_cwd(lua_State *L) {
 
 static int lfn_parent_directory(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
-    char *copy;
-    char *parent;
-
-    copy = psi_strdup(path);
-    if (!copy) return luaL_error(L, "out of memory");
-    parent = psi_prompt_parent_directory(copy);
-    free(copy);
+    char *parent = psi_vm_parent_directory(path);
     if (!parent) { lua_pushnil(L); return 1; }
     lua_pushstring(L, parent);
     free(parent);
@@ -283,7 +332,7 @@ static int lfn_parent_directory(lua_State *L) {
 
 static int lfn_file_exists(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
-    lua_pushboolean(L, psi_prompt_file_exists(path) ? 1 : 0);
+    lua_pushboolean(L, psi_vm_file_exists(path) ? 1 : 0);
     return 1;
 }
 
@@ -389,17 +438,38 @@ static int lfn_json_decode(lua_State *L) {
     return 1;
 }
 
-static int lfn_session_fork(lua_State *L) {
-    lua_Integer at_count = luaL_checkinteger(L, 1);
-    const char *out_path = luaL_checkstring(L, 2);
+static int lfn_session_set_id(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
     struct psi_session *s = host ? host->session : NULL;
-    int status;
-
+    const char *id = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : NULL;
     if (!s) { lua_pushboolean(L, 0); return 1; }
-    if (at_count < 0) at_count = 0;
-    status = psi_session_fork_to(s, (size_t)at_count, out_path);
-    lua_pushboolean(L, status == PSI_STATUS_OK ? 1 : 0);
+    lua_pushboolean(L, psi_session_set_id(s, id) == PSI_STATUS_OK ? 1 : 0);
+    return 1;
+}
+
+static int lfn_session_set_path(lua_State *L) {
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    struct psi_session *s = host ? host->session : NULL;
+    const char *path = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : NULL;
+    if (!s) { lua_pushboolean(L, 0); return 1; }
+    lua_pushboolean(L, psi_session_set_path(s, path) == PSI_STATUS_OK ? 1 : 0);
+    return 1;
+}
+
+static int lfn_session_set_parent_id(lua_State *L) {
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    struct psi_session *s = host ? host->session : NULL;
+    const char *pid = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : NULL;
+    if (!s) { lua_pushboolean(L, 0); return 1; }
+    lua_pushboolean(L, psi_session_set_parent_id(s, pid) == PSI_STATUS_OK ? 1 : 0);
+    return 1;
+}
+
+static int lfn_session_path(lua_State *L) {
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    struct psi_session *s = host ? host->session : NULL;
+    if (!s || !s->path) { lua_pushnil(L); return 1; }
+    lua_pushstring(L, s->path);
     return 1;
 }
 
@@ -609,8 +679,8 @@ static int lfn_runtime_info(lua_State *L) {
     int i;
 
     host = PSI_VM_HOST(L);
-    date = psi_prompt_current_date();
-    cwd  = psi_prompt_current_working_directory();
+    date = psi_vm_current_date();
+    cwd  = psi_vm_current_cwd();
     if (!date || !cwd) {
         free(date); free(cwd);
         return luaL_error(L, "failed to collect runtime info");
@@ -695,9 +765,12 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("process_run",           lfn_process_run);
     PSI_REG("session_append",        lfn_session_append);
     PSI_REG("session_clear",         lfn_session_clear);
-    PSI_REG("session_fork",          lfn_session_fork);
     PSI_REG("session_id",            lfn_session_id);
     PSI_REG("session_parent_id",     lfn_session_parent_id);
+    PSI_REG("session_path",          lfn_session_path);
+    PSI_REG("session_set_id",        lfn_session_set_id);
+    PSI_REG("session_set_path",      lfn_session_set_path);
+    PSI_REG("session_set_parent_id", lfn_session_set_parent_id);
     PSI_REG("is_aborted",            lfn_is_aborted);
     PSI_REG("json_encode",           lfn_json_encode);
     PSI_REG("json_decode",           lfn_json_decode);
@@ -718,7 +791,7 @@ static int psi_vm_apply_package_path(lua_State *L, const char *boot_file) {
     if (!boot_file) return PSI_STATUS_OK;
     copy = psi_strdup(boot_file);
     if (!copy) return PSI_STATUS_ERROR;
-    parent = psi_prompt_parent_directory(copy);
+    parent = psi_vm_parent_directory(copy);
     free(copy);
     if (!parent) return PSI_STATUS_ERROR;
     snprintf(buffer, sizeof(buffer), "%s/?.lua;%s/?/init.lua", parent, parent);
@@ -1264,6 +1337,29 @@ int psi_vm_run_agent_turn(
         observer, abort_signal, model, max_tokens,
         user_text != NULL ? user_text : "", -1,
         response_text);
+}
+
+static int psi_vm_session_call_with_path(struct psi_vm *vm, const char *procedure, const char *path) {
+    int ok;
+    if (vm == NULL || vm->L == NULL) return PSI_STATUS_ERROR;
+    if (psi_vm_push_dotted(vm->L, procedure) != 0) return PSI_STATUS_ERROR;
+    if (path != NULL) lua_pushstring(vm->L, path); else lua_pushnil(vm->L);
+    if (lua_pcall(vm->L, 1, 1, 0) != LUA_OK) {
+        fprintf(stderr, "Lua error in %s: %s\n", procedure, lua_tostring(vm->L, -1));
+        lua_pop(vm->L, 1);
+        return PSI_STATUS_ERROR;
+    }
+    ok = lua_toboolean(vm->L, -1);
+    lua_pop(vm->L, 1);
+    return ok ? PSI_STATUS_OK : PSI_STATUS_ERROR;
+}
+
+int psi_vm_session_save(struct psi_vm *vm, const char *path) {
+    return psi_vm_session_call_with_path(vm, "psi.session.save", path);
+}
+
+int psi_vm_session_load(struct psi_vm *vm, const char *path) {
+    return psi_vm_session_call_with_path(vm, "psi.session.load", path);
 }
 
 int psi_vm_run_agent_compact(
