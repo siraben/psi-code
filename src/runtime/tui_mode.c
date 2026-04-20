@@ -1595,15 +1595,13 @@ static void *psi_tui_run_turn(struct psi_tui_state *state) {
     int save_failed;
     struct psi_tui_event *done_event;
 
+    memset(&observer, 0, sizeof(observer));
     observer.userdata = state;
     observer.on_assistant_text_delta = psi_tui_observer_text_delta;
     observer.on_tool_call = psi_tui_observer_tool_call;
     observer.on_tool_result = psi_tui_observer_tool_result;
     observer.on_tool_progress = psi_tui_observer_tool_progress;
     observer.on_thinking_delta = psi_tui_observer_thinking_delta;
-    observer.on_tool_call_delta = NULL;
-    observer.on_turn_start = NULL;
-    observer.on_turn_end = NULL;
 
     response_text = NULL;
     save_failed = 0;

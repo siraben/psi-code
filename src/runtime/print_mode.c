@@ -142,6 +142,7 @@ static int psi_run_agent_turn_with_cli_hooks(
         return status;
     }
 
+    memset(&observer, 0, sizeof(observer));
     observer.userdata = &render_state;
     observer.on_assistant_text_delta = psi_cli_observer_text_delta;
     observer.on_tool_call = psi_cli_observer_tool_call;

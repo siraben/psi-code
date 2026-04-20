@@ -51,4 +51,27 @@ int psi_vm_session_compact(
     const char *summary_text
 );
 
+/* Bridge into the Lua agent layer. The observer is wrapped as a Lua
+ * table whose callbacks invoke the C function pointers. abort_signal
+ * and max_tokens/model are forwarded into the Lua opts table. */
+struct psi_agent_observer;
+struct psi_abort_signal;
+int psi_vm_run_agent_turn(
+    struct psi_vm *vm,
+    const char *user_text,
+    struct psi_agent_observer *observer,
+    struct psi_abort_signal *abort_signal,
+    const char *model,
+    long max_tokens,
+    char **response_text
+);
+int psi_vm_run_agent_compact(
+    struct psi_vm *vm,
+    size_t keep_recent,
+    struct psi_abort_signal *abort_signal,
+    const char *model,
+    long max_tokens,
+    char **summary_text
+);
+
 #endif

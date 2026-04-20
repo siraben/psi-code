@@ -2,42 +2,36 @@
 #define PSI_ANTHROPIC_H
 
 #include "psi/common.h"
-#include "psi/session.h"
 
 struct psi_abort_signal;
-struct psi_host_context;
-struct psi_vm;
 
-int psi_anthropic_agent_turn(
-    struct psi_session *session,
-    struct psi_vm *vm,
-    struct psi_host_context *host,
-    const char *user_text,
-    struct psi_agent_observer *observer,
-    const char *model,
-    long max_tokens,
+/* Generic HTTP primitives exposed to Lua. The agent turn loop lives
+ * in lua/psi/anthropic.lua; this header is just the minimum C surface
+ * needed for Lua to POST to Anthropic's API (or any other provider). */
+
+typedef void (*psi_http_chunk_cb)(void *userdata, const char *chunk, size_t len);
+
+int psi_http_post_stream(
+    const char *url,
+    const char *const *header_lines,
+    size_t header_count,
+    const char *body,
+    size_t body_len,
+    psi_http_chunk_cb on_chunk,
+    void *userdata,
     struct psi_abort_signal *abort_signal,
-    char **output_text
+    long *status_code
 );
-int psi_anthropic_agent_turn_with_prompt(
-    struct psi_session *session,
-    struct psi_vm *vm,
-    struct psi_host_context *host,
-    const char *user_text,
-    struct psi_agent_observer *observer,
-    const char *model,
-    long max_tokens,
-    const char *system_prompt,
+
+int psi_http_post(
+    const char *url,
+    const char *const *header_lines,
+    size_t header_count,
+    const char *body,
+    size_t body_len,
     struct psi_abort_signal *abort_signal,
-    char **output_text
-);
-int psi_anthropic_complete_text(
-    const char *model,
-    long max_tokens,
-    const char *system_prompt,
-    const char *user_text,
-    struct psi_abort_signal *abort_signal,
-    char **output_text
+    long *status_code,
+    char **response_body
 );
 
 #endif

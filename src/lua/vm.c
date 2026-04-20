@@ -10,6 +10,7 @@
 
 #include "psi/abort.h"
 #include "psi/agent.h"
+#include "psi/anthropic.h"
 #include "psi/common.h"
 #include "psi/host_ops.h"
 #include "psi/message.h"
@@ -418,6 +419,144 @@ static int lfn_session_id(lua_State *L) {
     return 1;
 }
 
+struct psi_lua_http_stream_ctx {
+    lua_State *L;
+    int cb_ref;
+};
+
+static void psi_lua_http_stream_cb(void *userdata, const char *chunk, size_t len) {
+    struct psi_lua_http_stream_ctx *ctx = (struct psi_lua_http_stream_ctx *)userdata;
+    lua_State *L = ctx->L;
+    lua_rawgeti(L, LUA_REGISTRYINDEX, ctx->cb_ref);
+    lua_pushlstring(L, chunk, len);
+    if (lua_pcall(L, 1, 0, 0) != LUA_OK) {
+        /* Swallow the error into stderr; we can't usefully propagate it
+         * out of libcurl's write callback without leaking resources. */
+        fprintf(stderr, "http_post_stream callback error: %s\n", lua_tostring(L, -1));
+        lua_pop(L, 1);
+    }
+}
+
+static int psi_lua_collect_headers(lua_State *L, int idx, char ***out, size_t *out_count) {
+    lua_Integer len;
+    lua_Integer i;
+    char **headers;
+
+    idx = lua_absindex(L, idx);
+    len = (lua_Integer)lua_rawlen(L, idx);
+    if (len <= 0) {
+        *out = NULL;
+        *out_count = 0u;
+        return 0;
+    }
+    headers = (char **)malloc(sizeof(*headers) * (size_t)len);
+    if (headers == NULL) return -1;
+    for (i = 1; i <= len; i++) {
+        const char *value;
+        lua_rawgeti(L, idx, i);
+        value = lua_tostring(L, -1);
+        headers[i - 1] = value != NULL ? psi_strdup(value) : psi_strdup("");
+        lua_pop(L, 1);
+    }
+    *out = headers;
+    *out_count = (size_t)len;
+    return 0;
+}
+
+static void psi_lua_free_headers(char **headers, size_t count) {
+    size_t i;
+    if (headers == NULL) return;
+    for (i = 0; i < count; i++) free(headers[i]);
+    free(headers);
+}
+
+static int lfn_http_post_stream(lua_State *L) {
+    const char *url = luaL_checkstring(L, 1);
+    size_t body_len;
+    const char *body;
+    char **headers;
+    size_t header_count;
+    struct psi_host_context *host;
+    struct psi_lua_http_stream_ctx ctx;
+    long status_code;
+    int status;
+
+    luaL_checktype(L, 2, LUA_TTABLE);
+    body = luaL_checklstring(L, 3, &body_len);
+    luaL_checktype(L, 4, LUA_TFUNCTION);
+
+    if (psi_lua_collect_headers(L, 2, &headers, &header_count) != 0) {
+        return luaL_error(L, "failed to collect headers");
+    }
+
+    lua_pushvalue(L, 4);
+    ctx.L = L;
+    ctx.cb_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+
+    host = PSI_VM_HOST(L);
+    status_code = 0l;
+    status = psi_http_post_stream(
+        url,
+        (const char *const *)headers, header_count,
+        body, body_len,
+        psi_lua_http_stream_cb, &ctx,
+        host ? host->abort_signal : NULL,
+        &status_code);
+
+    luaL_unref(L, LUA_REGISTRYINDEX, ctx.cb_ref);
+    psi_lua_free_headers(headers, header_count);
+
+    if (status != PSI_STATUS_OK) {
+        lua_pushnil(L);
+        lua_pushstring(L, "http request failed");
+        return 2;
+    }
+    lua_pushinteger(L, status_code);
+    return 1;
+}
+
+static int lfn_http_post(lua_State *L) {
+    const char *url = luaL_checkstring(L, 1);
+    size_t body_len;
+    const char *body;
+    char **headers;
+    size_t header_count;
+    struct psi_host_context *host;
+    long status_code;
+    char *response;
+    int status;
+
+    luaL_checktype(L, 2, LUA_TTABLE);
+    body = luaL_checklstring(L, 3, &body_len);
+
+    if (psi_lua_collect_headers(L, 2, &headers, &header_count) != 0) {
+        return luaL_error(L, "failed to collect headers");
+    }
+
+    host = PSI_VM_HOST(L);
+    status_code = 0l;
+    response = NULL;
+    status = psi_http_post(
+        url,
+        (const char *const *)headers, header_count,
+        body, body_len,
+        host ? host->abort_signal : NULL,
+        &status_code, &response);
+
+    psi_lua_free_headers(headers, header_count);
+
+    if (status != PSI_STATUS_OK) {
+        free(response);
+        lua_pushnil(L);
+        lua_pushstring(L, "http request failed");
+        return 2;
+    }
+    lua_pushinteger(L, status_code);
+    lua_pushstring(L, response != NULL ? response : "");
+    free(response);
+    return 2;
+}
+
 static int lfn_is_aborted(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
     lua_pushboolean(L,
@@ -562,6 +701,8 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("is_aborted",            lfn_is_aborted);
     PSI_REG("json_encode",           lfn_json_encode);
     PSI_REG("json_decode",           lfn_json_decode);
+    PSI_REG("http_post",             lfn_http_post);
+    PSI_REG("http_post_stream",      lfn_http_post_stream);
     PSI_REG("tool_call",             lfn_tool_call);
 
 #undef PSI_REG
@@ -957,6 +1098,187 @@ int psi_vm_dispatch_tool_json(struct psi_vm *vm, const char *tool_name,
     *output_json = cJSON_PrintUnformatted(result);
     cJSON_Delete(result);
     return *output_json ? PSI_STATUS_OK : PSI_STATUS_ERROR;
+}
+
+/* ------------------------------------------------------------------
+ * Observer / abort trampolines for the Lua agent loop.
+ *
+ * The TUI and other C callers hand us a struct psi_agent_observer
+ * whose fields are plain function pointers. The Lua agent code wants
+ * a callbacks table instead. We wrap each pointer as a C closure that
+ * unpacks the observer from its upvalue and forwards the call.
+ * ------------------------------------------------------------------ */
+
+static struct psi_agent_observer *psi_vm_unpack_observer(lua_State *L) {
+    return (struct psi_agent_observer *)lua_touserdata(L, lua_upvalueindex(1));
+}
+
+static int psi_vm_ob_text_delta(lua_State *L) {
+    struct psi_agent_observer *obs = psi_vm_unpack_observer(L);
+    const char *text = luaL_optstring(L, 1, "");
+    if (obs != NULL && obs->on_assistant_text_delta != NULL) {
+        obs->on_assistant_text_delta(obs->userdata, text);
+    }
+    return 0;
+}
+
+static int psi_vm_ob_tool_call(lua_State *L) {
+    struct psi_agent_observer *obs = psi_vm_unpack_observer(L);
+    const char *id = luaL_optstring(L, 1, NULL);
+    const char *name = luaL_optstring(L, 2, NULL);
+    const char *input_json = luaL_optstring(L, 3, "");
+    if (obs != NULL && obs->on_tool_call != NULL) {
+        obs->on_tool_call(obs->userdata, id, name, input_json);
+    }
+    return 0;
+}
+
+static int psi_vm_ob_tool_result(lua_State *L) {
+    struct psi_agent_observer *obs = psi_vm_unpack_observer(L);
+    const char *id = luaL_optstring(L, 1, NULL);
+    const char *name = luaL_optstring(L, 2, NULL);
+    const char *output_json = luaL_optstring(L, 3, "");
+    if (obs != NULL && obs->on_tool_result != NULL) {
+        obs->on_tool_result(obs->userdata, id, name, output_json);
+    }
+    return 0;
+}
+
+static int psi_vm_ob_thinking_delta(lua_State *L) {
+    struct psi_agent_observer *obs = psi_vm_unpack_observer(L);
+    const char *text = luaL_optstring(L, 1, "");
+    if (obs != NULL && obs->on_thinking_delta != NULL) {
+        obs->on_thinking_delta(obs->userdata, text);
+    }
+    return 0;
+}
+
+static int psi_vm_ob_tool_call_delta(lua_State *L) {
+    struct psi_agent_observer *obs = psi_vm_unpack_observer(L);
+    const char *id = luaL_optstring(L, 1, NULL);
+    const char *partial = luaL_optstring(L, 2, "");
+    if (obs != NULL && obs->on_tool_call_delta != NULL) {
+        obs->on_tool_call_delta(obs->userdata, id, partial);
+    }
+    return 0;
+}
+
+static int psi_vm_abort_check(lua_State *L) {
+    struct psi_abort_signal *sig = (struct psi_abort_signal *)lua_touserdata(L, lua_upvalueindex(1));
+    lua_pushboolean(L, psi_abort_signal_is_triggered(sig) ? 1 : 0);
+    return 1;
+}
+
+static void psi_vm_push_observer_table(lua_State *L, struct psi_agent_observer *observer) {
+    lua_newtable(L);
+    if (observer == NULL) return;
+#define PSI_OB_BIND(key, fn) do { \
+    lua_pushlightuserdata(L, observer); \
+    lua_pushcclosure(L, fn, 1); \
+    lua_setfield(L, -2, key); \
+} while (0)
+    PSI_OB_BIND("on_assistant_text_delta", psi_vm_ob_text_delta);
+    PSI_OB_BIND("on_tool_call",            psi_vm_ob_tool_call);
+    PSI_OB_BIND("on_tool_result",          psi_vm_ob_tool_result);
+    PSI_OB_BIND("on_thinking_delta",       psi_vm_ob_thinking_delta);
+    PSI_OB_BIND("on_tool_call_delta",      psi_vm_ob_tool_call_delta);
+#undef PSI_OB_BIND
+}
+
+static int psi_vm_call_agent(
+    struct psi_vm *vm,
+    const char *procedure,
+    struct psi_agent_observer *observer,
+    struct psi_abort_signal *abort_signal,
+    const char *model,
+    long max_tokens,
+    const char *user_text,
+    long keep_recent,
+    char **output_text
+) {
+    int ok;
+    const char *text;
+
+    if (vm == NULL || vm->L == NULL) return PSI_STATUS_ERROR;
+    if (output_text != NULL) *output_text = NULL;
+
+    if (psi_vm_push_dotted(vm->L, procedure) != 0) {
+        fprintf(stderr, "undefined Lua procedure: %s\n", procedure);
+        return PSI_STATUS_ERROR;
+    }
+
+    vm->host.abort_signal = abort_signal;
+
+    lua_newtable(vm->L);
+    if (user_text != NULL) {
+        lua_pushstring(vm->L, user_text);
+        lua_setfield(vm->L, -2, "user_text");
+    }
+    if (model != NULL) {
+        lua_pushstring(vm->L, model);
+        lua_setfield(vm->L, -2, "model");
+    }
+    lua_pushinteger(vm->L, (lua_Integer)max_tokens);
+    lua_setfield(vm->L, -2, "max_tokens");
+    if (keep_recent >= 0) {
+        lua_pushinteger(vm->L, (lua_Integer)keep_recent);
+        lua_setfield(vm->L, -2, "keep_recent");
+    }
+
+    psi_vm_push_observer_table(vm->L, observer);
+    lua_setfield(vm->L, -2, "observer");
+
+    lua_pushlightuserdata(vm->L, abort_signal);
+    lua_pushcclosure(vm->L, psi_vm_abort_check, 1);
+    lua_setfield(vm->L, -2, "abort_check");
+
+    if (lua_pcall(vm->L, 1, 2, 0) != LUA_OK) {
+        fprintf(stderr, "Lua error in %s: %s\n", procedure, lua_tostring(vm->L, -1));
+        lua_pop(vm->L, 1);
+        vm->host.abort_signal = NULL;
+        return PSI_STATUS_ERROR;
+    }
+
+    ok = lua_toboolean(vm->L, -2);
+    text = lua_tostring(vm->L, -1);
+    if (output_text != NULL) {
+        *output_text = psi_strdup(text != NULL ? text : "");
+    }
+    lua_pop(vm->L, 2);
+
+    vm->host.abort_signal = NULL;
+    return ok ? PSI_STATUS_OK : PSI_STATUS_ERROR;
+}
+
+int psi_vm_run_agent_turn(
+    struct psi_vm *vm,
+    const char *user_text,
+    struct psi_agent_observer *observer,
+    struct psi_abort_signal *abort_signal,
+    const char *model,
+    long max_tokens,
+    char **response_text
+) {
+    return psi_vm_call_agent(
+        vm, "psi.agent.run_turn",
+        observer, abort_signal, model, max_tokens,
+        user_text != NULL ? user_text : "", -1,
+        response_text);
+}
+
+int psi_vm_run_agent_compact(
+    struct psi_vm *vm,
+    size_t keep_recent,
+    struct psi_abort_signal *abort_signal,
+    const char *model,
+    long max_tokens,
+    char **summary_text
+) {
+    return psi_vm_call_agent(
+        vm, "psi.agent.run_compact",
+        NULL, abort_signal, model, max_tokens,
+        NULL, (long)keep_recent,
+        summary_text);
 }
 
 int psi_vm_session_compact(struct psi_vm *vm, long keep_recent, const char *summary_text) {

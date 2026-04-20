@@ -6,16 +6,18 @@
 -- through psi.tools.*, psi.session.*, psi.prompt.*, psi.render.*,
 -- psi.commands.*.
 
-psi.prelude  = require("psi.prelude")
-psi.ansi     = require("psi.ansi")
-psi.io       = require("psi.io")
-psi.diff     = require("psi.diff")
-psi.records  = require("psi.records")
-psi.session  = require("psi.session")
-psi.tools    = require("psi.tools")
-psi.prompt   = require("psi.prompt")
-psi.render   = require("psi.render")
-psi.commands = require("psi.commands")
+psi.prelude   = require("psi.prelude")
+psi.ansi      = require("psi.ansi")
+psi.io        = require("psi.io")
+psi.diff      = require("psi.diff")
+psi.records   = require("psi.records")
+psi.session   = require("psi.session")
+psi.tools     = require("psi.tools")
+psi.anthropic = require("psi.anthropic")
+psi.prompt    = require("psi.prompt")
+psi.agent     = require("psi.agent")
+psi.render    = require("psi.render")
+psi.commands  = require("psi.commands")
 require("psi.hooks")
 
 -- Convenience shim so user code can write psi.tool_call(name, input).
