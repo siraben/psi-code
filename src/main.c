@@ -1,8 +1,6 @@
 #include <stdio.h>
 #include "psi/runtime.h"
 
-extern int psi_run_print_mode_dispatch(const struct psi_cli_options *options);
-
 int main(int argc, char **argv) {
     struct psi_cli_options options;
 

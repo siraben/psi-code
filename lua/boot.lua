@@ -18,6 +18,7 @@ psi.prompt    = require("psi.prompt")
 psi.agent     = require("psi.agent")
 psi.render    = require("psi.render")
 psi.commands  = require("psi.commands")
+psi.modes     = require("psi.modes")
 require("psi.hooks")
 
 -- Convenience shim so user code can write psi.tool_call(name, input).

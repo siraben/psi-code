@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <cjson/cJSON.h>
+#include <editline/readline.h>
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
@@ -723,6 +724,37 @@ static int lfn_runtime_info(lua_State *L) {
     return 1;
 }
 
+/* psi.readline(prompt) -> string or nil (nil on EOF / Ctrl-D). */
+static int lfn_readline(lua_State *L) {
+    const char *prompt = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : "";
+    char *line = readline(prompt);
+    if (line == NULL) {
+        lua_pushnil(L);
+        return 1;
+    }
+    lua_pushstring(L, line);
+    free(line);
+    return 1;
+}
+
+/* psi.add_history(line) -- libedit history append. */
+static int lfn_add_history(lua_State *L) {
+    const char *line = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : NULL;
+    if (line != NULL && line[0] != '\0') add_history(line);
+    return 0;
+}
+
+/* psi.stdout_write(text) -- raw unbuffered write to stdout. */
+static int lfn_stdout_write(lua_State *L) {
+    size_t len = 0;
+    const char *text = lua_type(L, 1) == LUA_TSTRING ? lua_tolstring(L, 1, &len) : NULL;
+    if (text != NULL && len > 0) {
+        fwrite(text, 1, len, stdout);
+        fflush(stdout);
+    }
+    return 0;
+}
+
 /* psi.tool_call(name, input) -> result alist, via psi.tools.dispatch_alist. */
 static int lfn_tool_call(lua_State *L) {
     luaL_checkstring(L, 1);
@@ -777,6 +809,9 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("http_post",             lfn_http_post);
     PSI_REG("http_post_stream",      lfn_http_post_stream);
     PSI_REG("tool_call",             lfn_tool_call);
+    PSI_REG("readline",              lfn_readline);
+    PSI_REG("add_history",           lfn_add_history);
+    PSI_REG("stdout_write",          lfn_stdout_write);
 
 #undef PSI_REG
 

@@ -27,11 +27,7 @@ struct psi_cli_options {
 
 int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv);
 void psi_cli_usage(const char *program_name);
-int psi_run_print_mode(const struct psi_cli_options *options);
-int psi_run_repl(const struct psi_cli_options *options);
 int psi_run_tui_mode(const struct psi_cli_options *options);
-int psi_run_system_prompt_mode(const struct psi_cli_options *options);
-int psi_run_agent_mode(const struct psi_cli_options *options);
-int psi_run_compact_mode(const struct psi_cli_options *options);
+int psi_run_print_mode_dispatch(const struct psi_cli_options *options);
 
 #endif

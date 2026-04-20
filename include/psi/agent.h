@@ -45,7 +45,6 @@ int psi_agent_runtime_init(
 void psi_agent_runtime_free(struct psi_agent_runtime *runtime);
 int psi_agent_runtime_load_session(struct psi_agent_runtime *runtime, const char *path);
 void psi_agent_runtime_configure(struct psi_agent_runtime *runtime, const char *model, long max_tokens);
-int psi_agent_runtime_turn(struct psi_agent_runtime *runtime, const char *user_text, char **response_text);
 int psi_agent_runtime_turn_with_observer(
     struct psi_agent_runtime *runtime,
     const char *user_text,

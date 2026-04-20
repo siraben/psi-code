@@ -74,10 +74,6 @@ int psi_agent_runtime_turn_with_observer(
     return status;
 }
 
-int psi_agent_runtime_turn(struct psi_agent_runtime *runtime, const char *user_text, char **response_text) {
-    return psi_agent_runtime_turn_with_observer(runtime, user_text, NULL, NULL, response_text);
-}
-
 int psi_agent_runtime_compact(
     struct psi_agent_runtime *runtime,
     size_t keep_recent,
