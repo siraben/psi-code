@@ -16,6 +16,7 @@ local M = {}
 function M.run_turn(opts)
   local user_text = opts.user_text or ""
   psi.session_append("user", user_text, nil)
+  session.save()
 
   local system_prompt = prompt.system_prompt()
   return anthropic.run_turn({

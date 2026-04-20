@@ -21,6 +21,7 @@
 
 local prelude = require("psi.prelude")
 local tools = require("psi.tools")
+local session_mod = require("psi.session")
 
 local M = {}
 
@@ -375,6 +376,7 @@ function M.run_turn(opts)
 
     local content, tool_uses = finalize_blocks(state)
     psi.session_append("assistant", state.assistant_text, psi.json_encode(content))
+    session_mod.save()
 
     if #tool_uses == 0 then
       return true, state.assistant_text
@@ -391,6 +393,7 @@ function M.run_turn(opts)
       psi.session_append("tool-call", psi.json_encode({
         id = tu.id, name = tu.name, input = tu.input,
       }))
+      session_mod.save()
 
       local result_alist = psi.tools.dispatch_alist(tu.name, tu.input)
       local result_json = psi.json_encode(result_alist)
@@ -404,6 +407,7 @@ function M.run_turn(opts)
         content = result_json,
         is_error = not result_alist.ok,
       }))
+      session_mod.save()
     end
   end
 
