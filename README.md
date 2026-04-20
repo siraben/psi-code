@@ -6,7 +6,7 @@ The immediate goal is not feature parity with `pi-mono`. The goal is to keep
 the same minimal harness philosophy while rebuilding the core around a simpler
 runtime:
 
-- C99 host runtime
+- C89 host runtime
 - Lua 5.4 as the embedded extension language
 - Nix flake based development and packaging
 - A small, explicit core that grows from a working vertical slice

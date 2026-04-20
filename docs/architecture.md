@@ -9,7 +9,7 @@ Primary goals:
 
 - keep the harness minimal and inspectable
 - make the host runtime portable C89
-- make Scheme the first extension surface
+- make Lua the first extension surface
 - keep core state and persistence in C
 - make user customization cheap and progressive
 - support both old and modern toolchains
@@ -69,33 +69,39 @@ The runtime layer assembles the host core into actual modes:
 
 - print mode
 - interactive mode
+- TUI mode
 - RPC mode
 
 Each mode is only an I/O shell around the same session object.
 
-### 4.3 Scheme VM layer
+### 4.3 Lua VM layer
 
-Chibi-Scheme is embedded as the extension runtime.
+Lua 5.4 is embedded as the extension runtime.
 
-Scheme is used for:
+Lua is used for:
 
-- skills
+- the tool registry and built-in tool implementations
 - prompt assembly helpers
+- skills
 - slash commands
-- hooks
+- hooks (before/after tool calls, file-op tracking, render hooks)
 - optional custom tools
 - future summary prompt customization
 
-The host embeds Chibi and exposes explicit libraries such as:
+The host embeds Lua and exposes the runtime through a `psi.*` module surface
+assembled in `lua/boot.lua`:
 
-- `(psi core)`
-- `(psi session)`
-- `(psi tools)`
-- `(psi ui)`
-- `(psi fs)`
+- `psi.tools` — tool registry and dispatch
+- `psi.tool_registry` — declarative tool registration
+- `psi.session` — session records and file-op provenance
+- `psi.prompt` — system prompt assembly
+- `psi.render` / `psi.diff` / `psi.ansi` — TUI and diff rendering
+- `psi.hooks` — hook dispatch
+- `psi.records` — structured tool and message records
+- `psi.io` — small host I/O helpers
 
-The portable language contract presented to user code should remain close to
-`R7RS-small`, with host-specific functionality in `psi` libraries.
+User code stays close to stock Lua 5.4 semantics, with host-specific
+functionality confined to the `psi.*` modules.
 
 ### 4.4 provider layer
 
@@ -124,7 +130,7 @@ It owns:
 - current provider/model selection
 - current session
 - current tool table
-- current embedded Scheme VM
+- current embedded Lua VM
 - mode-specific service handles
 
 Conceptually this is the C replacement for `AgentSession` plus the runtime host
@@ -196,101 +202,105 @@ should be shaped for it immediately.
 
 ## 8. tools
 
-`psi` should start with the same minimal default set:
+`psi` ships the following default set, registered in `lua/psi/tools.lua`:
 
 - `read`
-- `bash`
-- `edit`
 - `write`
-
-Optional read-only helpers can come next:
-
+- `edit`
+- `bash`
 - `grep`
 - `find`
 - `ls`
+- `lua`
 
 Tool design rules:
 
-- host executes tools
+- host executes tools through a small C process layer (`src/core/process.c`)
+  and host-ops surface (`src/core/host_ops.c`)
 - provider sees tool schema, not host internals
-- Scheme can register new tools, but tool execution still happens through an
+- Lua owns the registry and can register new tools; dispatch still crosses an
   explicit host callback boundary
 - tool results are persisted as first-class messages
+- before/after hooks run through `psi.tool_registry` so session provenance
+  and file-op tracking can observe every call
 
-## 9. Scheme integration model
+## 9. Lua integration model
 
-Chibi-Scheme is embedded, not treated as a sidecar process.
+Lua 5.4 is embedded, not treated as a sidecar process.
 
 The host is responsible for:
 
 - VM lifecycle
-- loading the bootstrap file
-- loading host libraries
-- registering foreign procedures
-- translating host errors into Scheme errors and back
+- loading the bootstrap file (`lua/boot.lua`)
+- loading host modules under `psi.*`
+- registering C functions and userdata for host ops, session access, and
+  process execution
+- translating host errors into Lua errors and back
 
-Scheme is responsible for:
+Lua is responsible for:
 
+- tool registry contents and default tool implementations
 - declarative skill metadata
 - prompt snippets
 - policy and workflow helpers
-- future commands and hooks
+- slash commands, hooks, and render helpers
 
-Important constraint from Chibi's embedding model:
+Important constraint from Lua's embedding model:
 
-- continuations should not be allowed to cross arbitrary host call boundaries
-  in ways that make C control flow ambiguous
+- host calls into Lua must go through `lua_pcall` (or an equivalent protected
+  call) so that a Lua error cannot long-jump past C frames that own resources;
+  the host should treat Lua calls as bounded transactions
 
-This means the host should treat Scheme calls as bounded transactions:
+This means the host treats Lua calls as bounded transactions:
 
-- call into Scheme
-- get a value or exception back
+- call into Lua under a protected frame
+- get a value or error back
 - resume host control
 
-## 10. Scheme libraries
+## 10. Lua modules
 
-Planned libraries:
+Currently shipped modules (see `lua/psi/`):
 
-### `(psi core)`
+### `psi.tools`
 
-Small host facts and utility procedures:
+Built-in tool implementations (`read`, `write`, `edit`, `bash`, `grep`,
+`find`, `ls`, `lua`). Exposes `psi.tools.dispatch_alist` for C glue.
 
-- `(psi-version)`
-- `(psi-log message)`
-- `(psi-feature? symbol)`
+### `psi.tool_registry`
 
-### `(psi session)`
+Declarative tool registration, schema capture, dispatch, and
+before/after hook plumbing.
 
-Session accessors and mutation helpers:
+### `psi.session`
 
-- current session id
-- session cwd
-- append custom messages
-- future tree navigation hooks
+Session record construction and file-op provenance hooks used during
+compaction.
 
-### `(psi tools)`
+### `psi.prompt`
 
-Tool registration and tool-call helpers:
+System prompt assembly: tool metadata, cwd, date, and discovered
+`AGENTS.md` / `CLAUDE.md` context.
 
-- define tool
-- tool metadata helpers
-- future argument validation hooks
+### `psi.render`, `psi.diff`, `psi.ansi`
 
-### `(psi ui)`
+Render helpers used by both the interactive shell and the TUI for tool
+execution blocks, diffs, and ANSI formatting.
 
-Frontend-neutral user interaction hooks:
+### `psi.hooks`
 
-- notify
-- confirm
-- prompt
-- future selector support
+Hook registration and dispatch used by tooling and rendering layers.
 
-### `(psi fs)`
+### `psi.records`
 
-Small host filesystem helpers when direct Scheme-side file work is appropriate.
+Structured tool spec, tool result, and message record constructors.
 
-The host should keep this library intentionally narrow. Direct unrestricted host
-surfaces are easy to add later and hard to remove cleanly.
+### `psi.io`, `psi.commands`, `psi.tool_shell`, `psi.prelude`
+
+Small host I/O helpers, slash-command dispatch, POSIX shell quoting, and the
+prelude used by the boot script.
+
+The host should keep these modules intentionally narrow. Direct unrestricted
+host surfaces are easy to add later and hard to remove cleanly.
 
 ## 11. mode architecture
 
@@ -302,20 +312,25 @@ This is the first implementation target because it exercises:
 
 - CLI parsing
 - runtime initialization
-- Scheme bootstrap loading
+- Lua bootstrap loading
 - provider-independent request flow
 
 ### 11.2 interactive mode
 
-Interactive mode should come after the core session and tool loop exist.
+Interactive mode runs on top of `libedit` and reuses the streamed Anthropic
+loop.
 
-Initial interactive mode can use `libedit`.
-Richer terminal rendering can later add `ncurses` where it is actually useful.
+### 11.3 TUI mode
+
+`--tui` drives the same runtime under a full-screen `ncursesw` view. The TUI
+runs the agent turn on a worker thread and streams tool output live through
+Lua render hooks. A UTF-8 locale is set before `initscr()` so unicode glyphs
+render correctly.
 
 The important rule is that the UI must consume host events rather than becoming
 the place where state lives.
 
-### 11.3 RPC mode
+### 11.4 RPC mode
 
 RPC mode should be a JSONL protocol over stdin/stdout, reusing the same runtime
 object and event stream as interactive mode.
@@ -330,7 +345,7 @@ That implies:
 - summaries are persisted
 - summaries are visible to frontends
 - summaries can carry structured details
-- future Scheme hooks can customize prompts or details
+- future Lua hooks can customize prompts or details
 
 The first slice can defer implementation, but the runtime should reserve
 message types for them now.
@@ -345,9 +360,9 @@ Configuration should be simple and layered:
 
 Discovery surfaces:
 
-- `AGENTS.md`
+- `AGENTS.md` / `CLAUDE.md`
 - future `SKILL.md`
-- local Scheme libraries under project config paths
+- local Lua modules under project config paths
 
 As in `pi`, only summary metadata should be promoted into the always-on prompt.
 Detailed skill content should be loaded on demand.
@@ -362,8 +377,9 @@ Build system choices:
 
 The flake should:
 
-- build Chibi-Scheme from source
-- expose a dev shell with compiler, make, pkg-config, libedit, ncurses
+- pull Lua 5.4 from nixpkgs
+- expose a dev shell with compiler, make, pkg-config, libedit, libcurl,
+  cJSON, and ncursesw
 - build `psi`
 
 The host should be compiled as C89 by default.
@@ -375,7 +391,7 @@ The host should be compiled as C89 by default.
 - flake
 - Makefile
 - core C89 project layout
-- embedded Chibi bootstrap
+- embedded Lua bootstrap
 - `--eval`
 - `--print`
 - minimal session/message data structures
@@ -393,6 +409,7 @@ The host should be compiled as C89 by default.
 - command parsing
 - project context loading
 - simple skill loading
+- ncurses-based `--tui` over the same runtime
 
 ### milestone 4
 
@@ -406,9 +423,9 @@ The host should be compiled as C89 by default.
 The first code in this repository should prove four things:
 
 - C89 host code builds cleanly
-- Nix can reproduce the toolchain and embedded Scheme dependency
-- the host can register foreign procedures in Chibi
-- Scheme bootstrap code can be called from C as part of a runtime flow
+- Nix can reproduce the toolchain and embedded Lua dependency
+- the host can register C functions in Lua
+- Lua bootstrap code can be called from C as part of a runtime flow
 
 That is enough to start building the real harness without committing to the
 wrong boundaries.
