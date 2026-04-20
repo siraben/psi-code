@@ -7,7 +7,6 @@
 local records = require("psi.records")
 local registry = require("psi.tool_registry")
 local shell = require("psi.tool_shell")
-local io_lib = require("psi.io")
 local prelude = require("psi.prelude")
 
 local M = {}
@@ -72,7 +71,7 @@ local function impl_edit(input)
   if not path then return records.tool_failure("edit", "missing string field: path") end
   local edits = input.edits
   local old_text, new_text = input.oldText, input.newText
-  local original = io_lib.safe_read(path)
+  local original = prelude.safe_read(path)
   if not original then return records.tool_failure("edit", "could not read file") end
 
   local edited, replacements
@@ -162,12 +161,7 @@ end
 -- ---------- lua (runtime inspect / eval) ----------
 
 local function eval_to_string(expression)
-  local chunk, err = load("return " .. expression, "=eval", "t")
-  if not chunk then
-    chunk, err = load(expression, "=eval", "t")
-  end
-  if not chunk then return err or "load error" end
-  local ok, value = pcall(chunk)
+  local ok, value = prelude.eval_expression(expression)
   if not ok then return "error: " .. tostring(value) end
   if type(value) == "string" then return value end
   return tostring(value)

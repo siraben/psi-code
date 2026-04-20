@@ -53,6 +53,26 @@ local function session_header()
   return hdr
 end
 
+local function message_entry(m)
+  local entry = {type = "message", role = m.role or "custom", text = m.text or ""}
+  if m.data then entry.data = m.data end
+  return entry
+end
+
+-- Write `header` followed by the first `count` messages (nil = all) to `path`.
+local function write_session_file(path, header, messages, count)
+  ensure_parent_dir(path)
+  local f, err = io.open(path, "w")
+  if not f then return false, err end
+  write_line(f, header)
+  local n = count or #messages
+  for i = 1, n do
+    write_line(f, message_entry(messages[i]))
+  end
+  f:close()
+  return true
+end
+
 function M.save(path)
   if not path or path == "" then
     path = psi.session_path()
@@ -65,18 +85,7 @@ function M.save(path)
   if not psi.session_id() or psi.session_id() == "" then
     psi.session_set_id(generate_id(""))
   end
-  ensure_parent_dir(path)
-
-  local f, err = io.open(path, "w")
-  if not f then return false, err end
-  write_line(f, session_header())
-  for _, m in ipairs(psi.session_messages()) do
-    local entry = {type = "message", role = m.role or "custom", text = m.text or ""}
-    if m.data then entry.data = m.data end
-    write_line(f, entry)
-  end
-  f:close()
-  return true
+  return write_session_file(path, session_header(), psi.session_messages())
 end
 
 function M.load(path)
@@ -94,15 +103,13 @@ function M.load(path)
 
   psi.session_clear()
   for line in f:lines() do
-    if #line > 0 then
-      local parsed = pcall(psi.json_decode, line) and psi.json_decode(line) or nil
-      if type(parsed) == "table" then
-        if parsed.type == "session" then
-          if parsed.id then psi.session_set_id(parsed.id) end
-          if parsed.parent then psi.session_set_parent_id(parsed.parent) end
-        elseif parsed.type == "message" and parsed.text then
-          psi.session_append(parsed.role or "custom", parsed.text, parsed.data)
-        end
+    local parsed = prelude.safe_json_decode(line)
+    if type(parsed) == "table" then
+      if parsed.type == "session" then
+        if parsed.id then psi.session_set_id(parsed.id) end
+        if parsed.parent then psi.session_set_parent_id(parsed.parent) end
+      elseif parsed.type == "message" and parsed.text then
+        psi.session_append(parsed.role or "custom", parsed.text, parsed.data)
       end
     end
   end
@@ -122,24 +129,13 @@ function M.fork(at_count, out_path)
   local messages = psi.session_messages()
   if at_count > #messages then at_count = #messages end
   if at_count < 0 then at_count = 0 end
-  ensure_parent_dir(out_path)
-
-  local f, err = io.open(out_path, "w")
-  if not f then return false, err end
-  write_line(f, {
+  local header = {
     type = "session",
     version = 1,
     id = generate_id("fork-"),
     parent = psi.session_id(),
-  })
-  for i = 1, at_count do
-    local m = messages[i]
-    local entry = {type = "message", role = m.role or "custom", text = m.text or ""}
-    if m.data then entry.data = m.data end
-    write_line(f, entry)
-  end
-  f:close()
-  return true
+  }
+  return write_session_file(out_path, header, messages, at_count)
 end
 
 -- ---------- file-op tracking for compaction provenance ----------

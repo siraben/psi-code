@@ -6,6 +6,7 @@
 -- command dispatch. TUI mode stays in C for now.
 
 local agent = require("psi.agent")
+local prelude = require("psi.prelude")
 local prompt = require("psi.prompt")
 local render = require("psi.render")
 local session = require("psi.session")
@@ -19,12 +20,7 @@ local function fire(event, payload)
   if text ~= nil and text ~= "" then psi.stdout_write(text) end
 end
 
-local function json_parse_or(text, fallback)
-  if not text or text == "" then return fallback end
-  local ok, value = pcall(psi.json_decode, text)
-  if not ok then return fallback end
-  return value
-end
+local json_parse_or = prelude.safe_json_decode
 
 -- Build an observer whose callbacks stream rendered events to stdout.
 local function print_observer()
@@ -89,16 +85,7 @@ function M.run_print(opts)
 end
 
 function M.run_eval(opts)
-  local expr = opts.payload or ""
-  local chunk, err = load("return " .. expr, "=eval", "t")
-  if not chunk then
-    chunk, err = load(expr, "=eval", "t")
-  end
-  if not chunk then
-    io.stderr:write("eval error: " .. tostring(err) .. "\n")
-    return false
-  end
-  local ok, value = pcall(chunk)
+  local ok, value = prelude.eval_expression(opts.payload or "")
   if not ok then
     io.stderr:write("eval error: " .. tostring(value) .. "\n")
     return false

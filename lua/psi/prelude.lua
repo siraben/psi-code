@@ -91,6 +91,35 @@ function M.each(xs, fn)
   for _, v in ipairs(xs) do fn(v) end
 end
 
+-- ---------- json / eval / io shims ----------
+
+-- Decode JSON text, returning `fallback` on nil/empty input or parse error.
+function M.safe_json_decode(text, fallback)
+  if not text or text == "" then return fallback end
+  local ok, value = pcall(psi.json_decode, text)
+  if not ok then return fallback end
+  return value
+end
+
+-- Compile a Lua expression (preferring `return expr` form, falling back to
+-- statement form) and evaluate it. Returns (ok, value_or_error).
+function M.eval_expression(expression)
+  local chunk, err = load("return " .. expression, "=eval", "t")
+  if not chunk then
+    chunk, err = load(expression, "=eval", "t")
+  end
+  if not chunk then return false, err or "load error" end
+  return pcall(chunk)
+end
+
+-- Read a file if it exists; return its contents or nil.
+function M.safe_read(path)
+  if path and psi.file_exists(path) then
+    return psi.read_file(path)
+  end
+  return nil
+end
+
 -- ---------- paths ----------
 
 -- Tag a table as a JSON array so it serializes as `[]` even when empty.

@@ -67,12 +67,7 @@ end
 
 -- ---------- Session -> API messages ----------
 
-local function safe_decode(text)
-  if not text or text == "" then return nil end
-  local ok, value = pcall(psi.json_decode, text)
-  if not ok then return nil end
-  return value
-end
+local safe_decode = prelude.safe_json_decode
 
 -- Build the Anthropic messages[] array from the session's ordered
 -- entries. Mirrors pi's model: assistant messages carry tool_use

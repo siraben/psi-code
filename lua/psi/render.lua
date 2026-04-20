@@ -3,7 +3,7 @@
 local records = require("psi.records")
 local ansi = require("psi.ansi")
 local diff = require("psi.diff")
-local io_lib = require("psi.io")
+local prelude = require("psi.prelude")
 
 local M = {}
 
@@ -140,7 +140,7 @@ local function render_write_result(p, frame)
   local input = frame and frame.input
   local path = (frame and frame.path) or result:get("path") or (input and input.path)
   local before_text = frame and frame.before_text
-  local after_text = path and io_lib.safe_read(path)
+  local after_text = path and prelude.safe_read(path)
   local content = input and (input.content or input.text)
   if result.ok then
     local header = ansi.dim((before_text and "updated " or "created ") .. path)
@@ -154,7 +154,7 @@ local function render_edit_result(p, frame)
   local result = payload_result(p)
   local path = (frame and frame.path) or result:get("path")
   local before_text = frame and frame.before_text
-  local after_text = path and io_lib.safe_read(path)
+  local after_text = path and prelude.safe_read(path)
   if result.ok then
     return ansi.dim("updated " .. path) .. "\n" ..
       diff.colored_diff(before_text, after_text or "") .. "\n"
@@ -225,7 +225,7 @@ function M.capture_frame(p)
   local path = input.path
   local before_text
   if path and (tool == "write" or tool == "edit") then
-    before_text = io_lib.safe_read(path)
+    before_text = prelude.safe_read(path)
   end
   if id then
     M.store_frame(id, records.new_tool_frame(tool, input, path, before_text))

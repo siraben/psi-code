@@ -943,6 +943,29 @@ static void psi_vm_print_error(const char *where, const char *msg) {
     fprintf(stderr, "Lua error in %s: %s\n", where, msg ? msg : "<unknown>");
 }
 
+/* Resolve a dotted Lua procedure name and push it on the stack.
+ * Returns 0 on success (function left at top), -1 on failure (nothing pushed,
+ * error already logged). */
+static int psi_vm_begin_call(lua_State *L, const char *dotted) {
+    if (psi_vm_push_dotted(L, dotted) != 0) {
+        fprintf(stderr, "undefined Lua procedure: %s\n", dotted);
+        return -1;
+    }
+    return 0;
+}
+
+/* pcall the function on the stack with `nargs` args (already pushed) expecting
+ * `nresults` results. On error, pops the error message and logs it; on success
+ * leaves results on the stack. Returns PSI_STATUS_OK / PSI_STATUS_ERROR. */
+static int psi_vm_finish_call(lua_State *L, int nargs, int nresults, const char *where) {
+    if (lua_pcall(L, nargs, nresults, 0) != LUA_OK) {
+        psi_vm_print_error(where, lua_tostring(L, -1));
+        lua_pop(L, 1);
+        return PSI_STATUS_ERROR;
+    }
+    return PSI_STATUS_OK;
+}
+
 /* ------------------------------------------------------------------
  * Public helpers invoked by runtime modes / anthropic / agent / host_ops.
  * ------------------------------------------------------------------ */
@@ -983,16 +1006,9 @@ int psi_vm_call_string_procedure(struct psi_vm *vm, const char *procedure_name,
                                   const char *argument, char **output_text) {
     if (!vm || !vm->L || !procedure_name || !output_text) return PSI_STATUS_ERROR;
     *output_text = NULL;
-    if (psi_vm_push_dotted(vm->L, procedure_name) != 0) {
-        fprintf(stderr, "undefined Lua procedure: %s\n", procedure_name);
-        return PSI_STATUS_ERROR;
-    }
+    if (psi_vm_begin_call(vm->L, procedure_name) != 0) return PSI_STATUS_ERROR;
     lua_pushstring(vm->L, argument ? argument : "");
-    if (lua_pcall(vm->L, 1, 1, 0) != LUA_OK) {
-        psi_vm_print_error(procedure_name, lua_tostring(vm->L, -1));
-        lua_pop(vm->L, 1);
-        return PSI_STATUS_ERROR;
-    }
+    if (psi_vm_finish_call(vm->L, 1, 1, procedure_name) != PSI_STATUS_OK) return PSI_STATUS_ERROR;
     return psi_vm_pop_string(vm->L, output_text);
 }
 
@@ -1000,65 +1016,9 @@ int psi_vm_call_procedure0_to_string(struct psi_vm *vm, const char *procedure_na
                                       char **output_text) {
     if (!vm || !vm->L || !procedure_name || !output_text) return PSI_STATUS_ERROR;
     *output_text = NULL;
-    if (psi_vm_push_dotted(vm->L, procedure_name) != 0) {
-        fprintf(stderr, "undefined Lua procedure: %s\n", procedure_name);
-        return PSI_STATUS_ERROR;
-    }
-    if (lua_pcall(vm->L, 0, 1, 0) != LUA_OK) {
-        psi_vm_print_error(procedure_name, lua_tostring(vm->L, -1));
-        lua_pop(vm->L, 1);
-        return PSI_STATUS_ERROR;
-    }
+    if (psi_vm_begin_call(vm->L, procedure_name) != 0) return PSI_STATUS_ERROR;
+    if (psi_vm_finish_call(vm->L, 0, 1, procedure_name) != PSI_STATUS_OK) return PSI_STATUS_ERROR;
     return psi_vm_pop_string(vm->L, output_text);
-}
-
-int psi_vm_tool_specs_json(struct psi_vm *vm, char **output_json) {
-    return psi_vm_active_tool_specs_json(vm, "", output_json);
-}
-
-int psi_vm_active_tool_specs_json(struct psi_vm *vm, const char *user_text, char **output_json) {
-    cJSON *arr;
-    cJSON *filtered;
-    cJSON *entry;
-
-    if (!vm || !vm->L || !output_json) return PSI_STATUS_ERROR;
-    *output_json = NULL;
-
-    if (psi_vm_push_dotted(vm->L, "psi.tools.select_specs") != 0) return PSI_STATUS_ERROR;
-    lua_pushstring(vm->L, user_text ? user_text : "");
-    if (lua_pcall(vm->L, 1, 1, 0) != LUA_OK) {
-        psi_vm_print_error("psi.tools.select_specs", lua_tostring(vm->L, -1));
-        lua_pop(vm->L, 1);
-        return PSI_STATUS_ERROR;
-    }
-
-    arr = psi_vm_lua_value_to_json(vm->L, -1);
-    lua_pop(vm->L, 1);
-    if (!arr || !cJSON_IsArray(arr)) {
-        cJSON_Delete(arr);
-        return PSI_STATUS_ERROR;
-    }
-
-    filtered = cJSON_CreateArray();
-    if (!filtered) { cJSON_Delete(arr); return PSI_STATUS_ERROR; }
-
-    cJSON_ArrayForEach(entry, arr) {
-        cJSON *f = cJSON_CreateObject();
-        cJSON *field;
-        if (!f) { cJSON_Delete(filtered); cJSON_Delete(arr); return PSI_STATUS_ERROR; }
-        if ((field = cJSON_GetObjectItemCaseSensitive(entry, "name")) != NULL)
-            cJSON_AddItemToObject(f, "name", cJSON_Duplicate(field, 1));
-        if ((field = cJSON_GetObjectItemCaseSensitive(entry, "description")) != NULL)
-            cJSON_AddItemToObject(f, "description", cJSON_Duplicate(field, 1));
-        if ((field = cJSON_GetObjectItemCaseSensitive(entry, "input_schema")) != NULL)
-            cJSON_AddItemToObject(f, "input_schema", cJSON_Duplicate(field, 1));
-        cJSON_AddItemToArray(filtered, f);
-    }
-    cJSON_Delete(arr);
-
-    *output_json = cJSON_PrintUnformatted(filtered);
-    cJSON_Delete(filtered);
-    return *output_json ? PSI_STATUS_OK : PSI_STATUS_ERROR;
 }
 
 int psi_vm_render_event_json(struct psi_vm *vm, const char *event_name,
@@ -1066,7 +1026,7 @@ int psi_vm_render_event_json(struct psi_vm *vm, const char *event_name,
     if (!vm || !vm->L || !event_name || !output_text) return PSI_STATUS_ERROR;
     *output_text = NULL;
 
-    if (psi_vm_push_dotted(vm->L, "psi.render.handle_event") != 0) return PSI_STATUS_ERROR;
+    if (psi_vm_begin_call(vm->L, "psi.render.handle_event") != 0) return PSI_STATUS_ERROR;
     lua_pushstring(vm->L, event_name);
     if (payload_json && payload_json[0] != '\0') {
         cJSON *root = cJSON_Parse(payload_json);
@@ -1076,11 +1036,8 @@ int psi_vm_render_event_json(struct psi_vm *vm, const char *event_name,
     } else {
         lua_newtable(vm->L);
     }
-    if (lua_pcall(vm->L, 2, 1, 0) != LUA_OK) {
-        psi_vm_print_error("psi.render.handle_event", lua_tostring(vm->L, -1));
-        lua_pop(vm->L, 1);
+    if (psi_vm_finish_call(vm->L, 2, 1, "psi.render.handle_event") != PSI_STATUS_OK)
         return PSI_STATUS_ERROR;
-    }
     if (lua_type(vm->L, -1) != LUA_TSTRING) {
         *output_text = psi_strdup("");
         lua_pop(vm->L, 1);
@@ -1099,13 +1056,10 @@ int psi_vm_parse_command(struct psi_vm *vm, const char *line,
     *action_text = NULL;
     *action_number = 0l;
 
-    if (psi_vm_push_dotted(vm->L, "psi.commands.handle_command_list") != 0) return PSI_STATUS_ERROR;
+    if (psi_vm_begin_call(vm->L, "psi.commands.handle_command_list") != 0) return PSI_STATUS_ERROR;
     lua_pushstring(vm->L, line);
-    if (lua_pcall(vm->L, 1, 1, 0) != LUA_OK) {
-        psi_vm_print_error("psi.commands.handle_command_list", lua_tostring(vm->L, -1));
-        lua_pop(vm->L, 1);
+    if (psi_vm_finish_call(vm->L, 1, 1, "psi.commands.handle_command_list") != PSI_STATUS_OK)
         return PSI_STATUS_ERROR;
-    }
 
     if (lua_isnil(vm->L, -1) || (lua_isboolean(vm->L, -1) && !lua_toboolean(vm->L, -1))) {
         lua_pop(vm->L, 1);
@@ -1146,13 +1100,10 @@ int psi_vm_build_compaction_request(struct psi_vm *vm, long keep_recent,
     *system_prompt = NULL;
     *user_prompt = NULL;
 
-    if (psi_vm_push_dotted(vm->L, "psi.prompt.compaction_request") != 0) return PSI_STATUS_ERROR;
+    if (psi_vm_begin_call(vm->L, "psi.prompt.compaction_request") != 0) return PSI_STATUS_ERROR;
     lua_pushinteger(vm->L, (lua_Integer)keep_recent);
-    if (lua_pcall(vm->L, 1, 1, 0) != LUA_OK) {
-        psi_vm_print_error("psi.prompt.compaction_request", lua_tostring(vm->L, -1));
-        lua_pop(vm->L, 1);
+    if (psi_vm_finish_call(vm->L, 1, 1, "psi.prompt.compaction_request") != PSI_STATUS_OK)
         return PSI_STATUS_ERROR;
-    }
     if (!lua_istable(vm->L, -1)) {
         fprintf(stderr, "invalid Lua compaction request\n");
         lua_pop(vm->L, 1);
@@ -1188,18 +1139,15 @@ int psi_vm_dispatch_tool_json(struct psi_vm *vm, const char *tool_name,
         : cJSON_CreateObject();
     if (!root) return PSI_STATUS_ERROR;
 
-    if (psi_vm_push_dotted(vm->L, "psi.tools.dispatch_alist") != 0) {
+    if (psi_vm_begin_call(vm->L, "psi.tools.dispatch_alist") != 0) {
         cJSON_Delete(root);
         return PSI_STATUS_ERROR;
     }
     lua_pushstring(vm->L, tool_name);
     psi_vm_push_json_value(vm->L, root);
     cJSON_Delete(root);
-    if (lua_pcall(vm->L, 2, 1, 0) != LUA_OK) {
-        psi_vm_print_error("psi.tools.dispatch_alist", lua_tostring(vm->L, -1));
-        lua_pop(vm->L, 1);
+    if (psi_vm_finish_call(vm->L, 2, 1, "psi.tools.dispatch_alist") != PSI_STATUS_OK)
         return PSI_STATUS_ERROR;
-    }
     result = psi_vm_lua_value_to_json(vm->L, -1);
     lua_pop(vm->L, 1);
     if (!result) return PSI_STATUS_ERROR;
@@ -1310,10 +1258,7 @@ static int psi_vm_call_agent(
     if (vm == NULL || vm->L == NULL) return PSI_STATUS_ERROR;
     if (output_text != NULL) *output_text = NULL;
 
-    if (psi_vm_push_dotted(vm->L, procedure) != 0) {
-        fprintf(stderr, "undefined Lua procedure: %s\n", procedure);
-        return PSI_STATUS_ERROR;
-    }
+    if (psi_vm_begin_call(vm->L, procedure) != 0) return PSI_STATUS_ERROR;
 
     vm->host.abort_signal = abort_signal;
 
@@ -1340,9 +1285,7 @@ static int psi_vm_call_agent(
     lua_pushcclosure(vm->L, psi_vm_abort_check, 1);
     lua_setfield(vm->L, -2, "abort_check");
 
-    if (lua_pcall(vm->L, 1, 2, 0) != LUA_OK) {
-        fprintf(stderr, "Lua error in %s: %s\n", procedure, lua_tostring(vm->L, -1));
-        lua_pop(vm->L, 1);
+    if (psi_vm_finish_call(vm->L, 1, 2, procedure) != PSI_STATUS_OK) {
         vm->host.abort_signal = NULL;
         return PSI_STATUS_ERROR;
     }
@@ -1377,13 +1320,9 @@ int psi_vm_run_agent_turn(
 static int psi_vm_session_call_with_path(struct psi_vm *vm, const char *procedure, const char *path) {
     int ok;
     if (vm == NULL || vm->L == NULL) return PSI_STATUS_ERROR;
-    if (psi_vm_push_dotted(vm->L, procedure) != 0) return PSI_STATUS_ERROR;
+    if (psi_vm_begin_call(vm->L, procedure) != 0) return PSI_STATUS_ERROR;
     if (path != NULL) lua_pushstring(vm->L, path); else lua_pushnil(vm->L);
-    if (lua_pcall(vm->L, 1, 1, 0) != LUA_OK) {
-        fprintf(stderr, "Lua error in %s: %s\n", procedure, lua_tostring(vm->L, -1));
-        lua_pop(vm->L, 1);
-        return PSI_STATUS_ERROR;
-    }
+    if (psi_vm_finish_call(vm->L, 1, 1, procedure) != PSI_STATUS_OK) return PSI_STATUS_ERROR;
     ok = lua_toboolean(vm->L, -1);
     lua_pop(vm->L, 1);
     return ok ? PSI_STATUS_OK : PSI_STATUS_ERROR;
@@ -1416,14 +1355,11 @@ int psi_vm_session_compact(struct psi_vm *vm, long keep_recent, const char *summ
     int ok;
     if (!vm || !vm->L || !summary_text) return PSI_STATUS_ERROR;
 
-    if (psi_vm_push_dotted(vm->L, "psi.session.do_compact") != 0) return PSI_STATUS_ERROR;
+    if (psi_vm_begin_call(vm->L, "psi.session.do_compact") != 0) return PSI_STATUS_ERROR;
     lua_pushinteger(vm->L, (lua_Integer)keep_recent);
     lua_pushstring(vm->L, summary_text);
-    if (lua_pcall(vm->L, 2, 1, 0) != LUA_OK) {
-        psi_vm_print_error("psi.session.do_compact", lua_tostring(vm->L, -1));
-        lua_pop(vm->L, 1);
+    if (psi_vm_finish_call(vm->L, 2, 1, "psi.session.do_compact") != PSI_STATUS_OK)
         return PSI_STATUS_ERROR;
-    }
     ok = lua_toboolean(vm->L, -1);
     lua_pop(vm->L, 1);
     return ok ? PSI_STATUS_OK : PSI_STATUS_ERROR;
