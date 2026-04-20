@@ -151,8 +151,9 @@ static int psi_tui_transcript_height(const struct psi_tui_state *state) {
     return height;
 }
 
+static size_t psi_tui_total_rendered_lines(struct psi_tui_state *state);
+
 static int psi_tui_max_scroll_offset(struct psi_tui_state *state) {
-    struct psi_tui_render_line *lines;
     size_t line_count;
     int max_scroll;
     int transcript_height;
@@ -161,18 +162,12 @@ static int psi_tui_max_scroll_offset(struct psi_tui_state *state) {
         return 0;
     }
 
-    lines = NULL;
-    line_count = 0u;
-    if (psi_tui_build_render_lines(state, &lines, &line_count) != PSI_STATUS_OK) {
-        return state->scroll_offset > 0 ? state->scroll_offset : 0;
-    }
-
+    line_count = psi_tui_total_rendered_lines(state);
     transcript_height = psi_tui_transcript_height(state);
     max_scroll = (int)line_count - transcript_height;
     if (max_scroll < 0) {
         max_scroll = 0;
     }
-    psi_tui_render_free_lines(lines, line_count);
     return max_scroll;
 }
 
@@ -334,7 +329,6 @@ static int psi_tui_add_entry(
     }
 
     state->entry_count++;
-    state->scroll_offset = 0;
     return (int)(state->entry_count - 1u);
 }
 
@@ -544,9 +538,9 @@ static char *psi_tui_format_tool_call(const char *tool_name, const char *input_j
     } else if (strcmp(tool_name, "ls") == 0 && input != NULL) {
         value = psi_tui_json_string(input, "path");
         text = psi_tui_make_summary2("ls ", value != NULL ? value : ".");
-    } else if (strcmp(tool_name, "scheme") == 0 && input != NULL) {
+    } else if (strcmp(tool_name, "lua") == 0 && input != NULL) {
         value = psi_tui_json_string(input, "mode");
-        text = psi_tui_make_summary2("scheme ", value != NULL ? value : "summary");
+        text = psi_tui_make_summary2("lua ", value != NULL ? value : "summary");
     } else {
         text = psi_tui_make_summary3(tool_name, " ", input_json != NULL ? input_json : "");
     }
@@ -605,7 +599,7 @@ static char *psi_tui_format_tool_result(const char *tool_name, const char *outpu
         cJSON_Delete(output);
         return summary;
     }
-    if (strcmp(tool_name, "scheme") == 0) {
+    if (strcmp(tool_name, "lua") == 0) {
         value = psi_tui_json_string(output, "result");
         summary = psi_tui_limit_text(value != NULL ? value : "");
         cJSON_Delete(output);
@@ -1235,9 +1229,28 @@ static void psi_tui_append_entry_text(struct psi_tui_state *state, int index, co
     if (state == NULL || index < 0 || (size_t)index >= state->entry_count || text == NULL) {
         return;
     }
-    if (psi_tui_append_text(&state->entries[index].text, text) == PSI_STATUS_OK) {
-        state->scroll_offset = 0;
+    (void)psi_tui_append_text(&state->entries[index].text, text);
+}
+
+/* Count the total rendered line count for the current transcript. Used to
+ * preserve scroll anchoring while new content streams in: if the user has
+ * scrolled up (scroll_offset > 0), we add the growth delta back to keep
+ * their view locked to the same content instead of drifting toward the
+ * bottom as lines pile on. Returns 0 on allocation failure. */
+static size_t psi_tui_total_rendered_lines(struct psi_tui_state *state) {
+    struct psi_tui_render_line *lines;
+    size_t line_count;
+
+    if (state == NULL) {
+        return 0u;
     }
+    lines = NULL;
+    line_count = 0u;
+    if (psi_tui_build_render_lines(state, &lines, &line_count) != PSI_STATUS_OK) {
+        return 0u;
+    }
+    psi_tui_render_free_lines(lines, line_count);
+    return line_count;
 }
 
 /* Push an event onto the thread-safe queue. Takes ownership of any heap
@@ -1570,6 +1583,7 @@ static int psi_tui_handle_command(struct psi_tui_state *state, const char *line)
 
     if (action_name != NULL && strcmp(action_name, "print") == 0) {
         psi_tui_add_entry(state, PSI_TUI_ENTRY_INFO, NULL, action_text != NULL ? action_text : "", 0);
+        state->scroll_offset = 0;
         psi_tui_set_status(state, "", 0);
     } else if (action_name != NULL && strcmp(action_name, "compact") == 0) {
         status = psi_tui_start_compact(state, keep_recent);
@@ -1701,6 +1715,7 @@ static int psi_tui_submit(struct psi_tui_state *state) {
 
     psi_tui_add_entry(state, PSI_TUI_ENTRY_USER, NULL, line, 0);
     state->streaming_assistant_index = psi_tui_add_entry(state, PSI_TUI_ENTRY_ASSISTANT, NULL, "", 0);
+    state->scroll_offset = 0;
     state->busy = 1;
     psi_tui_set_status(state, "Working...", 0);
     psi_tui_redraw(state);
@@ -1749,10 +1764,21 @@ static int psi_tui_start_compact(struct psi_tui_state *state, long keep_recent) 
 static void psi_tui_drain_events(struct psi_tui_state *state) {
     struct psi_tui_event *event;
     int dirty;
+    int was_scrolled_up;
+    size_t lines_before;
+    size_t lines_after;
 
     if (state == NULL) {
         return;
     }
+
+    /* Snapshot scroll state before touching entries. If the user has
+     * scrolled up to read earlier content, we want their view to stay
+     * anchored there as new deltas land. scroll_offset counts lines above
+     * the visible bottom, so growth of the transcript must be added back
+     * in to compensate; otherwise their view drifts toward the live tail. */
+    was_scrolled_up = state->scroll_offset > 0;
+    lines_before = was_scrolled_up ? psi_tui_total_rendered_lines(state) : 0u;
 
     dirty = 0;
     while ((event = psi_tui_pop_event(state)) != NULL) {
@@ -1854,6 +1880,12 @@ static void psi_tui_drain_events(struct psi_tui_state *state) {
         dirty = 1;
     }
     if (dirty) {
+        if (was_scrolled_up && state->scroll_offset > 0) {
+            lines_after = psi_tui_total_rendered_lines(state);
+            if (lines_after > lines_before) {
+                state->scroll_offset += (int)(lines_after - lines_before);
+            }
+        }
         psi_tui_redraw(state);
     }
 }
