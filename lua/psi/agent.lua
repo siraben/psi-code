@@ -5,6 +5,7 @@
 -- psi_vm_run_agent_* bridge helpers; everything downstream (session ↔
 -- API message mapping, tool loop, compaction assembly) is pure Lua.
 
+local context = require("psi.context")
 local prompt = require("psi.prompt")
 local session = require("psi.session")
 local anthropic = require("psi.anthropic")
@@ -42,7 +43,7 @@ function M.run_compact(opts)
     system_prompt = request[1],
     user_text = request[2],
     model = opts.model,
-    max_tokens = 2048,
+    max_tokens = context.compaction_budget(),
   })
   if not ok then return false end
 

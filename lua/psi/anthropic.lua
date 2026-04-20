@@ -19,6 +19,7 @@
 --
 -- Session transcript is read and written via psi.session_* primitives.
 
+local context = require("psi.context")
 local prelude = require("psi.prelude")
 local tools = require("psi.tools")
 local session_mod = require("psi.session")
@@ -152,7 +153,24 @@ local function new_state()
     blocks = {},          -- 1-indexed, mirrors Anthropic's 0-based index+1
     stop_reason = nil,
     assistant_text = "",
+    usage = nil,          -- merged usage object from message_start + message_delta
   }
+end
+
+local function merge_usage(state, u)
+  if type(u) ~= "table" then return end
+  state.usage = state.usage or {}
+  for _, k in ipairs({
+    "input_tokens", "output_tokens",
+    "cache_read_input_tokens", "cache_creation_input_tokens",
+  }) do
+    if type(u[k]) == "number" then state.usage[k] = u[k] end
+  end
+end
+
+local function on_message_start(state, data)
+  local msg = data.message
+  if type(msg) == "table" then merge_usage(state, msg.usage) end
 end
 
 local function on_content_block_start(state, data)
@@ -198,11 +216,13 @@ local function on_message_delta(state, data)
   if type(data.delta) == "table" and type(data.delta.stop_reason) == "string" then
     state.stop_reason = data.delta.stop_reason
   end
+  merge_usage(state, data.usage)
 end
 
 local function dispatch_sse(state, event_type, data, observer)
   if     event_type == "content_block_start" then on_content_block_start(state, data)
   elseif event_type == "content_block_delta" then on_content_block_delta(state, data, observer)
+  elseif event_type == "message_start"        then on_message_start(state, data)
   elseif event_type == "message_delta"        then on_message_delta(state, data)
   end
 end
@@ -236,6 +256,40 @@ local function finalize_blocks(state)
     -- round-trip compatible with pre-thinking transcripts.
   end
   return content, tool_uses
+end
+
+-- ---------- Auto-compaction (threshold check on usage) ----------
+
+local AUTO_COMPACT_ENV = "PSI_AUTO_COMPACT"
+
+local function auto_compact_enabled()
+  local v = os.getenv(AUTO_COMPACT_ENV)
+  return v ~= "0" and v ~= "false"
+end
+
+local function maybe_auto_compact(model, opts)
+  if opts and opts.no_auto_compact then return end
+  if not auto_compact_enabled() then return end
+  local over, est = context.should_compact(model)
+  if not over then return end
+  io.stderr:write(string.format(
+    "psi: auto-compacting (context ~%d tokens, threshold %d)\n",
+    est.tokens, context.context_window(model) - context.reserve_tokens()))
+  -- Lazy require to avoid a load-time cycle with psi.agent.
+  local keep = context.keep_recent_messages(context.keep_recent_tokens())
+  local ok, summary = require("psi.agent").run_compact({
+    keep_recent = keep,
+    model = model,
+  })
+  if not ok then
+    io.stderr:write("psi: auto-compaction failed\n")
+  else
+    context.reset_usage()
+    session_mod.save()
+    if summary and summary ~= "" then
+      io.stderr:write("psi: compacted; kept " .. tostring(keep) .. " recent messages\n")
+    end
+  end
 end
 
 -- ---------- One-shot completion (non-streaming) ----------
@@ -341,9 +395,11 @@ function M.run_turn(opts)
 
     local content, tool_uses = finalize_blocks(state)
     psi.session_append("assistant", state.assistant_text, psi.json_encode(content))
+    context.record_usage(psi.session_message_count(), state.usage)
     session_mod.save()
 
     if #tool_uses == 0 then
+      maybe_auto_compact(model, opts)
       return true, state.assistant_text
     end
 
@@ -369,6 +425,8 @@ function M.run_turn(opts)
       }))
       session_mod.save()
     end
+
+    maybe_auto_compact(model, opts)
   end
 
   io.stderr:write("Anthropic tool loop exceeded " ..
