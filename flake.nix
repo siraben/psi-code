@@ -44,6 +44,24 @@
           '';
         };
 
+        # `nix run .#valgrind` — memcheck a non-agent exercise set.
+        apps.valgrind = let
+          vgScript = pkgs.writeShellApplication {
+            name = "psi-valgrind";
+            runtimeInputs = [
+              self.packages.${system}.default
+              pkgs.valgrind
+              pkgs.coreutils
+            ];
+            text = ''
+              exec ${./tests/valgrind.sh} "$@"
+            '';
+          };
+        in {
+          type = "app";
+          program = "${vgScript}/bin/psi-valgrind";
+        };
+
         devShells.default = pkgs.mkShell {
           packages = [
             pkgs.argtable
@@ -60,6 +78,7 @@
             pkgs.lua54Packages.luacheck
             pkgs.stylua
             pkgs.ncurses
+            pkgs.valgrind
           ];
 
           shellHook = ''
