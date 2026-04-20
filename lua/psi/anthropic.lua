@@ -67,16 +67,6 @@ end
 
 -- ---------- Session -> API messages ----------
 
-local function content_has_tool_use(content)
-  if type(content) ~= "table" then return false end
-  for _, block in ipairs(content) do
-    if type(block) == "table" and block.type == "tool_use" then
-      return true
-    end
-  end
-  return false
-end
-
 local function safe_decode(text)
   if not text or text == "" then return nil end
   local ok, value = pcall(psi.json_decode, text)
@@ -85,53 +75,36 @@ local function safe_decode(text)
 end
 
 -- Build the Anthropic messages[] array from the session's ordered
--- entries. Mirrors the pre-port C logic in anthropic.c:
--- user/assistant: content = parsed data_json OR plain text.
--- assistant with tool_use blocks: skip trailing tool-call entries
---   (they're already embedded in assistant's content).
--- compaction-summary: fold into a single user message.
--- bare tool-call run: assembles an assistant message of tool_use blocks.
--- tool-result run: assembles a user message of tool_result blocks.
+-- entries.
+--   user/assistant: content = parsed data_json OR plain text.
+--   compaction-summary: fold into a single user message.
+--   tool-result run: assembles a user message of tool_result blocks.
+--   tool-call: display-only; the authoritative tool_use lives in the
+--     preceding assistant's data field, so we filter these out before
+--     assembling.
 local function build_api_messages(session)
+  local filtered = {}
+  for _, m in ipairs(session) do
+    if m.role ~= "tool-call" then filtered[#filtered + 1] = m end
+  end
   local out = {}
   local i = 1
-  local n = #session
+  local n = #filtered
   while i <= n do
-    local msg = session[i]
+    local msg = filtered[i]
     local role = msg.role
     if role == "user" or role == "assistant" then
       local decoded = safe_decode(msg.data)
       local content = decoded or (msg.text or "")
       out[#out + 1] = {role = role, content = content}
-      local skip_tool_calls = role == "assistant" and content_has_tool_use(content)
       i = i + 1
-      if skip_tool_calls then
-        while i <= n and session[i].role == "tool-call" do
-          i = i + 1
-        end
-      end
     elseif role == "compaction-summary" then
       out[#out + 1] = {role = "user", content = msg.text or ""}
       i = i + 1
-    elseif role == "tool-call" then
-      local content = prelude.as_array({})
-      while i <= n and session[i].role == "tool-call" do
-        local parsed = safe_decode(session[i].text)
-        if parsed and type(parsed.id) == "string" and type(parsed.name) == "string" then
-          content[#content + 1] = {
-            type = "tool_use",
-            id = parsed.id,
-            name = parsed.name,
-            input = parsed.input or {},
-          }
-        end
-        i = i + 1
-      end
-      out[#out + 1] = {role = "assistant", content = content}
     elseif role == "tool-result" then
       local content = prelude.as_array({})
-      while i <= n and session[i].role == "tool-result" do
-        local parsed = safe_decode(session[i].text)
+      while i <= n and filtered[i].role == "tool-result" do
+        local parsed = safe_decode(filtered[i].text)
         if parsed and type(parsed.tool_use_id) == "string" and type(parsed.content) == "string" then
           content[#content + 1] = {
             type = "tool_result",
