@@ -55,6 +55,7 @@ local function run_agent_turn(opts, user_text)
     model = opts.model,
     max_tokens = opts.max_tokens,
     observer = observer,
+    abort_check = psi.is_aborted,
   })
   if not ok then return false, reply end
   fire("after-turn", {

@@ -295,6 +295,38 @@ local function finalize_blocks(state)
   return content, tool_uses
 end
 
+-- ---------- Abort bookkeeping ----------
+--
+-- When the stream is interrupted (Ctrl-C / Esc) we want to leave the
+-- session on disk in a shape the next turn can resume from. Mirrors
+-- pi-mono: any received content blocks are persisted as an assistant
+-- message with stopReason="aborted" before unwinding.
+local function save_aborted_partial(state, model)
+  if not state then return end
+  local has_text = state.assistant_text and state.assistant_text ~= ""
+  local has_blocks = next(state.blocks) ~= nil
+  if not has_text and not has_blocks then return end
+  local content, tool_uses = finalize_blocks(state)
+  session_mod.append_assistant(state.assistant_text or "", content, {
+    usage = state.usage,
+    stop_reason = "aborted",
+    model = model,
+    provider = "anthropic",
+    api = "anthropic-messages",
+    response_id = state.response_id,
+  })
+  -- Any tool_use blocks that were emitted before abort never ran. Pair
+  -- each with a synthetic error tool_result so the session remains
+  -- Anthropic-valid on resume (every tool_use needs a matching result).
+  for _, tu in ipairs(tool_uses) do
+    session_mod.append_tool_result(tu.id, tu.name,
+      psi.json_encode({ok = false, tool = tu.name, error = "aborted"}),
+      true)
+  end
+  context.record_usage(psi.session_message_count(), state.usage)
+  session_mod.save()
+end
+
 -- ---------- Prompt caching helpers ----------
 --
 -- Anthropic's ephemeral prompt cache lets subsequent requests in the same
@@ -487,7 +519,10 @@ function M.run_turn(opts)
     end)
 
     if status == nil then
-      if abort_check() then return false, "aborted" end
+      if abort_check() then
+        save_aborted_partial(state, model)
+        return false, "aborted"
+      end
       io.stderr:write("http error: " .. tostring(err) .. "\n")
       return false
     end
@@ -513,8 +548,21 @@ function M.run_turn(opts)
       return true, state.assistant_text
     end
 
-    for _, tu in ipairs(tool_uses) do
-      if abort_check() then return false, "aborted" end
+    for tu_idx, tu in ipairs(tool_uses) do
+      if abort_check() then
+        -- Assistant with tool_use blocks is already persisted. Inject
+        -- synthetic error tool-results for every not-yet-dispatched
+        -- tool_use so the session stays Anthropic-valid: each tool_use
+        -- must be followed by a matching tool_result on the next turn.
+        for j = tu_idx, #tool_uses do
+          local pending = tool_uses[j]
+          session_mod.append_tool_result(pending.id, pending.name,
+            psi.json_encode({ok = false, tool = pending.name, error = "aborted"}),
+            true)
+        end
+        session_mod.save()
+        return false, "aborted"
+      end
 
       local input_json = psi.json_encode(tu.input)
       if observer.on_tool_call then

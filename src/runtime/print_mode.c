@@ -6,13 +6,49 @@
  * psi.modes.run(opts), return its boolean status. TUI mode still lives
  * in src/runtime/tui_mode.c. */
 
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <lua.h>
+#include "psi/abort.h"
 #include "psi/runtime.h"
 #include "psi/session.h"
 #include "psi/vm.h"
+
+/* Process-global so the SIGINT handler can reach it without args.
+ * TUI mode runs its own UI-thread/worker split and never routes Ctrl-C
+ * through these hooks; only CLI modes install them. */
+static struct psi_abort_signal *g_print_abort = NULL;
+static struct sigaction g_prev_sigint_sa;
+static int g_sigint_installed = 0;
+
+static void psi_print_sigint_handler(int sig) {
+    (void)sig;
+    if (g_print_abort != NULL) g_print_abort->flag = 1;
+}
+
+static void psi_install_sigint(struct psi_abort_signal *sig) {
+    struct sigaction sa;
+    g_print_abort = sig;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = psi_print_sigint_handler;
+    sigemptyset(&sa.sa_mask);
+    /* No SA_RESTART: we want blocking syscalls (read, waitpid) to return
+     * EINTR so the abort-polling loops can notice promptly. */
+    sa.sa_flags = 0;
+    if (sigaction(SIGINT, &sa, &g_prev_sigint_sa) == 0) {
+        g_sigint_installed = 1;
+    }
+}
+
+static void psi_restore_sigint(void) {
+    if (g_sigint_installed) {
+        sigaction(SIGINT, &g_prev_sigint_sa, NULL);
+        g_sigint_installed = 0;
+    }
+    g_print_abort = NULL;
+}
 
 static const char *psi_mode_name(enum psi_cli_mode mode) {
     switch (mode) {
@@ -43,6 +79,14 @@ static int psi_run_via_lua(const struct psi_cli_options *options) {
         return status;
     }
     psi_vm_bind_session(&vm, &session);
+
+    /* Ctrl-C → abort flag; curl xferinfo and process_run already poll it. */
+    {
+        static struct psi_abort_signal abort_signal;
+        psi_abort_signal_init(&abort_signal);
+        vm.host.abort_signal = &abort_signal;
+        psi_install_sigint(&abort_signal);
+    }
 
     lua_getglobal(vm.L, "psi");
     lua_getfield(vm.L, -1, "modes");
@@ -80,6 +124,7 @@ static int psi_run_via_lua(const struct psi_cli_options *options) {
     if (lua_pcall(vm.L, 1, 1, 0) != LUA_OK) {
         fprintf(stderr, "psi.modes.run error: %s\n", lua_tostring(vm.L, -1));
         lua_pop(vm.L, 1);
+        psi_restore_sigint();
         psi_vm_destroy(&vm);
         psi_session_free(&session);
         return PSI_STATUS_ERROR;
@@ -87,6 +132,7 @@ static int psi_run_via_lua(const struct psi_cli_options *options) {
     ok = lua_toboolean(vm.L, -1);
     lua_pop(vm.L, 1);
 
+    psi_restore_sigint();
     psi_vm_destroy(&vm);
     psi_session_free(&session);
     return ok ? PSI_STATUS_OK : PSI_STATUS_ERROR;
