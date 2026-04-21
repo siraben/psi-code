@@ -12,37 +12,53 @@
         pkgs = import nixpkgs {
           inherit system;
         };
-      in {
-        packages.default = pkgs.stdenv.mkDerivation {
+
+        # Build the psi derivation against an arbitrary package set.
+        # Accepts both the native `pkgs` and 32-bit compat sets
+        # (pkgs.pkgsi686Linux) without any source changes — the C
+        # sources are ILP32-safe and every dependency is looked up
+        # via pkg-config from the passed-in set.
+        mkPsi = p: extraMakeFlags: p.stdenv.mkDerivation {
           pname = "psi";
           version = "0.1.0";
           src = ./.;
 
           nativeBuildInputs = [
-            pkgs.gnumake
-            pkgs.pkg-config
+            p.gnumake
+            p.pkg-config
           ];
 
           buildInputs = [
-            pkgs.argtable
-            pkgs.cjson
-            pkgs.curl
-            pkgs.libedit
-            pkgs.lua5_4
-            pkgs.ncurses
+            p.argtable
+            p.cjson
+            p.curl
+            p.libedit
+            p.lua5_4
+            p.ncurses
           ];
 
           makeFlags = [
             "PREFIX=$(out)"
-            "CC=${pkgs.stdenv.cc.targetPrefix}cc"
-            "PKG_CONFIG=${pkgs.pkg-config}/bin/pkg-config"
+            "CC=${p.stdenv.cc.targetPrefix}cc"
+            "PKG_CONFIG=${p.pkg-config}/bin/pkg-config"
             "LUA_BOOT_FILE=$(out)/share/psi/boot.lua"
-          ];
+          ] ++ extraMakeFlags;
 
           installPhase = ''
             make PREFIX=$out install
           '';
         };
+      in {
+        packages.default = mkPsi pkgs [];
+
+        # 32-bit x86 build. Requires the host to have 32-bit compat
+        # libraries available (multilib). On x86_64-linux, nixpkgs
+        # exposes pkgs.pkgsi686Linux that produces ILP32 ELF
+        # binaries using the same kernel ABI — no qemu needed to run.
+        packages.psi-i686 =
+          if (pkgs.stdenv.hostPlatform.system == "x86_64-linux")
+          then mkPsi pkgs.pkgsi686Linux []
+          else throw "packages.psi-i686 requires x86_64-linux host (got ${pkgs.stdenv.hostPlatform.system})";
 
         # `nix run .#valgrind` — memcheck a non-agent exercise set.
         apps.valgrind = let
