@@ -70,9 +70,9 @@ function M.run_print(opts)
   if opts.session_file and opts.session_file ~= "" then
     session.load(opts.session_file)
   end
-  psi.session_append("user", opts.payload or "", nil)
+  session.append_user(opts.payload or "")
   local reply = prompt.handle_print(opts.payload or "")
-  psi.session_append("assistant", reply, nil)
+  session.append_assistant(reply, {{type = "text", text = reply}}, {})
   if opts.session_file and opts.session_file ~= "" then
     local ok, err = session.save()
     if not ok then

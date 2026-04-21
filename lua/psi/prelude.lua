@@ -91,6 +91,28 @@ function M.each(xs, fn)
   for _, v in ipairs(xs) do fn(v) end
 end
 
+-- ---------- ids / timestamps ----------
+
+-- Seed math.random once per process so uuid_short is non-deterministic.
+math.randomseed((os.time() * 1000003) + (os.clock() * 1e6))
+
+-- Pseudo-UUIDv4: 16 random bytes rendered as 8-4-4-4-12 hex. Not
+-- cryptographic; used only to tag session entries.
+function M.uuid_short()
+  local t = {}
+  for i = 1, 32 do t[i] = string.format("%x", math.random(0, 15)) end
+  return table.concat(t, "", 1, 8)  .. "-" ..
+         table.concat(t, "", 9, 12) .. "-" ..
+         "4" .. table.concat(t, "", 14, 16) .. "-" ..
+         string.format("%x", (math.random(0, 3) + 8)) ..
+         table.concat(t, "", 18, 20) .. "-" ..
+         table.concat(t, "", 21, 32)
+end
+
+function M.iso_timestamp()
+  return os.date("!%Y-%m-%dT%H:%M:%SZ")
+end
+
 -- ---------- json / eval / io shims ----------
 
 -- Decode JSON text, returning `fallback` on nil/empty input or parse error.

@@ -16,7 +16,7 @@ local M = {}
 -- streaming tool loop via psi.anthropic.run_turn.
 function M.run_turn(opts)
   local user_text = opts.user_text or ""
-  psi.session_append("user", user_text, nil)
+  session.append_user(user_text)
   session.save()
 
   local system_prompt = prompt.system_prompt()

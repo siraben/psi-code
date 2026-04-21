@@ -70,45 +70,79 @@ end
 
 local safe_decode = prelude.safe_json_decode
 
+-- Translate the v2 session data body into Anthropic's on-wire content
+-- shape. pi's `toolCall` becomes Anthropic's `tool_use`; `toolResult`
+-- becomes the `tool_result` user-message block. Thinking blocks are
+-- skipped (psi doesn't re-send them on the next turn).
+local function pi_content_to_anthropic(blocks)
+  local out = prelude.as_array({})
+  for _, b in ipairs(blocks or {}) do
+    if type(b) ~= "table" then
+      -- skip
+    elseif b.type == "text" then
+      out[#out + 1] = {type = "text", text = b.text or ""}
+    elseif b.type == "toolCall" then
+      out[#out + 1] = {type = "tool_use", id = b.id, name = b.name,
+                        input = b.arguments or {}}
+    end
+  end
+  return out
+end
+
+local function tool_result_block(msg)
+  -- pi stores toolResult.content as an array of content blocks; Anthropic
+  -- accepts either a string or an array. We concatenate the text blocks
+  -- for simplicity (matches what psi used to send).
+  local text = ""
+  if type(msg.content) == "table" then
+    for _, b in ipairs(msg.content) do
+      if type(b) == "table" and b.type == "text" and type(b.text) == "string" then
+        text = (text == "" and b.text) or (text .. b.text)
+      end
+    end
+  end
+  return {
+    type = "tool_result",
+    tool_use_id = msg.toolCallId or "",
+    content = text,
+    is_error = msg.isError and true or false,
+  }
+end
+
 -- Build the Anthropic messages[] array from the session's ordered
--- entries. Mirrors pi's model: assistant messages carry tool_use
--- blocks inside their content (via the stored data_json); tool-result
--- entries are first-class user messages keyed by tool_use_id. No
--- separate tool-call record type exists.
---
---   user/assistant: content = parsed data_json OR plain text.
---   compaction-summary: fold into a single user message.
---   tool-result run: coalesce consecutive results into one user message.
+-- entries. Session entries are already pi-shaped; we back-translate on
+-- the way out. Consecutive tool-result entries are coalesced into one
+-- user message (Anthropic requirement).
 local function build_api_messages(session)
   local out = {}
   local i = 1
   local n = #session
   while i <= n do
-    local msg = session[i]
-    local role = msg.role
-    if role == "user" or role == "assistant" then
-      local decoded = safe_decode(msg.data)
-      local content = decoded or (msg.text or "")
-      out[#out + 1] = {role = role, content = content}
+    local m = session[i]
+    local body = safe_decode(m.data)
+    local message = type(body) == "table" and body.message or nil
+    local role = m.role
+
+    if role == "user" and message then
+      out[#out + 1] = {role = "user", content = pi_content_to_anthropic(message.content)}
       i = i + 1
-    elseif role == "compaction-summary" then
-      out[#out + 1] = {role = "user", content = msg.text or ""}
+    elseif role == "assistant" and message then
+      out[#out + 1] = {role = "assistant", content = pi_content_to_anthropic(message.content)}
       i = i + 1
     elseif role == "tool-result" then
-      local content = prelude.as_array({})
+      local blocks = prelude.as_array({})
       while i <= n and session[i].role == "tool-result" do
-        local parsed = safe_decode(session[i].text)
-        if parsed and type(parsed.tool_use_id) == "string" and type(parsed.content) == "string" then
-          content[#content + 1] = {
-            type = "tool_result",
-            tool_use_id = parsed.tool_use_id,
-            content = parsed.content,
-            is_error = parsed.is_error and true or false,
-          }
+        local b = safe_decode(session[i].data)
+        if type(b) == "table" and type(b.message) == "table" then
+          blocks[#blocks + 1] = tool_result_block(b.message)
         end
         i = i + 1
       end
-      out[#out + 1] = {role = "user", content = content}
+      out[#out + 1] = {role = "user", content = blocks}
+    elseif role == "compaction-summary" then
+      local summary = (type(body) == "table" and body.summary) or m.text or ""
+      out[#out + 1] = {role = "user", content = summary}
+      i = i + 1
     else
       i = i + 1
     end
@@ -154,6 +188,7 @@ local function new_state()
     stop_reason = nil,
     assistant_text = "",
     usage = nil,          -- merged usage object from message_start + message_delta
+    response_id = nil,    -- Anthropic server-side message id (from message_start)
   }
 end
 
@@ -170,7 +205,9 @@ end
 
 local function on_message_start(state, data)
   local msg = data.message
-  if type(msg) == "table" then merge_usage(state, msg.usage) end
+  if type(msg) ~= "table" then return end
+  merge_usage(state, msg.usage)
+  if type(msg.id) == "string" then state.response_id = msg.id end
 end
 
 local function on_content_block_start(state, data)
@@ -256,6 +293,72 @@ local function finalize_blocks(state)
     -- round-trip compatible with pre-thinking transcripts.
   end
   return content, tool_uses
+end
+
+-- ---------- Prompt caching helpers ----------
+--
+-- Anthropic's ephemeral prompt cache lets subsequent requests in the same
+-- session skip re-encoding large prefixes. pi's pattern (ported here):
+--   * system prompt: array of text blocks; the last gets cache_control
+--   * tools: last tool in the array gets cache_control (caches whole list)
+--   * messages: last block of the *final* message gets cache_control
+-- Together these create cache breakpoints that persist for ~5 min.
+
+local CACHE_ENV = "PSI_PROMPT_CACHE"
+
+local function caching_enabled()
+  local v = os.getenv(CACHE_ENV)
+  return v ~= "0" and v ~= "false"
+end
+
+local EPHEMERAL = {type = "ephemeral"}
+
+local function system_as_blocks(system_prompt)
+  if type(system_prompt) == "table" then return system_prompt end
+  local text = system_prompt or ""
+  local block = {type = "text", text = text}
+  if caching_enabled() and text ~= "" then
+    block.cache_control = EPHEMERAL
+  end
+  return prelude.as_array({block})
+end
+
+local function tools_with_cache(tool_specs)
+  if not caching_enabled() then return tool_specs end
+  local out = prelude.as_array({})
+  local n = #tool_specs
+  for i, t in ipairs(tool_specs) do
+    local copy = {}
+    for k, v in pairs(t) do copy[k] = v end
+    if i == n then copy.cache_control = EPHEMERAL end
+    out[#out + 1] = copy
+  end
+  return out
+end
+
+-- Tag the last block of the last message with cache_control. Anthropic
+-- accepts cache_control on text, image, tool_use, and tool_result blocks.
+local function mark_last_message_cache(messages)
+  if not caching_enabled() or #messages == 0 then return messages end
+  local last = messages[#messages]
+  if type(last.content) == "string" then
+    last.content = prelude.as_array({
+      {type = "text", text = last.content, cache_control = EPHEMERAL},
+    })
+    return messages
+  end
+  if type(last.content) == "table" and #last.content > 0 then
+    local blocks = last.content
+    local tail = blocks[#blocks]
+    if type(tail) == "table" then
+      -- Shallow-copy to avoid mutating session-derived tables.
+      local copy = {}
+      for k, v in pairs(tail) do copy[k] = v end
+      copy.cache_control = EPHEMERAL
+      blocks[#blocks] = copy
+    end
+  end
+  return messages
 end
 
 -- ---------- Auto-compaction (threshold check on usage) ----------
@@ -367,9 +470,9 @@ function M.run_turn(opts)
     local request = {
       model = model,
       max_tokens = max_tokens,
-      system = system_prompt,
-      messages = api_messages,
-      tools = tool_specs,
+      system = system_as_blocks(system_prompt),
+      messages = mark_last_message_cache(api_messages),
+      tools = tools_with_cache(tool_specs),
       stream = true,
     }
     local body = psi.json_encode(request)
@@ -394,7 +497,14 @@ function M.run_turn(opts)
     end
 
     local content, tool_uses = finalize_blocks(state)
-    psi.session_append("assistant", state.assistant_text, psi.json_encode(content))
+    session_mod.append_assistant(state.assistant_text, content, {
+      usage = state.usage,
+      stop_reason = state.stop_reason,
+      model = model,
+      provider = "anthropic",
+      api = "anthropic-messages",
+      response_id = state.response_id,
+    })
     context.record_usage(psi.session_message_count(), state.usage)
     session_mod.save()
 
@@ -417,12 +527,7 @@ function M.run_turn(opts)
         observer.on_tool_result(tu.id, tu.name, result_json)
       end
 
-      psi.session_append("tool-result", psi.json_encode({
-        tool_use_id = tu.id,
-        tool = tu.name,
-        content = result_json,
-        is_error = not result_alist.ok,
-      }))
+      session_mod.append_tool_result(tu.id, tu.name, result_json, not result_alist.ok)
       session_mod.save()
     end
 
