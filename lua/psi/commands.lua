@@ -55,6 +55,39 @@ local function session_status()
   return "session-messages: " .. tostring(psi.session_message_count())
 end
 
+-- Extension-registered commands. Keyed by the first whitespace-
+-- delimited token after the leading slash (e.g. "/hello" registers
+-- under "hello"). Handlers receive (args_string, raw_line) and must
+-- return a records.command_action (via records.new_command_action)
+-- or nil. Registering an existing name overwrites the handler.
+local registered = {}
+
+function M.register(name, handler)
+  if type(name) ~= "string" or type(handler) ~= "function" then return end
+  local key = name:gsub("^/", "")
+  registered[key] = handler
+end
+
+function M.unregister(name)
+  if type(name) ~= "string" then return end
+  registered[name:gsub("^/", "")] = nil
+end
+
+local function dispatch_registered(line)
+  if line:sub(1, 1) ~= "/" then return nil end
+  local first, rest = line:match("^/(%S+)%s*(.*)$")
+  if not first then return nil end
+  local handler = registered[first]
+  if not handler then return nil end
+  local ok, result = pcall(handler, rest or "", line)
+  if not ok then
+    io.stderr:write("psi.commands: /" .. first .. " failed: "
+      .. tostring(result) .. "\n")
+    return records.new_command_action("print", "command /" .. first .. " failed")
+  end
+  return result
+end
+
 function M.handle(line)
   if line == "/help" or line == "/h" then
     return records.new_command_action("print", prompt.help_text())
@@ -75,7 +108,7 @@ function M.handle(line)
     local msg = ok and ("forked " .. tostring(keep) .. " entries to " .. out) or "fork failed"
     return records.new_command_action("print", msg)
   end
-  return nil
+  return dispatch_registered(line)
 end
 
 -- Bridge for C: returns either nil or a {kind-string, payload} sequence.

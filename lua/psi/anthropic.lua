@@ -321,16 +321,21 @@ local function on_content_block_delta(state, data, observer)
     if observer.on_assistant_text_delta then
       observer.on_assistant_text_delta(d.text)
     end
+    if psi.events then psi.events.emit("assistant-text-delta", {text = d.text}) end
   elseif d.type == "input_json_delta" and type(d.partial_json) == "string" then
     block.input_json = block.input_json .. d.partial_json
     if observer.on_tool_call_delta then
       observer.on_tool_call_delta(block.id, d.partial_json)
+    end
+    if psi.events then
+      psi.events.emit("tool-call-delta", {id = block.id, partial_json = d.partial_json})
     end
   elseif d.type == "thinking_delta" and type(d.thinking) == "string" then
     block.thinking = block.thinking .. d.thinking
     if observer.on_thinking_delta then
       observer.on_thinking_delta(d.thinking)
     end
+    if psi.events then psi.events.emit("thinking-delta", {text = d.thinking}) end
   end
 end
 
@@ -673,8 +678,20 @@ function M.run_turn(opts)
     context.record_usage(psi.session_message_count(), state.usage)
     session_mod.save()
 
+    if psi.events then
+      psi.events.emit("after-provider-response", {
+        usage = state.usage,
+        stop_reason = state.stop_reason,
+        response_id = state.response_id,
+        model = model,
+      })
+    end
+
     if #tool_uses == 0 then
       maybe_auto_compact(model, opts)
+      if psi.events then
+        psi.events.emit("turn-end", {text = state.assistant_text, model = model})
+      end
       return true, state.assistant_text
     end
 

@@ -1,0 +1,238 @@
+# psi extensions
+
+psi has a small, Lua-native extension surface. An extension is a single
+`.lua` file that returns a function; on startup psi discovers and invokes
+it with the `psi` global. From there an extension can register tools,
+subscribe to events, and add slash commands — the same APIs psi uses
+internally.
+
+This document codifies the **stable API surface** and the initial **event
+catalog**. Anything not documented here is internal and may change.
+
+---
+
+## Discovery
+
+At boot, psi scans three locations in order (earlier entries win on
+conflicts; later ones see the cumulative `psi` state):
+
+1. `$PSI_EXTENSIONS_DIR` (colon-separated list of directories)
+2. `~/.config/psi/extensions/`
+3. `./.psi/extensions/` (project-local)
+
+Every `*.lua` file in each directory is `dofile`'d. If it returns a
+function, psi invokes it with the `psi` global. Extension load failures
+are logged to stderr and don't abort psi.
+
+## Extension skeleton
+
+```lua
+-- ~/.config/psi/extensions/hello.lua
+return function(psi)
+  -- register a tool
+  psi.tools.register(psi.records.new_tool(
+    "hello",                                  -- name (LLM-visible)
+    "Greet someone by name.",                 -- description
+    "Say hello: input { who: string }",       -- prompt_snippet
+    {},                                       -- guidelines (strings)
+    {                                         -- JSON-schema input
+      type = "object",
+      properties = { who = { type = "string" } },
+      required = { "who" },
+    },
+    function(input)                           -- impl(input) -> ToolResult
+      return psi.records.new_tool_result(
+        true, "hello", nil, { greeting = "hi, " .. input.who })
+    end
+  ))
+
+  -- subscribe to a lifecycle event
+  psi.events.on("turn-end", function(payload)
+    io.stderr:write(("[hello] turn ended, %d chars\n"):format(#(payload.text or "")))
+  end)
+
+  -- add a slash command
+  psi.commands.register("greet", function(rest)
+    return psi.records.new_command_action(
+      "print", "hi, " .. (rest ~= "" and rest or "friend"))
+  end)
+end
+```
+
+---
+
+## Stable API surface
+
+Everything below is guaranteed not to break compatibility within a minor
+version. Experimental or internal helpers live off the `psi` global but
+are not listed here and may change without notice.
+
+### Tools — `psi.tools`
+
+| API | Notes |
+|---|---|
+| `psi.tools.register(tool)` | Add or overwrite a tool in the registry. |
+| `psi.tools.all()` | Array of all registered tools, in registration order. |
+| `psi.tools.find(name)` | Lookup by name; returns the tool record or `nil`. |
+| `psi.tools.add_before_hook(fn)` | `fn(name, input) -> ToolResult\|nil`. Returning non-nil short-circuits dispatch. |
+| `psi.tools.add_after_hook(fn)` | `fn(name, input, result) -> ToolResult\|nil`. Returning non-nil replaces the result. |
+
+**Tool record shape** (from `lua/psi/records.lua`):
+
+```lua
+{
+  name            = "hello",          -- unique; registering the same
+                                      -- name overwrites the prior entry
+  description     = "...",            -- passed to the LLM
+  prompt_snippet  = "...",            -- injected into the system prompt
+  guidelines      = { "...", ... },   -- appended to system-prompt
+                                      -- Guidelines section when the
+                                      -- tool is selected
+  input_schema    = { ... },          -- JSON-schema table
+  impl            = function(input) end,
+                                      -- input: parsed JSON table;
+                                      -- returns a ToolResult
+}
+```
+
+**`ToolResult`** (from `psi.records.new_tool_result(ok, tool, error, extras)`):
+
+```lua
+{
+  ok     = true|false,
+  tool   = "hello",
+  error  = "...",                     -- string when ok=false
+  -- plus every key of `extras` merged onto the result
+}
+```
+
+**Input validators** (from `psi.tool_registry`):
+- `psi.tool_registry.require_string(input, field)`
+- `psi.tool_registry.optional_string(input, field, default)`
+- `psi.tool_registry.optional_number(input, field, default)`
+- `psi.tool_registry.optional_boolean(input, field, default)`
+
+### Events — `psi.events`
+
+| API | Notes |
+|---|---|
+| `psi.events.on(event, fn)` | Subscribe. `fn(payload)`. |
+| `psi.events.off(event, fn)` | Unsubscribe a specific handler. |
+| `psi.events.emit(event, payload)` | Fire an event (extensions can emit custom events). |
+| `psi.events.handlers(event)` | Introspection; shallow copy. |
+
+Semantics: synchronous dispatch in registration order, handler return
+values ignored, errors swallowed per handler with a stderr log line.
+Designed so adding a subscriber never interferes with rendering or
+session state.
+
+### Slash commands — `psi.commands`
+
+| API | Notes |
+|---|---|
+| `psi.commands.register(name, handler)` | `handler(args_string, raw_line) -> CommandAction\|nil`. Overwrites on duplicate. |
+| `psi.commands.unregister(name)` | Remove a previously registered command. |
+
+Built-in commands (`/help`, `/session`, `/system-prompt`, `/compact`,
+`/fork`) take precedence over registered ones — extensions cannot
+shadow them.
+
+**CommandAction** (from `psi.records.new_command_action(kind, payload)`):
+```lua
+{ kind = "print" | "compact", payload = "..." | 12 }
+```
+
+### Render hooks — `psi.render.register_hook(event, fn)`
+
+For extensions that want to *change the rendered terminal output*
+(rather than just observe). Handlers receive a payload table and return
+a **string** (or `nil` = "contribute empty string"). Results are
+concatenated in registration order and printed.
+
+Most extensions should use `psi.events.on` instead. Use render hooks
+only when you need to mutate the on-screen output.
+
+### Safe C primitives on `psi`
+
+These are part of the stable surface:
+
+| API | Notes |
+|---|---|
+| `psi.cwd()` | Current working directory string. |
+| `psi.read_file(path)` / `psi.file_exists(path)` / `psi.file_write(path, content)` | Filesystem I/O. |
+| `psi.current_date()` | `"YYYY-MM-DD"`. |
+| `psi.is_aborted()` | `true` when Ctrl-C / Esc requested. Poll during long work. |
+| `psi.json_encode(v)` / `psi.json_decode(s)` | JSON. |
+| `psi.session_message_count()` / `psi.session_messages()` | Read current in-memory session. |
+
+Prelude helpers on `psi.prelude` (`trim`, `split`, `safe_json_decode`,
+`safe_read`, `uuid_short`, `iso_timestamp`, `as_array`, `path_join`) are
+stable as well.
+
+---
+
+## Event catalog
+
+Every event is fired synchronously from the agent turn loop. Order is
+defined below. Handlers must be fast — they run on the turn's critical
+path.
+
+| Event | Firing site | Payload |
+|---|---|---|
+| `before-turn` | Before each streaming iteration in `anthropic.run_turn`. Also fires once per user prompt. | `{ text = "<user prompt>" }` (via render bridge) |
+| `after-provider-response` | Right after the assistant message is saved, before tool dispatch or auto-compaction. | `{ usage, stop_reason, response_id, model }` |
+| `assistant-text-delta` | Every streamed text chunk. High frequency. | `{ text = "<chunk>" }` |
+| `tool-call-delta` | Every streamed chunk of a tool_use block's input JSON. | `{ id, partial_json }` |
+| `thinking-delta` | Every streamed thinking-block chunk (if the model emits thinking). | `{ text }` |
+| `tool-call` | Before a tool is dispatched. | `{ id, tool, input }` |
+| `tool-result` | After a tool returns. | `{ id, tool, result }` |
+| `assistant-text` | Per aggregated assistant text block (render-level). | `{ text }` |
+| `turn-end` | Final event when a turn ends with no more tool_use (i.e. the full turn is done). | `{ text, model }` |
+| `after-turn` | Right after `turn-end`, during render flush. | `{ text, ["assistant-streamed"] }` |
+
+Subscribe pattern:
+
+```lua
+psi.events.on("after-provider-response", function(p)
+  io.stderr:write(("turn cost: in=%d out=%d cacheRead=%d\n"):format(
+    p.usage.input_tokens or 0,
+    p.usage.output_tokens or 0,
+    p.usage.cache_read_input_tokens or 0))
+end)
+```
+
+---
+
+## Non-goals (today)
+
+What we **intentionally** do not support yet — open tickets, not bugs:
+
+- No `psi install` / package manager. Extensions are single-file drops.
+- No TypeScript. Lua only.
+- No provider registration (psi is Anthropic-only; revisit when we add a
+  second provider).
+- No sandboxing. Extensions run with full Lua and `psi` access — trust
+  the files you install.
+- No extension manifest, versioning, or compatibility checks.
+- No hot reload.
+- No MCP bridge.
+- No extension-controlled system-prompt injection (future
+  `system-prompt-build` event).
+- pi ships ~27 events; psi starts with the 10 above. New ones will be
+  added on demand.
+
+---
+
+## Internal, not stable
+
+These are on the `psi` global but subject to change without notice:
+
+- `psi.render.capture_frame` / `release_frame` / `lookup_frame`.
+- `psi.anthropic.*` (internals of the turn loop).
+- `psi.context` (token accounting — field names may shift).
+- `psi.session.append_user` / `append_assistant` / `append_tool_result`
+  (use `psi.events` to observe instead of calling these directly).
+- Anything named starting with `_`.
+
+If you find yourself reaching for one of these, consider opening an
+issue — it likely points to a missing stable API.
