@@ -9,20 +9,43 @@ local context = require("psi.context")
 local prompt = require("psi.prompt")
 local session = require("psi.session")
 local anthropic = require("psi.anthropic")
+local ollama = require("psi.ollama")
 
 local M = {}
 
+-- ---------- Provider routing ----------
+--
+-- Selection rules, in priority:
+--   1. Explicit model prefix: "ollama/<name>" or "anthropic/<name>"
+--      strips the prefix and routes accordingly.
+--   2. $PSI_PROVIDER env ("ollama" | "anthropic").
+--   3. Default: anthropic.
+local function pick_provider(model)
+  if type(model) == "string" then
+    local after = model:match("^ollama/(.+)$")
+    if after then return ollama, after end
+    after = model:match("^anthropic/(.+)$")
+    if after then return anthropic, after end
+  end
+  local env = os.getenv("PSI_PROVIDER")
+  if env == "ollama" then return ollama, model end
+  return anthropic, model
+end
+
+function M.provider_for(model) return pick_provider(model) end
+
 -- Append the user's turn, build the system prompt, and drive the
--- streaming tool loop via psi.anthropic.run_turn.
+-- streaming tool loop via the chosen provider's run_turn.
 function M.run_turn(opts)
   local user_text = opts.user_text or ""
   session.append_user(user_text)
   session.save()
 
+  local provider, real_model = pick_provider(opts.model)
   local system_prompt = prompt.system_prompt()
-  return anthropic.run_turn({
+  return provider.run_turn({
     system_prompt = system_prompt,
-    model = opts.model,
+    model = real_model,
     max_tokens = opts.max_tokens,
     observer = opts.observer,
     abort_check = opts.abort_check,
@@ -38,11 +61,12 @@ function M.run_compact(opts)
     return true, "session is already small enough"
   end
 
+  local provider, real_model = pick_provider(opts.model)
   local request = prompt.compaction_request(keep_recent)
-  local ok, summary = anthropic.complete_text({
+  local ok, summary = provider.complete_text({
     system_prompt = request[1],
     user_text = request[2],
-    model = opts.model,
+    model = real_model,
     max_tokens = context.compaction_budget(),
   })
   if not ok then
