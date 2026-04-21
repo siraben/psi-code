@@ -157,18 +157,26 @@ function M.run_compact(opts)
   return true
 end
 
+-- REPL slash-command dispatcher.
+--
+-- Returns (continue, quit): continue=false aborts the REPL with an
+-- error, quit=true ends the loop cleanly.
 local function handle_slash_command(opts, line)
   local commands = require("psi.commands")
   local action = commands.handle(line)
   if action == nil then
     io.stderr:write("unknown command\n")
-    return true
+    return true, false
   end
-  if action.kind == "print" then
+  local kind = action.kind
+  if kind == "print" then
     print(action.payload or "")
-    return true
+    return true, false
   end
-  if action.kind == "compact" then
+  if kind == "quit" then
+    return true, true
+  end
+  if kind == "compact" then
     local ok, summary = agent.run_compact({
       keep_recent = action.payload,
       model = opts.model,
@@ -176,20 +184,59 @@ local function handle_slash_command(opts, line)
     })
     if not ok then
       io.stderr:write("failed to compact session\n")
-      return false
+      return false, false
     end
     if opts.session_file and opts.session_file ~= "" then
       local saved, err = session.save()
       if not saved then
         io.stderr:write("failed to save session file: " .. tostring(err) .. "\n")
-        return false
+        return false, false
       end
     end
     print("compaction summary:\n" .. (summary or ""))
-    return true
+    return true, false
+  end
+  if kind == "set-model" then
+    opts.model = action.payload
+    print("model set to " .. tostring(opts.model))
+    return true, false
+  end
+  if kind == "new-session" then
+    psi.session_clear()
+    session.reset_entry_chain()
+    session.set_display_name(nil)
+    psi.session_set_id(psi.prelude.uuid_short())
+    psi.context.reset_usage()
+    print("new session id=" .. tostring(psi.session_id()))
+    return true, false
+  end
+  if kind == "resume" then
+    local path = action.payload
+    local ok, err = session.load(path)
+    if not ok then
+      io.stderr:write("resume failed: " .. tostring(err) .. "\n")
+      return true, false
+    end
+    opts.session_file = path
+    psi.context.reset_usage()
+    print("resumed " .. path .. " (" .. tostring(psi.session_message_count()) .. " messages)")
+    return true, false
+  end
+  if kind == "reload" then
+    if psi.load_extensions then psi.load_extensions() end
+    print("extensions reloaded")
+    return true, false
+  end
+  if kind == "name" then
+    session.set_display_name(action.payload)
+    if opts.session_file and opts.session_file ~= "" then
+      session.save()
+    end
+    print("name set to '" .. tostring(action.payload) .. "'")
+    return true, false
   end
   io.stderr:write("unknown command\n")
-  return true
+  return true, false
 end
 
 function M.run_repl(opts)
@@ -203,13 +250,10 @@ function M.run_repl(opts)
     if line == nil then
       break
     end
-    if line == "/quit" or line == "/q" or line == ":quit" or line == ":q" then
-      break
-    end
     if line:sub(1, 1) == "/" then
-      if not handle_slash_command(opts, line) then
-        return false
-      end
+      local ok, quit = handle_slash_command(opts, line)
+      if not ok then return false end
+      if quit then break end
     else
       if line ~= "" then
         psi.add_history(line)

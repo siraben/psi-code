@@ -228,12 +228,19 @@ function M.runtime_summary()
 end
 
 M.HELP_TEXT = table.concat({
-  "/help          show available commands\n",
-  "/quit          exit the shell\n",
-  "/compact [N]   summarize older context and keep the most recent N messages\n",
-  "/fork [N]      save the first N entries of the session to a new file\n",
-  "/system-prompt print the current coding-agent system prompt\n",
-  "/session       show the current session message count",
+  "/help            show available commands\n",
+  "/quit            exit the shell  (aliases: /q, :quit, :q)\n",
+  "/session         show current session info (id, file, model, usage)\n",
+  "/new             start a fresh session in place\n",
+  "/resume <path>   load a session file from disk\n",
+  "/name <text>     set the session display name\n",
+  "/model <spec>    switch model mid-session (e.g. ollama/llama3.1)\n",
+  "/copy            copy the last assistant message to the clipboard\n",
+  "/export [path]   write the session as markdown (default: sessions/<id>.md)\n",
+  "/compact [N]     summarize older context, keep the most recent N messages\n",
+  "/fork [N]        save the first N entries to a new session file\n",
+  "/reload          re-run extension discovery\n",
+  "/system-prompt   print the current coding-agent system prompt",
 })
 
 function M.help_text()

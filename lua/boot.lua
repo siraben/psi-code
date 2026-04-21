@@ -90,7 +90,7 @@ local function load_extensions_from(dir)
   end
 end
 
-do
+function psi.load_extensions()
   local env_dirs = os.getenv("PSI_EXTENSIONS_DIR") or ""
   for dir in (env_dirs .. ":"):gmatch("([^:]*):") do
     if dir ~= "" then load_extensions_from(dir) end
@@ -101,3 +101,5 @@ do
   end
   load_extensions_from("./.psi/extensions")
 end
+
+psi.load_extensions()

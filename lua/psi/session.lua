@@ -27,6 +27,18 @@ local M = {}
 
 local SESSION_VERSION = 2
 
+-- Optional display name set via /name; persisted into the session header
+-- so it survives reloads.
+local display_name = nil
+function M.display_name() return display_name end
+function M.set_display_name(n)
+  if type(n) == "string" and n ~= "" then
+    display_name = n
+  else
+    display_name = nil
+  end
+end
+
 -- ---------- Entry metadata (id/parent threading) ----------
 
 -- The in-memory entry chain is strictly linear, so we only need the id
@@ -220,6 +232,9 @@ local function session_header()
   local parent = psi.session_parent_id()
   if parent and parent ~= "" then
     hdr.parent = parent
+  end
+  if display_name and display_name ~= "" then
+    hdr.name = display_name
   end
   return hdr
 end
@@ -422,6 +437,7 @@ function M.load(path)
 
   psi.session_clear()
   M.reset_entry_chain()
+  display_name = nil
 
   local version = 1
   for line in f:lines() do
@@ -435,6 +451,7 @@ function M.load(path)
         if parsed.parent then
           psi.session_set_parent_id(parsed.parent)
         end
+        display_name = type(parsed.name) == "string" and parsed.name or nil
       elseif parsed.type == "message" then
         if version >= 2 and parsed.message then
           append_v2_message(parsed)
