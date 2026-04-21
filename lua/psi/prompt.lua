@@ -9,7 +9,7 @@ local M = {}
 
 -- ---------- project context discovery ----------
 
-local CONTEXT_FILENAMES = {"AGENTS.md", "CLAUDE.md"}
+local CONTEXT_FILENAMES = { "AGENTS.md", "CLAUDE.md" }
 
 function M.find_context_files()
   local dir = psi.cwd()
@@ -24,11 +24,17 @@ function M.find_context_files()
     end
     -- prepend local_matches so ancestor files come first in final order
     local merged = {}
-    for _, f in ipairs(local_matches) do merged[#merged + 1] = f end
-    for _, f in ipairs(found) do merged[#merged + 1] = f end
+    for _, f in ipairs(local_matches) do
+      merged[#merged + 1] = f
+    end
+    for _, f in ipairs(found) do
+      merged[#merged + 1] = f
+    end
     found = merged
     local parent = psi.parent_directory(dir)
-    if parent == dir then break end
+    if parent == dir then
+      break
+    end
     dir = parent
   end
   return found
@@ -52,7 +58,9 @@ local BASE_GUIDELINES = {
 
 local function tool_set(tool_list)
   local set = {}
-  for _, t in ipairs(tool_list) do set[t.name] = true end
+  for _, t in ipairs(tool_list) do
+    set[t.name] = true
+  end
   return set
 end
 
@@ -74,24 +82,31 @@ function M.system_prompt()
   local all_tools = tools.all()
   local have = tool_set(all_tools)
 
-  local buf = {PREAMBLE, "\n\nAvailable tools:\n"}
+  local buf = { PREAMBLE, "\n\nAvailable tools:\n" }
   for _, t in ipairs(all_tools) do
     buf[#buf + 1] = "- " .. t.name .. ": " .. t.prompt_snippet .. "\n"
   end
-  buf[#buf + 1] = "\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n"
+  buf[#buf + 1] =
+    "\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n"
 
   buf[#buf + 1] = "\nGuidelines:\n"
   local seen = {}
   local function add_guideline(g)
-    if g == nil or g == "" or seen[g] then return end
+    if g == nil or g == "" or seen[g] then
+      return
+    end
     seen[g] = true
     write_line(buf, "- ", g)
   end
   add_guideline(exploration_guideline(have))
   for _, t in ipairs(all_tools) do
-    for _, g in ipairs(t.guidelines or {}) do add_guideline(g) end
+    for _, g in ipairs(t.guidelines or {}) do
+      add_guideline(g)
+    end
   end
-  for _, g in ipairs(BASE_GUIDELINES) do add_guideline(g) end
+  for _, g in ipairs(BASE_GUIDELINES) do
+    add_guideline(g)
+  end
 
   buf[#buf + 1] = table.concat({
     "\nPsi documentation (read only when the user asks about psi itself, its architecture, ",
@@ -137,7 +152,7 @@ local SUMMARIZATION_INSTRUCTIONS = table.concat({
   "[What is the user trying to accomplish? Can be multiple items if the session covers different tasks.]\n\n",
   "## Constraints & Preferences\n",
   "- [Any constraints, preferences, or requirements mentioned by user]\n",
-  "- [Or \"(none)\" if none were mentioned]\n\n",
+  '- [Or "(none)" if none were mentioned]\n\n',
   "## Progress\n",
   "### Done\n",
   "- [x] [Completed tasks/changes]\n\n",
@@ -151,7 +166,7 @@ local SUMMARIZATION_INSTRUCTIONS = table.concat({
   "1. [Ordered list of what should happen next]\n\n",
   "## Critical Context\n",
   "- [Any data, examples, or references needed to continue]\n",
-  "- [Or \"(none)\" if not applicable]\n\n",
+  '- [Or "(none)" if not applicable]\n\n',
   "Keep each section concise. Preserve exact file paths, function names, and error messages.",
 })
 
@@ -172,9 +187,11 @@ end
 -- the structured-summary instructions, mirroring pi's generateSummary.
 function M.compaction_request(keep_recent)
   local transcript = build_compaction_transcript(keep_recent)
-  local user_prompt = "<conversation>\n" .. transcript .. "\n</conversation>\n\n" ..
-                      SUMMARIZATION_INSTRUCTIONS
-  return {COMPACTION_SYSTEM, user_prompt}
+  local user_prompt = "<conversation>\n"
+    .. transcript
+    .. "\n</conversation>\n\n"
+    .. SUMMARIZATION_INSTRUCTIONS
+  return { COMPACTION_SYSTEM, user_prompt }
 end
 
 -- ---------- runtime summary and help ----------
@@ -183,11 +200,21 @@ function M.runtime_summary()
   local info = psi.runtime_info()
   local buf = {
     "psi Lua runtime\n",
-    "version: ", info.version, "\n",
-    "boot-file: ", info["boot-file"] or "<none>", "\n",
-    "current-date: ", info["current-date"], "\n",
-    "current-working-directory: ", info["current-working-directory"], "\n",
-    "session-message-count: ", tostring(info["session-message-count"]), "\n",
+    "version: ",
+    info.version,
+    "\n",
+    "boot-file: ",
+    info["boot-file"] or "<none>",
+    "\n",
+    "current-date: ",
+    info["current-date"],
+    "\n",
+    "current-working-directory: ",
+    info["current-working-directory"],
+    "\n",
+    "session-message-count: ",
+    tostring(info["session-message-count"]),
+    "\n",
     "host-primitives:\n",
   }
   for _, name in ipairs(info.primitives) do
@@ -209,15 +236,22 @@ M.HELP_TEXT = table.concat({
   "/session       show the current session message count",
 })
 
-function M.help_text() return M.HELP_TEXT end
+function M.help_text()
+  return M.HELP_TEXT
+end
 
 -- Bootstrap print-mode handler (called by C with the user's prompt).
 function M.handle_print(prompt)
   return table.concat({
     "psi bootstrap online\n",
-    "version: ", psi.version(), "\n",
-    "session-messages: ", tostring(psi.session_message_count()), "\n",
-    "prompt: ", prompt,
+    "version: ",
+    psi.version(),
+    "\n",
+    "session-messages: ",
+    tostring(psi.session_message_count()),
+    "\n",
+    "prompt: ",
+    prompt,
   })
 end
 

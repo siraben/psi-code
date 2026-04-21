@@ -45,7 +45,9 @@ function M.run_compact(opts)
     model = opts.model,
     max_tokens = context.compaction_budget(),
   })
-  if not ok then return false end
+  if not ok then
+    return false
+  end
 
   session.do_compact(keep_recent, summary)
   return true, summary

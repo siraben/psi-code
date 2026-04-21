@@ -6,12 +6,17 @@ local M = {}
 
 -- Wraps text in single quotes with '\'' escapes for embedded quotes.
 function M.quote(text)
-  if text == nil then return "''" end
-  local parts = {"'"}
+  if text == nil then
+    return "''"
+  end
+  local parts = { "'" }
   for i = 1, #text do
     local ch = text:sub(i, i)
-    if ch == "'" then parts[#parts + 1] = "'\\''"
-    else parts[#parts + 1] = ch end
+    if ch == "'" then
+      parts[#parts + 1] = "'\\''"
+    else
+      parts[#parts + 1] = ch
+    end
   end
   parts[#parts + 1] = "'"
   return table.concat(parts)
@@ -25,14 +30,17 @@ end
 function M.run_tool(tool_name, command, path, keep_output_on_error)
   local proc = M.process_result(command)
   local ok = proc:ok()
-  local include_output = keep_output_on_error or ok
-    or (proc.output and #proc.output > 0)
+  local include_output = keep_output_on_error or ok or (proc.output and #proc.output > 0)
   local extras = {}
-  if path then extras.path = path end
+  if path then
+    extras.path = path
+  end
   extras.command = command
   extras.status = proc.status
   extras.truncated = proc.truncated
-  if include_output then extras.output = proc.output or "" end
+  if include_output then
+    extras.output = proc.output or ""
+  end
   return records.new_tool_result(ok, tool_name, nil, extras)
 end
 

@@ -10,27 +10,39 @@ local COMPACT_DEFAULT = 12
 
 local function parse_compact_count(line)
   local rest = prelude.trim(line:sub(9))
-  if #rest == 0 then return COMPACT_DEFAULT end
+  if #rest == 0 then
+    return COMPACT_DEFAULT
+  end
   return tonumber(rest) or COMPACT_DEFAULT
 end
 
 local function is_compact_command(line)
-  if not prelude.starts_with(line, "/compact") then return false end
-  if #line == 8 then return true end
+  if not prelude.starts_with(line, "/compact") then
+    return false
+  end
+  if #line == 8 then
+    return true
+  end
   local ch = line:sub(9, 9)
   return ch == " " or ch == "\t"
 end
 
 local function is_fork_command(line)
-  if not prelude.starts_with(line, "/fork") then return false end
-  if #line == 5 then return true end
+  if not prelude.starts_with(line, "/fork") then
+    return false
+  end
+  if #line == 5 then
+    return true
+  end
   local ch = line:sub(6, 6)
   return ch == " " or ch == "\t"
 end
 
 local function parse_fork_count(line)
   local rest = prelude.trim(line:sub(6))
-  if #rest == 0 then return psi.session_message_count() end
+  if #rest == 0 then
+    return psi.session_message_count()
+  end
   return tonumber(rest) or psi.session_message_count()
 end
 
@@ -60,9 +72,7 @@ function M.handle(line)
     local keep = parse_fork_count(line)
     local out = fork_output_path()
     local ok = psi.session_fork(keep, out)
-    local msg = ok
-      and ("forked " .. tostring(keep) .. " entries to " .. out)
-       or  "fork failed"
+    local msg = ok and ("forked " .. tostring(keep) .. " entries to " .. out) or "fork failed"
     return records.new_command_action("print", msg)
   end
   return nil
@@ -71,7 +81,9 @@ end
 -- Bridge for C: returns either nil or a {kind-string, payload} sequence.
 function M.handle_command_list(line)
   local action = M.handle(line)
-  if not action then return nil end
+  if not action then
+    return nil
+  end
   return records.command_action_to_list(action)
 end
 

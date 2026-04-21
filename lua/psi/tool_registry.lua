@@ -26,11 +26,15 @@ function M.register(tool)
   registry[#registry + 1] = tool
 end
 
-function M.all() return registry end
+function M.all()
+  return registry
+end
 
 function M.find(name)
   for _, t in ipairs(registry) do
-    if t.name == name then return t end
+    if t.name == name then
+      return t
+    end
   end
   return nil
 end
@@ -39,7 +43,9 @@ end
 -- filter tools per-turn; current implementation returns all tools.
 function M.select_specs(user_text)
   local out = {}
-  for i, t in ipairs(registry) do out[i] = records.tool_to_alist(t) end
+  for i, t in ipairs(registry) do
+    out[i] = records.tool_to_alist(t)
+  end
   return out
 end
 
@@ -49,8 +55,12 @@ end
 --     Common uses: permission gating, dry-run interception, logging.
 --   after(name, input, result) may return a replacement ToolResult or
 --     nil (keep result). Common uses: redaction, output transformation.
-function M.add_before_hook(fn) before_hooks[#before_hooks + 1] = fn end
-function M.add_after_hook(fn)  after_hooks[#after_hooks + 1]  = fn  end
+function M.add_before_hook(fn)
+  before_hooks[#before_hooks + 1] = fn
+end
+function M.add_after_hook(fn)
+  after_hooks[#after_hooks + 1] = fn
+end
 function M.clear_hooks()
   before_hooks = {}
   after_hooks = {}
@@ -89,26 +99,36 @@ end
 -- guardrail helpers used by tool impls
 function M.require_string(input, key)
   local v = input[key]
-  if type(v) == "string" and #v > 0 then return v end
+  if type(v) == "string" and #v > 0 then
+    return v
+  end
   return nil
 end
 
 function M.optional_string(input, key, default)
   local v = input[key]
-  if type(v) == "string" then return v end
+  if type(v) == "string" then
+    return v
+  end
   return default
 end
 
 function M.optional_number(input, key, default)
   local v = input[key]
-  if type(v) == "number" then return v end
+  if type(v) == "number" then
+    return v
+  end
   return default
 end
 
 function M.optional_boolean(input, key, default)
   local v = input[key]
-  if v == true then return true end
-  if v == false then return default end
+  if v == true then
+    return true
+  end
+  if v == false then
+    return default
+  end
   return default
 end
 

@@ -13,15 +13,15 @@
 local M = {}
 
 local MODEL_CONTEXT_WINDOWS = {
-  ["claude-opus-4-7"]   = 200000,
-  ["claude-opus-4-6"]   = 200000,
-  ["claude-opus-4-5"]   = 200000,
+  ["claude-opus-4-7"] = 200000,
+  ["claude-opus-4-6"] = 200000,
+  ["claude-opus-4-5"] = 200000,
   ["claude-sonnet-4-6"] = 200000,
   ["claude-sonnet-4-5"] = 200000,
-  ["claude-haiku-4-5"]  = 200000,
+  ["claude-haiku-4-5"] = 200000,
 }
-local DEFAULT_CONTEXT_WINDOW    = 128000
-local DEFAULT_RESERVE_TOKENS    = 16384
+local DEFAULT_CONTEXT_WINDOW = 128000
+local DEFAULT_RESERVE_TOKENS = 16384
 local DEFAULT_KEEP_RECENT_TOKENS = 20000
 
 -- Last successful API usage. Shape: {message_index=N, total=T}.
@@ -30,22 +30,30 @@ local DEFAULT_KEEP_RECENT_TOKENS = 20000
 local last_usage = nil
 
 function M.estimate_tokens(text)
-  if not text or #text == 0 then return 0 end
+  if not text or #text == 0 then
+    return 0
+  end
   return math.ceil(#text / 4)
 end
 
-function M.reset_usage() last_usage = nil end
+function M.reset_usage()
+  last_usage = nil
+end
 
-function M.last_usage() return last_usage end
+function M.last_usage()
+  return last_usage
+end
 
 -- `usage` is the Anthropic usage object; fields may be nil/absent.
 function M.record_usage(message_index, usage)
-  if type(usage) ~= "table" or type(message_index) ~= "number" then return end
+  if type(usage) ~= "table" or type(message_index) ~= "number" then
+    return
+  end
   local total = (usage.input_tokens or 0)
-              + (usage.output_tokens or 0)
-              + (usage.cache_read_input_tokens or 0)
-              + (usage.cache_creation_input_tokens or 0)
-  last_usage = {message_index = message_index, total = total}
+    + (usage.output_tokens or 0)
+    + (usage.cache_read_input_tokens or 0)
+    + (usage.cache_creation_input_tokens or 0)
+  last_usage = { message_index = message_index, total = total }
 end
 
 -- Estimate total tokens currently in context:
@@ -59,14 +67,18 @@ function M.estimate_context_tokens()
   for i = base_index + 1, #messages do
     local m = messages[i]
     trailing = trailing + M.estimate_tokens(m.text)
-    if m.data then trailing = trailing + M.estimate_tokens(m.data) end
+    if m.data then
+      trailing = trailing + M.estimate_tokens(m.data)
+    end
   end
   if base_total == 0 then
     -- No measured baseline yet: estimate the whole transcript.
     for i = 1, base_index do
       local m = messages[i]
       trailing = trailing + M.estimate_tokens(m.text)
-      if m.data then trailing = trailing + M.estimate_tokens(m.data) end
+      if m.data then
+        trailing = trailing + M.estimate_tokens(m.data)
+      end
     end
   end
   return {
@@ -79,12 +91,18 @@ function M.estimate_context_tokens()
 end
 
 function M.context_window(model)
-  if not model or model == "" then return DEFAULT_CONTEXT_WINDOW end
+  if not model or model == "" then
+    return DEFAULT_CONTEXT_WINDOW
+  end
   return MODEL_CONTEXT_WINDOWS[model] or DEFAULT_CONTEXT_WINDOW
 end
 
-function M.reserve_tokens()     return DEFAULT_RESERVE_TOKENS end
-function M.keep_recent_tokens() return DEFAULT_KEEP_RECENT_TOKENS end
+function M.reserve_tokens()
+  return DEFAULT_RESERVE_TOKENS
+end
+function M.keep_recent_tokens()
+  return DEFAULT_KEEP_RECENT_TOKENS
+end
 
 function M.should_compact(model)
   local est = M.estimate_context_tokens()
@@ -93,8 +111,12 @@ function M.should_compact(model)
 end
 
 -- Output-token budgets for summarization calls (mirrors pi's 0.8 / 0.5).
-function M.compaction_budget()   return math.floor(0.8 * DEFAULT_RESERVE_TOKENS) end
-function M.turn_prefix_budget()  return math.floor(0.5 * DEFAULT_RESERVE_TOKENS) end
+function M.compaction_budget()
+  return math.floor(0.8 * DEFAULT_RESERVE_TOKENS)
+end
+function M.turn_prefix_budget()
+  return math.floor(0.5 * DEFAULT_RESERVE_TOKENS)
+end
 
 -- Walk the session from the tail, accumulating estimated tokens; return the
 -- number of most-recent messages that fit within `target_tokens`. Used to
@@ -107,8 +129,12 @@ function M.keep_recent_messages(target_tokens)
   for i = #messages, 1, -1 do
     local m = messages[i]
     local t = M.estimate_tokens(m.text)
-    if m.data then t = t + M.estimate_tokens(m.data) end
-    if count > 0 and total + t > target_tokens then break end
+    if m.data then
+      t = t + M.estimate_tokens(m.data)
+    end
+    if count > 0 and total + t > target_tokens then
+      break
+    end
     total = total + t
     count = count + 1
   end

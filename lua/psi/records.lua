@@ -8,7 +8,7 @@ local M = {}
 
 -- helper: make a record class with given fields.
 local function make_class(tag)
-  local class = {__kind = tag}
+  local class = { __kind = tag }
   class.__index = class
   return class
 end
@@ -19,7 +19,7 @@ local Message = make_class("Message")
 M.Message = Message
 
 function M.new_message(role, text, data)
-  return setmetatable({role = role, text = text or "", data = data}, Message)
+  return setmetatable({ role = role, text = text or "", data = data }, Message)
 end
 
 function M.message_from_alist(t)
@@ -28,7 +28,9 @@ end
 
 function M.messages_from_alists(xs)
   local out = {}
-  for i, entry in ipairs(xs) do out[i] = M.message_from_alist(entry) end
+  for i, entry in ipairs(xs) do
+    out[i] = M.message_from_alist(entry)
+  end
   return out
 end
 
@@ -42,9 +44,9 @@ function M.new_tool(name, description, prompt_snippet, guidelines, input_schema,
     name = name,
     description = description,
     prompt_snippet = prompt_snippet,
-    guidelines = guidelines,     -- array of strings
+    guidelines = guidelines, -- array of strings
     input_schema = input_schema, -- table (JSON-shaped)
-    impl = impl,                 -- function(input) -> ToolResult
+    impl = impl, -- function(input) -> ToolResult
   }, Tool)
 end
 
@@ -67,20 +69,30 @@ function M.new_tool_result(ok, tool, error, extras)
   return setmetatable({
     ok = ok and true or false,
     tool = tool,
-    error = error,       -- string or nil
+    error = error, -- string or nil
     extras = extras or {},
   }, ToolResult)
 end
 
-function ToolResult:get(key) return self.extras[key] end
+function ToolResult:get(key)
+  return self.extras[key]
+end
 
-function M.tool_success(tool, extras) return M.new_tool_result(true, tool, nil, extras or {}) end
-function M.tool_failure(tool, message) return M.new_tool_result(false, tool, message, {}) end
+function M.tool_success(tool, extras)
+  return M.new_tool_result(true, tool, nil, extras or {})
+end
+function M.tool_failure(tool, message)
+  return M.new_tool_result(false, tool, message, {})
+end
 
 function M.tool_result_to_alist(r)
-  local t = {ok = r.ok, tool = r.tool}
-  if r.error then t.error = r.error end
-  for k, v in pairs(r.extras) do t[k] = v end
+  local t = { ok = r.ok, tool = r.tool }
+  if r.error then
+    t.error = r.error
+  end
+  for k, v in pairs(r.extras) do
+    t[k] = v
+  end
   return t
 end
 
@@ -90,7 +102,9 @@ function M.tool_result_from_alist(t)
   end
   local extras = {}
   for k, v in pairs(t) do
-    if k ~= "ok" and k ~= "tool" and k ~= "error" then extras[k] = v end
+    if k ~= "ok" and k ~= "tool" and k ~= "error" then
+      extras[k] = v
+    end
   end
   return M.new_tool_result(t.ok and t.ok ~= false, t.tool or "unknown", t.error, extras)
 end
@@ -126,7 +140,9 @@ function M.process_result_from_alist(t)
   return M.new_process_result(t.output, t.status, t.truncated)
 end
 
-function ProcessResult:ok() return self.status == 0 end
+function ProcessResult:ok()
+  return self.status == 0
+end
 
 -- ---------- ContextFile ----------
 
@@ -134,7 +150,7 @@ local ContextFile = make_class("ContextFile")
 M.ContextFile = ContextFile
 
 function M.new_context_file(path, content)
-  return setmetatable({path = path, content = content}, ContextFile)
+  return setmetatable({ path = path, content = content }, ContextFile)
 end
 
 -- ---------- CommandAction ----------
@@ -143,12 +159,12 @@ local CommandAction = make_class("CommandAction")
 M.CommandAction = CommandAction
 
 function M.new_command_action(kind, payload)
-  return setmetatable({kind = kind, payload = payload}, CommandAction)
+  return setmetatable({ kind = kind, payload = payload }, CommandAction)
 end
 
 -- serialization expected by C: {kind-string, payload}
 function M.command_action_to_list(action)
-  return {action.kind, action.payload}
+  return { action.kind, action.payload }
 end
 
 return M

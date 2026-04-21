@@ -6,19 +6,19 @@
 -- through psi.tools.*, psi.session.*, psi.prompt.*, psi.render.*,
 -- psi.commands.*.
 
-psi.prelude   = require("psi.prelude")
-psi.ansi      = require("psi.ansi")
-psi.diff      = require("psi.diff")
-psi.records   = require("psi.records")
-psi.context   = require("psi.context")
-psi.session   = require("psi.session")
-psi.tools     = require("psi.tools")
+psi.prelude = require("psi.prelude")
+psi.ansi = require("psi.ansi")
+psi.diff = require("psi.diff")
+psi.records = require("psi.records")
+psi.context = require("psi.context")
+psi.session = require("psi.session")
+psi.tools = require("psi.tools")
 psi.anthropic = require("psi.anthropic")
-psi.prompt    = require("psi.prompt")
-psi.agent     = require("psi.agent")
-psi.render    = require("psi.render")
-psi.commands  = require("psi.commands")
-psi.modes     = require("psi.modes")
+psi.prompt = require("psi.prompt")
+psi.agent = require("psi.agent")
+psi.render = require("psi.render")
+psi.commands = require("psi.commands")
+psi.modes = require("psi.modes")
 
 -- Default event-hook registrations.
 psi.render.register_hook("assistant-text", function(payload)
@@ -28,7 +28,9 @@ psi.render.register_hook("tool-call", psi.render.capture_frame)
 psi.render.register_hook("tool-call", psi.render.render_tool_call)
 psi.render.register_hook("tool-result", psi.render.render_tool_result)
 psi.render.register_hook("tool-result", psi.render.release_frame)
-psi.render.register_hook("after-turn", function() return "\n" end)
+psi.render.register_hook("after-turn", function()
+  return "\n"
+end)
 
 -- Convenience shim so user code can write psi.tool_call(name, input).
 function psi.tool_call(name, input)

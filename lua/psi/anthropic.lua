@@ -34,7 +34,9 @@ local MAX_TOOL_ITERATIONS = 32
 
 local function api_url()
   local base = os.getenv(BASE_URL_ENV) or BASE_URL_DEFAULT
-  if base:sub(-1) ~= "/" then base = base .. "/" end
+  if base:sub(-1) ~= "/" then
+    base = base .. "/"
+  end
   return base .. "v1/messages"
 end
 
@@ -47,7 +49,9 @@ local function anthropic_headers(api_key)
 end
 
 local function resolve_model(m)
-  if m and m ~= "" then return m end
+  if m and m ~= "" then
+    return m
+  end
   return os.getenv(MODEL_ENV) or MODEL_DEFAULT
 end
 
@@ -80,10 +84,9 @@ local function pi_content_to_anthropic(blocks)
     if type(b) ~= "table" then
       -- skip
     elseif b.type == "text" then
-      out[#out + 1] = {type = "text", text = b.text or ""}
+      out[#out + 1] = { type = "text", text = b.text or "" }
     elseif b.type == "toolCall" then
-      out[#out + 1] = {type = "tool_use", id = b.id, name = b.name,
-                        input = b.arguments or {}}
+      out[#out + 1] = { type = "tool_use", id = b.id, name = b.name, input = b.arguments or {} }
     end
   end
   return out
@@ -109,44 +112,104 @@ local function tool_result_block(msg)
   }
 end
 
--- Build the Anthropic messages[] array from the session's ordered
--- entries. Session entries are already pi-shaped; we back-translate on
--- the way out. Consecutive tool-result entries are coalesced into one
--- user message (Anthropic requirement).
+-- Build the Anthropic messages[] array from session entries.
+--
+-- Ported from pi-mono's transform-messages.ts:
+--   * Assistant messages with stopReason "aborted" or "error" are skipped
+--     entirely — their partial content should not be replayed.
+--   * Orphan tool_use blocks (assistant with tool_use whose tool_result
+--     never landed before the next user message) are resolved with a
+--     synthetic tool_result containing "No result provided", isError=true,
+--     inserted right before the next user message.
+--   * Consecutive tool-result entries are coalesced into one user message.
 local function build_api_messages(session)
   local out = {}
-  local i = 1
-  local n = #session
+  local pending_tool_calls = {} -- tool_use blocks awaiting results
+  local seen_result_ids = {} -- tool_use_ids already paired
+
+  local function flush_synthetic_results()
+    if #pending_tool_calls == 0 then
+      return
+    end
+    local blocks = prelude.as_array({})
+    for _, tc in ipairs(pending_tool_calls) do
+      if not seen_result_ids[tc.id] then
+        blocks[#blocks + 1] = {
+          type = "tool_result",
+          tool_use_id = tc.id,
+          content = "No result provided",
+          is_error = true,
+        }
+      end
+    end
+    if #blocks > 0 then
+      out[#out + 1] = { role = "user", content = blocks }
+    end
+    pending_tool_calls = {}
+    seen_result_ids = {}
+  end
+
+  local i, n = 1, #session
   while i <= n do
     local m = session[i]
     local body = safe_decode(m.data)
     local message = type(body) == "table" and body.message or nil
     local role = m.role
 
-    if role == "user" and message then
-      out[#out + 1] = {role = "user", content = pi_content_to_anthropic(message.content)}
-      i = i + 1
-    elseif role == "assistant" and message then
-      out[#out + 1] = {role = "assistant", content = pi_content_to_anthropic(message.content)}
+    if role == "assistant" and message then
+      local stop = message.stopReason
+      if stop == "aborted" or stop == "error" then
+        -- Skip entirely; any tool_use blocks here were never dispatched
+        -- and are paired with synthetic results below when a user turn
+        -- arrives. (No need to track them in pending_tool_calls since
+        -- the aborted assistant itself is invisible to the API.)
+        i = i + 1
+      else
+        flush_synthetic_results()
+        local content = pi_content_to_anthropic(message.content)
+        out[#out + 1] = { role = "assistant", content = content }
+        -- Track tool_use blocks for orphan detection on next iteration.
+        pending_tool_calls = {}
+        seen_result_ids = {}
+        if type(message.content) == "table" then
+          for _, b in ipairs(message.content) do
+            if type(b) == "table" and b.type == "toolCall" then
+              pending_tool_calls[#pending_tool_calls + 1] = { id = b.id, name = b.name }
+            end
+          end
+        end
+        i = i + 1
+      end
+    elseif role == "user" and message then
+      flush_synthetic_results()
+      out[#out + 1] = { role = "user", content = pi_content_to_anthropic(message.content) }
       i = i + 1
     elseif role == "tool-result" then
       local blocks = prelude.as_array({})
       while i <= n and session[i].role == "tool-result" do
         local b = safe_decode(session[i].data)
         if type(b) == "table" and type(b.message) == "table" then
-          blocks[#blocks + 1] = tool_result_block(b.message)
+          local tr = tool_result_block(b.message)
+          blocks[#blocks + 1] = tr
+          if tr.tool_use_id ~= "" then
+            seen_result_ids[tr.tool_use_id] = true
+          end
         end
         i = i + 1
       end
-      out[#out + 1] = {role = "user", content = blocks}
+      if #blocks > 0 then
+        out[#out + 1] = { role = "user", content = blocks }
+      end
     elseif role == "compaction-summary" then
+      flush_synthetic_results()
       local summary = (type(body) == "table" and body.summary) or m.text or ""
-      out[#out + 1] = {role = "user", content = summary}
+      out[#out + 1] = { role = "user", content = summary }
       i = i + 1
     else
       i = i + 1
     end
   end
+  flush_synthetic_results()
   return prelude.as_array(out)
 end
 
@@ -160,10 +223,14 @@ local function sse_feed(buffer, on_event)
   local pos = 1
   while true do
     local nl = buffer:find("\n", pos, true)
-    if not nl then break end
+    if not nl then
+      break
+    end
     local line = buffer:sub(pos, nl - 1)
     -- Strip trailing \r for CRLF servers.
-    if line:sub(-1) == "\r" then line = line:sub(1, -2) end
+    if line:sub(-1) == "\r" then
+      line = line:sub(1, -2)
+    end
     pos = nl + 1
     if line:sub(1, 7) == "event: " then
       pending_event = line:sub(8)
@@ -172,7 +239,9 @@ local function sse_feed(buffer, on_event)
     elseif line == "" then
       if pending_event and pending_data then
         local data = safe_decode(pending_data)
-        if data then on_event(pending_event, data) end
+        if data then
+          on_event(pending_event, data)
+        end
       end
       pending_event, pending_data = nil, nil
     end
@@ -184,35 +253,47 @@ end
 
 local function new_state()
   return {
-    blocks = {},          -- 1-indexed, mirrors Anthropic's 0-based index+1
+    blocks = {}, -- 1-indexed, mirrors Anthropic's 0-based index+1
     stop_reason = nil,
     assistant_text = "",
-    usage = nil,          -- merged usage object from message_start + message_delta
-    response_id = nil,    -- Anthropic server-side message id (from message_start)
+    usage = nil, -- merged usage object from message_start + message_delta
+    response_id = nil, -- Anthropic server-side message id (from message_start)
   }
 end
 
 local function merge_usage(state, u)
-  if type(u) ~= "table" then return end
+  if type(u) ~= "table" then
+    return
+  end
   state.usage = state.usage or {}
   for _, k in ipairs({
-    "input_tokens", "output_tokens",
-    "cache_read_input_tokens", "cache_creation_input_tokens",
+    "input_tokens",
+    "output_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
   }) do
-    if type(u[k]) == "number" then state.usage[k] = u[k] end
+    if type(u[k]) == "number" then
+      state.usage[k] = u[k]
+    end
   end
 end
 
 local function on_message_start(state, data)
   local msg = data.message
-  if type(msg) ~= "table" then return end
+  if type(msg) ~= "table" then
+    return
+  end
   merge_usage(state, msg.usage)
-  if type(msg.id) == "string" then state.response_id = msg.id end
+  if type(msg.id) == "string" then
+    state.response_id = msg.id
+  end
 end
 
 local function on_content_block_start(state, data)
   local idx = data.index
-  if type(idx) ~= "number" then return end
+  if type(idx) ~= "number" then
+    return
+  end
   local cb = data.content_block or {}
   state.blocks[idx + 1] = {
     type = cb.type or "text",
@@ -226,9 +307,13 @@ end
 
 local function on_content_block_delta(state, data, observer)
   local idx = data.index
-  if type(idx) ~= "number" then return end
+  if type(idx) ~= "number" then
+    return
+  end
   local block = state.blocks[idx + 1]
-  if not block then return end
+  if not block then
+    return
+  end
   local d = data.delta or {}
   if d.type == "text_delta" and type(d.text) == "string" then
     block.text = block.text .. d.text
@@ -257,10 +342,14 @@ local function on_message_delta(state, data)
 end
 
 local function dispatch_sse(state, event_type, data, observer)
-  if     event_type == "content_block_start" then on_content_block_start(state, data)
-  elseif event_type == "content_block_delta" then on_content_block_delta(state, data, observer)
-  elseif event_type == "message_start"        then on_message_start(state, data)
-  elseif event_type == "message_delta"        then on_message_delta(state, data)
+  if event_type == "content_block_start" then
+    on_content_block_start(state, data)
+  elseif event_type == "content_block_delta" then
+    on_content_block_delta(state, data, observer)
+  elseif event_type == "message_start" then
+    on_message_start(state, data)
+  elseif event_type == "message_delta" then
+    on_message_delta(state, data)
   end
 end
 
@@ -273,20 +362,30 @@ local function finalize_blocks(state)
   -- state.blocks is a 1-indexed table but may be sparse if Anthropic
   -- skipped indices; iterate with pairs then sort by key.
   local keys = {}
-  for k, _ in pairs(state.blocks) do keys[#keys + 1] = k end
+  for k, _ in pairs(state.blocks) do
+    keys[#keys + 1] = k
+  end
   table.sort(keys)
   for _, k in ipairs(keys) do
     local block = state.blocks[k]
     if block.type == "text" then
-      content[#content + 1] = {type = "text", text = block.text}
+      content[#content + 1] = { type = "text", text = block.text }
     elseif block.type == "tool_use" then
       local input = (#block.input_json > 0) and safe_decode(block.input_json) or {}
-      if type(input) ~= "table" then input = {} end
+      if type(input) ~= "table" then
+        input = {}
+      end
       content[#content + 1] = {
-        type = "tool_use", id = block.id, name = block.name, input = input
+        type = "tool_use",
+        id = block.id,
+        name = block.name,
+        input = input,
       }
       tool_uses[#tool_uses + 1] = {
-        id = block.id, name = block.name, input = input, input_json = block.input_json,
+        id = block.id,
+        name = block.name,
+        input = input,
+        input_json = block.input_json,
       }
     end
     -- Thinking blocks intentionally skipped: keep the session JSONL
@@ -295,34 +394,34 @@ local function finalize_blocks(state)
   return content, tool_uses
 end
 
--- ---------- Abort bookkeeping ----------
+-- ---------- Abort / error bookkeeping ----------
 --
--- When the stream is interrupted (Ctrl-C / Esc) we want to leave the
--- session on disk in a shape the next turn can resume from. Mirrors
--- pi-mono: any received content blocks are persisted as an assistant
--- message with stopReason="aborted" before unwinding.
-local function save_aborted_partial(state, model)
-  if not state then return end
+-- Matches pi's shape: the partial assistant is persisted as-is (no
+-- trimming, no synthesis). Request-build time filters these entries out
+-- (see build_api_messages). Orphan tool_use blocks are resolved at
+-- request-build time with synthetic "No result provided" tool_results,
+-- so we deliberately do NOT emit synthetic results here.
+--
+-- stop_reason: "aborted" (signal abort) | "error" (network / non-2xx)
+local function save_failed_partial(state, model, stop_reason, error_message)
+  if not state then
+    return
+  end
   local has_text = state.assistant_text and state.assistant_text ~= ""
   local has_blocks = next(state.blocks) ~= nil
-  if not has_text and not has_blocks then return end
-  local content, tool_uses = finalize_blocks(state)
+  if not has_text and not has_blocks then
+    return
+  end
+  local content = finalize_blocks(state)
   session_mod.append_assistant(state.assistant_text or "", content, {
     usage = state.usage,
-    stop_reason = "aborted",
+    stop_reason = stop_reason,
+    error_message = error_message,
     model = model,
     provider = "anthropic",
     api = "anthropic-messages",
     response_id = state.response_id,
   })
-  -- Any tool_use blocks that were emitted before abort never ran. Pair
-  -- each with a synthetic error tool_result so the session remains
-  -- Anthropic-valid on resume (every tool_use needs a matching result).
-  for _, tu in ipairs(tool_uses) do
-    session_mod.append_tool_result(tu.id, tu.name,
-      psi.json_encode({ok = false, tool = tu.name, error = "aborted"}),
-      true)
-  end
   context.record_usage(psi.session_message_count(), state.usage)
   session_mod.save()
 end
@@ -343,26 +442,34 @@ local function caching_enabled()
   return v ~= "0" and v ~= "false"
 end
 
-local EPHEMERAL = {type = "ephemeral"}
+local EPHEMERAL = { type = "ephemeral" }
 
 local function system_as_blocks(system_prompt)
-  if type(system_prompt) == "table" then return system_prompt end
+  if type(system_prompt) == "table" then
+    return system_prompt
+  end
   local text = system_prompt or ""
-  local block = {type = "text", text = text}
+  local block = { type = "text", text = text }
   if caching_enabled() and text ~= "" then
     block.cache_control = EPHEMERAL
   end
-  return prelude.as_array({block})
+  return prelude.as_array({ block })
 end
 
 local function tools_with_cache(tool_specs)
-  if not caching_enabled() then return tool_specs end
+  if not caching_enabled() then
+    return tool_specs
+  end
   local out = prelude.as_array({})
   local n = #tool_specs
   for i, t in ipairs(tool_specs) do
     local copy = {}
-    for k, v in pairs(t) do copy[k] = v end
-    if i == n then copy.cache_control = EPHEMERAL end
+    for k, v in pairs(t) do
+      copy[k] = v
+    end
+    if i == n then
+      copy.cache_control = EPHEMERAL
+    end
     out[#out + 1] = copy
   end
   return out
@@ -371,11 +478,13 @@ end
 -- Tag the last block of the last message with cache_control. Anthropic
 -- accepts cache_control on text, image, tool_use, and tool_result blocks.
 local function mark_last_message_cache(messages)
-  if not caching_enabled() or #messages == 0 then return messages end
+  if not caching_enabled() or #messages == 0 then
+    return messages
+  end
   local last = messages[#messages]
   if type(last.content) == "string" then
     last.content = prelude.as_array({
-      {type = "text", text = last.content, cache_control = EPHEMERAL},
+      { type = "text", text = last.content, cache_control = EPHEMERAL },
     })
     return messages
   end
@@ -385,7 +494,9 @@ local function mark_last_message_cache(messages)
     if type(tail) == "table" then
       -- Shallow-copy to avoid mutating session-derived tables.
       local copy = {}
-      for k, v in pairs(tail) do copy[k] = v end
+      for k, v in pairs(tail) do
+        copy[k] = v
+      end
       copy.cache_control = EPHEMERAL
       blocks[#blocks] = copy
     end
@@ -403,13 +514,23 @@ local function auto_compact_enabled()
 end
 
 local function maybe_auto_compact(model, opts)
-  if opts and opts.no_auto_compact then return end
-  if not auto_compact_enabled() then return end
+  if opts and opts.no_auto_compact then
+    return
+  end
+  if not auto_compact_enabled() then
+    return
+  end
   local over, est = context.should_compact(model)
-  if not over then return end
-  io.stderr:write(string.format(
-    "psi: auto-compacting (context ~%d tokens, threshold %d)\n",
-    est.tokens, context.context_window(model) - context.reserve_tokens()))
+  if not over then
+    return
+  end
+  io.stderr:write(
+    string.format(
+      "psi: auto-compacting (context ~%d tokens, threshold %d)\n",
+      est.tokens,
+      context.context_window(model) - context.reserve_tokens()
+    )
+  )
   -- Lazy require to avoid a load-time cycle with psi.agent.
   local keep = context.keep_recent_messages(context.keep_recent_tokens())
   local ok, summary = require("psi.agent").run_compact({
@@ -440,19 +561,20 @@ function M.complete_text(opts)
     max_tokens = opts.max_tokens or 2048,
     system = opts.system_prompt or "",
     messages = prelude.as_array({
-      {role = "user", content = opts.user_text or ""},
+      { role = "user", content = opts.user_text or "" },
     }),
     stream = false,
   }
-  local status, body = psi.http_post(api_url(), anthropic_headers(api_key),
-                                      psi.json_encode(request))
+  local status, body =
+    psi.http_post(api_url(), anthropic_headers(api_key), psi.json_encode(request))
   if status == nil then
     io.stderr:write("http post failed: " .. tostring(body) .. "\n")
     return false
   end
   if status < 200 or status >= 300 then
-    io.stderr:write("Anthropic API request failed (" .. tostring(status) .. "): " ..
-                    (body or "") .. "\n")
+    io.stderr:write(
+      "Anthropic API request failed (" .. tostring(status) .. "): " .. (body or "") .. "\n"
+    )
     return false
   end
   local parsed = safe_decode(body)
@@ -482,20 +604,24 @@ function M.run_turn(opts)
   local max_tokens = opts.max_tokens or 16384
   local system_prompt = opts.system_prompt or ""
   local tool_specs = opts.tool_specs or api_tool_specs("")
-  local abort_check = opts.abort_check or function() return false end
+  local abort_check = opts.abort_check or function()
+    return false
+  end
 
   local headers = anthropic_headers(api_key)
   local url = api_url()
 
   for _ = 1, MAX_TOOL_ITERATIONS do
-    if abort_check() then return false, "aborted" end
+    if abort_check() then
+      return false, "aborted"
+    end
 
     local session_messages = require("psi.session").messages()
     -- messages() returns Message records; convert to plain alists for
     -- build_api_messages' sake (only role/text/data needed).
     local plain = {}
     for i, m in ipairs(session_messages) do
-      plain[i] = {role = m.role, text = m.text, data = m.data}
+      plain[i] = { role = m.role, text = m.text, data = m.data }
     end
     local api_messages = build_api_messages(plain)
 
@@ -519,16 +645,20 @@ function M.run_turn(opts)
     end)
 
     if status == nil then
-      if abort_check() then
-        save_aborted_partial(state, model)
-        return false, "aborted"
+      local aborted = abort_check()
+      local reason = aborted and "aborted" or "error"
+      local emsg = aborted and "Request was aborted" or tostring(err or "http error")
+      save_failed_partial(state, model, reason, emsg)
+      if not aborted then
+        io.stderr:write("http error: " .. emsg .. "\n")
       end
-      io.stderr:write("http error: " .. tostring(err) .. "\n")
-      return false
+      return false, reason
     end
     if status < 200 or status >= 300 then
-      io.stderr:write("Anthropic API request failed (" .. tostring(status) .. ")\n")
-      return false
+      local emsg = string.format("Anthropic API request failed (%d)", status)
+      save_failed_partial(state, model, "error", emsg)
+      io.stderr:write(emsg .. "\n")
+      return false, "error"
     end
 
     local content, tool_uses = finalize_blocks(state)
@@ -548,19 +678,11 @@ function M.run_turn(opts)
       return true, state.assistant_text
     end
 
-    for tu_idx, tu in ipairs(tool_uses) do
+    for _, tu in ipairs(tool_uses) do
       if abort_check() then
-        -- Assistant with tool_use blocks is already persisted. Inject
-        -- synthetic error tool-results for every not-yet-dispatched
-        -- tool_use so the session stays Anthropic-valid: each tool_use
-        -- must be followed by a matching tool_result on the next turn.
-        for j = tu_idx, #tool_uses do
-          local pending = tool_uses[j]
-          session_mod.append_tool_result(pending.id, pending.name,
-            psi.json_encode({ok = false, tool = pending.name, error = "aborted"}),
-            true)
-        end
-        session_mod.save()
+        -- Any orphan tool_use here will be resolved with a synthetic
+        -- "No result provided" tool_result at request-build time on
+        -- the next turn (see build_api_messages). Nothing to emit.
         return false, "aborted"
       end
 
@@ -582,8 +704,9 @@ function M.run_turn(opts)
     maybe_auto_compact(model, opts)
   end
 
-  io.stderr:write("Anthropic tool loop exceeded " ..
-                  tostring(MAX_TOOL_ITERATIONS) .. " iterations\n")
+  io.stderr:write(
+    "Anthropic tool loop exceeded " .. tostring(MAX_TOOL_ITERATIONS) .. " iterations\n"
+  )
   return false
 end
 
