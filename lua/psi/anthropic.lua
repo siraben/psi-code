@@ -76,17 +76,41 @@ local safe_decode = prelude.safe_json_decode
 
 -- Translate the v2 session data body into Anthropic's on-wire content
 -- shape. pi's `toolCall` becomes Anthropic's `tool_use`; `toolResult`
--- becomes the `tool_result` user-message block. Thinking blocks are
--- skipped (psi doesn't re-send them on the next turn).
+-- becomes the `tool_result` user-message block.
+--
+-- Parity with pi's transform-messages.ts + anthropic.ts:
+--   * text: strip lone UTF-16 surrogates (Anthropic rejects them);
+--     then skip the block entirely if it's empty-after-trim.
+--   * toolCall → tool_use: verbatim id/name, input-object pass-through.
+--   * thinking: re-emit with signature so interleaved-thinking stays
+--     coherent if thinking is enabled; if the signature is missing
+--     (older session or feature-off) fall back to a text block so the
+--     reasoning content is not lost.
 local function pi_content_to_anthropic(blocks)
   local out = prelude.as_array({})
   for _, b in ipairs(blocks or {}) do
     if type(b) ~= "table" then
-      -- skip
+      -- skip malformed block
     elseif b.type == "text" then
-      out[#out + 1] = { type = "text", text = b.text or "" }
+      local t = prelude.sanitize_surrogates(b.text or "")
+      if prelude.trim(t) ~= "" then
+        out[#out + 1] = { type = "text", text = t }
+      end
     elseif b.type == "toolCall" then
       out[#out + 1] = { type = "tool_use", id = b.id, name = b.name, input = b.arguments or {} }
+    elseif b.type == "thinking" then
+      if type(b.thinkingSignature) == "string" and b.thinkingSignature ~= "" then
+        out[#out + 1] = {
+          type = "thinking",
+          thinking = b.thinking or "",
+          signature = b.thinkingSignature,
+        }
+      else
+        local t = prelude.sanitize_surrogates(b.thinking or "")
+        if prelude.trim(t) ~= "" then
+          out[#out + 1] = { type = "text", text = t }
+        end
+      end
     end
   end
   return out
@@ -94,16 +118,18 @@ end
 
 local function tool_result_block(msg)
   -- pi stores toolResult.content as an array of content blocks; Anthropic
-  -- accepts either a string or an array. We concatenate the text blocks
-  -- for simplicity (matches what psi used to send).
-  local text = ""
+  -- accepts either a string or an array. Concatenate text blocks with
+  -- "\n" (matches pi) and strip surrogates so the on-wire body is
+  -- always valid UTF-8.
+  local parts = {}
   if type(msg.content) == "table" then
     for _, b in ipairs(msg.content) do
       if type(b) == "table" and b.type == "text" and type(b.text) == "string" then
-        text = (text == "" and b.text) or (text .. b.text)
+        parts[#parts + 1] = b.text
       end
     end
   end
+  local text = prelude.sanitize_surrogates(table.concat(parts, "\n"))
   return {
     type = "tool_result",
     tool_use_id = msg.toolCallId or "",
@@ -302,6 +328,7 @@ local function on_content_block_start(state, data)
     name = cb.name,
     input_json = "",
     thinking = cb.thinking or "",
+    signature = cb.signature or "",
   }
 end
 
@@ -336,6 +363,10 @@ local function on_content_block_delta(state, data, observer)
       observer.on_thinking_delta(d.thinking)
     end
     if psi.events then psi.events.emit("thinking-delta", {text = d.thinking}) end
+  elseif d.type == "signature_delta" and type(d.signature) == "string" then
+    -- Anthropic streams the thinking-block signature in one or more
+    -- signature_delta events; concatenate for cross-turn replay.
+    block.signature = (block.signature or "") .. d.signature
   end
 end
 
@@ -392,9 +423,18 @@ local function finalize_blocks(state)
         input = input,
         input_json = block.input_json,
       }
+    elseif block.type == "thinking" then
+      -- Preserve thinking blocks with the streamed signature so the
+      -- session JSONL can round-trip through pi's transform-messages
+      -- flow. Outgoing-request emission is decided at replay time
+      -- (pi_content_to_anthropic) — if no signature survived, the
+      -- content falls back to a text block there.
+      content[#content + 1] = {
+        type = "thinking",
+        thinking = block.thinking or "",
+        signature = block.signature or "",
+      }
     end
-    -- Thinking blocks intentionally skipped: keep the session JSONL
-    -- round-trip compatible with pre-thinking transcripts.
   end
   return content, tool_uses
 end

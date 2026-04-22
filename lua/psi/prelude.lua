@@ -177,6 +177,23 @@ function M.safe_read(path)
   return nil
 end
 
+-- Strip the UTF-8 encodings of lone UTF-16 surrogate code points
+-- (U+D800..U+DFFF) from a string. Ported from pi's sanitizeSurrogates.
+--
+-- Anthropic's API rejects requests whose bodies contain these byte
+-- sequences with 400 "invalid UTF-8"; they can creep in when the model
+-- echoes bytes it read from a malformed file via the read tool. Well-
+-- formed Unicode (emoji etc.) is untouched.
+--
+-- Encoding details: a lone surrogate in CESU-8 / invalid-UTF-8 is
+-- always the 3-byte sequence ED [A0..BF] [80..BF].
+function M.sanitize_surrogates(text)
+  if type(text) ~= "string" or text == "" then
+    return text or ""
+  end
+  return (text:gsub("\xED[\xA0-\xBF][\x80-\xBF]", ""))
+end
+
 -- ---------- paths ----------
 
 -- Tag a table as a JSON array so it serializes as `[]` even when empty.

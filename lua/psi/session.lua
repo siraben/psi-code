@@ -129,7 +129,13 @@ local function pi_content_from_blocks(blocks)
     elseif b.type == "tool_use" then
       out[#out + 1] = { type = "toolCall", id = b.id, name = b.name, arguments = b.input or {} }
     elseif b.type == "thinking" then
-      out[#out + 1] = { type = "thinking", thinking = b.thinking or "" }
+      local entry = { type = "thinking", thinking = b.thinking or "" }
+      -- Anthropic emits the signature as `signature`; pi's session
+      -- schema renames it to `thinkingSignature`. Preserve for replay.
+      if type(b.signature) == "string" and b.signature ~= "" then
+        entry.thinkingSignature = b.signature
+      end
+      out[#out + 1] = entry
     end
   end
   return out
