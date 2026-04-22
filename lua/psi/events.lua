@@ -40,8 +40,17 @@ end
 function M.emit(event, payload)
   local list = handlers[event]
   if not list then return end
-  for _, fn in ipairs(list) do
-    local ok, err = pcall(fn, payload)
+  -- Snapshot the handler list before iterating. A handler that calls
+  -- psi.events.on/off for the SAME event during emission would
+  -- otherwise mutate the array ipairs is walking — registering a new
+  -- handler could cause it to fire in the same cycle (unexpected),
+  -- and unregistering via table.remove would shift subsequent
+  -- handlers left and skip one.
+  local snapshot = {}
+  local n = #list
+  for i = 1, n do snapshot[i] = list[i] end
+  for i = 1, n do
+    local ok, err = pcall(snapshot[i], payload)
     if not ok then
       io.stderr:write("psi.events: handler for '" .. tostring(event)
         .. "' failed: " .. tostring(err) .. "\n")

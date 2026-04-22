@@ -249,13 +249,20 @@ end
 local function to_disk_entry(m)
   local body = prelude.safe_json_decode(m.data, nil)
   if type(body) ~= "table" then
-    -- Legacy/synthetic record with no structured body: build a minimal one.
-    body = stamp_entry({
+    -- Legacy/synthetic record with no structured body: synthesize one
+    -- inline. Must NOT call stamp_entry here — to_disk_entry is a
+    -- formatter invoked by save() and fork(), and mutating
+    -- last_entry_id would corrupt the live in-memory chain with the
+    -- ids of records being serialized. fork() in particular promises
+    -- "current session is not modified".
+    body = {
+      id = prelude.uuid_short(),
+      timestamp = prelude.iso_timestamp(),
       message = {
         role = m.role or "user",
         content = prelude.as_array({ text_block(m.text) }),
       },
-    })
+    }
   end
   if m.role == "compaction-summary" then
     local out = { type = "compaction" }
@@ -294,12 +301,20 @@ local function write_session_file(path, header, messages, count)
   if not f then
     return false, err
   end
-  write_line(f, header)
+  -- Wrap the write loop in pcall so a mid-write failure (disk full,
+  -- ENOSPC, killed process, …) still closes the descriptor rather
+  -- than leaking it until GC.
   local n = count or #messages
-  for i = 1, n do
-    write_line(f, to_disk_entry(messages[i]))
-  end
+  local ok, werr = pcall(function()
+    write_line(f, header)
+    for i = 1, n do
+      write_line(f, to_disk_entry(messages[i]))
+    end
+  end)
   f:close()
+  if not ok then
+    return false, werr
+  end
   return true
 end
 

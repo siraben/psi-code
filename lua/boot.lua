@@ -71,10 +71,17 @@ local function list_lua_files(dir)
   local quoted = "'" .. dir:gsub("'", "'\\''") .. "'"
   local ok, handle = pcall(io.popen, "ls -1 " .. quoted .. " 2>/dev/null")
   if not ok or not handle then return {} end
+  -- pcall the read loop so an interrupted read (rare; most commonly
+  -- a Lua error in the ipairs walk below) still closes the popen
+  -- descriptor. Without this, repeated load_extensions() calls —
+  -- e.g. via /reload — would gradually leak pipe fds until the
+  -- process hit EMFILE.
   local names = {}
-  for line in handle:lines() do
-    if line:match("%.lua$") then names[#names + 1] = line end
-  end
+  pcall(function()
+    for line in handle:lines() do
+      if line:match("%.lua$") then names[#names + 1] = line end
+    end
+  end)
   handle:close()
   table.sort(names)
   return names
