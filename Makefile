@@ -35,6 +35,15 @@ LUA_BOOT_FILE ?= $(abspath lua/boot.lua)
 BUILD_DIR = build
 TARGET = $(BUILD_DIR)/psi
 
+# Every .lua file under lua/ gets compiled into the binary as a byte
+# array. embed_lua (a host-side helper built from scripts/embed_lua.c)
+# generates the C from the file list.
+LUA_SOURCES = \
+	lua/boot.lua \
+	$(sort $(wildcard lua/psi/*.lua))
+EMBED_TOOL = $(BUILD_DIR)/embed_lua
+EMBED_OUT  = $(BUILD_DIR)/embedded_lua.c
+
 SOURCES = \
 	src/main.c \
 	src/core/abort.c \
@@ -59,12 +68,22 @@ OBJECTS = \
 	$(BUILD_DIR)/cli.o \
 	$(BUILD_DIR)/print_mode.o \
 	$(BUILD_DIR)/tui_mode.o \
-	$(BUILD_DIR)/vm.o
+	$(BUILD_DIR)/vm.o \
+	$(BUILD_DIR)/embedded_lua.o
 
 all: $(TARGET)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
+
+$(EMBED_TOOL): scripts/embed_lua.c | $(BUILD_DIR)
+	$(CC) -O2 -o $@ $<
+
+$(EMBED_OUT): $(EMBED_TOOL) $(LUA_SOURCES)
+	$(EMBED_TOOL) $(LUA_SOURCES) > $@
+
+$(BUILD_DIR)/embedded_lua.o: $(EMBED_OUT) include/psi/embedded_lua.h
+	$(CC) $(CPPFLAGS) -Iinclude $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
 $(TARGET): $(BUILD_DIR) $(OBJECTS)
 	$(CC) $(LDFLAGS) -o $@ $(OBJECTS) $(LOCAL_LDFLAGS)
@@ -99,7 +118,7 @@ $(BUILD_DIR)/print_mode.o: src/runtime/print_mode.c include/psi/common.h include
 $(BUILD_DIR)/tui_mode.o: src/runtime/tui_mode.c include/psi/agent.h include/psi/common.h include/psi/message.h include/psi/runtime.h include/psi/session.h include/psi/vm.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/vm.o: src/lua/vm.c include/psi/common.h include/psi/host_ops.h include/psi/message.h include/psi/process.h include/psi/session.h include/psi/vm.h
+$(BUILD_DIR)/vm.o: src/lua/vm.c include/psi/common.h include/psi/embedded_lua.h include/psi/host_ops.h include/psi/message.h include/psi/process.h include/psi/session.h include/psi/vm.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
 install: $(TARGET)

@@ -107,6 +107,10 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
 
     options->mode = PSI_CLI_MODE_REPL;
     options->payload = NULL;
+    /* Default: use the compile-time path if set. psi_vm_init falls
+     * back to the embedded boot.lua when the file doesn't exist on
+     * disk, so a portable static binary still works on machines
+     * where PSI_LUA_BOOT_FILE's directory doesn't exist. */
     options->boot_file = PSI_LUA_BOOT_FILE;
     options->session_file = NULL;
     options->model = NULL;

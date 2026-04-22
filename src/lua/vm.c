@@ -17,6 +17,7 @@
 #include "psi/agent.h"
 #include "psi/anthropic.h"
 #include "psi/common.h"
+#include "psi/embedded_lua.h"
 #include "psi/host_ops.h"
 #include "psi/message.h"
 #include "psi/process.h"
@@ -838,6 +839,56 @@ static int psi_vm_apply_package_path(lua_State *L, const char *boot_file) {
     return PSI_STATUS_OK;
 }
 
+/* Lua-callable searcher: resolves require("psi.X") against the
+ * embedded table in psi_embedded_lua_table. Registered as the second
+ * entry in package.searchers (after the preload lookup) so user
+ * extensions on disk can still shadow the built-ins if the user sets
+ * an explicit package.path via --boot. */
+static int psi_vm_embedded_searcher(lua_State *L) {
+    const char *name = luaL_checkstring(L, 1);
+    const struct psi_embedded_lua *e;
+    for (e = psi_embedded_lua_table; e->name != NULL; e++) {
+        if (strcmp(e->name, name) == 0) {
+            if (luaL_loadbuffer(L, (const char *)e->src, e->len, e->name) != LUA_OK) {
+                return lua_error(L);
+            }
+            return 1;
+        }
+    }
+    lua_pushfstring(L, "\n\tno embedded psi module '%s'", name);
+    return 1;
+}
+
+/* Install the embedded searcher at package.searchers[2] so require()
+ * finds psi's modules without any filesystem lookup. Position 1 is
+ * Lua's built-in preload search; inserting at 2 lets extensions on
+ * disk (PSI_EXTENSIONS_DIR, ./.psi/extensions/) still be loaded via
+ * the standard path-based searcher that remains at position 3+. */
+static int psi_vm_register_embedded(lua_State *L) {
+    int n;
+    int i;
+    lua_getglobal(L, "package");
+    lua_getfield(L, -1, "searchers");
+    /* Shift existing searchers down by one so we can slot ours into 2. */
+    n = (int)lua_rawlen(L, -1);
+    for (i = n; i >= 2; i--) {
+        lua_rawgeti(L, -1, i);
+        lua_rawseti(L, -2, i + 1);
+    }
+    lua_pushcfunction(L, psi_vm_embedded_searcher);
+    lua_rawseti(L, -2, 2);
+    lua_pop(L, 2); /* searchers + package */
+    return PSI_STATUS_OK;
+}
+
+static const struct psi_embedded_lua *psi_vm_embedded_find(const char *name) {
+    const struct psi_embedded_lua *e;
+    for (e = psi_embedded_lua_table; e->name != NULL; e++) {
+        if (strcmp(e->name, name) == 0) return e;
+    }
+    return NULL;
+}
+
 int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *output, FILE *error_output) {
     PSI_UNUSED(input);
     PSI_UNUSED(output);
@@ -860,14 +911,43 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
         return PSI_STATUS_ERROR;
     }
 
-    psi_vm_register_psi(vm->L);
-
-    if (boot_file && luaL_dofile(vm->L, boot_file) != LUA_OK) {
-        fprintf(stderr, "failed to load Lua bootstrap: %s\n%s\n",
-                boot_file, lua_tostring(vm->L, -1));
+    if (psi_vm_register_embedded(vm->L) != PSI_STATUS_OK) {
         lua_close(vm->L);
         vm->L = NULL;
         return PSI_STATUS_ERROR;
+    }
+
+    psi_vm_register_psi(vm->L);
+
+    /* Bootstrap: use the file at boot_file if it exists (source-tree
+     * dev runs, or installs that ship lua/ alongside the binary);
+     * otherwise fall back to the embedded boot.lua compiled into the
+     * binary. This is what makes static psi binaries self-contained —
+     * a stripped-down install or a different host without the Nix
+     * store still finds its Lua without touching the filesystem. */
+    if (boot_file != NULL && boot_file[0] != '\0' && psi_vm_file_exists(boot_file)) {
+        if (luaL_dofile(vm->L, boot_file) != LUA_OK) {
+            fprintf(stderr, "failed to load Lua bootstrap: %s\n%s\n",
+                    boot_file, lua_tostring(vm->L, -1));
+            lua_close(vm->L);
+            vm->L = NULL;
+            return PSI_STATUS_ERROR;
+        }
+    } else {
+        const struct psi_embedded_lua *boot = psi_vm_embedded_find("boot");
+        if (boot == NULL) {
+            fprintf(stderr, "psi: no embedded boot module compiled in\n");
+            lua_close(vm->L);
+            vm->L = NULL;
+            return PSI_STATUS_ERROR;
+        }
+        if (luaL_loadbuffer(vm->L, (const char *)boot->src, boot->len, "=boot") != LUA_OK
+            || lua_pcall(vm->L, 0, 0, 0) != LUA_OK) {
+            fprintf(stderr, "psi: embedded boot failed: %s\n", lua_tostring(vm->L, -1));
+            lua_close(vm->L);
+            vm->L = NULL;
+            return PSI_STATUS_ERROR;
+        }
     }
     return PSI_STATUS_OK;
 }
