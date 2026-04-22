@@ -24,7 +24,13 @@ psi.modes = require("psi.modes")
 
 -- Default event-hook registrations.
 psi.render.register_hook("assistant-text", function(payload)
-  return payload.text or ""
+  -- When assistant text resumes after a tool result, pi leaves one
+  -- blank line between the tool result and the new text. psi's stream
+  -- deltas don't end in "\n", so we emit a leading "\n" only on the
+  -- first delta of the new text block (subsequent deltas see the
+  -- previous event as "assistant-text").
+  local sep = psi.render.last_event_kind() == "tool-result" and "\n" or ""
+  return sep .. (payload.text or "")
 end)
 psi.render.register_hook("tool-call", psi.render.capture_frame)
 psi.render.register_hook("tool-call", psi.render.render_tool_call)

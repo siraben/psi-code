@@ -38,8 +38,20 @@ local function render_hook_results(results)
   return table.concat(pieces)
 end
 
+-- Track which event we rendered most recently so hooks can compute
+-- blank-line separators without global output buffers. The value is
+-- updated AFTER the current event's hooks run, so hooks see the
+-- previous event's kind. Reset on each new turn via "before-turn".
+local last_event_kind = "before-turn"
+
+function M.last_event_kind()
+  return last_event_kind
+end
+
 function M.handle_event(event, payload)
-  return render_hook_results(M.run_hooks(event, payload))
+  local text = render_hook_results(M.run_hooks(event, payload))
+  last_event_kind = event
+  return text
 end
 
 -- ---------- tool frames ----------
@@ -58,8 +70,20 @@ end
 
 -- ---------- renderer helpers ----------
 
+-- When a tool-call follows assistant text directly, pi emits one blank
+-- line between them (tool components carry their own leading Spacer(1)).
+-- psi's banner already starts with "\n" which produces a blank line
+-- when the prior chunk ended with "\n" (e.g. coming out of a tool-
+-- result). Assistant-text deltas don't end with "\n", so we need an
+-- extra leading newline in that case.
+local function tool_call_leading()
+  return M.last_event_kind() == "assistant-text" and "\n" or ""
+end
+
 local function tool_banner(tool, path)
-  return "\n" .. ansi.bold(ansi.cyan(tool)) .. (path and (" " .. path) or "") .. "\n"
+  return tool_call_leading()
+    .. "\n" .. ansi.bold(ansi.cyan(tool))
+    .. (path and (" " .. path) or "") .. "\n"
 end
 
 local function payload_tool(p)
@@ -87,7 +111,8 @@ end
 
 local function render_bash_call(p)
   local command = payload_input(p).command or ""
-  return "\n" .. ansi.bold(ansi.cyan("$")) .. " " .. command .. "\n"
+  return tool_call_leading()
+    .. "\n" .. ansi.bold(ansi.cyan("$")) .. " " .. command .. "\n"
 end
 
 local function render_write_call(p)
@@ -114,7 +139,8 @@ end
 
 local function render_lua_call(p)
   local mode = payload_input(p).mode or "summary"
-  return "\n" .. ansi.bold(ansi.cyan("lua")) .. " " .. mode .. "\n"
+  return tool_call_leading()
+    .. "\n" .. ansi.bold(ansi.cyan("lua")) .. " " .. mode .. "\n"
 end
 
 local function render_generic_call(p)
