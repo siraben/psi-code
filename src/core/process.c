@@ -16,6 +16,15 @@
 
 static const size_t PSI_PROCESS_OUTPUT_MAX_BYTES = 262144u;
 
+/* Per-iteration read() size when draining the child's stdout/stderr.
+ * Also the per-chunk quantum fed to the progress callback.
+ * #define so it's usable as an array dimension in C89. */
+#define PSI_PROCESS_READ_CHUNK 4096
+
+/* Poll interval when the child has produced no output yet. Keeps the
+ * abort-signal check responsive without burning a CPU core. */
+static const long PSI_PROCESS_POLL_DELAY_NS = 20L * 1000000L; /* 20 ms */
+
 static int psi_process_append_bytes(char **buffer, size_t *length, size_t *capacity, const char *data, size_t bytes) {
     char *next_buffer;
     size_t next_capacity;
@@ -58,7 +67,7 @@ int psi_process_run_shell(
     int pipe_fds[2];
     pid_t child_pid;
     int wait_status;
-    char read_buffer[4096];
+    char read_buffer[PSI_PROCESS_READ_CHUNK];
     char *output_buffer;
     size_t output_length;
     size_t output_capacity;
@@ -86,12 +95,24 @@ int psi_process_run_shell(
     }
 
     if (child_pid == 0) {
-        close(pipe_fds[0]);
-        dup2(pipe_fds[1], 1);
-        dup2(pipe_fds[1], 2);
-        close(pipe_fds[1]);
+        /* Child: redirect stdout/stderr to the pipe; bail to 127 on
+         * any setup failure so the parent observes a clean exit code
+         * rather than a half-wired exec. 127 mirrors the shell
+         * convention for "command not found / could not exec".
+         *
+         * gcc -fanalyzer flags the dup2 branches as potential fd
+         * leaks (see [CWE-775]); this is a false positive in a fork
+         * child that is about to _exit — the kernel releases all
+         * descriptors on process exit. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wanalyzer-fd-leak"
+        if (close(pipe_fds[0]) != 0) _exit(127);
+        if (dup2(pipe_fds[1], 1) < 0) _exit(127);
+        if (dup2(pipe_fds[1], 2) < 0) _exit(127);
+        if (close(pipe_fds[1]) != 0) _exit(127);
         execl("/bin/sh", "sh", "-lc", command, (char *)0);
         _exit(127);
+#pragma GCC diagnostic pop
     }
 
     close(pipe_fds[1]);
@@ -118,7 +139,7 @@ int psi_process_run_shell(
                 if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
                     struct timespec delay;
                     delay.tv_sec = 0;
-                    delay.tv_nsec = 20 * 1000000; /* 20ms */
+                    delay.tv_nsec = PSI_PROCESS_POLL_DELAY_NS;
                     nanosleep(&delay, NULL);
                     continue;
                 }
@@ -179,6 +200,13 @@ int psi_process_run_shell(
     *output_text = output_buffer;
     return PSI_STATUS_OK;
 #else
+    /* Windows placeholder. psi is not production-tested on Windows;
+     * the system() call spawns cmd.exe and performs its own shell
+     * parsing, so this path is NOT equivalent to the POSIX fork+execl
+     * implementation above and offers no abort-signal responsiveness,
+     * no output capture, and no chunk streaming. It exists only so
+     * the translation unit compiles on Windows toolchains during
+     * experimental ports. */
     int status;
 
     PSI_UNUSED(on_chunk);

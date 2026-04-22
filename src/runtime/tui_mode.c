@@ -225,7 +225,12 @@ static void psi_tui_stdio_guard_end(struct psi_tui_stdio_guard *guard) {
         return;
     }
 
-    dup2(guard->stderr_saved, STDERR_FILENO);
+    /* Best-effort restore: if dup2 fails the process ends up without
+     * a usable stderr, but there is nothing actionable to do from
+     * inside curses teardown. Assert visibly in debug builds. */
+    if (dup2(guard->stderr_saved, STDERR_FILENO) < 0) {
+        /* Intentionally silent: no working stderr to write to. */
+    }
     close(guard->stderr_saved);
     close(guard->null_fd);
     guard->active = 0;
@@ -2014,7 +2019,7 @@ static int psi_tui_setup_runtime(struct psi_tui_state *state, const struct psi_c
     return PSI_STATUS_OK;
 }
 
-static void psi_tui_state_init(struct psi_tui_state *state, const struct psi_cli_options *options) {
+static int psi_tui_state_init(struct psi_tui_state *state, const struct psi_cli_options *options) {
     memset(state, 0, sizeof(*state));
     state->options = options;
     state->streaming_assistant_index = -1;
@@ -2022,7 +2027,10 @@ static void psi_tui_state_init(struct psi_tui_state *state, const struct psi_cli
     state->streaming_thinking_index = -1;
     state->running = 1;
     psi_abort_signal_init(&state->abort_signal);
-    pthread_mutex_init(&state->event_lock, NULL);
+    if (pthread_mutex_init(&state->event_lock, NULL) != 0) {
+        return PSI_STATUS_ERROR;
+    }
+    return PSI_STATUS_OK;
 }
 
 static void psi_tui_free_event(struct psi_tui_event *event) {
@@ -2074,7 +2082,10 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
         return PSI_STATUS_ERROR;
     }
 
-    psi_tui_state_init(&state, options);
+    if (psi_tui_state_init(&state, options) != PSI_STATUS_OK) {
+        fprintf(stderr, "TUI state init failed (mutex)\n");
+        return PSI_STATUS_ERROR;
+    }
     if (psi_tui_reserve_input(&state, 1u) != PSI_STATUS_OK) {
         return PSI_STATUS_ERROR;
     }
