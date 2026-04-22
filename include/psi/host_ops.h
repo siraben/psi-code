@@ -17,12 +17,32 @@ struct psi_vm;
 struct psi_agent_observer;
 struct psi_abort_signal;
 
+/* Usage-mirror for the TUI status line. Written by the worker
+ * thread via psi.set_usage() (through context.record_usage); read
+ * by the TUI main thread when painting the footer.
+ *
+ * `volatile long` is enough here: on all supported 32-/64-bit
+ * platforms `long` stores are single-word and therefore atomic;
+ * the main thread may observe a momentary mix of old+new fields
+ * across the six members for at most one store, which is
+ * harmless for display. No mutex — locking would block the hot
+ * redraw path while the worker is mid-HTTP-stream. */
+struct psi_host_usage {
+    volatile long input;
+    volatile long output;
+    volatile long cache_read;
+    volatile long cache_write;
+    volatile long total;
+    volatile long context_window;
+};
+
 struct psi_host_context {
     struct psi_session *session;
     struct psi_vm *vm;
     struct psi_agent_observer *active_observer;
     const char *active_tool_id;
     struct psi_abort_signal *abort_signal;
+    struct psi_host_usage usage;
 };
 
 #endif

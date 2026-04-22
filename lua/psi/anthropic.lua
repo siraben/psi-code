@@ -496,7 +496,7 @@ local function save_failed_partial(state, model, stop_reason, error_message)
     api = "anthropic-messages",
     response_id = state.response_id,
   })
-  context.record_usage(psi.session_message_count(), state.usage)
+  context.record_usage(psi.session_message_count(), state.usage, model)
   session_mod.save()
 end
 
@@ -745,7 +745,7 @@ function M.run_turn(opts)
       api = "anthropic-messages",
       response_id = state.response_id,
     })
-    context.record_usage(psi.session_message_count(), state.usage)
+    context.record_usage(psi.session_message_count(), state.usage, model)
     session_mod.save()
 
     if psi.events then

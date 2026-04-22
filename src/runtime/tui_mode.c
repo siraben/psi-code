@@ -1067,45 +1067,17 @@ static int psi_tui_build_render_lines(
     return PSI_STATUS_OK;
 }
 
-/* Ask a Lua helper (psi.tui.<name>) for a formatted status string.
- * `arg_json` is the single stringified-JSON argument the helper takes;
- * its values are trusted host-side ints and the model name (which is
- * an Anthropic/Ollama model identifier — always safe alphanumerics +
- * dash/dot/colon/slash, no JSON-escape needed).
+/* Format the rich status line in pure C. Reads ONLY host-struct
+ * memory (model, session id, usage mirror, message count). Must not
+ * call into Lua: a single lua_State is shared between this (main)
+ * thread and the worker thread running psi.agent.run_turn, and Lua
+ * is not thread-safe. Observed on 32-bit hardware as SIGSEGVs deep
+ * in luaV_execute/luaL_error when both threads raced on the state.
  *
- * CRITICAL: a single lua_State is shared between the TUI main thread
- * and the worker thread that runs psi.agent.run_turn. Lua is not
- * thread-safe; only one thread may touch a given lua_State at a time.
- * When state->busy is true the worker is mid-lua_pcall, so the main
- * thread MUST NOT call into Lua — it would race with luaV_execute and
- * corrupt the stack/registry (observed as SIGSEGVs deep in luaL_error
- * on 32-bit hardware, where the race was reproducible every turn).
- *
- * When busy we copy the fallback verbatim. The C-formatted fallback
- * is what psi always shipped before the rich status line, so the TUI
- * stays useful during long-running turns. Idle redraws (when the
- * worker is not running) safely invoke the Lua helper for the full
- * pi-style status. */
-static void psi_tui_call_status_helper(
-    struct psi_tui_state *state,
-    const char *helper,
-    const char *arg_json,
-    const char *fallback,
-    char *out,
-    size_t out_size
-) {
-    char *result = NULL;
-    if (state != NULL && !state->busy
-        && psi_vm_call_string_procedure(&state->runtime.vm, helper, arg_json, &result) == PSI_STATUS_OK
-        && result != NULL) {
-        snprintf(out, out_size, "%s", result);
-        free(result);
-        return;
-    }
-    free(result);
-    snprintf(out, out_size, "%s", fallback);
-}
-
+ * The usage fields are volatile longs written atomically by the
+ * worker via psi.set_usage() from lua/psi/context.lua's record_usage.
+ * A torn read (e.g. input=new, output=still-old for one frame) is
+ * acceptable for display. */
 static void psi_tui_footer_lines(
     struct psi_tui_state *state,
     char *line1,
@@ -1114,33 +1086,57 @@ static void psi_tui_footer_lines(
     size_t line2_size
 ) {
     char cwd_buffer[4096];
-    char model_buffer[256];
-    char args_json[1024];
     const char *cwd;
+    const char *model;
+    const char *sess_id;
+    char short_id[16];
+    const struct psi_host_usage *usage;
+    long total;
+    long window;
 
     cwd = getcwd(cwd_buffer, sizeof(cwd_buffer));
     if (cwd == NULL) {
-        snprintf(cwd_buffer, sizeof(cwd_buffer), "<cwd unavailable: %s>", strerror(errno));
+        snprintf(cwd_buffer, sizeof(cwd_buffer),
+                 "<cwd unavailable: %s>", strerror(errno));
     }
-
     snprintf(line1, line1_size, "%s", cwd_buffer);
 
-    snprintf(model_buffer, sizeof(model_buffer), "%s",
-             state->runtime.model != NULL ? state->runtime.model : "claude-opus-4-7");
-    snprintf(args_json, sizeof(args_json),
-             "{\"model\":\"%s\",\"busy\":%s,\"scroll\":%d}",
-             model_buffer,
-             state->busy ? "true" : "false",
-             state->scroll_offset);
+    model = state->runtime.model != NULL
+        ? state->runtime.model : "claude-opus-4-7";
+    sess_id = state->runtime.session.id != NULL
+        ? state->runtime.session.id : "-";
+    /* First 8 chars of the id, mirroring psi.tui.status_line's short_id. */
+    snprintf(short_id, sizeof(short_id), "%.8s", sess_id);
 
-    {
-        char fallback[512];
-        snprintf(fallback, sizeof(fallback), "model:%.255s  msg:%lu%s",
-                 model_buffer,
+    usage  = &state->runtime.vm.host.usage;
+    total  = usage->total;
+    window = usage->context_window;
+
+    if (total > 0 && window > 0) {
+        int pct = (int)((total * 100l) / window);
+        snprintf(line2, line2_size,
+                 "session:%s  model:%.96s  msg:%lu  ctx:%d%% (%ld/%ld)%s%s",
+                 short_id, model,
                  (unsigned long)state->runtime.session.count,
-                 state->busy ? "  working" : "");
-        psi_tui_call_status_helper(state, "psi.tui.status_line", args_json,
-                                   fallback, line2, line2_size);
+                 pct, total, window,
+                 state->scroll_offset > 0 ? "  " : "",
+                 state->busy ? "  working…" : "");
+    } else {
+        /* First turn hasn't landed yet — no usage numbers to show. */
+        snprintf(line2, line2_size,
+                 "session:%s  model:%.96s  msg:%lu%s%s",
+                 short_id, model,
+                 (unsigned long)state->runtime.session.count,
+                 state->scroll_offset > 0 ? "  " : "",
+                 state->busy ? "  working…" : "");
+    }
+    if (state->scroll_offset > 0) {
+        /* Append scroll indicator without exploding snprintf args. */
+        size_t len = strlen(line2);
+        if (len + 32u < line2_size) {
+            snprintf(line2 + len, line2_size - len,
+                     "scroll:%d", state->scroll_offset);
+        }
     }
 }
 
@@ -1251,22 +1247,18 @@ static void psi_tui_redraw(struct psi_tui_state *state) {
     psi_tui_render_free_lines(lines, line_count);
 
     {
-        char hint_buffer[256];
+        /* Pure-C hint selection — no Lua call, so the TUI main
+         * thread cannot race with the worker's lua_State. */
         const char *hint_text;
         if (state->status_text != NULL) {
             hint_text = state->status_text;
+        } else if (state->busy) {
+            hint_text = "Esc abort current turn";
+        } else if (state->scroll_offset > 0) {
+            hint_text =
+                "↑↓ scroll  PgUp/PgDn page  Home/End jump  Enter=submit  /help  /quit";
         } else {
-            char hint_args[128];
-            snprintf(hint_args, sizeof(hint_args),
-                     "{\"busy\":%s,\"scroll\":%d}",
-                     state->busy ? "true" : "false",
-                     state->scroll_offset);
-            psi_tui_call_status_helper(state, "psi.tui.footer_hint", hint_args,
-                                       state->busy
-                                           ? "Esc abort current turn"
-                                           : "Enter submit  ↑↓ scroll  /help  /quit",
-                                       hint_buffer, sizeof(hint_buffer));
-            hint_text = hint_buffer;
+            hint_text = "Enter submit  ↑↓ scroll  /help  /quit";
         }
         psi_tui_draw_line(
             status_row, hint_text,

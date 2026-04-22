@@ -635,6 +635,27 @@ static int lfn_is_aborted(lua_State *L) {
     return 1;
 }
 
+/* psi.set_usage(input, output, cache_read, cache_write, total, context_window)
+ *
+ * Publishes the most recent API-reported usage into the shared
+ * host-context mirror so the TUI main thread can render rich status
+ * without calling into Lua (which is unsafe while the worker thread
+ * is mid-lua_pcall on the same state — see commit 3548caa).
+ *
+ * Each field is a Lua integer, coerced to long. `psi.context.
+ * record_usage` is the normal caller; `reset_usage` passes zeros. */
+static int lfn_set_usage(lua_State *L) {
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    if (host == NULL) return 0;
+    host->usage.input          = (long)luaL_optinteger(L, 1, 0);
+    host->usage.output         = (long)luaL_optinteger(L, 2, 0);
+    host->usage.cache_read     = (long)luaL_optinteger(L, 3, 0);
+    host->usage.cache_write    = (long)luaL_optinteger(L, 4, 0);
+    host->usage.total          = (long)luaL_optinteger(L, 5, 0);
+    host->usage.context_window = (long)luaL_optinteger(L, 6, 0);
+    return 0;
+}
+
 /* psi.embedded_doc(name) -> string | nil
  * Look up a file name in the embedded docs table. Returns the file
  * contents as a Lua string, or nil if the name isn't embedded. */
@@ -834,6 +855,7 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("session_set_path",      lfn_session_set_path);
     PSI_REG("session_set_parent_id", lfn_session_set_parent_id);
     PSI_REG("is_aborted",            lfn_is_aborted);
+    PSI_REG("set_usage",             lfn_set_usage);
     PSI_REG("embedded_doc",          lfn_embedded_doc);
     PSI_REG("embedded_doc_names",    lfn_embedded_doc_names);
     PSI_REG("json_encode",           lfn_json_encode);

@@ -364,7 +364,8 @@ function M.run_turn(opts)
           state.usage and {
             input_tokens = state.usage.prompt_tokens,
             output_tokens = state.usage.completion_tokens,
-          } or nil)
+          } or nil,
+          model)
         session_mod.save()
       end
       if not aborted then io.stderr:write("ollama: " .. emsg .. "\n") end
@@ -384,7 +385,8 @@ function M.run_turn(opts)
       state.usage and {
         input_tokens = state.usage.prompt_tokens,
         output_tokens = state.usage.completion_tokens,
-      } or nil)
+      } or nil,
+      model)
     session_mod.save()
 
     if psi.events then
