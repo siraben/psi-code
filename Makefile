@@ -37,12 +37,16 @@ TARGET = $(BUILD_DIR)/psi
 
 # Every .lua file under lua/ gets compiled into the binary as a byte
 # array. embed_lua (a host-side helper built from scripts/embed_lua.c)
-# generates the C from the file list.
+# generates the C from the file list. README.md + docs/*.md are
+# embedded similarly under a second table (psi_embedded_docs_table)
+# so a portable static binary can self-describe without a source tree.
 LUA_SOURCES = \
 	lua/boot.lua \
 	$(sort $(wildcard lua/psi/*.lua))
-EMBED_TOOL = $(BUILD_DIR)/embed_lua
-EMBED_OUT  = $(BUILD_DIR)/embedded_lua.c
+DOC_SOURCES = README.md $(sort $(wildcard docs/*.md))
+EMBED_TOOL  = $(BUILD_DIR)/embed_lua
+EMBED_OUT   = $(BUILD_DIR)/embedded_lua.c
+EMBED_DOCS_OUT = $(BUILD_DIR)/embedded_docs.c
 
 SOURCES = \
 	src/main.c \
@@ -69,7 +73,8 @@ OBJECTS = \
 	$(BUILD_DIR)/print_mode.o \
 	$(BUILD_DIR)/tui_mode.o \
 	$(BUILD_DIR)/vm.o \
-	$(BUILD_DIR)/embedded_lua.o
+	$(BUILD_DIR)/embedded_lua.o \
+	$(BUILD_DIR)/embedded_docs.o
 
 all: $(TARGET)
 
@@ -82,7 +87,13 @@ $(EMBED_TOOL): scripts/embed_lua.c | $(BUILD_DIR)
 $(EMBED_OUT): $(EMBED_TOOL) $(LUA_SOURCES)
 	$(EMBED_TOOL) $(LUA_SOURCES) > $@
 
+$(EMBED_DOCS_OUT): $(EMBED_TOOL) $(DOC_SOURCES)
+	$(EMBED_TOOL) --table=psi_embedded_docs_table --raw-keys $(DOC_SOURCES) > $@
+
 $(BUILD_DIR)/embedded_lua.o: $(EMBED_OUT) include/psi/embedded_lua.h
+	$(CC) $(CPPFLAGS) -Iinclude $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/embedded_docs.o: $(EMBED_DOCS_OUT) include/psi/embedded_lua.h
 	$(CC) $(CPPFLAGS) -Iinclude $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
 $(TARGET): $(BUILD_DIR) $(OBJECTS)

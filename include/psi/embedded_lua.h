@@ -23,6 +23,15 @@ struct psi_embedded_lua {
     size_t len;
 };
 
+/* Lua modules (boot.lua + psi/ modules). Keyed by module name. */
 extern const struct psi_embedded_lua psi_embedded_lua_table[];
+
+/* Documentation (README.md + docs/ markdown). Keyed by the relative
+ * path as it appears in the source tree ("README.md",
+ * "docs/architecture.md"). Exposed to Lua via psi.embedded_doc(path);
+ * the `read` tool falls back to this table when a requested file
+ * isn't on disk, so the agent can self-describe even on machines
+ * where the source tree isn't present. */
+extern const struct psi_embedded_lua psi_embedded_docs_table[];
 
 #endif

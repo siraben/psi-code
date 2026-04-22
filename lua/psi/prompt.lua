@@ -109,13 +109,17 @@ function M.system_prompt()
   end
 
   buf[#buf + 1] = table.concat({
-    "\nPsi documentation (read only when the user asks about psi itself, its architecture, ",
-    "Lua modules, or host layer):\n",
-    "- Main documentation: README.md\n",
-    "- Architecture: docs/architecture.md\n",
-    "- Port status: docs/port-status.md\n",
-    "- When working on psi topics, read the docs and follow .md cross-references before implementing\n",
-    "- Always read psi .md files completely and follow links to related docs",
+    "\nPsi documentation (embedded in the binary; the read tool serves ",
+    "the bundled copy when the file is not on disk, so these paths ",
+    "work regardless of cwd):\n",
+    "- README.md                 — main documentation\n",
+    "- docs/architecture.md      — architecture overview\n",
+    "- docs/port-status.md       — port audit against pi\n",
+    "- docs/extensions.md        — extension / event / slash-command API\n",
+    "- docs/providers.md         — Anthropic + Ollama provider routing\n",
+    "- Read only when the user asks about psi itself, its architecture, ",
+    "Lua modules, or host layer. Always read the target .md file ",
+    "completely and follow links to related docs.",
   })
 
   local context_files = M.find_context_files()

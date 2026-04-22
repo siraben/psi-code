@@ -1,12 +1,19 @@
-/* Generate a C file that embeds Lua sources as byte arrays plus a
- * lookup table used by psi_vm's embedded `package.searchers` entry.
+/* Generate a C file that embeds arbitrary files as byte arrays plus a
+ * sentinel-terminated lookup table.
  *
- * Usage:   embed_lua <file1.lua> [<file2.lua> ...] > embedded_lua.c
+ * Usage:
+ *   embed_lua [--table=NAME] [--raw-keys] <file1> [<file2> ...] > out.c
  *
- * Module names are derived from the input paths:
- *   lua/boot.lua          -> "boot"
- *   lua/psi/prelude.lua   -> "psi.prelude"
- *   lua/psi/tool_shell.lua-> "psi.tool_shell"
+ * Default behavior (Lua modules):
+ *   --table=psi_embedded_lua_table
+ *   module names derived from path:
+ *     lua/boot.lua          -> "boot"
+ *     lua/psi/prelude.lua   -> "psi.prelude"
+ *
+ * With --raw-keys the input path is used verbatim as the lookup key
+ * (useful for doc files: "README.md" stays "README.md"). The
+ * --table flag picks which symbol the generated table is exposed as
+ * so multiple invocations can coexist in the same binary.
  *
  * The binary only runs at build time on the host; it has no psi
  * dependencies and uses only <stdio.h>/<string.h>/<stdlib.h>. */
@@ -65,9 +72,32 @@ static int emit_bytes(const char *path) {
 }
 
 int main(int argc, char **argv) {
+    const char *table_name = "psi_embedded_lua_table";
+    int raw_keys = 0;
     int i;
-    if (argc < 2) {
-        fprintf(stderr, "usage: %s <file1.lua> [<file2.lua> ...]\n", argv[0]);
+    int first_file;
+
+    /* Parse leading options. */
+    first_file = 1;
+    while (first_file < argc) {
+        const char *a = argv[first_file];
+        if (strncmp(a, "--table=", 8) == 0) {
+            table_name = a + 8;
+            first_file++;
+        } else if (strcmp(a, "--raw-keys") == 0) {
+            raw_keys = 1;
+            first_file++;
+        } else if (a[0] == '-' && a[1] == '-') {
+            fprintf(stderr, "unknown option: %s\n", a);
+            return 1;
+        } else {
+            break;
+        }
+    }
+    if (first_file >= argc) {
+        fprintf(stderr,
+            "usage: %s [--table=NAME] [--raw-keys] <file1> [<file2> ...]\n",
+            argv[0]);
         return 1;
     }
 
@@ -75,24 +105,33 @@ int main(int argc, char **argv) {
     printf("#include <stddef.h>\n");
     printf("#include \"psi/embedded_lua.h\"\n\n");
 
-    for (i = 1; i < argc; i++) {
-        char modname[256];
+    for (i = first_file; i < argc; i++) {
+        char key[512];
         char sym[256];
-        derive_modname(argv[i], modname, sizeof(modname));
-        sanitize_symbol(modname, sym, sizeof(sym));
-        printf("static const unsigned char lua_%s_src[] = {", sym);
+        if (raw_keys) {
+            /* Key is the path verbatim; symbol needs sanitization only. */
+            snprintf(key, sizeof(key), "%s", argv[i]);
+        } else {
+            derive_modname(argv[i], key, sizeof(key));
+        }
+        sanitize_symbol(key, sym, sizeof(sym));
+        printf("static const unsigned char emb_%s_src[] = {", sym);
         if (emit_bytes(argv[i]) < 0) return 1;
         printf("\n};\n\n");
     }
 
-    printf("const struct psi_embedded_lua psi_embedded_lua_table[] = {\n");
-    for (i = 1; i < argc; i++) {
-        char modname[256];
+    printf("const struct psi_embedded_lua %s[] = {\n", table_name);
+    for (i = first_file; i < argc; i++) {
+        char key[512];
         char sym[256];
-        derive_modname(argv[i], modname, sizeof(modname));
-        sanitize_symbol(modname, sym, sizeof(sym));
-        printf("    { \"%s\", lua_%s_src, sizeof(lua_%s_src) },\n",
-               modname, sym, sym);
+        if (raw_keys) {
+            snprintf(key, sizeof(key), "%s", argv[i]);
+        } else {
+            derive_modname(argv[i], key, sizeof(key));
+        }
+        sanitize_symbol(key, sym, sizeof(sym));
+        printf("    { \"%s\", emb_%s_src, sizeof(emb_%s_src) },\n",
+               key, sym, sym);
     }
     printf("    { NULL, NULL, 0u }\n");
     printf("};\n");

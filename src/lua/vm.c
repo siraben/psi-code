@@ -635,6 +635,36 @@ static int lfn_is_aborted(lua_State *L) {
     return 1;
 }
 
+/* psi.embedded_doc(name) -> string | nil
+ * Look up a file name in the embedded docs table. Returns the file
+ * contents as a Lua string, or nil if the name isn't embedded. */
+static int lfn_embedded_doc(lua_State *L) {
+    const char *name = luaL_checkstring(L, 1);
+    const struct psi_embedded_lua *e;
+    for (e = psi_embedded_docs_table; e->name != NULL; e++) {
+        if (strcmp(e->name, name) == 0) {
+            lua_pushlstring(L, (const char *)e->src, e->len);
+            return 1;
+        }
+    }
+    lua_pushnil(L);
+    return 1;
+}
+
+/* psi.embedded_doc_names() -> array-of-strings
+ * List every doc embedded in the binary. Handy for a `/docs` command
+ * or an agent discovering what docs are available. */
+static int lfn_embedded_doc_names(lua_State *L) {
+    const struct psi_embedded_lua *e;
+    int i = 1;
+    lua_newtable(L);
+    for (e = psi_embedded_docs_table; e->name != NULL; e++, i++) {
+        lua_pushstring(L, e->name);
+        lua_rawseti(L, -2, i);
+    }
+    return 1;
+}
+
 static int lfn_session_clear(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
     struct psi_session *s = host ? host->session : NULL;
@@ -804,6 +834,8 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("session_set_path",      lfn_session_set_path);
     PSI_REG("session_set_parent_id", lfn_session_set_parent_id);
     PSI_REG("is_aborted",            lfn_is_aborted);
+    PSI_REG("embedded_doc",          lfn_embedded_doc);
+    PSI_REG("embedded_doc_names",    lfn_embedded_doc_names);
     PSI_REG("json_encode",           lfn_json_encode);
     PSI_REG("json_decode",           lfn_json_decode);
     PSI_REG("http_post",             lfn_http_post);

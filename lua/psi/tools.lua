@@ -32,8 +32,20 @@ local function impl_read(input)
   if not path then
     return records.tool_failure("read", "missing string field: path")
   end
-  local text = psi.read_file(path)
-  return records.new_tool_result(true, "read", nil, { path = path, text = text })
+  -- Disk first; if the file isn't there and the path matches an
+  -- embedded psi doc (README.md, docs/*.md), serve the bundled copy
+  -- so the agent can self-describe regardless of cwd.
+  if psi.file_exists(path) then
+    return records.new_tool_result(true, "read", nil,
+      { path = path, text = psi.read_file(path) })
+  end
+  local embedded = psi.embedded_doc and psi.embedded_doc(path) or nil
+  if embedded then
+    return records.new_tool_result(true, "read", nil,
+      { path = path, text = embedded, source = "embedded" })
+  end
+  return records.new_tool_result(true, "read", nil,
+    { path = path, text = psi.read_file(path) })
 end
 
 -- ---------- write ----------
