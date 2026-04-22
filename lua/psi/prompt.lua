@@ -231,7 +231,7 @@ M.HELP_TEXT = table.concat({
   "/help            show available commands\n",
   "/quit            exit the shell  (aliases: /q, :quit, :q)\n",
   "/session         show current session info (id, file, model, usage)\n",
-  "/new             start a fresh session in place\n",
+  "/new             start a fresh session in place (alias: /clear)\n",
   "/resume <path>   load a session file from disk\n",
   "/name <text>     set the session display name\n",
   "/model <spec>    switch model mid-session (e.g. ollama/llama3.1)\n",

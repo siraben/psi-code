@@ -201,15 +201,8 @@ local function handle_slash_command(opts, line)
     print("model set to " .. tostring(opts.model))
     return true, false
   end
-  if kind == "new-session" then
-    psi.session_clear()
-    session.reset_entry_chain()
-    session.set_display_name(nil)
-    psi.session_set_id(psi.prelude.uuid_short())
-    psi.context.reset_usage()
-    print("new session id=" .. tostring(psi.session_id()))
-    return true, false
-  end
+  -- "new-session" / "reload" are now handled inside commands.lua and
+  -- come back as "print" actions; no REPL-specific arms needed.
   if kind == "resume" then
     local path = action.payload
     local ok, err = session.load(path)
@@ -220,11 +213,6 @@ local function handle_slash_command(opts, line)
     opts.session_file = path
     psi.context.reset_usage()
     print("resumed " .. path .. " (" .. tostring(psi.session_message_count()) .. " messages)")
-    return true, false
-  end
-  if kind == "reload" then
-    if psi.load_extensions then psi.load_extensions() end
-    print("extensions reloaded")
     return true, false
   end
   if kind == "name" then

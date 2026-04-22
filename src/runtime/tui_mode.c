@@ -1599,6 +1599,12 @@ static int psi_tui_handle_command(struct psi_tui_state *state, const char *line)
     }
 
     if (action_name != NULL && strcmp(action_name, "print") == 0) {
+        /* Commands with purely side effects (/new, /clear, /reload,
+         * /copy, /session, /export, /name, /system-prompt, /help) all
+         * route through "print"; commands.lua has already performed
+         * the mutation by the time we see this. Re-render the
+         * transcript so entries cleared by /new or /clear disappear. */
+        psi_tui_rebuild_from_session(state);
         psi_tui_add_entry(state, PSI_TUI_ENTRY_INFO, NULL, action_text != NULL ? action_text : "", 0);
         state->scroll_offset = 0;
         psi_tui_set_status(state, "", 0);

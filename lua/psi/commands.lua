@@ -205,6 +205,32 @@ local function cmd_export(rest)
   return records.new_command_action("print", "export failed: " .. path)
 end
 
+-- /new, /clear, /reload are side-effect-only commands. Running them in
+-- commands.lua and returning a plain "print" action lets them work in
+-- both the REPL and the TUI uniformly — the TUI's C dispatcher only
+-- understands "print" and "compact" kinds, so everything else must
+-- resolve here.
+local function cmd_new_session()
+  psi.session_clear()
+  session.reset_entry_chain()
+  if session.set_display_name then session.set_display_name(nil) end
+  psi.session_set_id(prelude.uuid_short())
+  if psi.context and psi.context.reset_usage then psi.context.reset_usage() end
+  return records.new_command_action(
+    "print", "new session id=" .. tostring(psi.session_id() or "-"))
+end
+
+local function cmd_reload()
+  if type(psi.load_extensions) == "function" then
+    local ok, err = pcall(psi.load_extensions)
+    if not ok then
+      return records.new_command_action(
+        "print", "reload failed: " .. tostring(err))
+    end
+  end
+  return records.new_command_action("print", "extensions reloaded")
+end
+
 -- ---------- dispatcher + registry ----------
 
 local registered = {}
@@ -253,11 +279,11 @@ function M.handle(line)
   if line == "/copy" then
     return cmd_copy()
   end
-  if line == "/new" then
-    return records.new_command_action("new-session", nil)
+  if line == "/new" or line == "/clear" then
+    return cmd_new_session()
   end
   if line == "/reload" then
-    return records.new_command_action("reload", nil)
+    return cmd_reload()
   end
   if starts_word(line, "/model") then
     local spec = arg_after(line, "/model")
