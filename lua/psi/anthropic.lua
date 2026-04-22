@@ -243,9 +243,20 @@ end
 
 -- Feed stream buffer, call on_event(event_type, data_table) for each
 -- complete event, return leftover bytes that didn't form a full event.
-local function sse_feed(buffer, on_event)
-  local pending_event = nil
-  local pending_data = nil
+--
+-- `carry` holds parser state that MUST persist across chunk
+-- boundaries: `event` (the most recent `event: X` line) and `data`
+-- (the most recent `data: Y` line). A blank line finalises them.
+--
+-- Previously these lived as sse_feed's own locals and were reset on
+-- every chunk. If a libcurl chunk ended after `data: {...}\n` but
+-- before the `\n\n` terminator, the event was silently dropped —
+-- corrupting streamed tool_use JSON and causing the agent to call
+-- the tool with empty input ("missing string field: path"). TCP
+-- fragmentation + large input_json_delta events made this triggerable.
+local function sse_feed(buffer, carry, on_event)
+  local pending_event = carry.event
+  local pending_data = carry.data
   local pos = 1
   while true do
     local nl = buffer:find("\n", pos, true)
@@ -272,6 +283,8 @@ local function sse_feed(buffer, on_event)
       pending_event, pending_data = nil, nil
     end
   end
+  carry.event = pending_event
+  carry.data = pending_data
   return buffer:sub(pos)
 end
 
@@ -407,8 +420,24 @@ local function finalize_blocks(state)
     if block.type == "text" then
       content[#content + 1] = { type = "text", text = block.text }
     elseif block.type == "tool_use" then
-      local input = (#block.input_json > 0) and safe_decode(block.input_json) or {}
-      if type(input) ~= "table" then
+      local input
+      if #block.input_json > 0 then
+        input = safe_decode(block.input_json)
+        if type(input) ~= "table" then
+          -- Truncated or malformed input_json means stream events
+          -- were dropped (SSE chunk-boundary bug, network glitch, or
+          -- server truncation). Surface it loudly rather than silently
+          -- passing {} — otherwise the agent's next turn sees a
+          -- "missing field" error from the tool and wastes a round
+          -- trip retrying blindly.
+          io.stderr:write(string.format(
+            "psi: tool_use %s (%s) has malformed input_json (%d bytes, "
+              .. "starts with %q); dispatching with empty input\n",
+            block.name or "?", block.id or "?",
+            #block.input_json, block.input_json:sub(1, 48)))
+          input = {}
+        end
+      else
         input = {}
       end
       content[#content + 1] = {
@@ -682,9 +711,10 @@ function M.run_turn(opts)
 
     local state = new_state()
     local leftover = ""
+    local sse_carry = { event = nil, data = nil }
     local status, err = psi.http_post_stream(url, headers, body, function(chunk)
       leftover = leftover .. chunk
-      leftover = sse_feed(leftover, function(event_type, data)
+      leftover = sse_feed(leftover, sse_carry, function(event_type, data)
         dispatch_sse(state, event_type, data, observer)
       end)
     end)
