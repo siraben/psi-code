@@ -19,7 +19,7 @@ int psi_http_post_stream(
     size_t body_len,
     psi_http_chunk_cb on_chunk,
     void *userdata,
-    struct psi_abort_signal *abort_signal,
+    const struct psi_abort_signal *abort_signal,
     long *status_code
 );
 
@@ -29,7 +29,7 @@ int psi_http_post(
     size_t header_count,
     const char *body,
     size_t body_len,
-    struct psi_abort_signal *abort_signal,
+    const struct psi_abort_signal *abort_signal,
     long *status_code,
     char **response_body
 );

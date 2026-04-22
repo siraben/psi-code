@@ -32,7 +32,7 @@
 static char *psi_vm_current_date(void) {
     char buffer[32];
     time_t now = time(NULL);
-    struct tm *lt = localtime(&now);
+    const struct tm *lt = localtime(&now);
     if (lt == NULL) return NULL;
     snprintf(buffer, sizeof(buffer), "%04d-%02d-%02d",
              lt->tm_year + 1900, lt->tm_mon + 1, lt->tm_mday);
@@ -41,9 +41,8 @@ static char *psi_vm_current_date(void) {
 
 static char *psi_vm_current_cwd(void) {
     size_t size = 256u;
-    char *buf;
     for (;;) {
-        buf = (char *)malloc(size);
+        char *buf = (char *)malloc(size);
         if (buf == NULL) return NULL;
         if (getcwd(buf, size) != NULL) return buf;
         free(buf);
@@ -538,7 +537,7 @@ static void psi_lua_free_headers(char **headers, size_t count) {
     size_t i;
     if (headers == NULL) return;
     for (i = 0; i < count; i++) free(headers[i]);
-    free(headers);
+    free((void *)headers);
 }
 
 static int lfn_http_post_stream(lua_State *L) {
@@ -547,7 +546,7 @@ static int lfn_http_post_stream(lua_State *L) {
     const char *body;
     char **headers;
     size_t header_count;
-    struct psi_host_context *host;
+    const struct psi_host_context *host;
     struct psi_lua_http_stream_ctx ctx;
     long status_code;
     int status;

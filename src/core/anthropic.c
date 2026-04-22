@@ -38,7 +38,7 @@ static int psi_http_xferinfo(
     curl_off_t dltotal, curl_off_t dlnow,
     curl_off_t ultotal, curl_off_t ulnow
 ) {
-    struct psi_abort_signal *abort_signal = (struct psi_abort_signal *)clientp;
+    const struct psi_abort_signal *abort_signal = (const struct psi_abort_signal *)clientp;
     (void)dltotal; (void)dlnow; (void)ultotal; (void)ulnow;
     return psi_abort_signal_is_triggered(abort_signal) ? 1 : 0;
 }
@@ -62,7 +62,7 @@ static CURL *psi_http_build_handle(
     const char *const *header_lines, size_t header_count,
     const char *body, size_t body_len,
     struct curl_slist **headers_out,
-    struct psi_abort_signal *abort_signal
+    const struct psi_abort_signal *abort_signal
 ) {
     CURL *curl;
     struct curl_slist *headers = NULL;
@@ -83,6 +83,9 @@ static CURL *psi_http_build_handle(
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, psi_http_xferinfo);
+    /* curl stores an arbitrary opaque userdata; the const is safely
+     * dropped here because psi_http_xferinfo re-casts to
+     * const psi_abort_signal *. */
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, (void *)abort_signal);
     return curl;
 }
@@ -92,7 +95,7 @@ int psi_http_post_stream(
     const char *const *header_lines, size_t header_count,
     const char *body, size_t body_len,
     psi_http_chunk_cb on_chunk, void *userdata,
-    struct psi_abort_signal *abort_signal,
+    const struct psi_abort_signal *abort_signal,
     long *status_code
 ) {
     CURL *curl;
@@ -125,7 +128,7 @@ int psi_http_post(
     const char *url,
     const char *const *header_lines, size_t header_count,
     const char *body, size_t body_len,
-    struct psi_abort_signal *abort_signal,
+    const struct psi_abort_signal *abort_signal,
     long *status_code, char **response_body
 ) {
     CURL *curl;

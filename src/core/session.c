@@ -110,14 +110,11 @@ int psi_session_append_with_data(
     const char *text,
     const char *data_json
 ) {
-    struct psi_message *new_messages;
-    size_t new_capacity;
-
     if (session == NULL) return PSI_STATUS_ERROR;
 
     if (session->count == session->capacity) {
-        new_capacity = session->capacity == 0u ? 8u : session->capacity * 2u;
-        new_messages = (struct psi_message *)realloc(
+        size_t new_capacity = session->capacity == 0u ? 8u : session->capacity * 2u;
+        struct psi_message *new_messages = (struct psi_message *)realloc(
             session->messages, new_capacity * sizeof(struct psi_message));
         if (new_messages == NULL) return PSI_STATUS_ERROR;
         session->messages = new_messages;

@@ -52,18 +52,16 @@ int psi_process_run_shell(
     int *truncated,
     psi_process_progress_cb on_chunk,
     void *userdata,
-    struct psi_abort_signal *abort_signal
+    const struct psi_abort_signal *abort_signal
 ) {
 #ifndef _WIN32
     int pipe_fds[2];
     pid_t child_pid;
     int wait_status;
     char read_buffer[4096];
-    ssize_t read_count;
     char *output_buffer;
     size_t output_length;
     size_t output_capacity;
-    size_t to_copy;
 
     if (command == NULL || output_text == NULL || exit_status == NULL || truncated == NULL) {
         return PSI_STATUS_ERROR;
@@ -109,6 +107,7 @@ int psi_process_run_shell(
     {
         int aborted = 0;
         for (;;) {
+            ssize_t read_count;
             if (psi_abort_signal_is_triggered(abort_signal)) {
                 aborted = 1;
                 kill(child_pid, SIGTERM);
@@ -134,7 +133,7 @@ int psi_process_run_shell(
             }
 
             if (output_length < PSI_PROCESS_OUTPUT_MAX_BYTES) {
-                to_copy = (size_t)read_count;
+                size_t to_copy = (size_t)read_count;
                 if (output_length + to_copy > PSI_PROCESS_OUTPUT_MAX_BYTES) {
                     to_copy = PSI_PROCESS_OUTPUT_MAX_BYTES - output_length;
                     *truncated = 1;

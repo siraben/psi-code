@@ -99,4 +99,22 @@ install: $(TARGET)
 clean:
 	rm -rf $(BUILD_DIR)
 
-.PHONY: all clean install
+# ---- static analysis ----
+#
+# `make analyze` runs cppcheck + gcc -fanalyzer. Both are installed in
+# the dev shell; on bare systems install them or skip the target.
+
+CPPCHECK ?= cppcheck
+analyze-cppcheck:
+	$(CPPCHECK) --enable=all --inconclusive --std=c89 \
+		--suppressions-list=.cppcheck-suppressions \
+		--error-exitcode=1 \
+		-I include --quiet src/
+
+analyze-gcc:
+	$(MAKE) clean
+	$(MAKE) CFLAGS="-O2 -fanalyzer"
+
+analyze: analyze-cppcheck analyze-gcc
+
+.PHONY: all clean install analyze analyze-cppcheck analyze-gcc

@@ -20,7 +20,7 @@ int psi_process_run_shell(
     int *truncated,
     psi_process_progress_cb on_chunk,
     void *userdata,
-    struct psi_abort_signal *abort_signal
+    const struct psi_abort_signal *abort_signal
 );
 
 #endif

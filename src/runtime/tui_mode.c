@@ -206,9 +206,6 @@ static int psi_tui_stdio_guard_begin(struct psi_tui_stdio_guard *guard) {
 
     guard->stderr_saved = dup(STDERR_FILENO);
     if (guard->stderr_saved < 0) {
-        if (guard->stderr_saved >= 0) {
-            close(guard->stderr_saved);
-        }
         close(guard->null_fd);
         return PSI_STATUS_ERROR;
     }
@@ -716,7 +713,7 @@ static char *psi_tui_render_tool_result_text(
 
 static int psi_tui_render_reserve(
     struct psi_tui_render_line **lines,
-    size_t *count,
+    const size_t *count,
     size_t *capacity,
     size_t extra
 ) {
@@ -1045,7 +1042,7 @@ static void psi_tui_footer_lines(
     char cwd_buffer[4096];
     char model_buffer[256];
     char scroll_buffer[64];
-    char *cwd;
+    const char *cwd;
 
     cwd = getcwd(cwd_buffer, sizeof(cwd_buffer));
     if (cwd == NULL) {
@@ -2038,6 +2035,12 @@ static void psi_tui_free_event(struct psi_tui_event *event) {
     free(event);
 }
 
+/* gcc -fanalyzer sometimes clones this function (`.part.0`) for the
+ * non-null path and loses the NULL guard below, reporting a false
+ * dereference on the loop. The check IS present — silence only this
+ * analyzer warning so -fanalyzer builds stay clean. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wanalyzer-null-dereference"
 static void psi_tui_state_free(struct psi_tui_state *state) {
     size_t index;
     struct psi_tui_event *event;
@@ -2059,6 +2062,7 @@ static void psi_tui_state_free(struct psi_tui_state *state) {
     free(state->turn_line);
     psi_agent_runtime_free(&state->runtime);
 }
+#pragma GCC diagnostic pop
 
 int psi_run_tui_mode(const struct psi_cli_options *options) {
     struct psi_tui_state state;
@@ -2183,12 +2187,8 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
         } else if (ch == KEY_END || ch == 5) {
             state.cursor = state.input_length;
         } else if (ch == '\n' || ch == '\r' || ch == KEY_ENTER) {
-            if (!state.busy) {
-                status = psi_tui_submit(&state);
-                if (status != PSI_STATUS_OK) {
-                    status = PSI_STATUS_OK;
-                }
-            }
+            /* Submit failures are non-fatal — the user can keep typing. */
+            if (!state.busy) (void)psi_tui_submit(&state);
         } else if (isprint(ch)) {
             psi_tui_insert_char(&state, ch);
         }

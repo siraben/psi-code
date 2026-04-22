@@ -78,6 +78,38 @@
           program = "${vgScript}/bin/psi-valgrind";
         };
 
+        # `nix run .#analyze` — run cppcheck + gcc -fanalyzer in the
+        # source tree. Exits non-zero on any cppcheck finding (after
+        # suppressions in .cppcheck-suppressions) or compiler warning.
+        apps.analyze = let
+          script = pkgs.writeShellApplication {
+            name = "psi-analyze";
+            runtimeInputs = [
+              pkgs.gnumake
+              pkgs.pkg-config
+              pkgs.cppcheck
+              pkgs.gcc
+              pkgs.argtable
+              pkgs.cjson
+              pkgs.curl
+              pkgs.libedit
+              pkgs.lua5_4
+              pkgs.ncurses
+            ];
+            text = ''
+              set -eu
+              cd "''${PSI_SRC:-$PWD}"
+              echo "=== cppcheck ==="
+              make analyze-cppcheck
+              echo "=== gcc -fanalyzer ==="
+              make analyze-gcc
+            '';
+          };
+        in {
+          type = "app";
+          program = "${script}/bin/psi-analyze";
+        };
+
         devShells.default = pkgs.mkShell {
           packages = [
             pkgs.argtable

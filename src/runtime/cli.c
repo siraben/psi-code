@@ -125,7 +125,7 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     }
 
     parse_errors = arg_parse(normalized_argc, normalized_argv, args.table);
-    free(normalized_argv);
+    free((void *)normalized_argv);
     if (parse_errors > 0) {
         arg_print_errors(stderr, args.end, argv[0]);
         psi_cli_free_argtable(&args);

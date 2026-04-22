@@ -1,0 +1,32 @@
+# cppcheck suppressions for psi.
+#
+# Regenerate the report with: `make analyze` or
+# `cppcheck --enable=all --inconclusive --std=c89 --suppressions-list=.cppcheck-suppressions -I include src/`.
+#
+# We suppress findings that are intentional design choices or noise from
+# cppcheck's own caveats, not real bugs.
+
+# ---- infrastructure noise ----
+missingIncludeSystem
+unusedFunction
+unmatchedSuppression
+normalCheckLevelMaxBranches
+checkersReport
+
+# ---- curl callback signatures (cppcheck itself warns against changing) ----
+# psi_http_buffer_callback / psi_http_xferinfo have libcurl-mandated
+# signatures; constifying the void* opaque-data parameter breaks the
+# function-pointer ABI.
+constParameterCallback:src/core/anthropic.c
+
+# ---- intentionally public C API ----
+# psi_strdup_n, psi_message_init_with_data, psi_message_free are part of
+# the public C headers (common.h, message.h) for future external callers.
+staticFunction:src/core/common.c
+staticFunction:src/core/session.c
+
+# ---- deliberate style in large TUI function ----
+# psi_tui_redraw et al declare locals C89-style at the top of the
+# function; narrowing per-site would hurt readability of a rendering
+# pipeline where every local is used at least once.
+variableScope:src/runtime/tui_mode.c
