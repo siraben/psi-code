@@ -27,8 +27,9 @@ BASE_CFLAGS = -std=c89 -pedantic -Wall -Wextra -Werror
 LOCAL_CPPFLAGS = -Iinclude -DPSI_LUA_BOOT_FILE=\"$(LUA_BOOT_FILE)\" $(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --cflags lua5.4 libcjson)
 LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --cflags libedit)
 LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --cflags libcurl)
+LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --cflags zlib)
 LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --cflags ncursesw 2>/dev/null || $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --cflags ncurses 2>/dev/null)
-LOCAL_LDFLAGS = $(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --libs lua5.4 libcjson libedit libcurl) $(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --libs ncursesw 2>/dev/null || $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --libs ncurses 2>/dev/null) -largtable3 -lpthread
+LOCAL_LDFLAGS = $(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --libs lua5.4 libcjson libedit libcurl zlib) $(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --libs ncursesw 2>/dev/null || $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --libs ncurses 2>/dev/null) -largtable3 -lpthread
 
 LUA_BOOT_FILE ?= $(abspath lua/boot.lua)
 
@@ -82,7 +83,7 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 $(EMBED_TOOL): scripts/embed_lua.c | $(BUILD_DIR)
-	$(CC) -O2 -o $@ $<
+	$(CC) -O2 $(shell $(PKG_CONFIG) --cflags zlib) -o $@ $< $(shell $(PKG_CONFIG) --libs zlib)
 
 $(EMBED_OUT): $(EMBED_TOOL) $(LUA_SOURCES)
 	$(EMBED_TOOL) $(LUA_SOURCES) > $@

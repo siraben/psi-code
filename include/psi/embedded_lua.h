@@ -17,10 +17,16 @@
  * access. A user-supplied --boot=FILE still overrides the embedded
  * bootstrap for development. */
 
+/* Each entry is DEFLATE-compressed (zlib compress2 level 9). The
+ * runtime inflates on first access before handing the bytes to
+ * luaL_loadbuffer or the read tool. `len` is the compressed size
+ * baked into the C array; `raw_len` is the size the caller must
+ * allocate for the inflated output. */
 struct psi_embedded_lua {
     const char *name;
     const unsigned char *src;
     size_t len;
+    size_t raw_len;
 };
 
 /* Lua modules (boot.lua + psi/ modules). Keyed by module name. */

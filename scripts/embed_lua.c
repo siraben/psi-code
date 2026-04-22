@@ -1,5 +1,5 @@
-/* Generate a C file that embeds arbitrary files as byte arrays plus a
- * sentinel-terminated lookup table.
+/* Generate a C file that embeds arbitrary files as DEFLATE-compressed
+ * byte arrays plus a sentinel-terminated lookup table.
  *
  * Usage:
  *   embed_lua [--table=NAME] [--raw-keys] <file1> [<file2> ...] > out.c
@@ -15,12 +15,15 @@
  * --table flag picks which symbol the generated table is exposed as
  * so multiple invocations can coexist in the same binary.
  *
- * The binary only runs at build time on the host; it has no psi
- * dependencies and uses only <stdio.h>/<string.h>/<stdlib.h>. */
+ * Each file is compressed with zlib at level 9 before being emitted;
+ * the runtime inflates on first access. Decreases binary size
+ * significantly (Lua + docs ~170 KB -> ~55 KB). Tool runs at build
+ * time on the host and requires -lz. */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <zlib.h>
 
 static void derive_modname(const char *path, char *out, size_t out_size) {
     const char *start = path;
@@ -51,24 +54,49 @@ static void sanitize_symbol(const char *in, char *out, size_t out_size) {
     out[i] = '\0';
 }
 
-static int emit_bytes(const char *path) {
+/* Read the whole file into memory. Returns 0/size on success, -1 on failure. */
+static unsigned char *slurp(const char *path, size_t *len_out) {
     FILE *f = fopen(path, "rb");
-    if (!f) { perror(path); return -1; }
-    int c, n = 0;
-    while ((c = fgetc(f)) != EOF) {
-        if (n > 0) {
+    if (!f) { perror(path); return NULL; }
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return NULL; }
+    long size = ftell(f);
+    if (size < 0) { fclose(f); return NULL; }
+    rewind(f);
+    unsigned char *buf = (unsigned char *)malloc((size_t)size + 1u);
+    if (!buf) { fclose(f); return NULL; }
+    size_t got = fread(buf, 1u, (size_t)size, f);
+    fclose(f);
+    if (got != (size_t)size) { free(buf); return NULL; }
+    buf[size] = 0;
+    *len_out = (size_t)size;
+    return buf;
+}
+
+/* Deflate `in` to a newly-malloc'd buffer. Returns length or -1 on error. */
+static long deflate_bytes(const unsigned char *in, size_t in_len,
+                          unsigned char **out_buf) {
+    /* Upper bound per zlib manual: compressBound(n). For our input
+     * sizes a comfortable 1.2x + 128 suffices too. */
+    uLongf bound = compressBound((uLong)in_len);
+    unsigned char *out = (unsigned char *)malloc(bound);
+    if (!out) return -1;
+    int rc = compress2(out, &bound, in, (uLong)in_len, 9);
+    if (rc != Z_OK) { free(out); fprintf(stderr, "deflate: %d\n", rc); return -1; }
+    *out_buf = out;
+    return (long)bound;
+}
+
+static void emit_bytes(const unsigned char *bytes, size_t n) {
+    size_t i;
+    for (i = 0; i < n; i++) {
+        if (i > 0) {
             fputc(',', stdout);
-            if (n % 16 == 0) {
-                fputs("\n    ", stdout);
-            }
+            if (i % 16 == 0) fputs("\n    ", stdout);
         } else {
             fputs("\n    ", stdout);
         }
-        printf("0x%02x", (unsigned char)c);
-        n++;
+        printf("0x%02x", bytes[i]);
     }
-    fclose(f);
-    return n;
 }
 
 int main(int argc, char **argv) {
@@ -105,35 +133,53 @@ int main(int argc, char **argv) {
     printf("#include <stddef.h>\n");
     printf("#include \"psi/embedded_lua.h\"\n\n");
 
+    /* Track sizes so we can emit the table after the byte arrays. */
+    size_t count = (size_t)(argc - first_file);
+    size_t *raw_lens = (size_t *)calloc(count, sizeof(size_t));
+    size_t *zlen = (size_t *)calloc(count, sizeof(size_t));
+    char **syms = (char **)calloc(count, sizeof(char *));
+    char **keys = (char **)calloc(count, sizeof(char *));
+    if (!raw_lens || !zlen || !syms || !keys) {
+        fprintf(stderr, "embed_lua: out of memory\n");
+        return 1;
+    }
+
     for (i = first_file; i < argc; i++) {
-        char key[512];
-        char sym[256];
+        size_t k = (size_t)(i - first_file);
+        char buf[512];
+        char symbuf[256];
         if (raw_keys) {
-            /* Key is the path verbatim; symbol needs sanitization only. */
-            snprintf(key, sizeof(key), "%s", argv[i]);
+            snprintf(buf, sizeof(buf), "%s", argv[i]);
         } else {
-            derive_modname(argv[i], key, sizeof(key));
+            derive_modname(argv[i], buf, sizeof(buf));
         }
-        sanitize_symbol(key, sym, sizeof(sym));
-        printf("static const unsigned char emb_%s_src[] = {", sym);
-        if (emit_bytes(argv[i]) < 0) return 1;
+        sanitize_symbol(buf, symbuf, sizeof(symbuf));
+        keys[k] = strdup(buf);
+        syms[k] = strdup(symbuf);
+
+        size_t raw_len = 0;
+        unsigned char *raw = slurp(argv[i], &raw_len);
+        if (!raw) return 1;
+        unsigned char *compressed = NULL;
+        long clen = deflate_bytes(raw, raw_len, &compressed);
+        free(raw);
+        if (clen < 0) return 1;
+
+        raw_lens[k] = raw_len;
+        zlen[k] = (size_t)clen;
+
+        printf("static const unsigned char emb_%s_src[] = {", syms[k]);
+        emit_bytes(compressed, (size_t)clen);
         printf("\n};\n\n");
+        free(compressed);
     }
 
     printf("const struct psi_embedded_lua %s[] = {\n", table_name);
-    for (i = first_file; i < argc; i++) {
-        char key[512];
-        char sym[256];
-        if (raw_keys) {
-            snprintf(key, sizeof(key), "%s", argv[i]);
-        } else {
-            derive_modname(argv[i], key, sizeof(key));
-        }
-        sanitize_symbol(key, sym, sizeof(sym));
-        printf("    { \"%s\", emb_%s_src, sizeof(emb_%s_src) },\n",
-               key, sym, sym);
+    for (i = 0; i < (int)count; i++) {
+        printf("    { \"%s\", emb_%s_src, %zuu, %zuu },\n",
+               keys[i], syms[i], zlen[i], raw_lens[i]);
     }
-    printf("    { NULL, NULL, 0u }\n");
+    printf("    { NULL, NULL, 0u, 0u }\n");
     printf("};\n");
     return 0;
 }

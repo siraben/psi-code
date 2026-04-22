@@ -43,6 +43,7 @@
             p.libedit
             p.lua5_4
             p.ncurses
+            p.zlib
           ];
 
           makeFlags = [

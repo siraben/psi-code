@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <zlib.h>
 #include <cjson/cJSON.h>
 #include <editline/readline.h>
 #include <lua.h>
@@ -656,15 +657,43 @@ static int lfn_set_usage(lua_State *L) {
     return 0;
 }
 
+/* Inflate an embedded entry into a caller-provided buffer. Returns
+ * PSI_STATUS_OK on success (buffer filled with entry->raw_len bytes).
+ * The caller owns the buffer; on error the buffer contents are
+ * undefined but no allocation is retained. */
+static int psi_vm_embedded_inflate(const struct psi_embedded_lua *e,
+                                   unsigned char *out, size_t out_len) {
+    uLongf dst_len = (uLongf)out_len;
+    int rc;
+    if (e == NULL || e->src == NULL || out == NULL) return PSI_STATUS_ERROR;
+    rc = uncompress(out, &dst_len, e->src, (uLong)e->len);
+    if (rc != Z_OK || dst_len != (uLongf)e->raw_len) {
+        fprintf(stderr, "psi: inflate failed for %s (zlib %d, %lu/%lu)\n",
+                e->name, rc, (unsigned long)dst_len, (unsigned long)e->raw_len);
+        return PSI_STATUS_ERROR;
+    }
+    return PSI_STATUS_OK;
+}
+
 /* psi.embedded_doc(name) -> string | nil
  * Look up a file name in the embedded docs table. Returns the file
- * contents as a Lua string, or nil if the name isn't embedded. */
+ * contents as a Lua string, or nil if the name isn't embedded.
+ * Entries are DEFLATE-compressed; we inflate on demand. */
 static int lfn_embedded_doc(lua_State *L) {
     const char *name = luaL_checkstring(L, 1);
     const struct psi_embedded_lua *e;
     for (e = psi_embedded_docs_table; e->name != NULL; e++) {
         if (strcmp(e->name, name) == 0) {
-            lua_pushlstring(L, (const char *)e->src, e->len);
+            unsigned char *buf = (unsigned char *)malloc(e->raw_len + 1u);
+            if (buf == NULL) return luaL_error(L, "out of memory");
+            if (psi_vm_embedded_inflate(e, buf, e->raw_len) != PSI_STATUS_OK) {
+                free(buf);
+                lua_pushnil(L);
+                return 1;
+            }
+            buf[e->raw_len] = 0; /* keep as NUL-terminated for safety */
+            lua_pushlstring(L, (const char *)buf, e->raw_len);
+            free(buf);
             return 1;
         }
     }
@@ -897,15 +926,24 @@ static int psi_vm_apply_package_path(lua_State *L, const char *boot_file) {
  * embedded table in psi_embedded_lua_table. Registered as the second
  * entry in package.searchers (after the preload lookup) so user
  * extensions on disk can still shadow the built-ins if the user sets
- * an explicit package.path via --boot. */
+ * an explicit package.path via --boot. Entries are DEFLATE-compressed;
+ * we inflate into a scratch buffer, hand it to luaL_loadbuffer (which
+ * copies what it needs), then free. */
 static int psi_vm_embedded_searcher(lua_State *L) {
     const char *name = luaL_checkstring(L, 1);
     const struct psi_embedded_lua *e;
     for (e = psi_embedded_lua_table; e->name != NULL; e++) {
         if (strcmp(e->name, name) == 0) {
-            if (luaL_loadbuffer(L, (const char *)e->src, e->len, e->name) != LUA_OK) {
-                return lua_error(L);
+            unsigned char *buf = (unsigned char *)malloc(e->raw_len);
+            int load_rc;
+            if (buf == NULL) return luaL_error(L, "out of memory");
+            if (psi_vm_embedded_inflate(e, buf, e->raw_len) != PSI_STATUS_OK) {
+                free(buf);
+                return luaL_error(L, "inflate failed for %s", name);
             }
+            load_rc = luaL_loadbuffer(L, (const char *)buf, e->raw_len, e->name);
+            free(buf);
+            if (load_rc != LUA_OK) return lua_error(L);
             return 1;
         }
     }
@@ -989,14 +1027,29 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
         }
     } else {
         const struct psi_embedded_lua *boot = psi_vm_embedded_find("boot");
+        unsigned char *buf;
+        int load_rc;
         if (boot == NULL) {
             fprintf(stderr, "psi: no embedded boot module compiled in\n");
             lua_close(vm->L);
             vm->L = NULL;
             return PSI_STATUS_ERROR;
         }
-        if (luaL_loadbuffer(vm->L, (const char *)boot->src, boot->len, "=boot") != LUA_OK
-            || lua_pcall(vm->L, 0, 0, 0) != LUA_OK) {
+        buf = (unsigned char *)malloc(boot->raw_len);
+        if (buf == NULL) {
+            lua_close(vm->L);
+            vm->L = NULL;
+            return PSI_STATUS_ERROR;
+        }
+        if (psi_vm_embedded_inflate(boot, buf, boot->raw_len) != PSI_STATUS_OK) {
+            free(buf);
+            lua_close(vm->L);
+            vm->L = NULL;
+            return PSI_STATUS_ERROR;
+        }
+        load_rc = luaL_loadbuffer(vm->L, (const char *)buf, boot->raw_len, "=boot");
+        free(buf);
+        if (load_rc != LUA_OK || lua_pcall(vm->L, 0, 0, 0) != LUA_OK) {
             fprintf(stderr, "psi: embedded boot failed: %s\n", lua_tostring(vm->L, -1));
             lua_close(vm->L);
             vm->L = NULL;
