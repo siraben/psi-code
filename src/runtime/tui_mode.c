@@ -951,14 +951,18 @@ static int psi_tui_entry_style(
             *attrs = 0;
             return PSI_STATUS_OK;
         case PSI_TUI_ENTRY_TOOL_CALL:
-            *prefix_first = "  ";
-            *prefix_rest = "  ";
+            /* Opening corner of a tool-execution panel. tool-result
+             * entries continue the panel with a vertical pipe and a
+             * closing corner is drawn after their last line (see
+             * psi_tui_build_render_lines). */
+            *prefix_first = "\xe2\x95\xad\xe2\x94\x80 "; /* ╭─ */
+            *prefix_rest  = "\xe2\x94\x82  ";             /* │  */
             *color_pair = 4;
             *attrs = 0;
             return PSI_STATUS_OK;
         case PSI_TUI_ENTRY_TOOL_RESULT:
-            *prefix_first = "  ";
-            *prefix_rest = "  ";
+            *prefix_first = "\xe2\x94\x82  "; /* │  */
+            *prefix_rest  = "\xe2\x94\x82  "; /* │  */
             *color_pair = entry->is_error ? 6 : 5;
             *attrs = 0;
             return PSI_STATUS_OK;
@@ -1009,20 +1013,34 @@ static int psi_tui_build_render_lines(
     capacity = 0u;
 
     for (index = 0u; index < state->entry_count; index++) {
-        if (count > 0u && psi_tui_render_add_line(&lines, &count, &capacity, "", 0, 0) != PSI_STATUS_OK) {
+        const struct psi_tui_entry *entry = &state->entries[index];
+        const struct psi_tui_entry *prev = index > 0u ? &state->entries[index - 1u] : NULL;
+        const struct psi_tui_entry *next =
+            (index + 1u < state->entry_count) ? &state->entries[index + 1u] : NULL;
+        int same_panel_as_prev = (prev != NULL
+            && prev->kind == PSI_TUI_ENTRY_TOOL_CALL
+            && entry->kind == PSI_TUI_ENTRY_TOOL_RESULT)
+            || (prev != NULL
+                && prev->kind == PSI_TUI_ENTRY_TOOL_RESULT
+                && entry->kind == PSI_TUI_ENTRY_TOOL_RESULT);
+
+        /* Inter-entry blank-line separator, except between entries
+         * that belong to the same tool-execution panel. */
+        if (count > 0u && !same_panel_as_prev
+            && psi_tui_render_add_line(&lines, &count, &capacity, "", 0, 0) != PSI_STATUS_OK) {
             psi_tui_render_free_lines(lines, count);
             return PSI_STATUS_ERROR;
         }
 
-        psi_tui_entry_style(&state->entries[index], &prefix_first, &prefix_rest, &color_pair, &attrs);
+        psi_tui_entry_style(entry, &prefix_first, &prefix_rest, &color_pair, &attrs);
         if (psi_tui_render_wrapped(
                 &lines,
                 &count,
                 &capacity,
-                &state->entries[index],
+                entry,
                 prefix_first,
                 prefix_rest,
-                state->entries[index].text,
+                entry->text,
                 color_pair,
                 attrs,
                 state->width
@@ -1030,11 +1048,48 @@ static int psi_tui_build_render_lines(
             psi_tui_render_free_lines(lines, count);
             return PSI_STATUS_ERROR;
         }
+
+        /* Close the tool-execution panel with ╰─ when this entry is
+         * a tool_result and the NEXT entry doesn't continue it. */
+        if (entry->kind == PSI_TUI_ENTRY_TOOL_RESULT
+            && (next == NULL || next->kind != PSI_TUI_ENTRY_TOOL_RESULT)) {
+            if (psi_tui_render_add_line(&lines, &count, &capacity,
+                    "\xe2\x95\xb0\xe2\x94\x80", 4, 0) != PSI_STATUS_OK) {
+                /* ╰─ : U+2570 U+2500 */
+                psi_tui_render_free_lines(lines, count);
+                return PSI_STATUS_ERROR;
+            }
+        }
     }
 
     *lines_out = lines;
     *count_out = count;
     return PSI_STATUS_OK;
+}
+
+/* Ask a Lua helper (psi.tui.<name>) for a formatted status string.
+ * `arg_json` is the single stringified-JSON argument the helper takes;
+ * its values are trusted host-side ints and the model name (which is
+ * an Anthropic/Ollama model identifier — always safe alphanumerics +
+ * dash/dot/colon/slash, no JSON-escape needed). On failure the fallback
+ * text is copied instead so the status line never goes blank. */
+static void psi_tui_call_status_helper(
+    struct psi_tui_state *state,
+    const char *helper,
+    const char *arg_json,
+    const char *fallback,
+    char *out,
+    size_t out_size
+) {
+    char *result = NULL;
+    if (psi_vm_call_string_procedure(&state->runtime.vm, helper, arg_json, &result) == PSI_STATUS_OK
+        && result != NULL) {
+        snprintf(out, out_size, "%s", result);
+        free(result);
+        return;
+    }
+    free(result);
+    snprintf(out, out_size, "%s", fallback);
 }
 
 static void psi_tui_footer_lines(
@@ -1046,7 +1101,7 @@ static void psi_tui_footer_lines(
 ) {
     char cwd_buffer[4096];
     char model_buffer[256];
-    char scroll_buffer[64];
+    char args_json[1024];
     const char *cwd;
 
     cwd = getcwd(cwd_buffer, sizeof(cwd_buffer));
@@ -1054,28 +1109,25 @@ static void psi_tui_footer_lines(
         snprintf(cwd_buffer, sizeof(cwd_buffer), "<cwd unavailable: %s>", strerror(errno));
     }
 
-    snprintf(
-        line1,
-        line1_size,
-        "%s",
-        cwd_buffer
-    );
+    snprintf(line1, line1_size, "%s", cwd_buffer);
 
-    if (state->scroll_offset > 0) {
-        snprintf(scroll_buffer, sizeof(scroll_buffer), " scroll:%d", state->scroll_offset);
-    } else {
-        scroll_buffer[0] = '\0';
+    snprintf(model_buffer, sizeof(model_buffer), "%s",
+             state->runtime.model != NULL ? state->runtime.model : "claude-opus-4-7");
+    snprintf(args_json, sizeof(args_json),
+             "{\"model\":\"%s\",\"busy\":%s,\"scroll\":%d}",
+             model_buffer,
+             state->busy ? "true" : "false",
+             state->scroll_offset);
+
+    {
+        char fallback[512];
+        snprintf(fallback, sizeof(fallback), "model:%.255s  msg:%lu%s",
+                 model_buffer,
+                 (unsigned long)state->runtime.session.count,
+                 state->busy ? "  working" : "");
+        psi_tui_call_status_helper(state, "psi.tui.status_line", args_json,
+                                   fallback, line2, line2_size);
     }
-    snprintf(model_buffer, sizeof(model_buffer), "%s", state->runtime.model != NULL ? state->runtime.model : "claude-opus-4-7");
-    snprintf(
-        line2,
-        line2_size,
-        "model:%s  messages:%lu%s%s",
-        model_buffer,
-        (unsigned long)state->runtime.session.count,
-        state->busy ? "  working" : "",
-        scroll_buffer
-    );
 }
 
 static void psi_tui_draw_line(int row, const char *text, int color_pair, int attrs) {
@@ -1184,14 +1236,30 @@ static void psi_tui_redraw(struct psi_tui_state *state) {
     }
     psi_tui_render_free_lines(lines, line_count);
 
-    psi_tui_draw_line(
-        status_row,
-        state->status_text != NULL ? state->status_text :
-            (state->busy ? "Working... Up/Down, PageUp/PageDown, or mouse wheel scroll" :
-                "Enter to submit, Up/Down or PageUp/PageDown to scroll, Ctrl+D or /quit to exit"),
-        state->status_is_error ? 6 : 7,
-        state->status_is_error ? A_BOLD : A_DIM
-    );
+    {
+        char hint_buffer[256];
+        const char *hint_text;
+        if (state->status_text != NULL) {
+            hint_text = state->status_text;
+        } else {
+            char hint_args[128];
+            snprintf(hint_args, sizeof(hint_args),
+                     "{\"busy\":%s,\"scroll\":%d}",
+                     state->busy ? "true" : "false",
+                     state->scroll_offset);
+            psi_tui_call_status_helper(state, "psi.tui.footer_hint", hint_args,
+                                       state->busy
+                                           ? "Esc abort current turn"
+                                           : "Enter submit  ↑↓ scroll  /help  /quit",
+                                       hint_buffer, sizeof(hint_buffer));
+            hint_text = hint_buffer;
+        }
+        psi_tui_draw_line(
+            status_row, hint_text,
+            state->status_is_error ? 6 : 7,
+            state->status_is_error ? A_BOLD : A_DIM
+        );
+    }
 
     psi_tui_footer_lines(state, footer_line1, sizeof(footer_line1), footer_line2, sizeof(footer_line2));
     psi_tui_draw_line(footer_row1, footer_line1, 7, A_DIM);

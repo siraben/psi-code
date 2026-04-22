@@ -20,6 +20,7 @@ psi.prompt = require("psi.prompt")
 psi.agent = require("psi.agent")
 psi.render = require("psi.render")
 psi.commands = require("psi.commands")
+psi.tui = require("psi.tui")
 psi.modes = require("psi.modes")
 
 -- Default event-hook registrations.
