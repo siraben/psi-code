@@ -10,12 +10,25 @@ CFLAGS ?= -O2
 CPPFLAGS ?=
 LDFLAGS ?=
 
+# STATIC=1 produces a statically linked binary. Each dependency's
+# transitive link dependencies come through pkg-config --static; for a
+# fully static ELF (no ld.so) the toolchain must also supply static
+# libc — use nix pkgsStatic (musl-based) rather than a stock distro
+# gcc, since glibc can't be fully statically linked in general.
+STATIC ?= 0
+ifeq ($(STATIC),1)
+PKG_CONFIG_FLAGS = --static
+LDFLAGS += -static
+else
+PKG_CONFIG_FLAGS =
+endif
+
 BASE_CFLAGS = -std=c89 -pedantic -Wall -Wextra -Werror
-LOCAL_CPPFLAGS = -Iinclude -DPSI_LUA_BOOT_FILE=\"$(LUA_BOOT_FILE)\" $(shell $(PKG_CONFIG) --cflags lua5.4 libcjson)
-LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) --cflags libedit)
-LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) --cflags libcurl)
-LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) --cflags ncursesw 2>/dev/null || $(PKG_CONFIG) --cflags ncurses 2>/dev/null)
-LOCAL_LDFLAGS = $(shell $(PKG_CONFIG) --libs lua5.4 libcjson libedit libcurl) $(shell $(PKG_CONFIG) --libs ncursesw 2>/dev/null || $(PKG_CONFIG) --libs ncurses 2>/dev/null) -largtable3 -lpthread
+LOCAL_CPPFLAGS = -Iinclude -DPSI_LUA_BOOT_FILE=\"$(LUA_BOOT_FILE)\" $(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --cflags lua5.4 libcjson)
+LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --cflags libedit)
+LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --cflags libcurl)
+LOCAL_CPPFLAGS += $(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --cflags ncursesw 2>/dev/null || $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --cflags ncurses 2>/dev/null)
+LOCAL_LDFLAGS = $(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --libs lua5.4 libcjson libedit libcurl) $(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --libs ncursesw 2>/dev/null || $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --libs ncurses 2>/dev/null) -largtable3 -lpthread
 
 LUA_BOOT_FILE ?= $(abspath lua/boot.lua)
 
