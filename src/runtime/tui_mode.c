@@ -1071,8 +1071,21 @@ static int psi_tui_build_render_lines(
  * `arg_json` is the single stringified-JSON argument the helper takes;
  * its values are trusted host-side ints and the model name (which is
  * an Anthropic/Ollama model identifier — always safe alphanumerics +
- * dash/dot/colon/slash, no JSON-escape needed). On failure the fallback
- * text is copied instead so the status line never goes blank. */
+ * dash/dot/colon/slash, no JSON-escape needed).
+ *
+ * CRITICAL: a single lua_State is shared between the TUI main thread
+ * and the worker thread that runs psi.agent.run_turn. Lua is not
+ * thread-safe; only one thread may touch a given lua_State at a time.
+ * When state->busy is true the worker is mid-lua_pcall, so the main
+ * thread MUST NOT call into Lua — it would race with luaV_execute and
+ * corrupt the stack/registry (observed as SIGSEGVs deep in luaL_error
+ * on 32-bit hardware, where the race was reproducible every turn).
+ *
+ * When busy we copy the fallback verbatim. The C-formatted fallback
+ * is what psi always shipped before the rich status line, so the TUI
+ * stays useful during long-running turns. Idle redraws (when the
+ * worker is not running) safely invoke the Lua helper for the full
+ * pi-style status. */
 static void psi_tui_call_status_helper(
     struct psi_tui_state *state,
     const char *helper,
@@ -1082,7 +1095,8 @@ static void psi_tui_call_status_helper(
     size_t out_size
 ) {
     char *result = NULL;
-    if (psi_vm_call_string_procedure(&state->runtime.vm, helper, arg_json, &result) == PSI_STATUS_OK
+    if (state != NULL && !state->busy
+        && psi_vm_call_string_procedure(&state->runtime.vm, helper, arg_json, &result) == PSI_STATUS_OK
         && result != NULL) {
         snprintf(out, out_size, "%s", result);
         free(result);
