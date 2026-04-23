@@ -194,4 +194,6 @@ for the authoring guide.
   assembly, session records/format, provider loops (Anthropic,
   Ollama), agent orchestration, slash commands, events bus,
   context mirror, render/diff/ANSI/markdown helpers, prelude
-- `tests/`: smoke tests and valgrind harness
+- `tests/`: smoke suite (`tests/smoke.py` — stdlib-only Python,
+  runs offline tests by default and live Anthropic tests when
+  `ANTHROPIC_API_KEY` is set) and valgrind harness
