@@ -21,8 +21,9 @@ static const size_t PSI_PROCESS_OUTPUT_MAX_BYTES = 262144u;
  * #define so it's usable as an array dimension in C89. */
 #define PSI_PROCESS_READ_CHUNK 4096
 
-/* Poll interval when the child has produced no output yet. Keeps the
- * abort-signal check responsive without burning a CPU core. */
+/* Fallback poll interval used by psi_process_poll when the caller
+ * passes a longer timeout — we wake up at most every 20 ms so the
+ * abort signal stays responsive. */
 static const long PSI_PROCESS_POLL_DELAY_NS = 20L * 1000000L; /* 20 ms */
 
 static int psi_process_append_bytes(char **buffer, size_t *length, size_t *capacity, const char *data, size_t bytes) {
@@ -54,38 +55,51 @@ static int psi_process_append_bytes(char **buffer, size_t *length, size_t *capac
     return PSI_STATUS_OK;
 }
 
-int psi_process_run_shell(
-    const char *command,
-    char **output_text,
-    int *exit_status,
-    int *truncated,
-    psi_process_progress_cb on_chunk,
-    void *userdata,
-    const struct psi_abort_signal *abort_signal
-) {
+/* ------------------------------------------------------------------
+ * Async handle.
+ *
+ * Lua-driven callers use this through begin/poll/finish. The
+ * blocking psi_process_run_shell is a thin wrapper that drives the
+ * same state machine in a tight loop.
+ * ------------------------------------------------------------------ */
+
 #ifndef _WIN32
-    int pipe_fds[2];
+
+struct psi_process_handle {
     pid_t child_pid;
-    int wait_status;
-    char read_buffer[PSI_PROCESS_READ_CHUNK];
+    int pipe_fd;              /* read end of stdout/stderr pipe */
+    int aborted;              /* 1 if abort_signal fired mid-run */
+    int eof_seen;             /* 1 if read() returned 0 */
+    int reaped;               /* 1 if waitpid already called */
+    int wait_status;          /* waitpid result */
+
+    /* Accumulated output. Grows up to PSI_PROCESS_OUTPUT_MAX_BYTES
+     * then `truncated` is set to 1 and further bytes are dropped
+     * from the buffer (though poll still returns them to the caller
+     * so live rendering keeps working). */
     char *output_buffer;
     size_t output_length;
     size_t output_capacity;
+    int truncated;
 
-    if (command == NULL || output_text == NULL || exit_status == NULL || truncated == NULL) {
-        return PSI_STATUS_ERROR;
-    }
+    const struct psi_abort_signal *abort_signal;
+};
 
-    *output_text = NULL;
-    *exit_status = -1;
-    *truncated = 0;
-    output_buffer = NULL;
-    output_length = 0u;
-    output_capacity = 0u;
+int psi_process_begin(
+    const char *command,
+    const struct psi_abort_signal *abort_signal,
+    struct psi_process_handle **out
+) {
+    struct psi_process_handle *h;
+    int pipe_fds[2];
+    pid_t child_pid;
+    int flags;
 
-    if (pipe(pipe_fds) != 0) {
-        return PSI_STATUS_ERROR;
-    }
+    if (out == NULL) return PSI_STATUS_ERROR;
+    *out = NULL;
+    if (command == NULL) return PSI_STATUS_ERROR;
+
+    if (pipe(pipe_fds) != 0) return PSI_STATUS_ERROR;
 
     child_pid = fork();
     if (child_pid < 0) {
@@ -95,15 +109,8 @@ int psi_process_run_shell(
     }
 
     if (child_pid == 0) {
-        /* Child: redirect stdout/stderr to the pipe; bail to 127 on
-         * any setup failure so the parent observes a clean exit code
-         * rather than a half-wired exec. 127 mirrors the shell
-         * convention for "command not found / could not exec".
-         *
-         * gcc -fanalyzer flags the dup2 branches as potential fd
-         * leaks (see [CWE-775]); this is a false positive in a fork
-         * child that is about to _exit — the kernel releases all
-         * descriptors on process exit. */
+        /* Child: see psi_process_run_shell for the same logic and
+         * the gcc -fanalyzer fd-leak suppression rationale. */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wanalyzer-fd-leak"
         if (close(pipe_fds[0]) != 0) _exit(127);
@@ -116,97 +123,240 @@ int psi_process_run_shell(
     }
 
     close(pipe_fds[1]);
-    /* Put the read end in non-blocking mode so we can poll the abort
-     * signal while the child runs. Without this, a child that never
-     * writes output would ignore Esc for its full lifetime. */
-    {
-        int flags = fcntl(pipe_fds[0], F_GETFL, 0);
-        if (flags != -1) {
-            fcntl(pipe_fds[0], F_SETFL, flags | O_NONBLOCK);
-        }
+    flags = fcntl(pipe_fds[0], F_GETFL, 0);
+    if (flags != -1) {
+        fcntl(pipe_fds[0], F_SETFL, flags | O_NONBLOCK);
     }
-    {
-        int aborted = 0;
-        for (;;) {
-            ssize_t read_count;
-            if (psi_abort_signal_is_triggered(abort_signal)) {
-                aborted = 1;
-                kill(child_pid, SIGTERM);
-                break;
-            }
-            read_count = read(pipe_fds[0], read_buffer, sizeof(read_buffer));
-            if (read_count < 0) {
-                if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
-                    struct timespec delay;
-                    delay.tv_sec = 0;
-                    delay.tv_nsec = PSI_PROCESS_POLL_DELAY_NS;
-                    nanosleep(&delay, NULL);
-                    continue;
-                }
-                break;
-            }
-            if (read_count == 0) {
-                break;
-            }
 
-            if (on_chunk != NULL) {
-                on_chunk(userdata, read_buffer, (size_t)read_count);
-            }
-
-            if (output_length < PSI_PROCESS_OUTPUT_MAX_BYTES) {
-                size_t to_copy = (size_t)read_count;
-                if (output_length + to_copy > PSI_PROCESS_OUTPUT_MAX_BYTES) {
-                    to_copy = PSI_PROCESS_OUTPUT_MAX_BYTES - output_length;
-                    *truncated = 1;
-                }
-                if (psi_process_append_bytes(&output_buffer, &output_length, &output_capacity, read_buffer, to_copy) != PSI_STATUS_OK) {
-                    close(pipe_fds[0]);
-                    waitpid(child_pid, &wait_status, 0);
-                    free(output_buffer);
-                    return PSI_STATUS_ERROR;
-                }
-                if ((size_t)read_count > to_copy) {
-                    *truncated = 1;
-                }
-            } else {
-                *truncated = 1;
-            }
-        }
+    h = (struct psi_process_handle *)calloc(1u, sizeof(*h));
+    if (h == NULL) {
         close(pipe_fds[0]);
+        /* Can't reap child cleanly here; fall through to OS cleanup. */
+        kill(child_pid, SIGTERM);
+        waitpid(child_pid, NULL, 0);
+        return PSI_STATUS_ERROR;
+    }
+    h->child_pid = child_pid;
+    h->pipe_fd = pipe_fds[0];
+    h->abort_signal = abort_signal;
+    *out = h;
+    return PSI_STATUS_OK;
+}
 
-        if (waitpid(child_pid, &wait_status, 0) < 0) {
-            free(output_buffer);
-            return PSI_STATUS_ERROR;
+int psi_process_poll(
+    struct psi_process_handle *h,
+    int timeout_ms,
+    char **chunk, size_t *chunk_len
+) {
+    char read_buffer[PSI_PROCESS_READ_CHUNK];
+    ssize_t read_count;
+    long total_waited_ns;
+    long max_wait_ns;
+
+    if (chunk != NULL) *chunk = NULL;
+    if (chunk_len != NULL) *chunk_len = 0u;
+    if (h == NULL) return 2;
+
+    if (psi_abort_signal_is_triggered(h->abort_signal) && !h->aborted) {
+        h->aborted = 1;
+        kill(h->child_pid, SIGTERM);
+    }
+
+    /* Loop until either we produce a chunk, time runs out, or
+     * the pipe hits EOF. Each iteration: one non-blocking read(),
+     * optionally followed by a short nanosleep capped at the
+     * remaining budget. */
+    total_waited_ns = 0L;
+    max_wait_ns = (timeout_ms > 0) ? (long)timeout_ms * 1000000L : 0L;
+
+    for (;;) {
+        read_count = read(h->pipe_fd, read_buffer, sizeof(read_buffer));
+        if (read_count > 0) {
+            char *copy;
+
+            if (chunk != NULL) {
+                copy = (char *)malloc((size_t)read_count);
+                if (copy == NULL) return PSI_STATUS_ERROR;
+                memcpy(copy, read_buffer, (size_t)read_count);
+                *chunk = copy;
+            }
+            if (chunk_len != NULL) *chunk_len = (size_t)read_count;
+
+            /* Also stash into the internal buffer so finish() can
+             * reassemble even if the caller didn't consume every
+             * chunk. Respect the 256 KiB ceiling; once full we
+             * stop buffering but still return to the caller. */
+            if (h->output_length < PSI_PROCESS_OUTPUT_MAX_BYTES) {
+                size_t to_copy = (size_t)read_count;
+                if (h->output_length + to_copy > PSI_PROCESS_OUTPUT_MAX_BYTES) {
+                    to_copy = PSI_PROCESS_OUTPUT_MAX_BYTES - h->output_length;
+                    h->truncated = 1;
+                }
+                if (psi_process_append_bytes(&h->output_buffer, &h->output_length, &h->output_capacity, read_buffer, to_copy) != PSI_STATUS_OK) {
+                    /* Keep going — the caller's copy already has the bytes. */
+                }
+                if ((size_t)read_count > to_copy) h->truncated = 1;
+            } else {
+                h->truncated = 1;
+            }
+            return 1;
         }
 
-        if (aborted) {
-            *exit_status = 130; /* SIGINT convention */
-        } else if (WIFEXITED(wait_status)) {
-            *exit_status = WEXITSTATUS(wait_status);
-        } else if (WIFSIGNALED(wait_status)) {
-            *exit_status = 128 + WTERMSIG(wait_status);
+        if (read_count == 0) {
+            h->eof_seen = 1;
+            return 2;
+        }
+
+        /* read_count < 0 */
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+            struct timespec delay;
+            long step_ns;
+
+            if (h->aborted) {
+                /* Child has been SIGTERM'd but hasn't closed the pipe
+                 * yet. Treat this as "done" after the abort flag
+                 * so the poll loop doesn't spin. */
+                h->eof_seen = 1;
+                return 2;
+            }
+            if (timeout_ms <= 0) return 0; /* non-blocking */
+
+            step_ns = PSI_PROCESS_POLL_DELAY_NS;
+            if (max_wait_ns - total_waited_ns < step_ns) {
+                step_ns = max_wait_ns - total_waited_ns;
+            }
+            if (step_ns <= 0L) return 0;
+
+            delay.tv_sec = 0;
+            delay.tv_nsec = step_ns;
+            nanosleep(&delay, NULL);
+            total_waited_ns += step_ns;
+
+            if (psi_abort_signal_is_triggered(h->abort_signal) && !h->aborted) {
+                h->aborted = 1;
+                kill(h->child_pid, SIGTERM);
+            }
+            continue;
+        }
+        /* Non-recoverable read error — treat as EOF. */
+        h->eof_seen = 1;
+        return 2;
+    }
+}
+
+int psi_process_finish(
+    struct psi_process_handle *h,
+    char **output_text,
+    int *exit_status,
+    int *truncated
+) {
+    if (h == NULL) return PSI_STATUS_ERROR;
+
+    if (!h->reaped) {
+        close(h->pipe_fd);
+        if (waitpid(h->child_pid, &h->wait_status, 0) < 0) {
+            /* Best-effort: carry on with whatever we have. */
+        }
+        h->reaped = 1;
+    }
+
+    if (exit_status != NULL) {
+        if (h->aborted) {
+            *exit_status = 130;
+        } else if (WIFEXITED(h->wait_status)) {
+            *exit_status = WEXITSTATUS(h->wait_status);
+        } else if (WIFSIGNALED(h->wait_status)) {
+            *exit_status = 128 + WTERMSIG(h->wait_status);
         } else {
             *exit_status = -1;
         }
     }
-
-    if (output_buffer == NULL) {
-        output_buffer = psi_strdup("");
-        if (output_buffer == NULL) {
-            return PSI_STATUS_ERROR;
+    if (truncated != NULL) *truncated = h->truncated;
+    if (output_text != NULL) {
+        if (h->output_buffer == NULL) {
+            *output_text = psi_strdup("");
+            if (*output_text == NULL) {
+                free(h->output_buffer);
+                free(h);
+                return PSI_STATUS_ERROR;
+            }
+        } else {
+            *output_text = h->output_buffer;
+            h->output_buffer = NULL; /* caller owns */
         }
+    } else {
+        free(h->output_buffer);
+    }
+    free(h);
+    return PSI_STATUS_OK;
+}
+
+#else /* _WIN32 */
+
+struct psi_process_handle { int unused; };
+
+int psi_process_begin(const char *cmd, const struct psi_abort_signal *a, struct psi_process_handle **out) {
+    PSI_UNUSED(cmd); PSI_UNUSED(a);
+    if (out != NULL) *out = NULL;
+    return PSI_STATUS_ERROR;
+}
+int psi_process_poll(struct psi_process_handle *h, int ms, char **c, size_t *n) {
+    PSI_UNUSED(h); PSI_UNUSED(ms);
+    if (c) *c = NULL; if (n) *n = 0u;
+    return 2;
+}
+int psi_process_finish(struct psi_process_handle *h, char **out, int *ex, int *tr) {
+    PSI_UNUSED(h);
+    if (out) *out = psi_strdup("");
+    if (ex) *ex = -1;
+    if (tr) *tr = 0;
+    return PSI_STATUS_OK;
+}
+
+#endif
+
+/* ------------------------------------------------------------------
+ * Blocking wrapper — drives the async state machine in a tight
+ * loop. Keeps the existing progress-callback contract intact.
+ * ------------------------------------------------------------------ */
+
+int psi_process_run_shell(
+    const char *command,
+    char **output_text,
+    int *exit_status,
+    int *truncated,
+    psi_process_progress_cb on_chunk,
+    void *userdata,
+    const struct psi_abort_signal *abort_signal
+) {
+#ifndef _WIN32
+    struct psi_process_handle *h;
+
+    if (command == NULL || output_text == NULL || exit_status == NULL || truncated == NULL) {
+        return PSI_STATUS_ERROR;
     }
 
-    *output_text = output_buffer;
-    return PSI_STATUS_OK;
+    if (psi_process_begin(command, abort_signal, &h) != PSI_STATUS_OK || h == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    for (;;) {
+        char *chunk;
+        size_t chunk_len;
+        int r;
+
+        chunk = NULL;
+        chunk_len = 0u;
+        r = psi_process_poll(h, 20 /* ms */, &chunk, &chunk_len);
+        if (r == 1 && chunk != NULL) {
+            if (on_chunk != NULL) on_chunk(userdata, chunk, chunk_len);
+            free(chunk);
+        }
+        if (r == 2) break;
+    }
+
+    return psi_process_finish(h, output_text, exit_status, truncated);
 #else
-    /* Windows placeholder. psi is not production-tested on Windows;
-     * the system() call spawns cmd.exe and performs its own shell
-     * parsing, so this path is NOT equivalent to the POSIX fork+execl
-     * implementation above and offers no abort-signal responsiveness,
-     * no output capture, and no chunk streaming. It exists only so
-     * the translation unit compiles on Windows toolchains during
-     * experimental ports. */
     int status;
 
     PSI_UNUSED(on_chunk);

@@ -384,6 +384,96 @@ static int lfn_process_run(lua_State *L) {
     return 1;
 }
 
+/* ------------------------------------------------------------------
+ * Async process (psi.process_begin / _poll / _finish).
+ *
+ * Mirrors the http_stream_* surface. Callers drive the poll loop
+ * from a Lua coroutine via psi.sched.proc_poll; the main thread
+ * stays free to service the TUI event loop in between.
+ *
+ * Handle lifetime: the light-userdata pointer is owned by the
+ * caller; begin returns it, finish frees it. Lua coroutine code
+ * MUST call finish or leak the handle + child process.
+ * ------------------------------------------------------------------ */
+
+static int lfn_process_begin(lua_State *L) {
+    const char *command = luaL_checkstring(L, 1);
+    const struct psi_host_context *host = PSI_VM_HOST(L);
+    struct psi_process_handle *h;
+    int status;
+
+    h = NULL;
+    status = psi_process_begin(
+        command,
+        host ? host->abort_signal : NULL,
+        &h);
+    if (status != PSI_STATUS_OK || h == NULL) {
+        lua_pushnil(L);
+        lua_pushstring(L, "failed to spawn shell");
+        return 2;
+    }
+    lua_pushlightuserdata(L, h);
+    return 1;
+}
+
+static int lfn_process_poll(lua_State *L) {
+    struct psi_process_handle *h;
+    int timeout_ms;
+    char *chunk;
+    size_t chunk_len;
+    int result;
+
+    if (lua_type(L, 1) != LUA_TLIGHTUSERDATA) {
+        return luaL_error(L, "process_poll: handle expected");
+    }
+    h = (struct psi_process_handle *)lua_touserdata(L, 1);
+    timeout_ms = (int)luaL_optinteger(L, 2, 0);
+    chunk = NULL;
+    chunk_len = 0u;
+
+    result = psi_process_poll(h, timeout_ms, &chunk, &chunk_len);
+
+    /* (chunk | nil, done_flag) mirroring http_stream_poll. */
+    if (result == 1 && chunk != NULL) {
+        lua_pushlstring(L, chunk, chunk_len);
+        free(chunk);
+    } else {
+        lua_pushnil(L);
+    }
+    lua_pushboolean(L, result == 2 ? 1 : 0);
+    return 2;
+}
+
+static int lfn_process_finish(lua_State *L) {
+    struct psi_process_handle *h;
+    char *output;
+    int status;
+    int truncated;
+
+    if (lua_type(L, 1) != LUA_TLIGHTUSERDATA) {
+        return luaL_error(L, "process_finish: handle expected");
+    }
+    h = (struct psi_process_handle *)lua_touserdata(L, 1);
+    output = NULL;
+    status = -1;
+    truncated = 0;
+
+    if (psi_process_finish(h, &output, &status, &truncated) != PSI_STATUS_OK) {
+        free(output);
+        return luaL_error(L, "process_finish failed");
+    }
+
+    lua_newtable(L);
+    lua_pushstring(L, output ? output : "");
+    lua_setfield(L, -2, "output");
+    lua_pushinteger(L, (lua_Integer)status);
+    lua_setfield(L, -2, "status");
+    lua_pushboolean(L, truncated ? 1 : 0);
+    lua_setfield(L, -2, "truncated");
+    free(output);
+    return 1;
+}
+
 static int lfn_session_append(lua_State *L) {
     const char *role = luaL_checkstring(L, 1);
     const char *text = luaL_checkstring(L, 2);
@@ -981,6 +1071,9 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("runtime_info",          lfn_runtime_info);
     PSI_REG("session_messages",      lfn_session_messages);
     PSI_REG("process_run",           lfn_process_run);
+    PSI_REG("process_begin",         lfn_process_begin);
+    PSI_REG("process_poll",          lfn_process_poll);
+    PSI_REG("process_finish",        lfn_process_finish);
     PSI_REG("session_append",        lfn_session_append);
     PSI_REG("session_clear",         lfn_session_clear);
     PSI_REG("session_id",            lfn_session_id);

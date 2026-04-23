@@ -23,4 +23,64 @@ int psi_process_run_shell(
     const struct psi_abort_signal *abort_signal
 );
 
+/* ------------------------------------------------------------------
+ * Async shell execution.
+ *
+ * Lua coroutines in the TUI must not block the main thread on shell
+ * execution, so exec gets a begin/poll/finish split. begin forks
+ * and exec's the child and returns immediately; poll drains one
+ * chunk at a time from the pipe with a timeout; finish reaps the
+ * child, frees the handle, and hands back the accumulated output.
+ *
+ * Typical usage from the Lua side (via psi.process_begin / _poll /
+ * _finish → psi.sched.proc_poll):
+ *
+ *   local h = psi.process_begin(cmd)
+ *   while true do
+ *     local chunk, done = sched.proc_poll(h, 50)
+ *     if chunk then parts[#parts+1] = chunk end
+ *     if done then break end
+ *   end
+ *   local result = psi.process_finish(h)  -- table
+ * ------------------------------------------------------------------ */
+
+struct psi_process_handle;
+
+/* Start the shell command. On success, *out owns the handle and the
+ * child is already forked. On abort-signal-triggered return the
+ * handle is still returned and finish will reap with status=130. */
+int psi_process_begin(
+    const char *command,
+    const struct psi_abort_signal *abort_signal,
+    struct psi_process_handle **out
+);
+
+/* Drain one read() worth of output.
+ *
+ * Returns:
+ *   1  chunk available; *chunk owns heap bytes (caller free()s).
+ *      *chunk_len is byte length (no trailing NUL).
+ *   0  timeout elapsed; child still running; may poll again.
+ *   2  child exited / EOF reached; call finish.
+ */
+int psi_process_poll(
+    struct psi_process_handle *h,
+    int timeout_ms,
+    char **chunk,
+    size_t *chunk_len
+);
+
+/* Reap the child, close descriptors, free the handle. Returns
+ * PSI_STATUS_OK with exit_status / truncated / output_text populated
+ * (output_text is the concatenation of everything poll accumulated
+ * internally — callers that drained every chunk via poll get a
+ * separate reconstruction. output_text may be "" but is never NULL
+ * on PSI_STATUS_OK; caller must free() it. */
+int psi_process_finish(
+    struct psi_process_handle *h,
+    char **output_text,
+    int *exit_status,
+    int *truncated
+);
+
 #endif
