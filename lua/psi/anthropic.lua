@@ -813,7 +813,13 @@ function M.run_turn(opts)
     local tasks = {}
     for i, tu in ipairs(tool_uses) do
       tasks[i] = function()
-        return psi.tools.dispatch_alist(tu.name, tu.input)
+        -- meta carries tool_call_id downstream so shell-family
+        -- tools can tag on_tool_progress chunks with the id of the
+        -- tool that produced them. Without this, two tools
+        -- running under sched.run_all would stream into the same
+        -- TUI panel.
+        return psi.tools.dispatch_alist(tu.name, tu.input,
+                                        { tool_call_id = tu.id })
       end
     end
     local results = require("psi.sched").run_all(tasks)

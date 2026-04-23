@@ -351,6 +351,39 @@ static void psi_vm_process_progress(void *userdata, const char *chunk, size_t le
     );
 }
 
+/* psi.tool_progress(tool_id, chunk) — stream an incremental chunk of
+ * tool output to the currently-active observer. Used by the Lua
+ * tool_shell coroutine path so the TUI sees live output even when
+ * multiple tools are dispatched in parallel. The blocking
+ * psi.process_run path already forwards progress through the C
+ * callback above, so this entry point is for async tools only.
+ *
+ * tool_id is taken explicitly (not from host->active_tool_id)
+ * because multiple tools may be in flight concurrently — each
+ * sub-coroutine knows its own id. host->active_tool_id is
+ * unused here. */
+static int lfn_tool_progress(lua_State *L) {
+    const char *tool_id;
+    size_t chunk_len;
+    const char *chunk;
+    struct psi_host_context *host;
+
+    tool_id = luaL_optstring(L, 1, NULL);
+    chunk = lua_type(L, 2) == LUA_TSTRING ? lua_tolstring(L, 2, &chunk_len) : NULL;
+    if (chunk == NULL || chunk_len == 0u) return 0;
+
+    host = PSI_VM_HOST(L);
+    if (host == NULL || host->active_observer == NULL) return 0;
+    if (host->active_observer->on_tool_progress == NULL) return 0;
+    host->active_observer->on_tool_progress(
+        host->active_observer->userdata,
+        tool_id,
+        chunk,
+        chunk_len
+    );
+    return 0;
+}
+
 static int lfn_process_run(lua_State *L) {
     const char *command = luaL_checkstring(L, 1);
     char *output = NULL;
@@ -1125,6 +1158,7 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("stdout_write",          lfn_stdout_write);
     PSI_REG("sleep_ms",              lfn_sleep_ms);
     PSI_REG("host_tick",             lfn_host_tick);
+    PSI_REG("tool_progress",         lfn_tool_progress);
 
 #undef PSI_REG
 
@@ -1695,6 +1729,10 @@ static int psi_vm_call_agent(
     if (psi_vm_begin_call(vm->L, procedure) != 0) return PSI_STATUS_ERROR;
 
     vm->host.abort_signal = abort_signal;
+    /* Stamp the observer on the host context so FFI primitives
+     * (psi.tool_progress) can forward incremental tool output to
+     * the TUI while a turn is running. Cleared on return. */
+    vm->host.active_observer = observer;
 
     lua_newtable(vm->L);
     if (user_text != NULL) {
@@ -1721,6 +1759,7 @@ static int psi_vm_call_agent(
 
     if (psi_vm_finish_call(vm->L, 1, 2, procedure) != PSI_STATUS_OK) {
         vm->host.abort_signal = NULL;
+        vm->host.active_observer = NULL;
         return PSI_STATUS_ERROR;
     }
 
@@ -1732,6 +1771,7 @@ static int psi_vm_call_agent(
     lua_pop(vm->L, 2);
 
     vm->host.abort_signal = NULL;
+    vm->host.active_observer = NULL;
     return ok ? PSI_STATUS_OK : PSI_STATUS_ERROR;
 }
 

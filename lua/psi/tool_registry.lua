@@ -66,10 +66,17 @@ function M.clear_hooks()
   after_hooks = {}
 end
 
-function M.dispatch(name, input)
+-- `meta` is an optional opts table carrying context the host wants
+-- to pass through to the tool impl. Today the only field we use is
+-- meta.tool_call_id, which lets tools that stream progress
+-- (bash/grep/find/ls via psi.tool_shell) tag their on_tool_progress
+-- events with the right id — essential when multiple tools run
+-- concurrently (psi.sched.run_all). Older impls that only accept
+-- `input` stay compatible since the extra arg is optional.
+function M.dispatch(name, input, meta)
   input = input or {}
   for _, hook in ipairs(before_hooks) do
-    local intercept = hook(name, input)
+    local intercept = hook(name, input, meta)
     if intercept ~= nil then
       return intercept
     end
@@ -80,11 +87,11 @@ function M.dispatch(name, input)
   if not tool then
     result = records.tool_failure(name, "unknown tool")
   else
-    result = tool.impl(input)
+    result = tool.impl(input, meta)
   end
 
   for _, hook in ipairs(after_hooks) do
-    local replaced = hook(name, input, result)
+    local replaced = hook(name, input, result, meta)
     if replaced ~= nil then
       result = replaced
     end
@@ -92,8 +99,8 @@ function M.dispatch(name, input)
   return result
 end
 
-function M.dispatch_alist(name, input)
-  return records.tool_result_to_alist(M.dispatch(name, input))
+function M.dispatch_alist(name, input, meta)
+  return records.tool_result_to_alist(M.dispatch(name, input, meta))
 end
 
 -- guardrail helpers used by tool impls

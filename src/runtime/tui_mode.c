@@ -31,6 +31,13 @@ struct psi_tui_entry {
     char *title;
     char *text;
     int is_error;
+    /* Tool-call id tag. Set on TOOL_CALL entries and the matching
+     * TOOL_RESULT placeholder created alongside them; used by
+     * psi_tui_observer_tool_progress / _tool_result to route
+     * streamed chunks and final output to the right entry when
+     * multiple tools run concurrently (sched.run_all). NULL for
+     * every other entry kind. Owned — freed by psi_tui_free_entry. */
+    char *tool_call_id;
 };
 
 struct psi_tui_render_line {
@@ -64,9 +71,11 @@ struct psi_tui_state {
     int scroll_offset;
     int streaming_assistant_index;
     int streaming_thinking_index;
-    /* Index of the live tool-output entry receiving streaming progress
-     * chunks, or -1 when no tool is currently streaming. */
-    int streaming_tool_index;
+    /* Note: there is no global streaming_tool_index anymore.
+     * Multiple tools run concurrently under psi.sched.run_all and
+     * each owns its own placeholder TOOL_RESULT entry tagged with
+     * the dispatched tool_call_id; progress/result observers look
+     * the entry up by id via psi_tui_find_entry_by_tool_id. */
     /* Redraw coalescing: observer callbacks set transcript_dirty; the
      * host tick hook clears it and repaints. Avoids one redraw per
      * SSE delta; one per sched tick (~every 50ms during a stream). */
@@ -219,8 +228,10 @@ static void psi_tui_free_entry(struct psi_tui_entry *entry) {
     }
     free(entry->title);
     free(entry->text);
+    free(entry->tool_call_id);
     entry->title = NULL;
     entry->text = NULL;
+    entry->tool_call_id = NULL;
     entry->is_error = 0;
 }
 
@@ -300,6 +311,7 @@ static int psi_tui_add_entry(
     entry->title = psi_strdup(title != NULL ? title : "");
     entry->text = psi_strdup(text != NULL ? text : "");
     entry->is_error = is_error;
+    entry->tool_call_id = NULL;
     if (entry->title == NULL || entry->text == NULL) {
         psi_tui_free_entry(entry);
         return -1;
@@ -307,6 +319,41 @@ static int psi_tui_add_entry(
 
     state->entry_count++;
     return (int)(state->entry_count - 1u);
+}
+
+/* Tag the most-recently added entry with a tool-call id. Used right
+ * after psi_tui_add_entry to associate TOOL_CALL / TOOL_RESULT
+ * pairs with a specific dispatched tool so later progress/result
+ * events can find them. A no-op if the entry is gone. */
+static void psi_tui_entry_set_tool_id(struct psi_tui_state *state, int index, const char *tool_call_id) {
+    if (state == NULL || index < 0 || (size_t)index >= state->entry_count) return;
+    if (tool_call_id == NULL) return;
+    free(state->entries[index].tool_call_id);
+    state->entries[index].tool_call_id = psi_strdup(tool_call_id);
+}
+
+/* Walk backwards through the transcript for the most recent entry
+ * of `kind` whose tool_call_id matches. Returns -1 when not found.
+ * Back-to-front because concurrent tools leave their pair of
+ * entries near the tail; earlier occurrences of the same id
+ * (e.g. a prior turn's retry) should not match the live one. */
+static int psi_tui_find_entry_by_tool_id(
+    const struct psi_tui_state *state,
+    enum psi_tui_entry_kind kind,
+    const char *tool_call_id
+) {
+    size_t i;
+    if (state == NULL || tool_call_id == NULL || state->entry_count == 0u) return -1;
+    for (i = state->entry_count; i > 0u; i--) {
+        size_t idx = i - 1u;
+        const struct psi_tui_entry *e = &state->entries[idx];
+        if (e->kind == kind
+            && e->tool_call_id != NULL
+            && strcmp(e->tool_call_id, tool_call_id) == 0) {
+            return (int)idx;
+        }
+    }
+    return -1;
 }
 
 static void psi_tui_remove_entry(struct psi_tui_state *state, size_t index) {
@@ -1537,18 +1584,33 @@ static void psi_tui_observer_thinking_delta(void *userdata, const char *text) {
     state->transcript_dirty = 1;
 }
 
+/* When a tool dispatch fires, add BOTH the TOOL_CALL header and
+ * an empty TOOL_RESULT placeholder tagged with the same
+ * tool_call_id. This "reserves" a panel per tool so that when
+ * progress chunks start arriving — for this tool specifically —
+ * we can route them to the right entry instead of smearing
+ * everyone's output into a shared streaming block. Matters for
+ * concurrent dispatch (sched.run_all) where three shell commands
+ * could otherwise interleave their output unrecognisably. */
 static void psi_tui_observer_tool_call(void *userdata, const char *tool_call_id, const char *tool_name, const char *input_json) {
     struct psi_tui_state *state = (struct psi_tui_state *)userdata;
     char *summary;
     size_t lines_before;
+    int call_idx;
+    int result_idx;
     if (state == NULL || tool_name == NULL) return;
     summary = psi_tui_render_tool_call_text(state, tool_call_id, tool_name, input_json);
     lines_before = psi_tui_scroll_anchor_before(state);
     psi_tui_finish_streaming_assistant(state);
     state->streaming_thinking_index = -1;
-    state->streaming_tool_index = -1;
-    psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_CALL, tool_name,
-                      summary != NULL ? summary : "", 0);
+
+    call_idx = psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_CALL, tool_name,
+                                 summary != NULL ? summary : "", 0);
+    psi_tui_entry_set_tool_id(state, call_idx, tool_call_id);
+    /* Placeholder that tool_progress / tool_result will fill in. */
+    result_idx = psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_RESULT, NULL, "", 0);
+    psi_tui_entry_set_tool_id(state, result_idx, tool_call_id);
+
     free(summary);
     psi_tui_scroll_anchor_after(state, lines_before);
     state->transcript_dirty = 1;
@@ -1557,20 +1619,26 @@ static void psi_tui_observer_tool_call(void *userdata, const char *tool_call_id,
 static void psi_tui_observer_tool_progress(void *userdata, const char *tool_call_id, const char *chunk, size_t len) {
     struct psi_tui_state *state = (struct psi_tui_state *)userdata;
     size_t lines_before;
+    int idx;
     char *copy;
-    PSI_UNUSED(tool_call_id);
     if (state == NULL || chunk == NULL || len == 0u) return;
     copy = (char *)malloc(len + 1u);
     if (copy == NULL) return;
     memcpy(copy, chunk, len);
     copy[len] = '\0';
     lines_before = psi_tui_scroll_anchor_before(state);
-    if (state->streaming_tool_index < 0) {
-        state->streaming_tool_index =
-            psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_RESULT, NULL, "", 0);
+
+    idx = psi_tui_find_entry_by_tool_id(state, PSI_TUI_ENTRY_TOOL_RESULT, tool_call_id);
+    if (idx < 0) {
+        /* No placeholder exists (maybe the session was replayed
+         * without a live tool_call event). Fall back to appending
+         * a fresh untagged result entry so nothing gets lost. */
+        idx = psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_RESULT, NULL, "", 0);
+        psi_tui_entry_set_tool_id(state, idx, tool_call_id);
     }
-    psi_tui_append_entry_text(state, state->streaming_tool_index, copy);
+    psi_tui_append_entry_text(state, idx, copy);
     free(copy);
+
     psi_tui_scroll_anchor_after(state, lines_before);
     state->transcript_dirty = 1;
 }
@@ -1580,14 +1648,16 @@ static void psi_tui_observer_tool_result(void *userdata, const char *tool_call_i
     char *summary;
     int is_error;
     size_t lines_before;
+    int idx;
     if (state == NULL || tool_name == NULL) return;
     summary = psi_tui_render_tool_result_text(state, tool_call_id, tool_name, output_json, &is_error);
     lines_before = psi_tui_scroll_anchor_before(state);
-    if (state->streaming_tool_index >= 0 &&
-        (size_t)state->streaming_tool_index < state->entry_count) {
-        /* We streamed progress — replace the live entry with the
-         * final formatted render rather than appending. */
-        struct psi_tui_entry *entry = &state->entries[state->streaming_tool_index];
+
+    idx = psi_tui_find_entry_by_tool_id(state, PSI_TUI_ENTRY_TOOL_RESULT, tool_call_id);
+    if (idx >= 0) {
+        /* Replace the placeholder / streaming body with the
+         * final formatted tool_result render. */
+        struct psi_tui_entry *entry = &state->entries[idx];
         free(entry->title);
         free(entry->text);
         entry->title = psi_strdup(tool_name);
@@ -1595,11 +1665,12 @@ static void psi_tui_observer_tool_result(void *userdata, const char *tool_call_i
         entry->is_error = is_error;
         summary = NULL; /* ownership moved into entry->text */
     } else {
-        psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_RESULT, tool_name,
-                          summary != NULL ? summary : "", is_error);
+        idx = psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_RESULT, tool_name,
+                                summary != NULL ? summary : "", is_error);
+        psi_tui_entry_set_tool_id(state, idx, tool_call_id);
     }
     free(summary);
-    state->streaming_tool_index = -1;
+
     psi_tui_scroll_anchor_after(state, lines_before);
     state->transcript_dirty = 1;
 }
@@ -1949,7 +2020,6 @@ static int psi_tui_run_turn_sync(struct psi_tui_state *state, const char *line) 
 
     state->streaming_assistant_index = -1;
     state->streaming_thinking_index = -1;
-    state->streaming_tool_index = -1;
     return status;
 }
 
@@ -2205,7 +2275,6 @@ static int psi_tui_state_init(struct psi_tui_state *state, const struct psi_cli_
     memset(state, 0, sizeof(*state));
     state->options = options;
     state->streaming_assistant_index = -1;
-    state->streaming_tool_index = -1;
     state->streaming_thinking_index = -1;
     state->running = 1;
     psi_abort_signal_init(&state->abort_signal);

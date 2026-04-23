@@ -433,7 +433,8 @@ function M.run_turn(opts)
     local tasks = {}
     for i, tc in ipairs(state.tool_calls) do
       tasks[i] = function()
-        return psi.tools.dispatch_alist(tc.name, tc.arguments)
+        return psi.tools.dispatch_alist(tc.name, tc.arguments,
+                                        { tool_call_id = tc.id })
       end
     end
     local results = require("psi.sched").run_all(tasks)

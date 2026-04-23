@@ -27,7 +27,13 @@ end
 -- process-handle via sched.proc_poll so the TUI event loop keeps
 -- pumping between reads. Outside a coroutine (scripts, tests) we
 -- fall back to the blocking psi.process_run.
-function M.process_result(command)
+--
+-- tool_call_id, if passed, tags each chunk fed to
+-- psi.tool_progress so the TUI observer can route the stream
+-- into the right per-tool panel. Multiple tools running under
+-- psi.sched.run_all each own their own id; without it, concurrent
+-- tools would be indistinguishable on the wire.
+function M.process_result(command, tool_call_id)
   if not sched.in_coroutine() then
     return records.process_result_from_alist(psi.process_run(command))
   end
@@ -42,13 +48,16 @@ function M.process_result(command)
     })
   end
 
-  -- Stream progress via the active observer if one is registered on
-  -- the host side (C surfaces it through on_tool_progress today).
   local parts = {}
   while true do
     local chunk, done = sched.proc_poll(handle, 50)
     if chunk ~= nil and #chunk > 0 then
       parts[#parts + 1] = chunk
+      -- Fire a live progress event for the TUI (no-op if no
+      -- observer is registered, e.g. under --eval / --print).
+      if psi.tool_progress ~= nil then
+        psi.tool_progress(tool_call_id, chunk)
+      end
     end
     if done then break end
   end
@@ -64,8 +73,10 @@ function M.process_result(command)
 end
 
 -- Run a shell command and wrap as a ToolResult.
-function M.run_tool(tool_name, command, path, keep_output_on_error)
-  local proc = M.process_result(command)
+-- `meta.tool_call_id`, if present, is threaded through so live
+-- progress events carry the right id for multi-tool turns.
+function M.run_tool(tool_name, command, path, keep_output_on_error, meta)
+  local proc = M.process_result(command, meta and meta.tool_call_id or nil)
   local ok = proc:ok()
   local include_output = keep_output_on_error or ok or (proc.output and #proc.output > 0)
   local extras = {}

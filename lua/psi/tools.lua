@@ -128,12 +128,12 @@ end
 
 -- ---------- bash ----------
 
-local function impl_bash(input)
+local function impl_bash(input, meta)
   local command = registry.require_string(input, "command")
   if not command then
     return records.tool_failure("bash", "missing string field: command")
   end
-  return shell.run_tool("bash", command, nil, true)
+  return shell.run_tool("bash", command, nil, true, meta)
 end
 
 -- ---------- grep ----------
@@ -161,7 +161,7 @@ local function build_grep_command(pattern, path, glob, limit, context, ignore_ca
   return table.concat(parts)
 end
 
-local function impl_grep(input)
+local function impl_grep(input, meta)
   local pattern = registry.require_string(input, "pattern")
   if not pattern then
     return records.tool_failure("grep", "missing string field: pattern")
@@ -173,12 +173,12 @@ local function impl_grep(input)
   local ignore_case = registry.optional_boolean(input, "ignoreCase", false)
   local literal = registry.optional_boolean(input, "literal", false)
   local command = build_grep_command(pattern, path, glob, limit, context, ignore_case, literal)
-  return shell.run_tool("grep", command, path, true)
+  return shell.run_tool("grep", command, path, true, meta)
 end
 
 -- ---------- find ----------
 
-local function impl_find(input)
+local function impl_find(input, meta)
   local pattern = registry.require_string(input, "pattern")
   if not pattern then
     return records.tool_failure("find", "missing string field: pattern")
@@ -193,16 +193,16 @@ local function impl_find(input)
     .. shell.quote(pattern)
     .. " "
     .. shell.quote(path)
-  return shell.run_tool("find", command, path, true)
+  return shell.run_tool("find", command, path, true, meta)
 end
 
 -- ---------- ls ----------
 
-local function impl_ls(input)
+local function impl_ls(input, meta)
   local path = registry.optional_string(input, "path", ".")
   local limit = registry.optional_number(input, "limit", 500)
   local command = "ls -1A " .. shell.quote(path) .. " | sed -n '1," .. tostring(limit) .. "p'"
-  return shell.run_tool("ls", command, path, true)
+  return shell.run_tool("ls", command, path, true, meta)
 end
 
 -- ---------- lua (runtime inspect / eval) ----------
