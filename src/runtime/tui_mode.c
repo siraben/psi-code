@@ -38,6 +38,14 @@ struct psi_tui_render_line {
     char *text;
     int color_pair;
     int attrs;
+    /* Markdown handling for assistant-entry lines. Both flags are 0
+     * for every other entry kind and for pre-markdown assistant text
+     * alike (is_assistant=0 means "draw with mvaddnstr, no parsing").
+     * in_code_fence=1 forces the entire wrapped line to render dim
+     * without inline parsing even when source text happens to look
+     * like markdown inside a fence. */
+    int is_assistant;
+    int in_code_fence;
 };
 
 enum psi_tui_event_kind {
@@ -769,6 +777,8 @@ static int psi_tui_render_add_line(
     }
     line->color_pair = color_pair;
     line->attrs = attrs;
+    line->is_assistant = 0;
+    line->in_code_fence = 0;
     (*count)++;
     return PSI_STATUS_OK;
 }
@@ -849,6 +859,20 @@ static void psi_tui_line_style(
     }
 }
 
+/* Return 1 iff the source line at `text` starts (ignoring leading
+ * spaces) with a Markdown code-fence marker (``` or ~~~). Used by
+ * render_wrapped to toggle fence state across source lines of an
+ * assistant entry. */
+static int psi_tui_md_is_fence_line(const char *text) {
+    int i;
+    if (text == NULL) return 0;
+    i = 0;
+    while (text[i] == ' ') i++;
+    if (text[i] == '`' && text[i + 1] == '`' && text[i + 2] == '`') return 1;
+    if (text[i] == '~' && text[i + 1] == '~' && text[i + 2] == '~') return 1;
+    return 0;
+}
+
 static int psi_tui_render_wrapped(
     struct psi_tui_render_line **lines,
     size_t *count,
@@ -871,14 +895,42 @@ static int psi_tui_render_wrapped(
     char *line_text;
     int line_color_pair;
     int line_attrs;
+    int is_assistant;
+    int fence_state;
 
     cursor = text != NULL ? text : "";
     prefix = prefix_first != NULL ? prefix_first : "";
+    is_assistant = (entry != NULL && entry->kind == PSI_TUI_ENTRY_ASSISTANT);
+    fence_state = 0;
     while (1) {
+        int source_line_is_fence;
+        int line_fence_flag;
+
         line_start = cursor;
         line_end = strchr(line_start, '\n');
         if (line_end == NULL) {
             line_end = line_start + strlen(line_start);
+        }
+
+        /* Toggle fence state when a new source line BEGINS with ```. The
+         * fence line itself renders dim (line_fence_flag=1 below). */
+        source_line_is_fence = 0;
+        if (is_assistant) {
+            /* Copy out just the first chars to check prefix without
+             * needing to scan past the newline sentinel. */
+            char head[8];
+            int head_len;
+            head_len = (int)(line_end - line_start);
+            if (head_len > (int)sizeof(head) - 1) head_len = (int)sizeof(head) - 1;
+            memcpy(head, line_start, (size_t)head_len);
+            head[head_len] = '\0';
+            source_line_is_fence = psi_tui_md_is_fence_line(head);
+        }
+        if (source_line_is_fence) {
+            line_fence_flag = 1; /* fence marker itself rendered dim */
+            fence_state = !fence_state;
+        } else {
+            line_fence_flag = fence_state;
         }
 
         while (1) {
@@ -906,6 +958,8 @@ static int psi_tui_render_wrapped(
             }
             (*lines)[*count - 1u].color_pair = line_color_pair;
             (*lines)[*count - 1u].attrs = line_attrs;
+            (*lines)[*count - 1u].is_assistant = is_assistant;
+            (*lines)[*count - 1u].in_code_fence = line_fence_flag;
             free(line_text);
 
             line_start += break_index;
@@ -1161,6 +1215,119 @@ static void psi_tui_draw_line(int row, const char *text, int color_pair, int att
     }
 }
 
+/* Draw one wrapped assistant line with inline-markdown styling.
+ *
+ * Pure C so the main thread can render without touching the shared
+ * lua_State (same constraint that forced the status line to be
+ * C-side in commit 2027d56).
+ *
+ * Handles:
+ *   - whole-line code-fence dim (when in_code_fence=1)
+ *   - whole-line heading bold+cyan (when the wrapped line begins
+ *     with `#`/`##`/`###` — wrapping preserves the marker on the
+ *     first line of the source line, so this fires only on it)
+ *   - inline **bold**, `code`
+ *   - a crude *italic* rule: single `*` toggles italic when the
+ *     next char is non-space and non-`*`, which keeps bullet-list
+ *     markers (`* ` at line start) from being mis-parsed.
+ *
+ * Markdown that straddles a wrap boundary (e.g. `**bo` / `ld**`
+ * split across two render lines) will render unbalanced. Accepted
+ * trade-off; wide terminals make it rare for real text.
+ */
+static void psi_tui_draw_assistant_line(int row, const char *text, int in_code_fence) {
+    int max_width;
+    int len;
+    int col;
+    int i;
+    int bold;
+    int italic;
+    int code;
+    attr_t cur;
+
+    max_width = COLS > 1 ? COLS - 1 : 0;
+    move(row, 0);
+    clrtoeol();
+    if (text == NULL) {
+        return;
+    }
+
+    if (in_code_fence) {
+        attron(COLOR_PAIR(3) | A_DIM);
+        mvaddnstr(row, 0, text, max_width);
+        attroff(COLOR_PAIR(3) | A_DIM);
+        return;
+    }
+
+    {
+        int indent = 0;
+        while (text[indent] == ' ') indent++;
+        if (text[indent] == '#') {
+            int h = 0;
+            while (text[indent + h] == '#' && h < 7) h++;
+            if (h >= 1 && h <= 6 && text[indent + h] == ' ') {
+                attr_t a = COLOR_PAIR(4) | A_BOLD;
+                attron(a);
+                mvaddnstr(row, 0, text, max_width);
+                attroff(a);
+                return;
+            }
+        }
+    }
+
+    len = (int)strlen(text);
+    bold = 0;
+    italic = 0;
+    code = 0;
+    col = 0;
+    i = 0;
+    move(row, 0);
+    attron(COLOR_PAIR(3));
+    while (i < len && col < max_width) {
+        /* Inline code takes precedence: inside backticks, no other
+         * markers count. */
+        if (text[i] == '`' && !bold && !italic) {
+            code = !code;
+            i++;
+            continue;
+        }
+        if (!code) {
+            if (text[i] == '*' && i + 1 < len && text[i + 1] == '*') {
+                bold = !bold;
+                i += 2;
+                continue;
+            }
+            if (text[i] == '*' && !bold) {
+                int next = (i + 1 < len) ? (unsigned char)text[i + 1] : 0;
+                int prev = (i > 0) ? (unsigned char)text[i - 1] : 0;
+                /* Open italic: next must be non-space, non-*.
+                 * Close italic: prev must be non-space. */
+                if (!italic && next != 0 && next != ' ' && next != '*') {
+                    italic = 1;
+                    i++;
+                    continue;
+                }
+                if (italic && prev != ' ') {
+                    italic = 0;
+                    i++;
+                    continue;
+                }
+            }
+        }
+
+        cur = 0;
+        if (bold) cur |= A_BOLD;
+        if (italic) cur |= A_UNDERLINE;
+        if (code) cur |= COLOR_PAIR(5) | A_DIM;
+        if (cur != 0) attron(cur);
+        addch((unsigned char)text[i]);
+        if (cur != 0) attroff(cur);
+        i++;
+        col++;
+    }
+    attroff(COLOR_PAIR(3));
+}
+
 static void psi_tui_redraw(struct psi_tui_state *state) {
     struct psi_tui_render_line *lines;
     size_t line_count;
@@ -1237,12 +1404,20 @@ static void psi_tui_redraw(struct psi_tui_state *state) {
             int source_index;
             source_index = first_line + (int)index;
             if (source_index >= 0 && source_index < (int)line_count) {
-                psi_tui_draw_line(
-                    transcript_start + (int)index,
-                    lines[source_index].text,
-                    lines[source_index].color_pair,
-                    lines[source_index].attrs
-                );
+                if (lines[source_index].is_assistant) {
+                    psi_tui_draw_assistant_line(
+                        transcript_start + (int)index,
+                        lines[source_index].text,
+                        lines[source_index].in_code_fence
+                    );
+                } else {
+                    psi_tui_draw_line(
+                        transcript_start + (int)index,
+                        lines[source_index].text,
+                        lines[source_index].color_pair,
+                        lines[source_index].attrs
+                    );
+                }
             } else {
                 psi_tui_draw_line(transcript_start + (int)index, "", 0, 0);
             }
