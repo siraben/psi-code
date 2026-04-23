@@ -133,6 +133,9 @@ static void psi_tui_insert_char(struct psi_tui_state *state, int ch);
 static void psi_tui_delete_backward(struct psi_tui_state *state);
 static void psi_tui_delete_forward(struct psi_tui_state *state);
 static void psi_tui_delete_word_backward(struct psi_tui_state *state);
+static void psi_tui_delete_word_forward(struct psi_tui_state *state);
+static void psi_tui_move_word_backward(struct psi_tui_state *state);
+static void psi_tui_move_word_forward(struct psi_tui_state *state);
 static void psi_tui_kill_to_end(struct psi_tui_state *state);
 static void psi_tui_kill_to_start(struct psi_tui_state *state);
 static void psi_tui_free_event(struct psi_tui_event *event);
@@ -2049,6 +2052,50 @@ static void psi_tui_delete_word_backward(struct psi_tui_state *state) {
     state->cursor = start;
 }
 
+/* Readline Alt-D: delete from cursor to end of current word. */
+static void psi_tui_delete_word_forward(struct psi_tui_state *state) {
+    size_t end;
+
+    if (state == NULL || state->input == NULL) return;
+    if (state->cursor >= state->input_length) return;
+
+    end = state->cursor;
+    /* skip leading whitespace */
+    while (end < state->input_length && isspace((unsigned char)state->input[end])) {
+        end++;
+    }
+    /* consume word chars */
+    while (end < state->input_length && !isspace((unsigned char)state->input[end])) {
+        end++;
+    }
+    memmove(
+        state->input + state->cursor,
+        state->input + end,
+        state->input_length - end + 1u
+    );
+    state->input_length -= end - state->cursor;
+}
+
+/* Readline Alt-B: move cursor one word to the left. */
+static void psi_tui_move_word_backward(struct psi_tui_state *state) {
+    size_t pos;
+    if (state == NULL || state->input == NULL || state->cursor == 0u) return;
+    pos = state->cursor;
+    while (pos > 0u && isspace((unsigned char)state->input[pos - 1u])) pos--;
+    while (pos > 0u && !isspace((unsigned char)state->input[pos - 1u])) pos--;
+    state->cursor = pos;
+}
+
+/* Readline Alt-F: move cursor one word to the right. */
+static void psi_tui_move_word_forward(struct psi_tui_state *state) {
+    size_t pos;
+    if (state == NULL || state->input == NULL) return;
+    pos = state->cursor;
+    while (pos < state->input_length && isspace((unsigned char)state->input[pos])) pos++;
+    while (pos < state->input_length && !isspace((unsigned char)state->input[pos])) pos++;
+    state->cursor = pos;
+}
+
 /* Readline Ctrl-K: kill from cursor to end of line. */
 static void psi_tui_kill_to_end(struct psi_tui_state *state) {
     if (state == NULL || state->input == NULL) return;
@@ -2229,13 +2276,48 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
 
         /* Esc while busy: trigger the abort signal. Worker stops its
          * curl transfer, kills any child process, and pushes TURN_DONE /
-         * COMPACT_DONE so the UI unblocks. Esc when idle: no-op. */
+         * COMPACT_DONE so the UI unblocks.
+         *
+         * Esc when idle: might be a plain Escape OR the prefix of an
+         * Alt-<key> sequence (xterm/vt100 style: Alt-X sends ESC X).
+         * Peek briefly at the next key; if one is queued, dispatch
+         * readline-style word motion / delete. If not, treat as plain
+         * Escape (no-op). set_escdelay(25) was called above so ncurses
+         * won't block longer than that on the follow-up. */
         if (ch == 27) {
+            int next;
             if (state.busy) {
                 psi_abort_signal_trigger(&state.abort_signal);
                 psi_tui_set_status(&state, "aborting...", 0);
                 psi_tui_redraw(&state);
+                continue;
             }
+            wtimeout(stdscr, 25);
+            next = getch();
+            wtimeout(stdscr, -1);
+            if (next == ERR) {
+                /* Plain Escape (no idle action bound today). */
+                continue;
+            }
+            switch (next) {
+                case 'b': case 'B':
+                    psi_tui_move_word_backward(&state);
+                    break;
+                case 'f': case 'F':
+                    psi_tui_move_word_forward(&state);
+                    break;
+                case 'd': case 'D':
+                    psi_tui_delete_word_forward(&state);
+                    break;
+                case KEY_BACKSPACE: case 127: case 8:
+                    /* Alt-Backspace mirrors Ctrl-W. */
+                    psi_tui_delete_word_backward(&state);
+                    break;
+                default:
+                    /* Unbound Alt-<key>; ignore silently. */
+                    break;
+            }
+            psi_tui_redraw(&state);
             continue;
         }
 
