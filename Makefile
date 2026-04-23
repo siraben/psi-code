@@ -79,6 +79,18 @@ OBJECTS = \
 
 all: $(TARGET)
 
+# Parallel-build by default: use all CPUs unless the caller passed -j
+# explicitly or overrode MAKEFLAGS. `nproc` is Linux-specific; on other
+# platforms fall back to 4.
+JOBS := $(shell nproc 2>/dev/null || echo 4)
+ifeq (,$(filter -j%,$(MAKEFLAGS)))
+MAKEFLAGS += -j$(JOBS)
+endif
+
+# All object builds share the output directory; declare it as an
+# order-only prereq so `make -jN` doesn't race on mkdir.
+$(OBJECTS): | $(BUILD_DIR)
+
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
@@ -97,7 +109,7 @@ $(BUILD_DIR)/embedded_lua.o: $(EMBED_OUT) include/psi/embedded_lua.h
 $(BUILD_DIR)/embedded_docs.o: $(EMBED_DOCS_OUT) include/psi/embedded_lua.h
 	$(CC) $(CPPFLAGS) -Iinclude $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
-$(TARGET): $(BUILD_DIR) $(OBJECTS)
+$(TARGET): $(OBJECTS) | $(BUILD_DIR)
 	$(CC) $(LDFLAGS) -o $@ $(OBJECTS) $(LOCAL_LDFLAGS)
 
 $(BUILD_DIR)/main.o: src/main.c include/psi/common.h include/psi/runtime.h include/psi/session.h include/psi/vm.h
