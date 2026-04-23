@@ -176,7 +176,7 @@ int psi_process_poll(
 
             if (chunk != NULL) {
                 copy = (char *)malloc((size_t)read_count);
-                if (copy == NULL) return PSI_STATUS_ERROR;
+                if (copy == NULL) return -1;
                 memcpy(copy, read_buffer, (size_t)read_count);
                 *chunk = copy;
             }
@@ -352,7 +352,7 @@ int psi_process_run_shell(
             if (on_chunk != NULL) on_chunk(userdata, chunk, chunk_len);
             free(chunk);
         }
-        if (r == 2) break;
+        if (r == 2 || r < 0) break;
     }
 
     return psi_process_finish(h, output_text, exit_status, truncated);

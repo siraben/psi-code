@@ -50,25 +50,44 @@ struct psi_http_stream {
     int done;
     long http_status;   /* HTTP response code (only meaningful when done) */
     CURLcode curl_code; /* CURLE_OK on success */
+
+    /* Latch set under `mu` if the helper thread's write callback
+     * fails to enqueue a chunk (OOM). When set, the next callback
+     * invocation returns 0 to curl, which aborts the transfer as a
+     * short-write error so the caller sees a clean transport
+     * failure instead of silently losing bytes. */
+    int write_failed;
 };
 
 /* ------------------------------------------------------------------
  * Queue management — all under `mu`.
  * ------------------------------------------------------------------ */
 
-static void psi_http_queue_push(
+/* Enqueue a copy of `data[0..len)`. Returns 1 on success, 0 if
+ * either allocation fails. On failure, `write_failed` is latched
+ * under `mu` so the write callback can abort curl rather than
+ * silently lose streamed bytes. */
+static int psi_http_queue_push(
     struct psi_http_stream *h, const char *data, size_t len
 ) {
     struct psi_http_chunk_node *node;
 
     node = (struct psi_http_chunk_node *)malloc(sizeof(*node));
     if (node == NULL) {
-        return; /* drop on OOM; helper thread can't do anything better */
+        pthread_mutex_lock(&h->mu);
+        h->write_failed = 1;
+        pthread_cond_broadcast(&h->cond);
+        pthread_mutex_unlock(&h->mu);
+        return 0;
     }
     node->data = (char *)malloc(len);
     if (node->data == NULL) {
         free(node);
-        return;
+        pthread_mutex_lock(&h->mu);
+        h->write_failed = 1;
+        pthread_cond_broadcast(&h->cond);
+        pthread_mutex_unlock(&h->mu);
+        return 0;
     }
     memcpy(node->data, data, len);
     node->len = len;
@@ -83,6 +102,7 @@ static void psi_http_queue_push(
     h->queue_tail = node;
     pthread_cond_signal(&h->cond);
     pthread_mutex_unlock(&h->mu);
+    return 1;
 }
 
 static struct psi_http_chunk_node *psi_http_queue_pop_locked(
@@ -123,7 +143,14 @@ static size_t psi_http_stream_write_cb(
 ) {
     struct psi_http_stream *h = (struct psi_http_stream *)userdata;
     size_t total = size * nmemb;
-    psi_http_queue_push(h, (const char *)data, total);
+    if (!psi_http_queue_push(h, (const char *)data, total)) {
+        /* Returning a short count tells curl the write failed;
+         * curl_easy_perform unwinds with CURLE_WRITE_ERROR, the
+         * helper thread exits, and the caller's finish() observes
+         * the transport failure (returns -1). No bytes are
+         * silently dropped. */
+        return 0u;
+    }
     return total;
 }
 

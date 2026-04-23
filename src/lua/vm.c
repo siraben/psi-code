@@ -433,14 +433,26 @@ static int lfn_process_poll(lua_State *L) {
 
     result = psi_process_poll(h, timeout_ms, &chunk, &chunk_len);
 
-    /* (chunk | nil, done_flag) mirroring http_stream_poll. */
+    /* (chunk | nil, done_flag) mirroring http_stream_poll.
+     *
+     * psi_process_poll returns:
+     *   1  chunk available
+     *   0  timeout
+     *   2  child done (EOF)
+     *  -1  unrecoverable error (alloc fail etc.)
+     *
+     * Both "done" and "error" collapse to done=true from Lua's
+     * perspective so the coroutine stops the poll loop; the
+     * caller's finish() will then reap the child with whatever
+     * status applies. (Lua-side: a nil chunk with done=true is
+     * the terminal signal.) */
     if (result == 1 && chunk != NULL) {
         lua_pushlstring(L, chunk, chunk_len);
         free(chunk);
     } else {
         lua_pushnil(L);
     }
-    lua_pushboolean(L, result == 2 ? 1 : 0);
+    lua_pushboolean(L, (result == 2 || result < 0) ? 1 : 0);
     return 2;
 }
 

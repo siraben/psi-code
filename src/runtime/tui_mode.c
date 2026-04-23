@@ -1198,17 +1198,23 @@ static void psi_tui_draw_ansi_line(int row, const char *text, int base_color_pai
     i = 0;
     while (i < len && col < max_width) {
         if (text[i] == 0x1b && i + 1 < len && text[i + 1] == '[') {
-            /* Parse ESC [ ; ; ... m */
+            /* Parse ESC [ N ; M ; ... m. Accumulate each code into
+             * an unsigned int with a small cap so pathological
+             * input like \e[99999999999m can't overflow. Any code
+             * over 999 is clamped and the parser treats it as an
+             * unknown SGR (ignored by psi_tui_ansi_apply). */
             int j = i + 2;
-            int code = 0;
+            unsigned int code = 0u;
             int has_digit = 0;
             while (j < len && text[j] != 'm') {
                 if (text[j] >= '0' && text[j] <= '9') {
-                    code = code * 10 + (text[j] - '0');
+                    if (code <= 999u) {
+                        code = code * 10u + (unsigned int)(text[j] - '0');
+                    }
                     has_digit = 1;
                 } else if (text[j] == ';') {
-                    if (has_digit) psi_tui_ansi_apply(&st, code);
-                    code = 0;
+                    if (has_digit) psi_tui_ansi_apply(&st, (int)code);
+                    code = 0u;
                     has_digit = 0;
                 } else {
                     break; /* malformed; bail out */
@@ -1217,7 +1223,7 @@ static void psi_tui_draw_ansi_line(int row, const char *text, int base_color_pai
             }
             if (j < len && text[j] == 'm') {
                 /* Even a bare \e[m counts as reset */
-                if (has_digit) psi_tui_ansi_apply(&st, code);
+                if (has_digit) psi_tui_ansi_apply(&st, (int)code);
                 else psi_tui_ansi_apply(&st, 0);
                 i = j + 1;
                 continue;
@@ -1227,16 +1233,35 @@ static void psi_tui_draw_ansi_line(int row, const char *text, int base_color_pai
             continue;
         }
 
+        /* Plain-text span: find the next escape or end-of-string
+         * and emit the whole run in one call. Using mvaddnstr on a
+         * byte span lets ncurses handle UTF-8 multi-byte sequences
+         * correctly instead of corrupting them into mojibake the
+         * way an addch-per-byte loop would. Column accounting
+         * treats byte count as a conservative upper bound for
+         * width; multi-byte characters will still fit within the
+         * line because the line was already wrapped on plain
+         * bytes upstream. */
         {
-            attr_t cur = base | st.attrs;
-            int pair = st.color_pair > 0 ? st.color_pair : base_color_pair;
+            int span_start = i;
+            int take;
+            attr_t cur;
+            int pair;
+
+            while (i < len && text[i] != 0x1b) i++;
+            take = i - span_start;
+            if (take > max_width - col) take = max_width - col;
+            if (take <= 0) continue;
+
+            cur = base | st.attrs;
+            pair = st.color_pair > 0 ? st.color_pair : base_color_pair;
             if (pair > 0) cur |= COLOR_PAIR(pair);
             if (cur != 0) attron(cur);
-            addch((unsigned char)text[i]);
+            addnstr(text + span_start, take);
             if (cur != 0) attroff(cur);
+            col += take;
+            i = span_start + take;
         }
-        i++;
-        col++;
     }
 }
 

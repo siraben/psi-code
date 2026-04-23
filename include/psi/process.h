@@ -58,10 +58,16 @@ int psi_process_begin(
 /* Drain one read() worth of output.
  *
  * Returns:
- *   1  chunk available; *chunk owns heap bytes (caller free()s).
- *      *chunk_len is byte length (no trailing NUL).
- *   0  timeout elapsed; child still running; may poll again.
- *   2  child exited / EOF reached; call finish.
+ *    1  chunk available; *chunk owns heap bytes (caller free()s).
+ *       *chunk_len is byte length (no trailing NUL).
+ *    0  timeout elapsed; child still running; may poll again.
+ *    2  child exited / EOF reached; call finish.
+ *   -1  unrecoverable error (e.g. alloc failure); caller should
+ *       stop polling and call finish to reap the child.
+ *
+ * NB: the "chunk available" code is deliberately 1 and the error
+ * code is deliberately negative so a boolean `r == 1` branch can
+ * never be entered on failure.
  */
 int psi_process_poll(
     struct psi_process_handle *h,

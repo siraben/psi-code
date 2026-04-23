@@ -1,3 +1,10 @@
 build/
 result
 result-*
+
+# Local environment and scratch files. .env.local carries
+# ANTHROPIC_API_KEY; keep it out of commits by default.
+.env.local
+.env
+apr*.jsonl
+pi-mono/
