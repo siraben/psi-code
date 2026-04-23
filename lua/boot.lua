@@ -22,16 +22,41 @@ psi.render = require("psi.render")
 psi.commands = require("psi.commands")
 psi.tui = require("psi.tui")
 psi.modes = require("psi.modes")
+psi.markdown = require("psi.markdown")
 
 -- Default event-hook registrations.
+--
+-- Assistant text flows through a line-buffered markdown stream when
+-- PSI_MARKDOWN is not explicitly disabled. The stream accumulates
+-- partial lines between deltas; only complete lines emerge styled.
+-- after-turn flushes any trailing partial line.
+local md_enabled = (os.getenv("PSI_MARKDOWN") ~= "0")
+local md_stream = md_enabled and psi.markdown.new_stream() or nil
+
 psi.render.register_hook("assistant-text", function(payload)
   -- When assistant text resumes after a tool result, pi leaves one
   -- blank line between the tool result and the new text. psi's stream
   -- deltas don't end in "\n", so we emit a leading "\n" only on the
-  -- first delta of the new text block (subsequent deltas see the
-  -- previous event as "assistant-text").
+  -- first delta of the new text block.
   local sep = psi.render.last_event_kind() == "tool-result" and "\n" or ""
-  return sep .. (payload.text or "")
+  local text = payload.text or ""
+  if md_stream then
+    text = md_stream:feed(text)
+  end
+  return sep .. text
+end)
+
+psi.render.register_hook("after-turn", function()
+  if md_stream then
+    local tail = md_stream:flush()
+    -- Reset fence state across turns so a mid-turn unbalanced ``` does
+    -- not bleed into the next turn.
+    md_stream.state.in_code_fence = false
+    if tail ~= "" then
+      return tail
+    end
+  end
+  return ""
 end)
 psi.render.register_hook("tool-call", psi.render.capture_frame)
 psi.render.register_hook("tool-call", psi.render.render_tool_call)
