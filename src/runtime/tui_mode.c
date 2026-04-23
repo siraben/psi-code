@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <locale.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -2337,6 +2338,29 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
             continue;
         } else if (ch == 4) {
             psi_tui_delete_forward(&state);
+        } else if (ch == 26) {
+            /* Ctrl-Z: suspend. Leave ncurses mode, raise SIGTSTP with
+             * the default handler so the shell gets control, then
+             * re-enter ncurses when we resume. */
+            endwin();
+            {
+                struct sigaction dfl, prev;
+                sigset_t mask, prev_mask;
+                dfl.sa_handler = SIG_DFL;
+                sigemptyset(&dfl.sa_mask);
+                dfl.sa_flags = 0;
+                sigaction(SIGTSTP, &dfl, &prev);
+                sigemptyset(&mask);
+                sigaddset(&mask, SIGTSTP);
+                sigprocmask(SIG_UNBLOCK, &mask, &prev_mask);
+                raise(SIGTSTP);
+                sigprocmask(SIG_SETMASK, &prev_mask, NULL);
+                sigaction(SIGTSTP, &prev, NULL);
+            }
+            refresh();
+            clearok(stdscr, TRUE);
+            psi_tui_redraw(&state);
+            continue;
         } else if (ch == 11) {
             psi_tui_kill_to_end(&state);
         } else if (ch == 12) {
