@@ -783,28 +783,63 @@ function M.run_turn(opts)
       return true, state.assistant_text
     end
 
-    for _, tu in ipairs(tool_uses) do
-      if abort_check() then
-        -- Any orphan tool_use here will be resolved with a synthetic
-        -- "No result provided" tool_result at request-build time on
-        -- the next turn (see build_api_messages). Nothing to emit.
-        return false, "aborted"
-      end
+    -- Run every tool_use block in this turn concurrently. When
+    -- Claude emits N tool_use blocks in a single assistant
+    -- message, we expect their wall time to be ~max(times) rather
+    -- than sum(times). sched.run_all wraps each tool dispatch in
+    -- a sub-coroutine and round-robins them through the event
+    -- loop; each tool's own async primitives (sched.proc_poll,
+    -- etc.) keep yielding cooperatively, so none of them blocks
+    -- the others.
+    --
+    -- Abort semantics: if the user cancels between emitting
+    -- tool_use blocks, we check first and bail out cleanly. If
+    -- abort fires partway through a parallel batch, each
+    -- sub-coroutine's own abort_check picks it up (process_poll
+    -- honours the shared abort_signal); we still wait for all of
+    -- them to finish and emit results so the session stays
+    -- consistent.
+    if abort_check() then
+      return false, "aborted"
+    end
 
+    for _, tu in ipairs(tool_uses) do
       local input_json = psi.json_encode(tu.input)
       if observer.on_tool_call then
         observer.on_tool_call(tu.id, tu.name, input_json)
       end
+    end
 
-      local result_alist = psi.tools.dispatch_alist(tu.name, tu.input)
+    local tasks = {}
+    for i, tu in ipairs(tool_uses) do
+      tasks[i] = function()
+        return psi.tools.dispatch_alist(tu.name, tu.input)
+      end
+    end
+    local results = require("psi.sched").run_all(tasks)
+
+    for i, tu in ipairs(tool_uses) do
+      local r = results[i]
+      local result_alist
+      if r.ok and r.values and r.values.n > 0 then
+        result_alist = r.values[1]
+      else
+        -- Sub-coroutine errored. Synthesize an error ToolResult so
+        -- the next turn can see something sensible rather than an
+        -- orphan tool_use.
+        result_alist = {
+          tool = tu.name,
+          ok = false,
+          error = tostring(r and r.error or "tool dispatch failed"),
+        }
+      end
       local result_json = psi.json_encode(result_alist)
       if observer.on_tool_result then
         observer.on_tool_result(tu.id, tu.name, result_json)
       end
-
       session_mod.append_tool_result(tu.id, tu.name, result_json, not result_alist.ok)
-      session_mod.save()
     end
+    session_mod.save()
 
     maybe_auto_compact(model, opts)
   end

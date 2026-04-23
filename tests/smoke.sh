@@ -103,15 +103,59 @@ grep '"text":"two"' "$SESSION_FILE"
 # ----------------------------------------------------------------------
 if [ "${ANTHROPIC_API_KEY:-}" != "" ]; then
     AGENT_SESSION="$TMP_DIR/agent-session.jsonl"
-    MODEL="${PSI_ANTHROPIC_MODEL:-claude-opus-4-7}"
+    # Default to claude-haiku-4-5 for the tool-dispatch suite —
+    # it's cheap and consistently invokes the requested tools.
+    # Callers can override with PSI_ANTHROPIC_MODEL for broader
+    # model-version sweeps.
+    MODEL="${PSI_ANTHROPIC_MODEL:-claude-haiku-4-5}"
     "$PSI" --agent 'Say exactly: psi live agent smoke' --model "$MODEL" --max-tokens 32 \
         | grep 'psi live agent smoke'
-    "$PSI" --session "$AGENT_SESSION" --agent 'Read README.md and reply with exactly: tool smoke ok' \
-        --model "$MODEL" --max-tokens 128 | grep 'tool smoke ok'
+    "$PSI" --session "$AGENT_SESSION" \
+        --agent 'Use the bash tool to run exactly: echo tool-smoke-ok. Then reply with exactly: tool smoke ok' \
+        --model "$MODEL" --max-tokens 200 | grep 'tool smoke ok'
     "$PSI" --session "$AGENT_SESSION" --agent 'Reply with exactly: second turn ok' \
         --model "$MODEL" --max-tokens 64 | grep 'second turn ok'
-    grep '"role":"tool-call"' "$AGENT_SESSION"
-    grep '"role":"tool-result"' "$AGENT_SESSION"
+    # v2 JSONL session schema (pi-compatible). Tool calls are
+    # nested inside the assistant message's content array as
+    # {"type":"toolCall",...}; the top-level "role" values are
+    # camelCase, and a compaction rewrite leaves a standalone
+    # {"type":"compaction",...} header entry.
+    grep '"type":"toolCall"' "$AGENT_SESSION"
+    grep '"role":"toolResult"' "$AGENT_SESSION"
     "$PSI" --session "$AGENT_SESSION" --compact 4 --model "$MODEL" --max-tokens 256 | grep .
-    grep '"role":"compaction-summary"' "$AGENT_SESSION"
+    grep '"type":"compaction"' "$AGENT_SESSION"
+
+    # ------------------------------------------------------------------
+    # Concurrent tool dispatch: when Claude emits multiple tool_use
+    # blocks in a single assistant turn, psi must run them in parallel,
+    # not serialise them. We prompt for three shell commands whose
+    # combined serial time (3+6+9 = 18s) is much larger than the max
+    # (9s); wall time should be closer to the max than the sum.
+    # Budget 25s to absorb round-trip latency + auto-compaction.
+    # ------------------------------------------------------------------
+    PARALLEL_SESSION="$TMP_DIR/parallel-session.jsonl"
+    PARALLEL_OUT="$TMP_DIR/parallel-out"
+    START=$(date +%s)
+    "$PSI" --session "$PARALLEL_SESSION" \
+        --agent 'Issue three separate bash tool calls in this same turn, all at once. The three commands are exactly: "sleep 3 && echo apple", "sleep 6 && echo banana", "sleep 9 && echo cherry". Do not chain them with &&, do not background them with &, do not combine them — emit three distinct tool_use blocks. After the tools run, reply with exactly: parallel done' \
+        --model claude-haiku-4-5 --max-tokens 500 > "$PARALLEL_OUT"
+    END=$(date +%s)
+    ELAPSED=$((END - START))
+
+    # Acceptance: all three tool invocations ran (each echoed fruit
+    # appears in the persisted session)
+    grep apple  "$PARALLEL_SESSION" >/dev/null
+    grep banana "$PARALLEL_SESSION" >/dev/null
+    grep cherry "$PARALLEL_SESSION" >/dev/null
+
+    # Acceptance: wall time is closer to the max (9s) than the sum
+    # (18s). Threshold at 15s leaves room for network + compaction
+    # overhead without letting a silent regression back to serial
+    # dispatch slip through. On a typical link the actual number is
+    # around 10-11s.
+    if [ "$ELAPSED" -gt 15 ]; then
+        echo "concurrent-tool smoke FAIL: elapsed=${ELAPSED}s (expected <=15s, sum-serial would be ~18s)" >&2
+        exit 1
+    fi
+    echo "concurrent-tool smoke ok (${ELAPSED}s)"
 fi

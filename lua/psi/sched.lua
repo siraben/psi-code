@@ -120,4 +120,97 @@ function M.in_coroutine()
   return main == false
 end
 
+-- Run N functions concurrently as sub-coroutines. Each fn must
+-- yield through the sched.* primitives (http_poll, proc_poll,
+-- sleep_ms, yield_tick). The driver resumes each sub-coroutine
+-- round-robin; when one yields a wait request, we resolve it
+-- with a short timeout so the others stay responsive.
+--
+-- Returns an array of {ok, values} records in input order, where
+-- values is a table.pack of the fn's return values on success, or
+-- the error message on failure. Callers decide how to shape that
+-- into their domain result.
+--
+-- Works correctly when called from within a sched.run coroutine:
+-- the sub-coroutines yield to this function rather than to the
+-- outer driver, so the outer coroutine just appears to be taking
+-- a long time to complete.
+local SHORT_WAIT_MS = 20
+
+function M.run_all(fns)
+  local tasks = {}
+  for i, fn in ipairs(fns) do
+    tasks[i] = {
+      co = coroutine.create(fn),
+      done = false,
+      next_args = {},
+      next_n = 0,
+      ok = false,
+      values = nil,
+      error_msg = nil,
+    }
+  end
+
+  local remaining = #tasks
+  while remaining > 0 do
+    for _, t in ipairs(tasks) do
+      if not t.done then
+        local res = table.pack(coroutine.resume(t.co,
+          table.unpack(t.next_args, 1, t.next_n)))
+        if res[1] == false then
+          t.done = true
+          t.ok = false
+          t.error_msg = res[2]
+          remaining = remaining - 1
+        elseif coroutine.status(t.co) == "dead" then
+          local vals = { n = res.n - 1 }
+          for j = 2, res.n do vals[j - 1] = res[j] end
+          t.done = true
+          t.ok = true
+          t.values = vals
+          remaining = remaining - 1
+        else
+          -- Yielded: res[2] is the request. Resolve it with a
+          -- short timeout so the round-robin stays fair even if
+          -- one task is chatty.
+          local req = res[2]
+          if type(req) ~= "table" or type(req.kind) ~= "string" then
+            req = { kind = "tick" }
+          end
+          local short_req = req
+          if req.kind == "http" or req.kind == "proc" then
+            short_req = { kind = req.kind, h = req.h, ms = SHORT_WAIT_MS }
+          elseif req.kind == "sleep" then
+            local ms = tonumber(req.ms) or 0
+            if ms > SHORT_WAIT_MS then
+              short_req = { kind = "sleep", ms = SHORT_WAIT_MS }
+            end
+          end
+          local resolver = M.resolvers[req.kind]
+          if resolver ~= nil then
+            t.next_args = table.pack(resolver(short_req))
+            t.next_n = t.next_args.n
+          else
+            t.next_args = table.pack(nil, "unknown request kind: " .. tostring(req.kind))
+            t.next_n = t.next_args.n
+          end
+        end
+      end
+    end
+    if remaining == 0 then break end
+    -- Let the host loop keep pumping (TUI redraw, input, etc.).
+    if psi.host_tick ~= nil then psi.host_tick() end
+  end
+
+  local out = {}
+  for i, t in ipairs(tasks) do
+    if t.ok then
+      out[i] = { ok = true, values = t.values }
+    else
+      out[i] = { ok = false, error = t.error_msg }
+    end
+  end
+  return out
+end
+
 return M

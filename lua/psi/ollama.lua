@@ -416,25 +416,48 @@ function M.run_turn(opts)
       return true, state.text
     end
 
-    for _, tc in ipairs(state.tool_calls) do
-      if abort_check() then return false, "aborted" end
+    -- Concurrent tool dispatch. Mirrors psi.anthropic: all
+    -- tool_calls emitted in one model response run through
+    -- sched.run_all so their wall time is ~max(times) rather
+    -- than the sum.
+    if abort_check() then return false, "aborted" end
 
+    for _, tc in ipairs(state.tool_calls) do
       local input_json = psi.json_encode(tc.arguments)
       if observer.on_tool_call then observer.on_tool_call(tc.id, tc.name, input_json) end
       if psi.events then
         psi.events.emit("tool-call", { id = tc.id, tool = tc.name, input = tc.arguments })
       end
+    end
 
-      local result_alist = psi.tools.dispatch_alist(tc.name, tc.arguments)
+    local tasks = {}
+    for i, tc in ipairs(state.tool_calls) do
+      tasks[i] = function()
+        return psi.tools.dispatch_alist(tc.name, tc.arguments)
+      end
+    end
+    local results = require("psi.sched").run_all(tasks)
+
+    for i, tc in ipairs(state.tool_calls) do
+      local r = results[i]
+      local result_alist
+      if r.ok and r.values and r.values.n > 0 then
+        result_alist = r.values[1]
+      else
+        result_alist = {
+          tool = tc.name,
+          ok = false,
+          error = tostring(r and r.error or "tool dispatch failed"),
+        }
+      end
       local result_json = psi.json_encode(result_alist)
       if observer.on_tool_result then observer.on_tool_result(tc.id, tc.name, result_json) end
       if psi.events then
         psi.events.emit("tool-result", { id = tc.id, tool = tc.name, result = result_alist })
       end
-
       session_mod.append_tool_result(tc.id, tc.name, result_json, not result_alist.ok)
-      session_mod.save()
     end
+    session_mod.save()
   end
 
   io.stderr:write("ollama tool loop exceeded " .. tostring(MAX_TOOL_ITERATIONS) .. " iterations\n")
