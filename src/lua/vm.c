@@ -17,6 +17,7 @@
 #include "psi/abort.h"
 #include "psi/agent.h"
 #include "psi/anthropic.h"
+#include "psi/http_async.h"
 #include "psi/common.h"
 #include "psi/embedded_lua.h"
 #include "psi/host_ops.h"
@@ -587,6 +588,97 @@ static int lfn_http_post_stream(lua_State *L) {
     return 1;
 }
 
+/* ------------------------------------------------------------------
+ * Async streaming HTTP (psi.http_stream_*).
+ *
+ * Begin spawns a helper thread that runs curl_easy_perform; poll
+ * drains one chunk at a time with a timeout; finish joins the thread
+ * and returns the HTTP status code. The handle is a light-userdata
+ * value held by the Lua caller (psi.sched / psi.anthropic). Never
+ * garbage-collected automatically — callers MUST call finish.
+ * ------------------------------------------------------------------ */
+
+static int lfn_http_stream_begin(lua_State *L) {
+    const char *url = luaL_checkstring(L, 1);
+    size_t body_len;
+    const char *body;
+    char **headers;
+    size_t header_count;
+    const struct psi_host_context *host;
+    struct psi_http_stream *h;
+    int status;
+
+    luaL_checktype(L, 2, LUA_TTABLE);
+    body = luaL_checklstring(L, 3, &body_len);
+
+    if (psi_lua_collect_headers(L, 2, &headers, &header_count) != 0) {
+        return luaL_error(L, "failed to collect headers");
+    }
+
+    host = PSI_VM_HOST(L);
+    h = NULL;
+    status = psi_http_stream_begin(
+        url,
+        (const char *const *)headers, header_count,
+        body, body_len,
+        host ? host->abort_signal : NULL,
+        &h);
+    psi_lua_free_headers(headers, header_count);
+
+    if (status != PSI_STATUS_OK || h == NULL) {
+        lua_pushnil(L);
+        lua_pushstring(L, "failed to start http stream");
+        return 2;
+    }
+    lua_pushlightuserdata(L, h);
+    return 1;
+}
+
+static int lfn_http_stream_poll(lua_State *L) {
+    struct psi_http_stream *h;
+    int timeout_ms;
+    char *chunk;
+    size_t chunk_len;
+    int result;
+
+    if (lua_type(L, 1) != LUA_TLIGHTUSERDATA) {
+        return luaL_error(L, "http_stream_poll: handle expected");
+    }
+    h = (struct psi_http_stream *)lua_touserdata(L, 1);
+    timeout_ms = (int)luaL_optinteger(L, 2, 0);
+    chunk = NULL;
+    chunk_len = 0u;
+
+    result = psi_http_stream_poll(h, timeout_ms, &chunk, &chunk_len);
+
+    /* Returns (chunk, done_flag):
+     *   1 → (string, false)
+     *   0 → (nil,    false)   -- timeout
+     *   2 → (nil,    true)    -- stream done
+     */
+    if (result == 1 && chunk != NULL) {
+        lua_pushlstring(L, chunk, chunk_len);
+        free(chunk);
+    } else {
+        lua_pushnil(L);
+    }
+    lua_pushboolean(L, result == 2 ? 1 : 0);
+    return 2;
+}
+
+static int lfn_http_stream_finish(lua_State *L) {
+    struct psi_http_stream *h;
+    long status;
+
+    if (lua_type(L, 1) != LUA_TLIGHTUSERDATA) {
+        return luaL_error(L, "http_stream_finish: handle expected");
+    }
+    h = (struct psi_http_stream *)lua_touserdata(L, 1);
+    status = psi_http_stream_finish(h);
+    lua_pushinteger(L, (lua_Integer)status);
+    return 1;
+}
+
 static int lfn_http_post(lua_State *L) {
     const char *url = luaL_checkstring(L, 1);
     size_t body_len;
@@ -824,6 +916,20 @@ static int lfn_add_history(lua_State *L) {
     return 0;
 }
 
+/* psi.sleep_ms(ms) -- cooperative sleep (no thread involvement).
+ * Used by psi.sched to honour sleep requests. Clamped to 1 hour so
+ * buggy callers don't peg a UI thread indefinitely. */
+static int lfn_sleep_ms(lua_State *L) {
+    lua_Integer ms = luaL_optinteger(L, 1, 0);
+    struct timespec ts;
+    if (ms <= 0) return 0;
+    if (ms > 3600000l) ms = 3600000l;
+    ts.tv_sec = (time_t)(ms / 1000l);
+    ts.tv_nsec = (long)((ms % 1000l) * 1000000l);
+    nanosleep(&ts, NULL);
+    return 0;
+}
+
 /* psi.stdout_write(text) -- raw unbuffered write to stdout. */
 static int lfn_stdout_write(lua_State *L) {
     size_t len = 0;
@@ -891,10 +997,14 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("json_decode",           lfn_json_decode);
     PSI_REG("http_post",             lfn_http_post);
     PSI_REG("http_post_stream",      lfn_http_post_stream);
+    PSI_REG("http_stream_begin",     lfn_http_stream_begin);
+    PSI_REG("http_stream_poll",      lfn_http_stream_poll);
+    PSI_REG("http_stream_finish",    lfn_http_stream_finish);
     PSI_REG("tool_call",             lfn_tool_call);
     PSI_REG("readline",              lfn_readline);
     PSI_REG("add_history",           lfn_add_history);
     PSI_REG("stdout_write",          lfn_stdout_write);
+    PSI_REG("sleep_ms",              lfn_sleep_ms);
 
 #undef PSI_REG
 

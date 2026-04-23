@@ -7,6 +7,7 @@
 -- psi.commands.*.
 
 psi.prelude = require("psi.prelude")
+psi.sched = require("psi.sched")
 psi.events = require("psi.events")
 psi.ansi = require("psi.ansi")
 psi.diff = require("psi.diff")
