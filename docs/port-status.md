@@ -8,18 +8,19 @@ architecture it is porting.
 | `pi-mono` concept | `pi-mono` reference | `psi` status |
 | --- | --- | --- |
 | Central session/runtime object | `packages/coding-agent/src/core/agent-session.ts` | Partial. `psi` has a small `psi_agent_runtime` that owns session state and drives `--agent`, the interactive shell, and the TUI, but it is still much smaller than `pi`'s `AgentSession`. |
-| Structured message model | `packages/coding-agent/src/core/messages.ts` | Partial. `psi` has user, assistant, tool-call, tool-result, branch-summary, and compaction-summary roles, and assistant messages can persist structured payload JSON for better replay. |
-| Default coding tools | `packages/coding-agent/src/core/tools/` | Ported in minimal form. `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, and `lua` are registered in `lua/psi/tools.lua` and dispatched through host glue. |
-| Session persistence | `packages/coding-agent/docs/session.md` | Partial. `psi` persists JSONL session files, but they are still flat rather than branch-aware. |
+| Structured message model | `packages/coding-agent/src/core/messages.ts` | Ported. user, assistant, tool-call, tool-result, branch-summary, compaction-summary; assistant messages persist their full content-block array (text + tool_use + thinking blocks with signatures). |
+| Default coding tools | `packages/coding-agent/src/core/tools/` | Ported. `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `lua` registered in `lua/psi/tools.lua`, dispatched through host glue with before/after hooks. |
+| Session persistence | `packages/coding-agent/docs/session.md` | Ported to pi's v2 JSONL schema: typed entries, parent pointers, cache markers, file-op provenance, UTF-16 surrogate sanitising. Still single active-branch rather than a full tree walker; default auto-save path and picker UI not yet added. |
 | Project context discovery | `packages/coding-agent/src/core/resource-loader.ts` | Ported for `AGENTS.md` / `CLAUDE.md` discovery from cwd to root. Skills, prompt templates, and theme loading are not ported yet. |
-| System prompt assembly | `packages/coding-agent/src/core/system-prompt.ts` | Ported in minimal form via `psi.prompt`. The prompt is assembled from tool metadata, guidelines, cwd, date, and project context files. |
-| Interactive shell | `packages/coding-agent/src/modes/interactive/` | Partial. `psi` has a `libedit`-backed coding-agent shell that reuses the streamed Anthropic loop and supports a small slash-command set. |
-| Full-screen TUI | `packages/tui/` | Early. `--tui` runs the streamed agent loop under `ncursesw` with a worker-thread turn runner, live tool-stdout streaming, and Lua render/diff hooks, but is much smaller than `pi`'s TUI. |
+| System prompt assembly | `packages/coding-agent/src/core/system-prompt.ts` | Ported via `psi.prompt`. Assembled from tool metadata, guidelines, cwd, date, and project context files; prompt caching applied per `pi`. |
+| Interactive shell | `packages/coding-agent/src/modes/interactive/` | Ported. `libedit`-backed coding-agent shell over the streamed loop, slash commands include `/help`, `/session`, `/fork`, `/compact`, `/new`, `/clear`, `/reload`, `/system-prompt`, `/quit`, tier-1/2/3 additions. |
+| Full-screen TUI | `packages/tui/` | Ported core. `--tui` runs the streamed agent loop under `ncursesw` with a worker-thread runner, rich status line (cwd / model / session / token usage), unicode tool-call borders, live markdown, readline editing (Alt-B/F/D/Backspace, Ctrl-W/K/U), Esc-abort, and Ctrl-Z suspend. Smaller than `pi`'s TUI: no session tree view, no modals, no theme switching. |
 | RPC mode | `packages/coding-agent/src/modes/rpc/` | Not started. |
-| Compaction and summaries | `packages/coding-agent/src/core/compaction/` | Early. `psi` supports manual summary-based compaction through Anthropic, including file-op provenance from `psi.session`, but it is not yet token-aware or branch-aware like `pi`. |
-| Hooks and extensions | `packages/coding-agent/src/core/skills.ts`, `src/core/extensions/` | Early. `psi.tool_registry` exposes before/after tool-call hooks, and `psi.session` uses them to track file ops. Broader skills/extensions are not started. |
-| Abort / cancel plumbing | `packages/coding-agent/src/core/abort-signal.ts` | Early. `psi` threads an `AbortSignal` through turn, compact, curl, and shell execution. |
-| Provider/model loop | `packages/ai/`, `packages/coding-agent/src/modes/print-mode.ts` | Partial. `psi` has a streamed Anthropic Messages API loop for single-shot, interactive, and TUI runs, with host tool execution, manual compaction calls, and session logging. It is not yet an abstract multi-provider runtime. |
+| Compaction and summaries | `packages/coding-agent/src/core/compaction/` | Ported. Manual and dynamic token-aware auto-compaction; file-op provenance from `psi.session` feeds the compaction prompt. Not yet branch-aware. |
+| Hooks and extensions | `packages/coding-agent/src/core/skills.ts`, `src/core/extensions/` | Early-to-partial. `psi.tool_registry` exposes before/after tool-call hooks; `psi.events` is a neutral pub/sub bus; `psi.commands.register` opens slash commands to extensions; boot loads Lua files from `$PSI_EXTENSIONS_DIR`, `~/.config/psi/extensions/`, and `./.psi/extensions/`. No npm/git package manager, no TS transpile, no sandboxing. |
+| Abort / cancel plumbing | `packages/coding-agent/src/core/abort-signal.ts` | Ported. `AbortSignal` threaded through turn, compact, curl, and shell execution; transcript state ("aborted" / "error") recorded on each content block so the next turn sees a clean slate. |
+| Provider/model loop | `packages/ai/`, `packages/coding-agent/src/modes/print-mode.ts` | Partial. Streamed Anthropic Messages API (with prompt caching) and a local Ollama loop; both route through the same observer. A formal provider abstraction (and a second cloud provider) is still a next step. |
+| Markdown rendering of assistant output | `packages/tui/src/...` | Ported. Pure-Lua `psi.markdown` for print/REPL/`--agent`; mirrored C-side renderer in the TUI entry drawer (forced into C by the `lua_State` single-thread constraint — see architecture §4.3). |
 
 ## Dependency audit
 
@@ -41,15 +42,28 @@ architecture it is porting.
 
 ## Next porting priority
 
-The next structural gap is still the runtime shape around the first provider
-loop:
+The biggest remaining user-visible gaps are around session management
+and extension richness:
 
-1. grow `psi_agent_runtime` into a fuller session/runtime object that can also own the VM and future extension state
-2. split Anthropic-specific code behind a provider interface
-3. add token-aware and branch-aware compaction closer to `pi`
-4. build tree navigation and richer session management
-5. then layer RPC mode and a fuller TUI on top of that runtime
+1. **Default session path + resume/continue.** Auto-save to
+   `$PSI_DIR/sessions/<cwd-encoded>/<iso-ts>_<uuid>.jsonl`, add
+   `--no-session` / `--continue` / `--resume [id-prefix]`, and the
+   paired slash commands (`/resume`, `/sessions`, `/name`).
+   See [README.md](../README.md) and
+   [docs/architecture.md §7](architecture.md).
+2. **Formal provider abstraction.** Factor the shared observer /
+   streaming / tool-dispatch surface out of `psi.anthropic` /
+   `psi.ollama` into a small `psi.provider` interface so adding a
+   third backend is a declarative step.
+3. **Session tree navigation.** Walk the `parentSession` pointers
+   in session headers; add `/tree`, `/clone`, and forks that
+   persist sibling branches alongside the active leaf.
+4. **Branch-aware compaction.** Let compaction know about siblings
+   instead of treating the transcript as linear.
+5. **RPC mode.** JSONL over stdin/stdout reusing the same runtime
+   and observer.
 
-`psi` can now produce the coding-agent prompt, stream model output, execute host
-tools, run interactively, render a basic TUI, and compact sessions manually,
+`psi` can now produce the coding-agent prompt, stream model output
+from two providers, execute host tools, run interactively, render a
+TUI with live markdown and rich status, and auto-compact sessions,
 but it is still not feature-complete relative to `pi-mono`.

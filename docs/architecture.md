@@ -86,22 +86,42 @@ Lua is used for:
 - slash commands
 - hooks (before/after tool calls, file-op tracking, render hooks)
 - optional custom tools
+- event-bus pub/sub for extensions
+- provider loops (Anthropic streaming, Ollama)
+- line-oriented print/REPL rendering (including markdown)
 - future summary prompt customization
 
 The host embeds Lua and exposes the runtime through a `psi.*` module surface
-assembled in `lua/boot.lua`:
-
-- `psi.tools` — tool registry and dispatch
-- `psi.tool_registry` — declarative tool registration
-- `psi.session` — session records and file-op provenance
-- `psi.prompt` — system prompt assembly
-- `psi.render` / `psi.diff` / `psi.ansi` — TUI and diff rendering
-- `psi.hooks` — hook dispatch
-- `psi.records` — structured tool and message records
-- `psi.io` — small host I/O helpers
+assembled in `lua/boot.lua`. See §10 for the current module list.
 
 User code stays close to stock Lua 5.4 semantics, with host-specific
 functionality confined to the `psi.*` modules.
+
+#### Thread-safety constraint (important)
+
+Lua is strictly single-threaded: one `lua_State` cannot be touched by two
+OS threads simultaneously. The TUI mode (§11.3) runs the agent turn on a
+worker thread; that worker holds the VM for the entire turn. As a result,
+**the main thread must not call Lua during a streaming turn** — it would
+race the worker and has empirically produced SIGSEGVs deep in
+`luaV_execute` / `luaL_error`.
+
+This pushes a small amount of "render helper" code from Lua into C
+specifically for the TUI main-thread redraw path:
+
+- TUI status line formatting (cwd, session id, model, token usage)
+- TUI inline markdown rendering (bold / italic / code / headings /
+  fenced blocks) in the assistant-entry drawer
+- TUI diff-style colouring for write/edit tool results
+
+Non-TUI modes (print, REPL, --agent, --eval, --compact) never run Lua
+concurrently with anything else and so continue to render through the
+Lua `psi.render` / `psi.markdown` modules. The result is a deliberate
+duplication: the `psi.markdown` Lua module and a small C parser in
+`src/runtime/tui_mode.c` implement overlapping grammars for print and
+TUI respectively. The cost of duplication is lower than the cost of
+introducing a second `lua_State` for the main thread or serialising
+every redraw against the worker.
 
 ### 4.4 provider layer
 
@@ -261,46 +281,88 @@ This means the host treats Lua calls as bounded transactions:
 
 Currently shipped modules (see `lua/psi/`):
 
-### `psi.tools`
+### `psi.tools` and `psi.tool_registry`
 
-Built-in tool implementations (`read`, `write`, `edit`, `bash`, `grep`,
-`find`, `ls`, `lua`). Exposes `psi.tools.dispatch_alist` for C glue.
-
-### `psi.tool_registry`
-
-Declarative tool registration, schema capture, dispatch, and
-before/after hook plumbing.
+`psi.tools` holds the built-in tool implementations (`read`, `write`,
+`edit`, `bash`, `grep`, `find`, `ls`, `lua`) and exposes
+`psi.tools.dispatch_alist` for C glue. `psi.tool_registry` owns
+declarative registration, schema capture, dispatch, and before/after
+hook plumbing; extensions register new tools through it.
 
 ### `psi.session`
 
-Session record construction and file-op provenance hooks used during
-compaction.
+Session record construction, on-disk JSONL format (pi-compatible v2
+with parent pointers, cache markers, file-op provenance), load/save
+and fork/compaction plumbing.
 
 ### `psi.prompt`
 
 System prompt assembly: tool metadata, cwd, date, and discovered
 `AGENTS.md` / `CLAUDE.md` context.
 
-### `psi.render`, `psi.diff`, `psi.ansi`
+### `psi.anthropic`, `psi.ollama`
 
-Render helpers used by both the interactive shell and the TUI for tool
-execution blocks, diffs, and ANSI formatting.
+Provider loops. `psi.anthropic` streams the Anthropic Messages API with
+prompt caching, tool-use round-tripping, and per-turn usage accounting;
+`psi.ollama` is a local-first provider for offline iteration. Both
+funnel their deltas through the same observer interface so modes and
+extensions see a single event stream.
 
-### `psi.hooks`
+### `psi.agent`
 
-Hook registration and dispatch used by tooling and rendering layers.
+Thin orchestration wrapper around the current provider — one entry
+point for "run a turn", "run compaction", etc. Keeps the mode layer
+provider-agnostic.
 
-### `psi.records`
+### `psi.context`
 
-Structured tool spec, tool result, and message record constructors.
+Running per-turn usage mirror. Writes back into C (`psi.set_usage`) so
+the TUI status line can read input/output/cache/total/window without
+calling Lua.
 
-### `psi.io`, `psi.commands`, `psi.tool_shell`, `psi.prelude`
+### `psi.render`, `psi.diff`, `psi.ansi`, `psi.markdown`
 
-Small host I/O helpers, slash-command dispatch, POSIX shell quoting, and the
-prelude used by the boot script.
+Line-oriented render helpers for print / REPL / `--agent` modes.
+`psi.render` owns the assistant-text and tool-call/result hooks;
+`psi.diff` produces unified-diff blocks; `psi.ansi` is the small
+colour helper; `psi.markdown` is the pure-Lua streaming gsub
+renderer that styles assistant output live. The TUI does not use
+these (see §4.3 thread-safety note) — it has its own C-side drawer.
 
-The host should keep these modules intentionally narrow. Direct unrestricted
-host surfaces are easy to add later and hard to remove cleanly.
+### `psi.events`
+
+Neutral pub/sub bus (subscribe / unsubscribe / emit) used by extensions
+for effects that don't fit the render hook's string-concat contract.
+Bridged from the render events in `boot.lua` so extensions don't need
+to pick a side.
+
+### `psi.commands`
+
+Slash-command registration and dispatch (`/help`, `/session`, `/fork`,
+`/compact`, `/new`, `/clear`, ...). Extensions register their own
+commands through `psi.commands.register`.
+
+### `psi.modes`
+
+Implements the non-TUI mode entry points (print, eval, system-prompt,
+agent, compact, REPL) so the C host stays a thin dispatcher.
+
+### `psi.tui`
+
+Mode-aware hint strings and small helpers used by the TUI's C drawer.
+Legacy status-line code lives here but is no longer called by the
+redraw path (see §4.3).
+
+### `psi.records`, `psi.tool_shell`, `psi.prelude`
+
+Structured tool spec / tool result / message record constructors;
+POSIX shell quoting for the `bash` tool; the prelude (UUIDs, JSON
+helpers, safe reads, UTF-16 surrogate sanitising) used by the boot
+script and every other module.
+
+The host should keep these modules intentionally narrow. Direct
+unrestricted host surfaces are easy to add later and hard to remove
+cleanly.
 
 ## 11. mode architecture
 
@@ -323,12 +385,26 @@ loop.
 ### 11.3 TUI mode
 
 `--tui` drives the same runtime under a full-screen `ncursesw` view. The TUI
-runs the agent turn on a worker thread and streams tool output live through
-Lua render hooks. A UTF-8 locale is set before `initscr()` so unicode glyphs
-render correctly.
+runs the agent turn on a worker thread; tool calls, tool results, text deltas
+and thinking deltas are pushed to a C-owned event queue and drained on the
+main (redraw) thread between `getch()` ticks. A UTF-8 locale is set before
+`initscr()` so unicode glyphs render correctly.
+
+Because the worker holds the single `lua_State` for the duration of a turn
+(§4.3), the main thread **does not call Lua during a streaming turn**. In
+practice this means the TUI has its own small C-side renderers for
+anything that needs to run during a redraw:
+
+- `psi_tui_footer_lines` — status / usage line, reads the `psi_host_usage`
+  mirror in C directly
+- `psi_tui_draw_assistant_line` — inline markdown (bold, italic, code,
+  headings, fenced blocks) in the assistant entry drawer
+- `psi_tui_line_style` — diff-style coloring scoped to `write` / `edit`
+  tool results and compaction summaries
 
 The important rule is that the UI must consume host events rather than becoming
-the place where state lives.
+the place where state lives. Per-entry text is C-owned, so redraws are
+deterministic even if Lua is mid-`lua_pcall` on the worker thread.
 
 ### 11.4 RPC mode
 

@@ -17,23 +17,48 @@ This repository currently contains:
 
 - an architecture document in [docs/architecture.md](docs/architecture.md)
 - a port audit in [docs/port-status.md](docs/port-status.md)
-- a Nix flake that builds `psi` and its dependencies
+- an extension authoring guide in [docs/extensions.md](docs/extensions.md)
+- a provider catalogue in [docs/providers.md](docs/providers.md)
+- a Nix flake that builds `psi` and its dependencies, plus cross-
+  compile targets (`packages.psi-i686`, `packages.psi-static`,
+  `packages.psi-static-i686` for musl ILP32/LP64 static binaries)
 - `cJSON` for JSON session records and structured tool payloads
-- `libcurl` for Anthropic Messages API integration
+- `libcurl` for HTTPS provider integration
 - `libedit` for interactive line editing without the GPL constraint of GNU Readline
 - `ncursesw` (with UTF-8 locale) for the full-screen TUI
-- an embedded Lua 5.4 runtime with host glue in `src/lua/vm.c`
-- a Lua bootstrap layer under `lua/` that owns the tool registry, prompt
-  assembly, session records, hook dispatch, and render helpers
-- a default coding-agent system prompt assembled from tools, cwd, date, and local `AGENTS.md` / `CLAUDE.md`
-- a streamed Anthropic-backed `--agent` mode with host tool execution and session logging
-- a default interactive coding-agent shell backed by the same streamed agent loop
-- a full-screen `--tui` mode backed by the same streamed agent loop and Lua hook renderers
+- `zlib` to gzip-compress embedded Lua sources and docs inside the binary
+- an embedded Lua 5.4 runtime with host glue in `src/lua/vm.c` and a
+  compressed embed-table (`include/psi/embedded_lua.h`) so portable
+  static binaries carry their own Lua bootstrap and documentation
+- a Lua bootstrap layer under `lua/` that owns the tool registry,
+  prompt assembly, session records, render/markdown/diff helpers,
+  provider loops, slash commands, and an extension loader
+- a default coding-agent system prompt assembled from tools, cwd,
+  date, and local `AGENTS.md` / `CLAUDE.md`
+- a streamed Anthropic-backed `--agent` mode with host tool
+  execution, prompt caching, dynamic token-accounting, and session
+  logging in a pi-compatible v2 JSONL format
+- an Ollama provider for local-first iteration (see
+  [docs/providers.md](docs/providers.md))
+- a default interactive coding-agent shell backed by the same
+  streamed agent loop, with slash commands (`/help`, `/session`,
+  `/fork`, `/compact`, `/new`, `/clear`, `/reload`,
+  `/system-prompt`, `/quit`, tier-1/2/3 additions)
+- a full-screen `--tui` mode with rich status (cwd / model /
+  session / token usage), unicode tool-call borders, live
+  markdown rendering, mode-aware hints, readline-style editing
+  (Alt-B/F/D/Backspace, Ctrl-W/K/U), Esc-abort while busy, and
+  Ctrl-Z suspend/resume
 - manual session compaction through `--compact` and `/compact`
+- cooperative abort plumbing (Ctrl-C for non-TUI, Esc in TUI)
+  that cancels the current curl transfer, kills any child
+  process, and persists a truncated tool result
+- static analysis wired into the flake (`nix run .#analyze`) with
+  cppcheck + `gcc -fanalyzer`
 
-It still does not contain the full `pi` session tree model, RPC protocol, or
-skills/extensions layer. Those are described in the architecture document and
-will be built incrementally.
+It still does not contain the full `pi` session tree model, RPC
+protocol, or a rich skills/extensions ecosystem. Those are described
+in the architecture document and will be built incrementally.
 
 ## Quick start
 
@@ -73,7 +98,11 @@ set -a && . ./.env.local && ./build/psi --session .psi/session.jsonl --compact 1
 ```
 
 Session files are explicit for now. When `--session FILE` is set, `psi` loads
-the JSONL file if it exists and rewrites it after each run.
+the JSONL file if it exists and rewrites it after each run. The on-disk
+format matches `pi`'s v2 schema (headers, typed entries, parent pointers,
+cache markers, file-op provenance); auto-save to a default path and
+session-picker UI are planned (see the comparison in
+[docs/port-status.md](docs/port-status.md)).
 
 Current structured host tools registered in `lua/psi/tools.lua`:
 
@@ -114,25 +143,53 @@ original plain-text-only form.
 
 Current limitations of `--agent`:
 
-- the TUI is still much smaller than `pi`'s interactive mode
+- the TUI is smaller than `pi`'s; session tree navigation, clone,
+  name, import/export, and a session picker are not yet built
 - no RPC mode yet
 - no streaming resume/retry logic
-- session persistence is still flat JSONL rather than a full branch tree
-- compaction is manual and summary-based, not `pi`'s fuller token-aware system
-- only Anthropic is wired today; there is no provider abstraction yet
+- session persistence is still a flat active-branch JSONL rather
+  than a full branch tree walker
+- compaction is summary-based and now dynamically token-aware, but
+  not branch-aware
+- two wired providers (Anthropic, Ollama); a general provider
+  abstraction is not yet formalised
+
+## Extensions
+
+Lua files dropped into any of the following directories are
+loaded at startup and can register tools, subscribe to events, or
+add slash commands. See [docs/extensions.md](docs/extensions.md)
+for the authoring guide.
+
+- `$PSI_EXTENSIONS_DIR` (colon-separated list, takes precedence)
+- `~/.config/psi/extensions/`
+- `./.psi/extensions/`
 
 ## Layout
 
 - `docs/architecture.md`: planned runtime architecture
 - `docs/port-status.md`: audit against `pi-mono`
-- `include/psi/`: public project headers (`agent`, `anthropic`, `common`,
-  `host_ops`, `message`, `process`, `prompt`, `runtime`, `session`, `vm`, ...)
+- `docs/extensions.md`: extension API surface and authoring guide
+- `docs/providers.md`: provider catalogue and configuration
+- `include/psi/`: public project headers (`abort`, `agent`,
+  `anthropic`, `common`, `embedded_lua`, `host_ops`, `message`,
+  `process`, `runtime`, `session`, `vm`)
 - `src/main.c`: entry point and CLI dispatch
-- `src/core/`: core host runtime (agent loop, Anthropic client, host ops,
-  messages, process spawning, prompt assembly, session I/O)
+- `src/core/`: core host runtime (abort signal, agent loop,
+  Anthropic client, host ops, process spawning, session I/O)
 - `src/runtime/`: CLI parsing and the print/TUI runtime modes
-- `src/lua/vm.c`: Lua VM initialization and C-to-Lua glue
-- `lua/boot.lua`: bootstrap that wires the `psi.*` Lua modules together
-- `lua/psi/`: Lua modules for the tool registry, built-in tools, prompt
-  rendering, session records, hooks, diff, ANSI, and render helpers
-- `tests/`: smoke tests
+  (including the TUI's C-side status + markdown drawers, which
+  bypass Lua on the redraw path — see
+  [docs/architecture.md §4.3](docs/architecture.md))
+- `src/lua/vm.c`: Lua VM initialization, C-to-Lua glue, and the
+  embedded-asset searcher / inflate plumbing
+- `scripts/embed_lua.c`: build-time helper that deflate-compresses
+  Lua sources and docs into C byte arrays
+- `lua/boot.lua`: bootstrap that wires the `psi.*` Lua modules
+  together, bridges render hooks onto the events bus, and loads
+  extensions
+- `lua/psi/`: Lua modules — tool registry, built-in tools, prompt
+  assembly, session records/format, provider loops (Anthropic,
+  Ollama), agent orchestration, slash commands, events bus,
+  context mirror, render/diff/ANSI/markdown helpers, prelude
+- `tests/`: smoke tests and valgrind harness
