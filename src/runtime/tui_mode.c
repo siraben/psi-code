@@ -841,13 +841,24 @@ static void psi_tui_line_style(
     }
 
     if (entry->kind == PSI_TUI_ENTRY_TOOL_RESULT || entry->kind == PSI_TUI_ENTRY_COMPACTION) {
-        if (psi_tui_line_has_prefix(line_text, "+ ")) {
+        /* +/- diff coloring only makes sense for tools whose output is
+         * a unified-diff style block — otherwise a tool result that
+         * happens to emit a YAML/markdown list of items starting with
+         * "- " gets painted red as if each entry were a removed line.
+         * Compactions always render as diff-style summaries so they
+         * keep the coloring. */
+        int diff_context =
+            entry->kind == PSI_TUI_ENTRY_COMPACTION
+            || (entry->title != NULL
+                && (strcmp(entry->title, "write") == 0
+                    || strcmp(entry->title, "edit") == 0));
+        if (diff_context && psi_tui_line_has_prefix(line_text, "+ ")) {
             *color_pair = 5;
             *attrs = A_BOLD;
-        } else if (psi_tui_line_has_prefix(line_text, "- ")) {
+        } else if (diff_context && psi_tui_line_has_prefix(line_text, "- ")) {
             *color_pair = 6;
             *attrs = A_BOLD;
-        } else if (psi_tui_line_has_prefix(line_text, "  ")) {
+        } else if (diff_context && psi_tui_line_has_prefix(line_text, "  ")) {
             *color_pair = 7;
             *attrs = A_DIM;
         }
