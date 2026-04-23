@@ -712,17 +712,35 @@ function M.run_turn(opts)
     local state = new_state()
     local leftover = ""
     local sse_carry = { event = nil, data = nil }
-    local status, err = psi.http_post_stream(url, headers, body, function(chunk)
-      leftover = leftover .. chunk
-      leftover = sse_feed(leftover, sse_carry, function(event_type, data)
-        dispatch_sse(state, event_type, data, observer)
-      end)
-    end)
+    local sched = require("psi.sched")
 
-    if status == nil then
+    -- Async pull-loop. http_stream_begin spawns a helper thread that
+    -- runs curl_easy_perform; we cooperatively yield to the host
+    -- between chunks so the TUI redraw loop keeps running.
+    local handle, begin_err = psi.http_stream_begin(url, headers, body)
+    if handle == nil then
+      save_failed_partial(state, model, "error", tostring(begin_err))
+      io.stderr:write("http error: " .. tostring(begin_err) .. "\n")
+      return false, "error"
+    end
+
+    while true do
+      if abort_check() then break end
+      local chunk, done = sched.http_poll(handle, 50)
+      if chunk ~= nil then
+        leftover = leftover .. chunk
+        leftover = sse_feed(leftover, sse_carry, function(event_type, data)
+          dispatch_sse(state, event_type, data, observer)
+        end)
+      end
+      if done then break end
+    end
+    local status = psi.http_stream_finish(handle)
+
+    if status < 0 then
       local aborted = abort_check()
       local reason = aborted and "aborted" or "error"
-      local emsg = aborted and "Request was aborted" or tostring(err or "http error")
+      local emsg = aborted and "Request was aborted" or "http transport error"
       save_failed_partial(state, model, reason, emsg)
       if not aborted then
         io.stderr:write("http error: " .. emsg .. "\n")

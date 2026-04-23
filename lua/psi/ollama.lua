@@ -347,17 +347,29 @@ function M.run_turn(opts)
 
     local state = new_state()
     local leftover = ""
-    local status, err = psi.http_post_stream(
-      url, headers, psi.json_encode(request),
-      function(chunk)
+    local sched = require("psi.sched")
+
+    local handle, begin_err = psi.http_stream_begin(url, headers, psi.json_encode(request))
+    if handle == nil then
+      io.stderr:write("ollama: " .. tostring(begin_err) .. "\n")
+      return false, "error"
+    end
+
+    while true do
+      if abort_check() then break end
+      local chunk, done = sched.http_poll(handle, 50)
+      if chunk ~= nil then
         leftover = leftover .. chunk
         leftover = sse_feed_ndjson(leftover, state, observer)
-      end)
+      end
+      if done then break end
+    end
+    local status = psi.http_stream_finish(handle)
 
-    if status == nil then
+    if status < 0 then
       local aborted = abort_check()
       local reason = aborted and "aborted" or "error"
-      local emsg = aborted and "Request was aborted" or tostring(err or "http error")
+      local emsg = aborted and "Request was aborted" or "http transport error"
       if state.text ~= "" or #state.tool_calls > 0 then
         persist_assistant(state, model, reason, emsg)
         context.record_usage(psi.session_message_count(),

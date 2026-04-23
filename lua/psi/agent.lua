@@ -7,6 +7,7 @@
 
 local context = require("psi.context")
 local prompt = require("psi.prompt")
+local sched = require("psi.sched")
 local session = require("psi.session")
 local anthropic = require("psi.anthropic")
 local ollama = require("psi.ollama")
@@ -36,6 +37,12 @@ function M.provider_for(model) return pick_provider(model) end
 
 -- Append the user's turn, build the system prompt, and drive the
 -- streaming tool loop via the chosen provider's run_turn.
+--
+-- The turn body always runs inside a sched coroutine so provider
+-- code can freely yield at cooperative points (sched.http_poll,
+-- sched.proc_poll) without the caller having to know. Non-TUI
+-- modes get a trivial driver (no tick hook); the TUI installs its
+-- own tick hook so its main loop keeps redrawing.
 function M.run_turn(opts)
   local user_text = opts.user_text or ""
   session.append_user(user_text)
@@ -43,13 +50,15 @@ function M.run_turn(opts)
 
   local provider, real_model = pick_provider(opts.model)
   local system_prompt = prompt.system_prompt()
-  return provider.run_turn({
-    system_prompt = system_prompt,
-    model = real_model,
-    max_tokens = opts.max_tokens,
-    observer = opts.observer,
-    abort_check = opts.abort_check,
-  })
+  return sched.run(function()
+    return provider.run_turn({
+      system_prompt = system_prompt,
+      model = real_model,
+      max_tokens = opts.max_tokens,
+      observer = opts.observer,
+      abort_check = opts.abort_check,
+    })
+  end)
 end
 
 -- Summarize the older half of the session using a one-shot completion

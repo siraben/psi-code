@@ -60,38 +60,34 @@ M.resolvers["tick"] = function(_req)
   return nil
 end
 
--- Run fn(...) as a coroutine; return whatever fn returns.
--- Propagates errors with a traceback.
+-- Run fn(...) as a coroutine; return all of fn's return values.
+-- Propagates errors verbatim.
 function M.run(fn, ...)
   local co = coroutine.create(fn)
-  local args = { ... }
-  local nargs = select("#", ...)
+  local args = table.pack(...)
   while true do
-    local ok, req_or_result = coroutine.resume(co, table.unpack(args, 1, nargs))
+    local results = table.pack(coroutine.resume(co, table.unpack(args, 1, args.n)))
+    local ok = results[1]
     if not ok then
-      error(req_or_result, 0)
+      error(results[2], 0)
     end
     if coroutine.status(co) == "dead" then
-      return req_or_result
+      return table.unpack(results, 2, results.n)
     end
-    local req = req_or_result
+    -- results[2] is the yielded request (a table).
+    local req = results[2]
     if type(req) ~= "table" or type(req.kind) ~= "string" then
-      -- Unknown yield shape — treat as a pure "let the loop tick"
       req = { kind = "tick" }
     end
-    -- Let the host advance its own loop (redraw, input, etc.).
     local ok_tick, tick_err = pcall(tick_hook, req)
     if not ok_tick then
       io.stderr:write("psi.sched tick hook error: " .. tostring(tick_err) .. "\n")
     end
     local resolver = M.resolvers[req.kind]
     if resolver == nil then
-      args = { nil, "unknown request kind: " .. tostring(req.kind) }
-      nargs = 2
+      args = table.pack(nil, "unknown request kind: " .. tostring(req.kind))
     else
-      local a, b, c = resolver(req)
-      args = { a, b, c }
-      nargs = 3
+      args = table.pack(resolver(req))
     end
   end
 end
