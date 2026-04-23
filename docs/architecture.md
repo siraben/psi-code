@@ -88,7 +88,8 @@ Lua is used for:
 - optional custom tools
 - event-bus pub/sub for extensions
 - provider loops (Anthropic streaming, Ollama)
-- line-oriented print/REPL rendering (including markdown)
+- line-oriented rendering for all modes (including markdown)
+- cooperative scheduling of agent turns as coroutines
 - future summary prompt customization
 
 The host embeds Lua and exposes the runtime through a `psi.*` module surface
@@ -97,31 +98,47 @@ assembled in `lua/boot.lua`. See §10 for the current module list.
 User code stays close to stock Lua 5.4 semantics, with host-specific
 functionality confined to the `psi.*` modules.
 
-#### Thread-safety constraint (important)
+#### Concurrency model: single thread, Lua coroutines
 
-Lua is strictly single-threaded: one `lua_State` cannot be touched by two
-OS threads simultaneously. The TUI mode (§11.3) runs the agent turn on a
-worker thread; that worker holds the VM for the entire turn. As a result,
-**the main thread must not call Lua during a streaming turn** — it would
-race the worker and has empirically produced SIGSEGVs deep in
-`luaV_execute` / `luaL_error`.
+`lua_State` is strictly single-threaded and that fact drives the
+whole host design. Rather than fight it, psi commits to a single OS
+thread per process and expresses "do work while the UI stays
+responsive" through Lua coroutines on top of non-blocking C
+primitives.
 
-This pushes a small amount of "render helper" code from Lua into C
-specifically for the TUI main-thread redraw path:
+Two C helpers make this possible:
 
-- TUI status line formatting (cwd, session id, model, token usage)
-- TUI inline markdown rendering (bold / italic / code / headings /
-  fenced blocks) in the assistant-entry drawer
-- TUI diff-style colouring for write/edit tool results
+- `src/core/http_async.c` runs `curl_easy_perform` on an internal
+  helper pthread, enqueues chunks into a mutex-protected buffer, and
+  exposes `psi_http_stream_begin / _poll / _finish`. The helper
+  thread never touches Lua — it only pushes raw bytes.
+- `src/core/process.c` fork/execs the shell command and reads stdout
+  non-blockingly, exposing the same begin / poll / finish triple for
+  `psi_process_*`. The blocking `psi_process_run_shell` is now a
+  thin wrapper that drives the async state machine in a tight loop.
 
-Non-TUI modes (print, REPL, --agent, --eval, --compact) never run Lua
-concurrently with anything else and so continue to render through the
-Lua `psi.render` / `psi.markdown` modules. The result is a deliberate
-duplication: the `psi.markdown` Lua module and a small C parser in
-`src/runtime/tui_mode.c` implement overlapping grammars for print and
-TUI respectively. The cost of duplication is lower than the cost of
-introducing a second `lua_State` for the main thread or serialising
-every redraw against the worker.
+`lua/psi/sched.lua` wraps every agent turn in a coroutine. Each
+cooperative yield (`sched.http_poll`, `sched.proc_poll`,
+`sched.sleep_ms`) hands a small request table back to the driver;
+between resumes the driver calls `psi.host_tick`, which the TUI
+uses to run one iteration of its own event loop (non-blocking
+getch → input dispatch → redraw when dirty). Because all of this
+happens on the single thread that owns `lua_State`, the main
+redraw path is free to call Lua (markdown, status line, etc.)
+without any race.
+
+All the C-side duplicates that existed to work around the old
+worker-thread model — `psi_tui_footer_lines` (C status formatting),
+`psi_tui_draw_assistant_line` (C markdown parser), the event queue
+/ mutex / condvar — have been deleted. The TUI redraws via
+`psi.tui.status_line` + `psi.tui.footer_hint` + `psi.markdown.render_line`,
+fed through a small ANSI-escape FSM that maps `\e[Nm` codes to
+ncurses attrs.
+
+Non-TUI modes (print, REPL, `--agent`, `--eval`, `--compact`) use
+the same coroutine driver but install no tick hook, so
+`psi.host_tick` is a no-op for them; they run the turn to completion
+with cooperative yields internally but no UI interleaving.
 
 ### 4.4 provider layer
 
@@ -322,12 +339,25 @@ calling Lua.
 
 ### `psi.render`, `psi.diff`, `psi.ansi`, `psi.markdown`
 
-Line-oriented render helpers for print / REPL / `--agent` modes.
+Line-oriented render helpers used by every mode, including the TUI.
 `psi.render` owns the assistant-text and tool-call/result hooks;
 `psi.diff` produces unified-diff blocks; `psi.ansi` is the small
 colour helper; `psi.markdown` is the pure-Lua streaming gsub
-renderer that styles assistant output live. The TUI does not use
-these (see §4.3 thread-safety note) — it has its own C-side drawer.
+renderer that styles assistant output live and also exposes
+`render_line(line, in_code_fence)` for the TUI to call per wrapped
+line. The TUI reuses all of these via a small ANSI-escape parser
+in `src/runtime/tui_mode.c` that converts `\e[Nm` to ncurses attrs.
+
+### `psi.sched`
+
+Coroutine driver used by every agent turn. `sched.run(fn)` runs
+`fn` as a coroutine; each yield describes a wait (`http`, `proc`,
+`sleep`, `tick`) and is resolved by the C side via the
+`psi.http_stream_*` / `psi.process_*` FFIs. Between resumes,
+`psi.host_tick` gives whichever host installed a tick hook (the
+TUI today) a chance to run one iteration of its own event loop.
+This is the bridge that makes the single-threaded architecture
+described in §4.3 work.
 
 ### `psi.events`
 
@@ -385,26 +415,31 @@ loop.
 ### 11.3 TUI mode
 
 `--tui` drives the same runtime under a full-screen `ncursesw` view. The TUI
-runs the agent turn on a worker thread; tool calls, tool results, text deltas
-and thinking deltas are pushed to a C-owned event queue and drained on the
-main (redraw) thread between `getch()` ticks. A UTF-8 locale is set before
-`initscr()` so unicode glyphs render correctly.
+is single-threaded: the main thread owns ncurses, the single `lua_State`,
+and all transcript state. When the user presses Enter, `psi_tui_submit`
+calls `psi_tui_run_turn_sync` which invokes the agent turn directly on the
+same thread. The Lua turn runs inside a `psi.sched` coroutine; every
+cooperative yield calls `psi.host_tick`, which routes to `psi_tui_tick` —
+a small function that drains any pending input non-blockingly, dispatches
+Esc / scroll / editing keys, and repaints if the transcript is dirty. A
+UTF-8 locale is set before `initscr()` so unicode glyphs render correctly.
 
-Because the worker holds the single `lua_State` for the duration of a turn
-(§4.3), the main thread **does not call Lua during a streaming turn**. In
-practice this means the TUI has its own small C-side renderers for
-anything that needs to run during a redraw:
+Observer callbacks run inline from the coroutine on the same thread, so
+they mutate `state->entries[]` directly — no queue, no mutex, no
+background thread. `psi_tui_observer_text_delta` etc. just append to the
+streaming entry and set `transcript_dirty`; the next tick repaints.
 
-- `psi_tui_footer_lines` — status / usage line, reads the `psi_host_usage`
-  mirror in C directly
-- `psi_tui_draw_assistant_line` — inline markdown (bold, italic, code,
-  headings, fenced blocks) in the assistant entry drawer
-- `psi_tui_line_style` — diff-style coloring scoped to `write` / `edit`
-  tool results and compaction summaries
+TUI-specific rendering calls straight into Lua from the draw path:
 
-The important rule is that the UI must consume host events rather than becoming
-the place where state lives. Per-entry text is C-owned, so redraws are
-deterministic even if Lua is mid-`lua_pcall` on the worker thread.
+- `psi.tui.status_line` / `psi.tui.footer_hint` build the status line
+- `psi.markdown.render_line` styles each wrapped assistant line
+- a small C ANSI-escape FSM (`psi_tui_draw_ansi_line`) converts the
+  resulting `\e[Nm` codes to ncurses attrs / color pairs
+
+The important rule is that the UI consumes host events rather than
+becoming the place where state lives. Per-entry text is C-owned (because
+the entry array is a C structure), but everything about how it renders
+is Lua.
 
 ### 11.4 RPC mode
 

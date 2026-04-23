@@ -48,7 +48,9 @@ This repository currently contains:
   session / token usage), unicode tool-call borders, live
   markdown rendering, mode-aware hints, readline-style editing
   (Alt-B/F/D/Backspace, Ctrl-W/K/U), Esc-abort while busy, and
-  Ctrl-Z suspend/resume
+  Ctrl-Z suspend/resume. Single-threaded: the agent turn runs as
+  a Lua coroutine on the ncurses thread, pumping input and
+  redraws between every cooperative yield
 - manual session compaction through `--compact` and `/compact`
 - cooperative abort plumbing (Ctrl-C for non-TUI, Esc in TUI)
   that cancels the current curl transfer, kills any child
