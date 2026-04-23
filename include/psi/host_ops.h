@@ -36,6 +36,15 @@ struct psi_host_usage {
     volatile long context_window;
 };
 
+/* Host tick hook.
+ *
+ * psi.sched calls psi.host_tick() between coroutine resumes. If a
+ * host has installed a hook here, it runs one iteration of its own
+ * event loop (e.g. the TUI: non-blocking getch + dispatch +
+ * redraw). Non-TUI hosts leave this NULL and psi.host_tick becomes
+ * a no-op. */
+typedef void (*psi_host_tick_fn)(void *userdata);
+
 struct psi_host_context {
     struct psi_session *session;
     struct psi_vm *vm;
@@ -43,6 +52,8 @@ struct psi_host_context {
     const char *active_tool_id;
     struct psi_abort_signal *abort_signal;
     struct psi_host_usage usage;
+    psi_host_tick_fn tick_hook;
+    void *tick_userdata;
 };
 
 #endif

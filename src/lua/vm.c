@@ -1006,6 +1006,20 @@ static int lfn_add_history(lua_State *L) {
     return 0;
 }
 
+/* psi.host_tick() -- run one iteration of the host's event loop.
+ *
+ * Called by psi.sched between coroutine resumes. Does nothing if no
+ * host (e.g. --eval, --print, --agent scripts) has installed a hook.
+ * The TUI installs one that pumps ncurses input + redraws; this is
+ * how the UI stays responsive during a streaming turn. */
+static int lfn_host_tick(lua_State *L) {
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    if (host != NULL && host->tick_hook != NULL) {
+        host->tick_hook(host->tick_userdata);
+    }
+    return 0;
+}
+
 /* psi.sleep_ms(ms) -- cooperative sleep (no thread involvement).
  * Used by psi.sched to honour sleep requests. Clamped to 1 hour so
  * buggy callers don't peg a UI thread indefinitely. */
@@ -1098,6 +1112,7 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("add_history",           lfn_add_history);
     PSI_REG("stdout_write",          lfn_stdout_write);
     PSI_REG("sleep_ms",              lfn_sleep_ms);
+    PSI_REG("host_tick",             lfn_host_tick);
 
 #undef PSI_REG
 

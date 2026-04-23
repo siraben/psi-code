@@ -2,7 +2,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <locale.h>
-#include <pthread.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,34 +47,6 @@ struct psi_tui_render_line {
     int in_code_fence;
 };
 
-enum psi_tui_event_kind {
-    PSI_TUI_EVENT_TEXT_DELTA = 0,
-    PSI_TUI_EVENT_TOOL_CALL = 1,
-    PSI_TUI_EVENT_TOOL_RESULT = 2,
-    PSI_TUI_EVENT_TOOL_PROGRESS = 3,
-    PSI_TUI_EVENT_THINKING_DELTA = 4,
-    PSI_TUI_EVENT_TURN_DONE = 5,
-    PSI_TUI_EVENT_COMPACT_DONE = 6
-};
-
-struct psi_tui_event {
-    enum psi_tui_event_kind kind;
-    char *text;         /* pre-rendered display text (delta / tool summary) */
-    char *tool_name;    /* tool call / tool result */
-    int is_error;       /* tool result */
-    int worker_status;  /* turn/compact done status */
-    char *turn_response;/* turn done: response text (owned) */
-    char *compact_summary; /* compact done: summary text (owned) */
-    int save_failed;    /* turn/compact done: session save status */
-    struct psi_tui_event *next;
-};
-
-enum psi_tui_task_kind {
-    PSI_TUI_TASK_NONE = 0,
-    PSI_TUI_TASK_TURN = 1,
-    PSI_TUI_TASK_COMPACT = 2
-};
-
 struct psi_tui_state {
     struct psi_agent_runtime runtime;
     const struct psi_cli_options *options;
@@ -92,27 +63,20 @@ struct psi_tui_state {
     int running;
     int scroll_offset;
     int streaming_assistant_index;
+    int streaming_thinking_index;
+    /* Index of the live tool-output entry receiving streaming progress
+     * chunks, or -1 when no tool is currently streaming. */
+    int streaming_tool_index;
+    /* Redraw coalescing: observer callbacks set transcript_dirty; the
+     * host tick hook clears it and repaints. Avoids one redraw per
+     * SSE delta; one per sched tick (~every 50ms during a stream). */
+    int transcript_dirty;
     int width;
     int height;
 
-    /* Background-worker plumbing. Observer callbacks run on worker_thread
-     * and push pre-rendered events onto the queue under event_lock. The
-     * main loop drains the queue between getch() ticks. */
-    pthread_t worker_thread;
-    int worker_thread_valid;
-    enum psi_tui_task_kind worker_task;
-    pthread_mutex_t event_lock;
-    struct psi_tui_event *event_head;
-    struct psi_tui_event *event_tail;
-    char *turn_line;
-    long compact_keep_recent;
-    /* Index of the live tool-output entry receiving streaming progress
-     * chunks, or -1 when no tool is currently streaming. Main thread only. */
-    int streaming_tool_index;
-    int streaming_thinking_index;
-    /* Cancellation token shared with the worker. Main thread triggers it
-     * when the user presses Esc; the worker polls it inside curl transfer
-     * hooks and psi_process_run_shell. */
+    /* Cancellation token read by the HTTP helper thread (curl
+     * transfer hook) and the async process poll loop. Main thread
+     * triggers it when the user presses Esc. */
     struct psi_abort_signal abort_signal;
 };
 
@@ -147,7 +111,6 @@ static void psi_tui_move_word_backward(struct psi_tui_state *state);
 static void psi_tui_move_word_forward(struct psi_tui_state *state);
 static void psi_tui_kill_to_end(struct psi_tui_state *state);
 static void psi_tui_kill_to_start(struct psi_tui_state *state);
-static void psi_tui_free_event(struct psi_tui_event *event);
 static int psi_tui_start_compact(struct psi_tui_state *state, long keep_recent);
 
 static int psi_tui_transcript_height(const struct psi_tui_state *state) {
@@ -1519,84 +1482,31 @@ static size_t psi_tui_total_rendered_lines(struct psi_tui_state *state) {
     return line_count;
 }
 
-/* Push an event onto the thread-safe queue. Takes ownership of any heap
- * strings passed via the event struct. */
-static void psi_tui_push_event(struct psi_tui_state *state, struct psi_tui_event *event) {
-    if (state == NULL || event == NULL) {
-        if (event != NULL) {
-            free(event->text);
-            free(event->tool_name);
-            free(event->turn_response);
-            free(event);
-        }
-        return;
-    }
-    event->next = NULL;
-    pthread_mutex_lock(&state->event_lock);
-    if (state->event_tail == NULL) {
-        state->event_head = event;
-    } else {
-        state->event_tail->next = event;
-    }
-    state->event_tail = event;
-    pthread_mutex_unlock(&state->event_lock);
+/* Anchor-scroll helper: when the user has scrolled up to read older
+ * transcript, keep their view locked to the same content as new
+ * deltas land. Call before_mutation() to snapshot line-count, then
+ * after_mutation() to re-anchor. No-op when scroll_offset==0. */
+static size_t psi_tui_scroll_anchor_before(struct psi_tui_state *state) {
+    if (state == NULL || state->scroll_offset <= 0) return 0u;
+    return psi_tui_total_rendered_lines(state);
 }
 
-static struct psi_tui_event *psi_tui_pop_event(struct psi_tui_state *state) {
-    struct psi_tui_event *event;
-
-    if (state == NULL) {
-        return NULL;
+static void psi_tui_scroll_anchor_after(struct psi_tui_state *state, size_t lines_before) {
+    size_t lines_after;
+    if (state == NULL || lines_before == 0u || state->scroll_offset <= 0) return;
+    lines_after = psi_tui_total_rendered_lines(state);
+    if (lines_after > lines_before) {
+        state->scroll_offset += (int)(lines_after - lines_before);
     }
-    pthread_mutex_lock(&state->event_lock);
-    event = state->event_head;
-    if (event != NULL) {
-        state->event_head = event->next;
-        if (state->event_head == NULL) {
-            state->event_tail = NULL;
-        }
-    }
-    pthread_mutex_unlock(&state->event_lock);
-    if (event != NULL) {
-        event->next = NULL;
-    }
-    return event;
 }
 
-static struct psi_tui_event *psi_tui_event_new(enum psi_tui_event_kind kind) {
-    struct psi_tui_event *event;
-
-    event = (struct psi_tui_event *)calloc(1u, sizeof(*event));
-    if (event == NULL) {
-        return NULL;
-    }
-    event->kind = kind;
-    return event;
-}
-
-/* Observer callbacks run on the worker thread. They pre-render via Lua
- * (safe since only the worker touches Lua during a turn) and push
- * plain-string events to the queue. The main thread owns all curses and
- * transcript mutations. */
-static void psi_tui_observer_text_delta(void *userdata, const char *text) {
-    struct psi_tui_state *state;
-    struct psi_tui_event *event;
-
-    state = (struct psi_tui_state *)userdata;
-    if (state == NULL || text == NULL) {
-        return;
-    }
-    event = psi_tui_event_new(PSI_TUI_EVENT_TEXT_DELTA);
-    if (event == NULL) {
-        return;
-    }
-    event->text = psi_strdup(text);
-    if (event->text == NULL) {
-        free(event);
-        return;
-    }
-    psi_tui_push_event(state, event);
-}
+/* Observer callbacks (run on the single Lua/main thread from inside
+ * the provider's streaming coroutine). They mutate state->entries[]
+ * directly and flag the transcript dirty; the host tick hook runs
+ * during sched resumes and repaints when the flag is set. No queue,
+ * no mutex, no background thread — all pre-2027d56 races are gone
+ * by construction.
+ */
 
 static void psi_tui_finish_streaming_assistant(struct psi_tui_state *state) {
     if (state == NULL || state->streaming_assistant_index < 0) {
@@ -1610,105 +1520,100 @@ static void psi_tui_finish_streaming_assistant(struct psi_tui_state *state) {
     state->streaming_assistant_index = -1;
 }
 
-static void psi_tui_observer_tool_call(void *userdata, const char *tool_call_id, const char *tool_name, const char *input_json) {
-    struct psi_tui_state *state;
-    char *summary;
-    struct psi_tui_event *event;
-
-    state = (struct psi_tui_state *)userdata;
-    if (state == NULL || tool_name == NULL) {
-        return;
+static void psi_tui_observer_text_delta(void *userdata, const char *text) {
+    struct psi_tui_state *state = (struct psi_tui_state *)userdata;
+    size_t lines_before;
+    if (state == NULL || text == NULL) return;
+    lines_before = psi_tui_scroll_anchor_before(state);
+    state->streaming_thinking_index = -1;
+    if (state->streaming_assistant_index < 0) {
+        state->streaming_assistant_index =
+            psi_tui_add_entry(state, PSI_TUI_ENTRY_ASSISTANT, NULL, "", 0);
     }
-    /* psi_tui_render_tool_call_text invokes Lua and reads state; safe on
-     * worker because only worker touches Lua during the turn. We only
-     * read state here, never mutate it. */
-    summary = psi_tui_render_tool_call_text(state, tool_call_id, tool_name, input_json);
-    event = psi_tui_event_new(PSI_TUI_EVENT_TOOL_CALL);
-    if (event == NULL) {
-        free(summary);
-        return;
-    }
-    event->text = summary;
-    event->tool_name = psi_strdup(tool_name);
-    if (event->tool_name == NULL) {
-        free(event->text);
-        free(event);
-        return;
-    }
-    psi_tui_push_event(state, event);
+    psi_tui_append_entry_text(state, state->streaming_assistant_index, text);
+    psi_tui_scroll_anchor_after(state, lines_before);
+    state->transcript_dirty = 1;
 }
 
 static void psi_tui_observer_thinking_delta(void *userdata, const char *text) {
-    struct psi_tui_state *state;
-    struct psi_tui_event *event;
+    struct psi_tui_state *state = (struct psi_tui_state *)userdata;
+    size_t lines_before;
+    if (state == NULL || text == NULL || text[0] == '\0') return;
+    lines_before = psi_tui_scroll_anchor_before(state);
+    if (state->streaming_thinking_index < 0) {
+        state->streaming_thinking_index =
+            psi_tui_add_entry(state, PSI_TUI_ENTRY_THINKING, NULL, "", 0);
+    }
+    psi_tui_append_entry_text(state, state->streaming_thinking_index, text);
+    psi_tui_scroll_anchor_after(state, lines_before);
+    state->transcript_dirty = 1;
+}
 
-    state = (struct psi_tui_state *)userdata;
-    if (state == NULL || text == NULL || text[0] == '\0') {
-        return;
-    }
-    event = psi_tui_event_new(PSI_TUI_EVENT_THINKING_DELTA);
-    if (event == NULL) {
-        return;
-    }
-    event->text = psi_strdup(text);
-    if (event->text == NULL) {
-        free(event);
-        return;
-    }
-    psi_tui_push_event(state, event);
+static void psi_tui_observer_tool_call(void *userdata, const char *tool_call_id, const char *tool_name, const char *input_json) {
+    struct psi_tui_state *state = (struct psi_tui_state *)userdata;
+    char *summary;
+    size_t lines_before;
+    if (state == NULL || tool_name == NULL) return;
+    summary = psi_tui_render_tool_call_text(state, tool_call_id, tool_name, input_json);
+    lines_before = psi_tui_scroll_anchor_before(state);
+    psi_tui_finish_streaming_assistant(state);
+    state->streaming_thinking_index = -1;
+    state->streaming_tool_index = -1;
+    psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_CALL, tool_name,
+                      summary != NULL ? summary : "", 0);
+    free(summary);
+    psi_tui_scroll_anchor_after(state, lines_before);
+    state->transcript_dirty = 1;
 }
 
 static void psi_tui_observer_tool_progress(void *userdata, const char *tool_call_id, const char *chunk, size_t len) {
-    struct psi_tui_state *state;
-    struct psi_tui_event *event;
+    struct psi_tui_state *state = (struct psi_tui_state *)userdata;
+    size_t lines_before;
     char *copy;
-
     PSI_UNUSED(tool_call_id);
-    state = (struct psi_tui_state *)userdata;
-    if (state == NULL || chunk == NULL || len == 0u) {
-        return;
-    }
+    if (state == NULL || chunk == NULL || len == 0u) return;
     copy = (char *)malloc(len + 1u);
-    if (copy == NULL) {
-        return;
-    }
+    if (copy == NULL) return;
     memcpy(copy, chunk, len);
     copy[len] = '\0';
-
-    event = psi_tui_event_new(PSI_TUI_EVENT_TOOL_PROGRESS);
-    if (event == NULL) {
-        free(copy);
-        return;
+    lines_before = psi_tui_scroll_anchor_before(state);
+    if (state->streaming_tool_index < 0) {
+        state->streaming_tool_index =
+            psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_RESULT, NULL, "", 0);
     }
-    event->text = copy;
-    psi_tui_push_event(state, event);
+    psi_tui_append_entry_text(state, state->streaming_tool_index, copy);
+    free(copy);
+    psi_tui_scroll_anchor_after(state, lines_before);
+    state->transcript_dirty = 1;
 }
 
 static void psi_tui_observer_tool_result(void *userdata, const char *tool_call_id, const char *tool_name, const char *output_json) {
-    struct psi_tui_state *state;
+    struct psi_tui_state *state = (struct psi_tui_state *)userdata;
     char *summary;
     int is_error;
-    struct psi_tui_event *event;
-
-    state = (struct psi_tui_state *)userdata;
-    if (state == NULL || tool_name == NULL) {
-        return;
-    }
+    size_t lines_before;
+    if (state == NULL || tool_name == NULL) return;
     summary = psi_tui_render_tool_result_text(state, tool_call_id, tool_name, output_json, &is_error);
-    event = psi_tui_event_new(PSI_TUI_EVENT_TOOL_RESULT);
-    if (event == NULL) {
-        free(summary);
-        return;
+    lines_before = psi_tui_scroll_anchor_before(state);
+    if (state->streaming_tool_index >= 0 &&
+        (size_t)state->streaming_tool_index < state->entry_count) {
+        /* We streamed progress — replace the live entry with the
+         * final formatted render rather than appending. */
+        struct psi_tui_entry *entry = &state->entries[state->streaming_tool_index];
+        free(entry->title);
+        free(entry->text);
+        entry->title = psi_strdup(tool_name);
+        entry->text = summary != NULL ? summary : psi_strdup("");
+        entry->is_error = is_error;
+        summary = NULL; /* ownership moved into entry->text */
+    } else {
+        psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_RESULT, tool_name,
+                          summary != NULL ? summary : "", is_error);
     }
-    event->text = summary;
-    event->tool_name = psi_strdup(tool_name);
-    event->is_error = is_error;
-    if (event->tool_name == NULL) {
-        free(event->text);
-        free(event);
-        return;
-    }
-    psi_tui_push_event(state, event);
+    free(summary);
+    state->streaming_tool_index = -1;
+    psi_tui_scroll_anchor_after(state, lines_before);
+    state->transcript_dirty = 1;
 }
 
 static void psi_tui_add_session_entry(struct psi_tui_state *state, const struct psi_message *message) {
@@ -1883,18 +1788,135 @@ static int psi_tui_handle_command(struct psi_tui_state *state, const char *line)
     return status;
 }
 
-/* Worker thread: runs whichever task was queued (turn or compact).
- * Observer callbacks push events during a turn. After the operation
- * completes (and the session is saved), push a TURN_DONE or
- * COMPACT_DONE event. Main thread drains events, joins the worker,
- * and clears busy state. */
-static void *psi_tui_run_turn(struct psi_tui_state *state) {
+/* Host tick hook (called from psi.sched between coroutine resumes).
+ *
+ * Runs one short iteration of the TUI event loop: drain any queued
+ * input non-blockingly, then repaint if observers or input dispatch
+ * marked the transcript dirty. Must be cheap: it fires every time
+ * the agent coroutine yields (each SSE chunk, between tool calls,
+ * during shell waits). The input branch is kept minimal — Esc,
+ * scroll, resize, and Ctrl-L only; full keyboard editing is for
+ * the idle main loop.
+ */
+static void psi_tui_input_once(struct psi_tui_state *state, int ch);
+
+static void psi_tui_tick(void *userdata) {
+    struct psi_tui_state *state = (struct psi_tui_state *)userdata;
+    int prev_timeout;
+    int ch;
+
+    if (state == NULL) return;
+
+    /* Poll any keys waiting in the input queue without blocking. */
+    prev_timeout = 0; /* we set it explicitly below */
+    (void)prev_timeout;
+    wtimeout(stdscr, 0);
+    for (;;) {
+        ch = getch();
+        if (ch == ERR) break;
+        psi_tui_input_once(state, ch);
+    }
+
+    if (state->transcript_dirty) {
+        state->transcript_dirty = 0;
+        psi_tui_redraw(state);
+    }
+}
+
+/* Lightweight input dispatch used by the tick hook during a turn.
+ * Supports abort (Esc), scroll, resize, full-redraw, Ctrl-Z, and
+ * input editing. Enter submits are gated off while busy. */
+static void psi_tui_submit_if_idle(struct psi_tui_state *state); /* fwd */
+
+static void psi_tui_input_once(struct psi_tui_state *state, int ch) {
+    if (state == NULL) return;
+
+    if (ch == KEY_RESIZE) {
+        clearok(stdscr, TRUE);
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (ch == KEY_PPAGE) {
+        psi_tui_scroll_by(state, state->height > 8 ? state->height / 2 : 4);
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (ch == KEY_NPAGE) {
+        psi_tui_scroll_by(state, -(state->height > 8 ? state->height / 2 : 4));
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (ch == KEY_UP) {
+        psi_tui_scroll_by(state, 1);
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (ch == KEY_DOWN) {
+        psi_tui_scroll_by(state, -1);
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (ch == 27) { /* Esc — aborts the turn while busy */
+        if (state->busy) {
+            psi_abort_signal_trigger(&state->abort_signal);
+            psi_tui_set_status(state, "aborting...", 0);
+            state->transcript_dirty = 1;
+        }
+        return;
+    }
+    if (ch == 12) { /* Ctrl-L */
+        clearok(stdscr, TRUE);
+        state->transcript_dirty = 1;
+        return;
+    }
+    /* Input editing — allowed while busy so the user can compose
+     * the next message. Enter submit is gated by busy inside submit. */
+    if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
+        psi_tui_delete_backward(state);
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (ch == 4) { /* Ctrl-D forward-delete */
+        if (state->input_length > 0u) {
+            psi_tui_delete_forward(state);
+            state->transcript_dirty = 1;
+        }
+        return;
+    }
+    if (ch == 23) { psi_tui_delete_word_backward(state); state->transcript_dirty = 1; return; }
+    if (ch == 11) { psi_tui_kill_to_end(state); state->transcript_dirty = 1; return; }
+    if (ch == 21) { psi_tui_kill_to_start(state); state->transcript_dirty = 1; return; }
+    if (ch == KEY_LEFT || ch == 2)  { if (state->cursor > 0u) state->cursor--; state->transcript_dirty = 1; return; }
+    if (ch == KEY_RIGHT || ch == 6) { if (state->cursor < state->input_length) state->cursor++; state->transcript_dirty = 1; return; }
+    if (ch == KEY_HOME || ch == 1)  { state->cursor = 0u; state->transcript_dirty = 1; return; }
+    if (ch == KEY_END  || ch == 5)  { state->cursor = state->input_length; state->transcript_dirty = 1; return; }
+    if (ch == '\n' || ch == '\r' || ch == KEY_ENTER) {
+        /* Gate inside submit_if_idle — while busy, just ignore. */
+        psi_tui_submit_if_idle(state);
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (isprint(ch)) {
+        psi_tui_insert_char(state, ch);
+        state->transcript_dirty = 1;
+    }
+}
+
+/* Run an agent turn synchronously on the main thread.
+ *
+ * The provider loop (psi.anthropic / psi.ollama run_turn) now runs
+ * inside a Lua coroutine (set up by psi.agent.run_turn via sched).
+ * Every cooperative yield point inside the provider — each SSE
+ * chunk poll, every tool poll — calls psi.host_tick, which
+ * dispatches to psi_tui_tick above so the UI keeps repainting and
+ * the user can press Esc. By the time this function returns the
+ * turn is fully complete and the session is persisted. */
+static int psi_tui_run_turn_sync(struct psi_tui_state *state, const char *line) {
     struct psi_agent_observer observer;
     struct psi_tui_stdio_guard stdio_guard;
+    struct psi_host_context *host;
     char *response_text;
     int status;
-    int save_failed;
-    struct psi_tui_event *done_event;
 
     memset(&observer, 0, sizeof(observer));
     observer.userdata = state;
@@ -1904,77 +1926,80 @@ static void *psi_tui_run_turn(struct psi_tui_state *state) {
     observer.on_tool_progress = psi_tui_observer_tool_progress;
     observer.on_thinking_delta = psi_tui_observer_thinking_delta;
 
+    host = &state->runtime.vm.host;
+    host->tick_hook = psi_tui_tick;
+    host->tick_userdata = state;
+
     response_text = NULL;
-    save_failed = 0;
     stdio_guard.active = 0;
     status = psi_tui_stdio_guard_begin(&stdio_guard);
     if (status == PSI_STATUS_OK) {
         status = psi_agent_runtime_turn_with_observer(
-            &state->runtime, state->turn_line, &observer,
+            &state->runtime, line, &observer,
             &state->abort_signal, &response_text);
-        if (status == PSI_STATUS_OK) {
-            if (psi_agent_runtime_save(&state->runtime) != PSI_STATUS_OK) {
-                save_failed = 1;
-            }
-        }
         psi_tui_stdio_guard_end(&stdio_guard);
     }
 
-    done_event = psi_tui_event_new(PSI_TUI_EVENT_TURN_DONE);
-    if (done_event != NULL) {
-        done_event->worker_status = status;
-        done_event->save_failed = save_failed;
-        done_event->turn_response = response_text;
-        psi_tui_push_event(state, done_event);
+    host->tick_hook = NULL;
+    host->tick_userdata = NULL;
+
+    if (status == PSI_STATUS_OK) {
+        if (psi_agent_runtime_save(&state->runtime) != PSI_STATUS_OK) {
+            psi_tui_finish_streaming_assistant(state);
+            psi_tui_set_status(state, "failed to save session file", 1);
+        } else {
+            psi_tui_finish_streaming_assistant(state);
+            psi_tui_set_status(state, "", 0);
+        }
     } else {
-        free(response_text);
+        psi_tui_set_status(state, "agent turn failed", 1);
+        psi_tui_finish_streaming_assistant(state);
+        psi_tui_add_entry(state, PSI_TUI_ENTRY_ERROR, NULL,
+                          "provider request failed", 1);
     }
-    return NULL;
+    free(response_text);
+
+    state->streaming_assistant_index = -1;
+    state->streaming_thinking_index = -1;
+    state->streaming_tool_index = -1;
+    return status;
 }
 
-static void *psi_tui_run_compact(struct psi_tui_state *state) {
+static int psi_tui_run_compact_sync(struct psi_tui_state *state, long keep_recent) {
     struct psi_tui_stdio_guard stdio_guard;
+    struct psi_host_context *host;
     char *summary;
     int status;
-    int save_failed;
-    struct psi_tui_event *done_event;
+
+    host = &state->runtime.vm.host;
+    host->tick_hook = psi_tui_tick;
+    host->tick_userdata = state;
 
     summary = NULL;
-    save_failed = 0;
     stdio_guard.active = 0;
     status = psi_tui_stdio_guard_begin(&stdio_guard);
     if (status == PSI_STATUS_OK) {
         status = psi_agent_runtime_compact(
-            &state->runtime, (size_t)state->compact_keep_recent,
+            &state->runtime, (size_t)keep_recent,
             &state->abort_signal, &summary);
-        if (status == PSI_STATUS_OK) {
-            if (psi_agent_runtime_save(&state->runtime) != PSI_STATUS_OK) {
-                save_failed = 1;
-            }
-        }
         psi_tui_stdio_guard_end(&stdio_guard);
     }
 
-    done_event = psi_tui_event_new(PSI_TUI_EVENT_COMPACT_DONE);
-    if (done_event != NULL) {
-        done_event->worker_status = status;
-        done_event->save_failed = save_failed;
-        done_event->compact_summary = summary;
-        psi_tui_push_event(state, done_event);
-    } else {
-        free(summary);
-    }
-    return NULL;
-}
+    host->tick_hook = NULL;
+    host->tick_userdata = NULL;
 
-static void *psi_tui_worker_main(void *arg) {
-    struct psi_tui_state *state = (struct psi_tui_state *)arg;
-    switch (state->worker_task) {
-        case PSI_TUI_TASK_TURN:    return psi_tui_run_turn(state);
-        case PSI_TUI_TASK_COMPACT: return psi_tui_run_compact(state);
-        case PSI_TUI_TASK_NONE:
-        default:                   return NULL;
+    if (status == PSI_STATUS_OK) {
+        if (psi_agent_runtime_save(&state->runtime) != PSI_STATUS_OK) {
+            psi_tui_set_status(state, "failed to save compacted session", 1);
+        } else {
+            psi_tui_rebuild_from_session(state);
+            psi_tui_set_status(state, "session compacted", 0);
+        }
+    } else {
+        psi_tui_set_status(state, "failed to compact session", 1);
     }
+    free(summary);
+    return status;
 }
 
 static int psi_tui_submit(struct psi_tui_state *state) {
@@ -1986,9 +2011,7 @@ static int psi_tui_submit(struct psi_tui_state *state) {
     }
 
     line = psi_strdup(state->input);
-    if (line == NULL) {
-        return PSI_STATUS_ERROR;
-    }
+    if (line == NULL) return PSI_STATUS_ERROR;
 
     state->input[0] = '\0';
     state->input_length = 0u;
@@ -2004,177 +2027,34 @@ static int psi_tui_submit(struct psi_tui_state *state) {
     state->streaming_assistant_index = psi_tui_add_entry(state, PSI_TUI_ENTRY_ASSISTANT, NULL, "", 0);
     state->scroll_offset = 0;
     state->busy = 1;
+    psi_abort_signal_reset(&state->abort_signal);
     psi_tui_set_status(state, "Working...", 0);
     psi_tui_redraw(state);
 
-    free(state->turn_line);
-    state->turn_line = line;
-    state->worker_task = PSI_TUI_TASK_TURN;
-    psi_abort_signal_reset(&state->abort_signal);
-    if (pthread_create(&state->worker_thread, NULL, psi_tui_worker_main, state) != 0) {
-        state->busy = 0;
-        state->worker_task = PSI_TUI_TASK_NONE;
-        state->streaming_assistant_index = -1;
-        psi_tui_set_status(state, "failed to spawn worker", 1);
-        free(state->turn_line);
-        state->turn_line = NULL;
-        psi_tui_redraw(state);
-        return PSI_STATUS_ERROR;
-    }
-    state->worker_thread_valid = 1;
+    (void)psi_tui_run_turn_sync(state, line);
+    free(line);
+
+    state->busy = 0;
+    psi_tui_redraw(state);
     return PSI_STATUS_OK;
+}
+
+static void psi_tui_submit_if_idle(struct psi_tui_state *state) {
+    if (state == NULL || state->busy) return;
+    (void)psi_tui_submit(state);
 }
 
 static int psi_tui_start_compact(struct psi_tui_state *state, long keep_recent) {
-    if (state == NULL || state->busy) {
-        return PSI_STATUS_OK;
-    }
+    int status;
+    if (state == NULL || state->busy) return PSI_STATUS_OK;
     state->busy = 1;
-    state->compact_keep_recent = keep_recent;
-    state->worker_task = PSI_TUI_TASK_COMPACT;
     psi_abort_signal_reset(&state->abort_signal);
     psi_tui_set_status(state, "Compacting...", 0);
     psi_tui_redraw(state);
-    if (pthread_create(&state->worker_thread, NULL, psi_tui_worker_main, state) != 0) {
-        state->busy = 0;
-        state->worker_task = PSI_TUI_TASK_NONE;
-        psi_tui_set_status(state, "failed to spawn worker", 1);
-        psi_tui_redraw(state);
-        return PSI_STATUS_ERROR;
-    }
-    state->worker_thread_valid = 1;
-    return PSI_STATUS_OK;
-}
-
-/* Drain pending render events. Called from the main loop between getch
- * ticks while a turn is in flight. */
-static void psi_tui_drain_events(struct psi_tui_state *state) {
-    struct psi_tui_event *event;
-    int dirty;
-    int was_scrolled_up;
-    size_t lines_before;
-    size_t lines_after;
-
-    if (state == NULL) {
-        return;
-    }
-
-    /* Snapshot scroll state before touching entries. If the user has
-     * scrolled up to read earlier content, we want their view to stay
-     * anchored there as new deltas land. scroll_offset counts lines above
-     * the visible bottom, so growth of the transcript must be added back
-     * in to compensate; otherwise their view drifts toward the live tail. */
-    was_scrolled_up = state->scroll_offset > 0;
-    lines_before = was_scrolled_up ? psi_tui_total_rendered_lines(state) : 0u;
-
-    dirty = 0;
-    while ((event = psi_tui_pop_event(state)) != NULL) {
-        switch (event->kind) {
-            case PSI_TUI_EVENT_TEXT_DELTA:
-                state->streaming_thinking_index = -1;
-                if (state->streaming_assistant_index < 0) {
-                    state->streaming_assistant_index =
-                        psi_tui_add_entry(state, PSI_TUI_ENTRY_ASSISTANT, NULL, "", 0);
-                }
-                psi_tui_append_entry_text(state, state->streaming_assistant_index,
-                                          event->text != NULL ? event->text : "");
-                break;
-            case PSI_TUI_EVENT_THINKING_DELTA:
-                if (state->streaming_thinking_index < 0) {
-                    state->streaming_thinking_index =
-                        psi_tui_add_entry(state, PSI_TUI_ENTRY_THINKING, NULL, "", 0);
-                }
-                psi_tui_append_entry_text(state, state->streaming_thinking_index,
-                                          event->text != NULL ? event->text : "");
-                break;
-            case PSI_TUI_EVENT_TOOL_CALL:
-                psi_tui_finish_streaming_assistant(state);
-                state->streaming_thinking_index = -1;
-                state->streaming_tool_index = -1;
-                psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_CALL,
-                                  event->tool_name, event->text, 0);
-                break;
-            case PSI_TUI_EVENT_TOOL_PROGRESS:
-                if (state->streaming_tool_index < 0) {
-                    state->streaming_tool_index =
-                        psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_RESULT, NULL, "", 0);
-                }
-                psi_tui_append_entry_text(state, state->streaming_tool_index,
-                                          event->text != NULL ? event->text : "");
-                break;
-            case PSI_TUI_EVENT_TOOL_RESULT:
-                /* If we streamed progress for this call, replace the live
-                 * entry with the final formatted render. Otherwise add a
-                 * fresh result entry. */
-                if (state->streaming_tool_index >= 0 &&
-                    (size_t)state->streaming_tool_index < state->entry_count) {
-                    struct psi_tui_entry *entry = &state->entries[state->streaming_tool_index];
-                    free(entry->title);
-                    free(entry->text);
-                    entry->title = event->tool_name != NULL ? psi_strdup(event->tool_name) : NULL;
-                    entry->text = event->text != NULL ? psi_strdup(event->text) : psi_strdup("");
-                    entry->is_error = event->is_error;
-                } else {
-                    psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_RESULT,
-                                      event->tool_name, event->text, event->is_error);
-                }
-                state->streaming_tool_index = -1;
-                break;
-            case PSI_TUI_EVENT_TURN_DONE:
-                if (state->worker_thread_valid) {
-                    pthread_join(state->worker_thread, NULL);
-                    state->worker_thread_valid = 0;
-                }
-                if (event->worker_status != PSI_STATUS_OK) {
-                    psi_tui_set_status(state, "agent turn failed", 1);
-                    psi_tui_finish_streaming_assistant(state);
-                    psi_tui_add_entry(state, PSI_TUI_ENTRY_ERROR, NULL, "Anthropic request failed", 1);
-                } else if (event->save_failed) {
-                    psi_tui_finish_streaming_assistant(state);
-                    psi_tui_set_status(state, "failed to save session file", 1);
-                } else {
-                    psi_tui_finish_streaming_assistant(state);
-                    psi_tui_set_status(state, "", 0);
-                }
-                state->streaming_assistant_index = -1;
-                state->streaming_thinking_index = -1;
-                state->streaming_tool_index = -1;
-                state->worker_task = PSI_TUI_TASK_NONE;
-                state->busy = 0;
-                free(state->turn_line);
-                state->turn_line = NULL;
-                break;
-            case PSI_TUI_EVENT_COMPACT_DONE:
-                if (state->worker_thread_valid) {
-                    pthread_join(state->worker_thread, NULL);
-                    state->worker_thread_valid = 0;
-                }
-                if (event->worker_status != PSI_STATUS_OK) {
-                    psi_tui_set_status(state, "failed to compact session", 1);
-                } else {
-                    psi_tui_rebuild_from_session(state);
-                    if (event->save_failed) {
-                        psi_tui_set_status(state, "failed to save compacted session", 1);
-                    } else {
-                        psi_tui_set_status(state, "session compacted", 0);
-                    }
-                }
-                state->worker_task = PSI_TUI_TASK_NONE;
-                state->busy = 0;
-                break;
-        }
-        psi_tui_free_event(event);
-        dirty = 1;
-    }
-    if (dirty) {
-        if (was_scrolled_up && state->scroll_offset > 0) {
-            lines_after = psi_tui_total_rendered_lines(state);
-            if (lines_after > lines_before) {
-                state->scroll_offset += (int)(lines_after - lines_before);
-            }
-        }
-        psi_tui_redraw(state);
-    }
+    status = psi_tui_run_compact_sync(state, keep_recent);
+    state->busy = 0;
+    psi_tui_redraw(state);
+    return status;
 }
 
 static void psi_tui_insert_char(struct psi_tui_state *state, int ch) {
@@ -2341,50 +2221,20 @@ static int psi_tui_state_init(struct psi_tui_state *state, const struct psi_cli_
     state->streaming_thinking_index = -1;
     state->running = 1;
     psi_abort_signal_init(&state->abort_signal);
-    if (pthread_mutex_init(&state->event_lock, NULL) != 0) {
-        return PSI_STATUS_ERROR;
-    }
     return PSI_STATUS_OK;
 }
 
-static void psi_tui_free_event(struct psi_tui_event *event) {
-    if (event == NULL) {
-        return;
-    }
-    free(event->text);
-    free(event->tool_name);
-    free(event->turn_response);
-    free(event);
-}
-
-/* gcc -fanalyzer sometimes clones this function (`.part.0`) for the
- * non-null path and loses the NULL guard below, reporting a false
- * dereference on the loop. The check IS present — silence only this
- * analyzer warning so -fanalyzer builds stay clean. */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wanalyzer-null-dereference"
 static void psi_tui_state_free(struct psi_tui_state *state) {
     size_t index;
-    struct psi_tui_event *event;
-
-    if (state == NULL) {
-        return;
-    }
-    /* Drain any remaining events. */
-    while ((event = psi_tui_pop_event(state)) != NULL) {
-        psi_tui_free_event(event);
-    }
-    pthread_mutex_destroy(&state->event_lock);
+    if (state == NULL) return;
     for (index = 0u; index < state->entry_count; index++) {
         psi_tui_free_entry(&state->entries[index]);
     }
     free(state->entries);
     free(state->input);
     free(state->status_text);
-    free(state->turn_line);
     psi_agent_runtime_free(&state->runtime);
 }
-#pragma GCC diagnostic pop
 
 int psi_run_tui_mode(const struct psi_cli_options *options) {
     struct psi_tui_state state;
@@ -2427,65 +2277,28 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
 
     status = PSI_STATUS_OK;
     while (state.running) {
-        /* Poll with a short timeout while busy so we can drain events from
-         * the worker thread. Block indefinitely otherwise. */
-        wtimeout(stdscr, state.busy ? 30 : -1);
-        psi_tui_drain_events(&state);
+        /* No worker thread — the main loop is idle between turns.
+         * Block indefinitely on getch; a submit kicks off
+         * psi_tui_run_turn_sync which drives the coroutine to
+         * completion with the tick hook keeping the UI alive. */
+        wtimeout(stdscr, -1);
         ch = getch();
-        if (ch == ERR) {
-            continue;
-        }
+        if (ch == ERR) continue;
 
-        if (ch == KEY_RESIZE) {
-            psi_tui_redraw(&state);
-            continue;
-        }
-        if (ch == KEY_PPAGE) {
-            psi_tui_scroll_by(&state, state.height > 8 ? state.height / 2 : 4);
-            psi_tui_redraw(&state);
-            continue;
-        }
-        if (ch == KEY_NPAGE) {
-            psi_tui_scroll_by(&state, -(state.height > 8 ? state.height / 2 : 4));
-            psi_tui_redraw(&state);
-            continue;
-        }
-        if (ch == KEY_UP) {
-            psi_tui_scroll_by(&state, 1);
-            psi_tui_redraw(&state);
-            continue;
-        }
-        if (ch == KEY_DOWN) {
-            psi_tui_scroll_by(&state, -1);
-            psi_tui_redraw(&state);
-            continue;
-        }
+        if (ch == KEY_RESIZE) { clearok(stdscr, TRUE); psi_tui_redraw(&state); continue; }
+        if (ch == KEY_PPAGE)  { psi_tui_scroll_by(&state, state.height > 8 ? state.height / 2 : 4); psi_tui_redraw(&state); continue; }
+        if (ch == KEY_NPAGE)  { psi_tui_scroll_by(&state, -(state.height > 8 ? state.height / 2 : 4)); psi_tui_redraw(&state); continue; }
+        if (ch == KEY_UP)     { psi_tui_scroll_by(&state, 1); psi_tui_redraw(&state); continue; }
+        if (ch == KEY_DOWN)   { psi_tui_scroll_by(&state, -1); psi_tui_redraw(&state); continue; }
 
-        /* Esc while busy: trigger the abort signal. Worker stops its
-         * curl transfer, kills any child process, and pushes TURN_DONE /
-         * COMPACT_DONE so the UI unblocks.
-         *
-         * Esc when idle: might be a plain Escape OR the prefix of an
-         * Alt-<key> sequence (xterm/vt100 style: Alt-X sends ESC X).
-         * Peek briefly at the next key; if one is queued, dispatch
-         * readline-style word motion / delete. If not, treat as plain
-         * Escape (no-op). set_escdelay(25) was called above so ncurses
-         * won't block longer than that on the follow-up. */
+        /* Esc: peek for Alt-<key> readline binding (b/f/d/Backspace).
+         * A bare Esc in idle mode is a no-op. */
         if (ch == 27) {
             int next;
-            if (state.busy) {
-                psi_abort_signal_trigger(&state.abort_signal);
-                psi_tui_set_status(&state, "aborting...", 0);
-                psi_tui_redraw(&state);
-                continue;
-            }
             wtimeout(stdscr, 25);
             next = getch();
             wtimeout(stdscr, -1);
-            if (next == ERR) {
-                /* Plain Escape (no idle action bound today). */
-                continue;
-            }
+            if (next == ERR) continue;
             switch (next) {
                 case 'b': case 'B':
                     psi_tui_move_word_backward(&state);
@@ -2497,30 +2310,23 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
                     psi_tui_delete_word_forward(&state);
                     break;
                 case KEY_BACKSPACE: case 127: case 8:
-                    /* Alt-Backspace mirrors Ctrl-W. */
                     psi_tui_delete_word_backward(&state);
                     break;
                 default:
-                    /* Unbound Alt-<key>; ignore silently. */
                     break;
             }
             psi_tui_redraw(&state);
             continue;
         }
 
-        /* Input editing: allowed even while busy so the user can compose
-         * their next message. Enter and Ctrl-D-exit are disabled during a
-         * turn so submits stay serialized. */
-        /* Readline-style control keys. Codes are the legacy ASCII
-         * control positions:
-         *   ^A=1 home   ^B=2 left     ^D=4 delete-forward / EOF-exit
-         *   ^E=5 end    ^F=6 right    ^H=8 backspace
-         *   ^K=11 kill-to-end         ^L=12 redraw
-         *   ^U=21 kill-to-start       ^W=23 delete-word-backward */
+        /* Readline-style control keys:
+         *   ^A home  ^B left  ^D delete-forward / EOF-exit
+         *   ^E end   ^F right ^H backspace
+         *   ^K kill-to-end  ^L redraw
+         *   ^U kill-to-start ^W delete-word-backward
+         *   ^Z suspend */
         if (ch == 4 && state.input_length == 0u) {
-            if (!state.busy) {
-                state.running = 0;
-            }
+            state.running = 0;
             continue;
         } else if (ch == 4) {
             psi_tui_delete_forward(&state);
@@ -2558,32 +2364,20 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
         } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
             psi_tui_delete_backward(&state);
         } else if (ch == KEY_LEFT || ch == 2) {
-            if (state.cursor > 0u) {
-                state.cursor--;
-            }
+            if (state.cursor > 0u) state.cursor--;
         } else if (ch == KEY_RIGHT || ch == 6) {
-            if (state.cursor < state.input_length) {
-                state.cursor++;
-            }
+            if (state.cursor < state.input_length) state.cursor++;
         } else if (ch == KEY_HOME || ch == 1) {
             state.cursor = 0u;
         } else if (ch == KEY_END || ch == 5) {
             state.cursor = state.input_length;
         } else if (ch == '\n' || ch == '\r' || ch == KEY_ENTER) {
-            /* Submit failures are non-fatal — the user can keep typing. */
-            if (!state.busy) (void)psi_tui_submit(&state);
+            (void)psi_tui_submit(&state);
         } else if (isprint(ch)) {
             psi_tui_insert_char(&state, ch);
         }
 
         psi_tui_redraw(&state);
-    }
-
-    /* If a turn is still in flight at shutdown, wait for it to finish so
-     * the worker doesn't touch freed state. */
-    if (state.worker_thread_valid) {
-        pthread_join(state.worker_thread, NULL);
-        state.worker_thread_valid = 0;
     }
 
     endwin();

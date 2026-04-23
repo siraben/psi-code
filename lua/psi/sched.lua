@@ -79,6 +79,9 @@ function M.run(fn, ...)
     if type(req) ~= "table" or type(req.kind) ~= "string" then
       req = { kind = "tick" }
     end
+    -- Host tick first (C side: TUI input + redraw). Safe to call
+    -- even when no host has installed a hook (no-op then).
+    if psi.host_tick ~= nil then psi.host_tick() end
     local ok_tick, tick_err = pcall(tick_hook, req)
     if not ok_tick then
       io.stderr:write("psi.sched tick hook error: " .. tostring(tick_err) .. "\n")
