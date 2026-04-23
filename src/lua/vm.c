@@ -1416,6 +1416,24 @@ int psi_vm_call_string_procedure(struct psi_vm *vm, const char *procedure_name,
     return psi_vm_pop_string(vm->L, output_text);
 }
 
+int psi_vm_markdown_render_line(struct psi_vm *vm, const char *text, int in_code_fence, char **output_text) {
+    if (!vm || !vm->L || !output_text) return PSI_STATUS_ERROR;
+    *output_text = NULL;
+    if (psi_vm_begin_call(vm->L, "psi.markdown.render_line") != 0) return PSI_STATUS_ERROR;
+    lua_pushstring(vm->L, text ? text : "");
+    lua_pushboolean(vm->L, in_code_fence ? 1 : 0);
+    if (psi_vm_finish_call(vm->L, 2, 1, "psi.markdown.render_line") != PSI_STATUS_OK) return PSI_STATUS_ERROR;
+    return psi_vm_pop_string(vm->L, output_text);
+}
+
+int psi_vm_tui_status_line(struct psi_vm *vm, const char *arg_json, char **output_text) {
+    return psi_vm_call_string_procedure(vm, "psi.tui.status_line", arg_json, output_text);
+}
+
+int psi_vm_tui_footer_hint(struct psi_vm *vm, const char *arg_json, char **output_text) {
+    return psi_vm_call_string_procedure(vm, "psi.tui.footer_hint", arg_json, output_text);
+}
+
 int psi_vm_call_procedure0_to_string(struct psi_vm *vm, const char *procedure_name,
                                       char **output_text) {
     if (!vm || !vm->L || !procedure_name || !output_text) return PSI_STATUS_ERROR;

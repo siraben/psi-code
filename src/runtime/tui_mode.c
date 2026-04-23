@@ -1099,77 +1099,25 @@ static int psi_tui_build_render_lines(
     return PSI_STATUS_OK;
 }
 
-/* Format the rich status line in pure C. Reads ONLY host-struct
- * memory (model, session id, usage mirror, message count). Must not
- * call into Lua: a single lua_State is shared between this (main)
- * thread and the worker thread running psi.agent.run_turn, and Lua
- * is not thread-safe. Observed on 32-bit hardware as SIGSEGVs deep
- * in luaV_execute/luaL_error when both threads raced on the state.
- *
- * The usage fields are volatile longs written atomically by the
- * worker via psi.set_usage() from lua/psi/context.lua's record_usage.
- * A torn read (e.g. input=new, output=still-old for one frame) is
- * acceptable for display. */
-static void psi_tui_footer_lines(
-    struct psi_tui_state *state,
-    char *line1,
-    size_t line1_size,
-    char *line2,
-    size_t line2_size
+/* Build a small JSON arg string describing the TUI state, used by
+ * the Lua helpers psi.tui.status_line and psi.tui.footer_hint. Keeps
+ * the C side free of any formatting logic — the Lua side decides
+ * what to include (session id, model, usage pct, busy flag, scroll
+ * indicator, etc.). Safe to call Lua on the main thread now that
+ * the worker thread is gone (commit 17f7de0). */
+static void psi_tui_footer_arg_json(
+    const struct psi_tui_state *state,
+    char *buffer,
+    size_t buffer_size
 ) {
-    char cwd_buffer[4096];
-    const char *cwd;
     const char *model;
-    const char *sess_id;
-    char short_id[16];
-    const struct psi_host_usage *usage;
-    long total;
-    long window;
-
-    cwd = getcwd(cwd_buffer, sizeof(cwd_buffer));
-    if (cwd == NULL) {
-        snprintf(cwd_buffer, sizeof(cwd_buffer),
-                 "<cwd unavailable: %s>", strerror(errno));
-    }
-    snprintf(line1, line1_size, "%s", cwd_buffer);
-
     model = state->runtime.model != NULL
         ? state->runtime.model : "claude-opus-4-7";
-    sess_id = state->runtime.session.id != NULL
-        ? state->runtime.session.id : "-";
-    /* First 8 chars of the id, mirroring psi.tui.status_line's short_id. */
-    snprintf(short_id, sizeof(short_id), "%.8s", sess_id);
-
-    usage  = &state->runtime.vm.host.usage;
-    total  = usage->total;
-    window = usage->context_window;
-
-    if (total > 0 && window > 0) {
-        int pct = (int)((total * 100l) / window);
-        snprintf(line2, line2_size,
-                 "session:%s  model:%.96s  msg:%lu  ctx:%d%% (%ld/%ld)%s%s",
-                 short_id, model,
-                 (unsigned long)state->runtime.session.count,
-                 pct, total, window,
-                 state->scroll_offset > 0 ? "  " : "",
-                 state->busy ? "  working…" : "");
-    } else {
-        /* First turn hasn't landed yet — no usage numbers to show. */
-        snprintf(line2, line2_size,
-                 "session:%s  model:%.96s  msg:%lu%s%s",
-                 short_id, model,
-                 (unsigned long)state->runtime.session.count,
-                 state->scroll_offset > 0 ? "  " : "",
-                 state->busy ? "  working…" : "");
-    }
-    if (state->scroll_offset > 0) {
-        /* Append scroll indicator without exploding snprintf args. */
-        size_t len = strlen(line2);
-        if (len + 32u < line2_size) {
-            snprintf(line2 + len, line2_size - len,
-                     "scroll:%d", state->scroll_offset);
-        }
-    }
+    snprintf(buffer, buffer_size,
+             "{\"model\":\"%.96s\",\"busy\":%s,\"scroll\":%d}",
+             model,
+             state->busy ? "true" : "false",
+             state->scroll_offset);
 }
 
 static void psi_tui_draw_line(int row, const char *text, int color_pair, int attrs) {
@@ -1189,117 +1137,107 @@ static void psi_tui_draw_line(int row, const char *text, int color_pair, int att
     }
 }
 
-/* Draw one wrapped assistant line with inline-markdown styling.
- *
- * Pure C so the main thread can render without touching the shared
- * lua_State (same constraint that forced the status line to be
- * C-side in commit 2027d56).
- *
- * Handles:
- *   - whole-line code-fence dim (when in_code_fence=1)
- *   - whole-line heading bold+cyan (when the wrapped line begins
- *     with `#`/`##`/`###` — wrapping preserves the marker on the
- *     first line of the source line, so this fires only on it)
- *   - inline **bold**, `code`
- *   - a crude *italic* rule: single `*` toggles italic when the
- *     next char is non-space and non-`*`, which keeps bullet-list
- *     markers (`* ` at line start) from being mis-parsed.
- *
- * Markdown that straddles a wrap boundary (e.g. `**bo` / `ld**`
- * split across two render lines) will render unbalanced. Accepted
- * trade-off; wide terminals make it rare for real text.
+/* Map a single ANSI SGR code to the equivalent ncurses attr + color
+ * pair overlay. Supports just the codes that psi.ansi and
+ * psi.markdown emit — reset (0), bold (1), dim (2), italic (3, mapped
+ * to A_UNDERLINE since ncurses italic support is spotty), underline
+ * (4), and foreground colors 31-37 which we map to pre-initialised
+ * color pairs (see psi_tui_init_colors). Unknown codes are ignored.
  */
-static void psi_tui_draw_assistant_line(int row, const char *text, int in_code_fence) {
+struct psi_tui_ansi_state {
+    attr_t attrs;
+    int color_pair;
+};
+
+static void psi_tui_ansi_apply(struct psi_tui_ansi_state *s, int code) {
+    /* Map SGR codes to the pre-initialised ncurses color pairs set
+     * up by psi_tui_init_colors: 1=blue, 2=cyan, 3=white, 4=yellow,
+     * 5=green, 6=red, 7=default (info). */
+    switch (code) {
+        case 0:  s->attrs = 0; s->color_pair = 0; break;
+        case 1:  s->attrs |= A_BOLD; break;
+        case 2:  s->attrs |= A_DIM; break;
+        case 3:  s->attrs |= A_UNDERLINE; break; /* italic → underline */
+        case 4:  s->attrs |= A_UNDERLINE; break;
+        case 31: s->color_pair = 6; break; /* red    */
+        case 32: s->color_pair = 5; break; /* green  */
+        case 33: s->color_pair = 4; break; /* yellow */
+        case 34: s->color_pair = 1; break; /* blue   */
+        case 36: s->color_pair = 2; break; /* cyan   */
+        case 37: s->color_pair = 3; break; /* white  */
+        default: break;
+    }
+}
+
+/* Draw one line of ANSI-escape-bearing text. Consumes \e[...m SGR
+ * codes, updates the current attr, and writes the remaining bytes
+ * through ncurses at the tracked column.
+ *
+ * Pre-existing pair overrides (color_pair argument) are used as the
+ * base; they're union'd into the live attrs on every cell. Lines
+ * without escapes render identically to psi_tui_draw_line. */
+static void psi_tui_draw_ansi_line(int row, const char *text, int base_color_pair) {
     int max_width;
     int len;
     int col;
     int i;
-    int bold;
-    int italic;
-    int code;
-    attr_t cur;
+    struct psi_tui_ansi_state st;
+    attr_t base;
 
     max_width = COLS > 1 ? COLS - 1 : 0;
     move(row, 0);
     clrtoeol();
-    if (text == NULL) {
-        return;
-    }
+    if (text == NULL) return;
 
-    if (in_code_fence) {
-        attron(COLOR_PAIR(3) | A_DIM);
-        mvaddnstr(row, 0, text, max_width);
-        attroff(COLOR_PAIR(3) | A_DIM);
-        return;
-    }
-
-    {
-        int indent = 0;
-        while (text[indent] == ' ') indent++;
-        if (text[indent] == '#') {
-            int h = 0;
-            while (text[indent + h] == '#' && h < 7) h++;
-            if (h >= 1 && h <= 6 && text[indent + h] == ' ') {
-                attr_t a = COLOR_PAIR(4) | A_BOLD;
-                attron(a);
-                mvaddnstr(row, 0, text, max_width);
-                attroff(a);
-                return;
-            }
-        }
-    }
+    st.attrs = 0;
+    st.color_pair = 0;
+    base = base_color_pair > 0 ? COLOR_PAIR(base_color_pair) : 0;
 
     len = (int)strlen(text);
-    bold = 0;
-    italic = 0;
-    code = 0;
     col = 0;
     i = 0;
-    move(row, 0);
-    attron(COLOR_PAIR(3));
     while (i < len && col < max_width) {
-        /* Inline code takes precedence: inside backticks, no other
-         * markers count. */
-        if (text[i] == '`' && !bold && !italic) {
-            code = !code;
-            i++;
-            continue;
-        }
-        if (!code) {
-            if (text[i] == '*' && i + 1 < len && text[i + 1] == '*') {
-                bold = !bold;
-                i += 2;
+        if (text[i] == 0x1b && i + 1 < len && text[i + 1] == '[') {
+            /* Parse ESC [ ; ; ... m */
+            int j = i + 2;
+            int code = 0;
+            int has_digit = 0;
+            while (j < len && text[j] != 'm') {
+                if (text[j] >= '0' && text[j] <= '9') {
+                    code = code * 10 + (text[j] - '0');
+                    has_digit = 1;
+                } else if (text[j] == ';') {
+                    if (has_digit) psi_tui_ansi_apply(&st, code);
+                    code = 0;
+                    has_digit = 0;
+                } else {
+                    break; /* malformed; bail out */
+                }
+                j++;
+            }
+            if (j < len && text[j] == 'm') {
+                /* Even a bare \e[m counts as reset */
+                if (has_digit) psi_tui_ansi_apply(&st, code);
+                else psi_tui_ansi_apply(&st, 0);
+                i = j + 1;
                 continue;
             }
-            if (text[i] == '*' && !bold) {
-                int next = (i + 1 < len) ? (unsigned char)text[i + 1] : 0;
-                int prev = (i > 0) ? (unsigned char)text[i - 1] : 0;
-                /* Open italic: next must be non-space, non-*.
-                 * Close italic: prev must be non-space. */
-                if (!italic && next != 0 && next != ' ' && next != '*') {
-                    italic = 1;
-                    i++;
-                    continue;
-                }
-                if (italic && prev != ' ') {
-                    italic = 0;
-                    i++;
-                    continue;
-                }
-            }
+            /* Malformed escape — drop it and keep going. */
+            i = j < len ? j : len;
+            continue;
         }
 
-        cur = 0;
-        if (bold) cur |= A_BOLD;
-        if (italic) cur |= A_UNDERLINE;
-        if (code) cur |= COLOR_PAIR(5) | A_DIM;
-        if (cur != 0) attron(cur);
-        addch((unsigned char)text[i]);
-        if (cur != 0) attroff(cur);
+        {
+            attr_t cur = base | st.attrs;
+            int pair = st.color_pair > 0 ? st.color_pair : base_color_pair;
+            if (pair > 0) cur |= COLOR_PAIR(pair);
+            if (cur != 0) attron(cur);
+            addch((unsigned char)text[i]);
+            if (cur != 0) attroff(cur);
+        }
         i++;
         col++;
     }
-    attroff(COLOR_PAIR(3));
 }
 
 static void psi_tui_redraw(struct psi_tui_state *state) {
@@ -1315,8 +1253,6 @@ static void psi_tui_redraw(struct psi_tui_state *state) {
     int bottom_row;
     int first_line;
     size_t index;
-    char footer_line1[4096];
-    char footer_line2[512];
     char prompt_buffer[4096];
     int prompt_width;
     int input_start;
@@ -1379,11 +1315,23 @@ static void psi_tui_redraw(struct psi_tui_state *state) {
             source_index = first_line + (int)index;
             if (source_index >= 0 && source_index < (int)line_count) {
                 if (lines[source_index].is_assistant) {
-                    psi_tui_draw_assistant_line(
-                        transcript_start + (int)index,
+                    /* Run the wrapped plain-text line through the
+                     * pure-Lua markdown renderer, then draw the
+                     * ANSI-escape output through the C parser. Safe
+                     * to call Lua from the redraw path now that
+                     * there is no worker thread holding lua_State
+                     * (single-thread model, stage 5). */
+                    char *styled = NULL;
+                    psi_vm_markdown_render_line(
+                        &state->runtime.vm,
                         lines[source_index].text,
-                        lines[source_index].in_code_fence
-                    );
+                        lines[source_index].in_code_fence,
+                        &styled);
+                    psi_tui_draw_ansi_line(
+                        transcript_start + (int)index,
+                        styled != NULL ? styled : lines[source_index].text,
+                        3);
+                    free(styled);
                 } else {
                     psi_tui_draw_line(
                         transcript_start + (int)index,
@@ -1400,29 +1348,44 @@ static void psi_tui_redraw(struct psi_tui_state *state) {
     psi_tui_render_free_lines(lines, line_count);
 
     {
-        /* Pure-C hint selection — no Lua call, so the TUI main
-         * thread cannot race with the worker's lua_State. */
-        const char *hint_text;
-        if (state->status_text != NULL) {
-            hint_text = state->status_text;
-        } else if (state->busy) {
-            hint_text = "Esc abort current turn";
-        } else if (state->scroll_offset > 0) {
-            hint_text =
-                "↑↓ scroll  PgUp/PgDn page  Home/End jump  Enter=submit  /help  /quit";
-        } else {
-            hint_text = "Enter submit  ↑↓ scroll  /help  /quit";
-        }
-        psi_tui_draw_line(
-            status_row, hint_text,
-            state->status_is_error ? 6 : 7,
-            state->status_is_error ? A_BOLD : A_DIM
-        );
-    }
+        char arg_json[256];
+        char *hint = NULL;
+        char *status_line = NULL;
+        char cwd_buffer[4096];
+        const char *cwd;
 
-    psi_tui_footer_lines(state, footer_line1, sizeof(footer_line1), footer_line2, sizeof(footer_line2));
-    psi_tui_draw_line(footer_row1, footer_line1, 7, A_DIM);
-    psi_tui_draw_line(footer_row2, footer_line2, 7, A_DIM);
+        psi_tui_footer_arg_json(state, arg_json, sizeof(arg_json));
+
+        /* status_text (set by operations via psi_tui_set_status)
+         * wins over the regular Lua-rendered hint; otherwise we
+         * defer to psi.tui.footer_hint. */
+        if (state->status_text != NULL) {
+            psi_tui_draw_line(
+                status_row, state->status_text,
+                state->status_is_error ? 6 : 7,
+                state->status_is_error ? A_BOLD : A_DIM
+            );
+        } else {
+            psi_vm_tui_footer_hint(&state->runtime.vm, arg_json, &hint);
+            psi_tui_draw_line(
+                status_row, hint != NULL ? hint : "",
+                7, A_DIM
+            );
+            free(hint);
+        }
+
+        cwd = getcwd(cwd_buffer, sizeof(cwd_buffer));
+        if (cwd == NULL) {
+            snprintf(cwd_buffer, sizeof(cwd_buffer),
+                     "<cwd unavailable: %s>", strerror(errno));
+        }
+        psi_tui_draw_line(footer_row1, cwd_buffer, 7, A_DIM);
+
+        psi_vm_tui_status_line(&state->runtime.vm, arg_json, &status_line);
+        psi_tui_draw_line(footer_row2, status_line != NULL ? status_line : "",
+                          7, A_DIM);
+        free(status_line);
+    }
 
     prompt_width = state->width - 3;
     if (prompt_width < 1) {

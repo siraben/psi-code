@@ -137,6 +137,14 @@ end
 
 -- ---------- public API ----------
 
+-- Render one plain (non-ANSI) wrapped display line with the given
+-- fence flag. The TUI drawer calls this per wrapped line; fence
+-- state is tracked across wrapped lines by the TUI's build path
+-- (see psi_tui_render_wrapped) rather than here.
+function M.render_line(line, in_code_fence)
+  return render_line(line or "", { in_code_fence = in_code_fence and true or false })
+end
+
 function M.render(text)
   if type(text) ~= "string" or text == "" then
     return text or ""
