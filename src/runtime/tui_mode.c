@@ -2093,10 +2093,19 @@ static int psi_tui_run_turn_sync(struct psi_tui_state *state, const char *line) 
             psi_tui_set_status(state, "", 0);
         }
     } else {
+        /* The Lua turn loop returns the classified error message as
+         * response_text on failure (see openai_compat.classify_http_error
+         * / anthropic.lua). Use that directly so the transcript shows
+         * the real reason — "429 — rate limited — retry after a
+         * moment" — instead of a generic banner. Fall back to a
+         * placeholder when response_text is empty (e.g. begin() itself
+         * failed before the stream started). */
+        const char *detail = (response_text != NULL && response_text[0] != '\0')
+                             ? response_text
+                             : "provider request failed";
         psi_tui_set_status(state, "agent turn failed", 1);
         psi_tui_finish_streaming_assistant(state);
-        psi_tui_add_entry(state, PSI_TUI_ENTRY_ERROR, NULL,
-                          "provider request failed", 1);
+        psi_tui_add_entry(state, PSI_TUI_ENTRY_ERROR, NULL, detail, 1);
     }
     free(response_text);
 

@@ -731,6 +731,7 @@ function M.run_turn(opts)
     local state = new_state()
     local parser = new_sse_parser()
     local sched = require("psi.sched")
+    local compat = require("psi.openai_compat")
 
     -- Async pull-loop. http_stream_begin spawns a helper thread that
     -- runs curl_easy_perform; we cooperatively yield to the host
@@ -739,6 +740,16 @@ function M.run_turn(opts)
     -- multi-chunk "leftover" string — the old `leftover ..= chunk`
     -- approach paid O(N²) in chunk count for events fragmented
     -- across many TCP segments.
+    --
+    -- Raw chunks are also accumulated (capped) into raw_body so
+    -- compat.classify_http_error can lift `{"error":{"message":…}}`
+    -- out of the body on non-2xx — matches pi-mono's behaviour of
+    -- surfacing the provider's real error message instead of just
+    -- the status code.
+    local raw_body = {}
+    local raw_body_len = 0
+    local RAW_BODY_MAX = 16 * 1024
+
     local handle, begin_err = psi.http_stream_begin(url, headers, body)
     if handle == nil then
       save_failed_partial(state, model, "error", tostring(begin_err))
@@ -750,6 +761,10 @@ function M.run_turn(opts)
       if abort_check() then break end
       local chunk, done = sched.http_poll(handle, 50)
       if chunk ~= nil then
+        if raw_body_len < RAW_BODY_MAX then
+          raw_body[#raw_body + 1] = chunk
+          raw_body_len = raw_body_len + #chunk
+        end
         sse_push(parser, chunk, function(event_type, data)
           dispatch_sse(state, event_type, data, observer)
         end)
@@ -769,10 +784,13 @@ function M.run_turn(opts)
       return false, reason
     end
     if status < 200 or status >= 300 then
-      local emsg = string.format("Anthropic API request failed (%d)", status)
+      local emsg = compat.classify_http_error(
+        status, table.concat(raw_body), "anthropic")
       save_failed_partial(state, model, "error", emsg)
       io.stderr:write(emsg .. "\n")
-      return false, "error"
+      -- Surface the detailed message as the reply so TUI and
+      -- scripted --agent callers see it instead of a generic code.
+      return false, emsg
     end
 
     local content, tool_uses = finalize_blocks(state)

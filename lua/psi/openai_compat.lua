@@ -48,6 +48,59 @@ local MAX_TOOL_ITERATIONS = 32
 
 local safe_decode = prelude.safe_json_decode
 
+-- ---------- HTTP error classification ----------
+--
+-- When a provider returns a non-2xx status, the response body is
+-- typically a JSON error envelope. Common shapes:
+--   {"error": {"message": "...", "type": "..."}}   (OpenAI, Anthropic, OpenRouter)
+--   {"error": "..."}                                (some Ollama builds)
+-- Extract the most informative string we can and prepend an
+-- HTTP-status-specific hint when it tells the user something
+-- actionable. Matches pi-mono's error-body passthrough behaviour
+-- so operators don't have to tail stderr to learn what went wrong.
+function M.classify_http_error(status, body, provider_name)
+  local detail = nil
+  if type(body) == "string" and body ~= "" then
+    local parsed = safe_decode(body)
+    if type(parsed) == "table" then
+      local err = parsed.error
+      if type(err) == "table" then
+        detail = err.message or err.type or err.code
+      elseif type(err) == "string" then
+        detail = err
+      elseif type(parsed.message) == "string" then
+        detail = parsed.message
+      end
+    end
+    if not detail then
+      -- No structured error — include a short trimmed snippet so
+      -- the user sees SOMETHING rather than just the status code.
+      local trimmed = body:gsub("%s+", " "):sub(1, 200)
+      if trimmed ~= "" then detail = trimmed end
+    end
+  end
+
+  local hint = nil
+  if status == 401 or status == 403 then
+    hint = "check your API key"
+  elseif status == 429 then
+    hint = "rate limited — retry after a moment or switch model"
+  elseif status == 404 then
+    hint = "model or endpoint not found — check the model slug"
+  elseif status == 413 then
+    hint = "request too large — context or output may need trimming"
+  elseif status == 529 or status == 503 then
+    hint = "provider is overloaded — try again shortly"
+  elseif status >= 500 then
+    hint = "provider-side error — retry or check status page"
+  end
+
+  local parts = { string.format("%s request failed (%d)", provider_name, status) }
+  if hint   then parts[#parts + 1] = "— " .. hint   end
+  if detail then parts[#parts + 1] = "— " .. detail end
+  return table.concat(parts, " ")
+end
+
 -- ---------- Tool specs (identical across both providers) ----------
 
 function M.api_tool_specs(user_text)
@@ -235,6 +288,14 @@ function M.run_turn(opts, cfg)
 
     local state = cfg.new_state()
     local parser = cfg.parser_new()
+    -- Collect the raw response body alongside the streaming parser
+    -- (capped at 16 KiB) so we can parse a structured error out of
+    -- it if the server returns non-2xx. Normal streams are large
+    -- (many MB) but the cap only matters for error bodies, which
+    -- are always small JSON objects.
+    local raw_body = {}
+    local raw_body_len = 0
+    local RAW_BODY_MAX = 16 * 1024
 
     local handle, begin_err = psi.http_stream_begin(
       cfg.url, cfg.headers, psi.json_encode(body))
@@ -247,6 +308,10 @@ function M.run_turn(opts, cfg)
       if abort_check() then break end
       local chunk, done = sched.http_poll(handle, 50)
       if chunk ~= nil then
+        if raw_body_len < RAW_BODY_MAX then
+          raw_body[#raw_body + 1] = chunk
+          raw_body_len = raw_body_len + #chunk
+        end
         cfg.parser_push(parser, chunk, state, observer)
       end
       if done then break end
@@ -270,12 +335,18 @@ function M.run_turn(opts, cfg)
       return false, reason
     end
     if status < 200 or status >= 300 then
-      local emsg = string.format("%s request failed (%d)", cfg.provider_name, status)
+      local emsg = M.classify_http_error(
+        status, table.concat(raw_body), cfg.provider_name)
       if state.text ~= "" or #tool_calls > 0 then
         M.persist_assistant(state, model, tool_calls, cfg, "error", emsg)
       end
       io.stderr:write(emsg .. "\n")
-      return false, "error"
+      -- Return the detailed emsg as the reply so the TUI's
+      -- psi_tui_run_turn_sync can render it instead of a generic
+      -- "provider request failed" banner. The first return is still
+      -- false for control-flow callers; they already ignore the
+      -- second value on failure.
+      return false, emsg
     end
 
     M.persist_assistant(state, model, tool_calls, cfg)

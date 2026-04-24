@@ -425,6 +425,38 @@ def t_append_stamps_id(psi: Psi):
     assert_equals(out, "stamped", "append_user stamps id")
 
 
+@test("errors/classify_http_error")
+def t_classify_http(psi: Psi):
+    """openai_compat.classify_http_error must (a) prepend a status-
+    specific hint for common failure codes and (b) surface the
+    provider's error-body message when present."""
+    out = psi.eval(
+        'local c = require("psi.openai_compat").classify_http_error\n'
+        + 'local results = {}\n'
+        + 'results[1] = c(401,\n'
+        + '  psi.json_encode({error = {message = "invalid key"}}),\n'
+        + '  "anthropic")\n'
+        + 'results[2] = c(429, "", "openrouter")\n'
+        + 'results[3] = c(404,\n'
+        + '  psi.json_encode({error = {message = "no such model"}}),\n'
+        + '  "openrouter")\n'
+        + 'results[4] = c(503, "upstream exploded", "ollama")\n'
+        + 'return table.concat(results, "|")'
+    )
+    # Each line must include provider + status + hint + detail.
+    for needle in (
+        "anthropic request failed (401)",
+        "check your API key",
+        "invalid key",
+        "openrouter request failed (429)",
+        "rate limited",
+        "no such model",
+        "provider is overloaded",
+        "upstream exploded",
+    ):
+        assert_contains(out, needle, f"classifier missing {needle!r}")
+
+
 @test("handles/process_finish_idempotent")
 def t_process_finish_idempotent(psi: Psi):
     """process_finish should be idempotent — calling it twice (or
