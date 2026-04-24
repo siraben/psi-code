@@ -11,25 +11,32 @@ local sched = require("psi.sched")
 local session = require("psi.session")
 local anthropic = require("psi.anthropic")
 local ollama = require("psi.ollama")
+local openrouter = require("psi.openrouter")
 
 local M = {}
 
 -- ---------- Provider routing ----------
 --
 -- Selection rules, in priority:
---   1. Explicit model prefix: "ollama/<name>" or "anthropic/<name>"
---      strips the prefix and routes accordingly.
---   2. $PSI_PROVIDER env ("ollama" | "anthropic").
+--   1. Explicit model prefix: "ollama/<name>", "anthropic/<name>",
+--      or "openrouter/<provider>/<name>" strips the first path
+--      segment and routes accordingly. For openrouter we keep the
+--      rest of the path — OpenRouter model slugs are
+--      "<vendor>/<model>" (e.g. google/gemini-3-flash-preview).
+--   2. $PSI_PROVIDER env ("ollama" | "anthropic" | "openrouter").
 --   3. Default: anthropic.
 local function pick_provider(model)
   if type(model) == "string" then
-    local after = model:match("^ollama/(.+)$")
+    local after = model:match("^openrouter/(.+)$")
+    if after then return openrouter, after end
+    after = model:match("^ollama/(.+)$")
     if after then return ollama, after end
     after = model:match("^anthropic/(.+)$")
     if after then return anthropic, after end
   end
   local env = os.getenv("PSI_PROVIDER")
   if env == "ollama" then return ollama, model end
+  if env == "openrouter" then return openrouter, model end
   return anthropic, model
 end
 
