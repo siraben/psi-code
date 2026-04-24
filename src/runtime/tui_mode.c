@@ -2457,6 +2457,13 @@ static int psi_tui_setup_runtime(struct psi_tui_state *state, const struct psi_c
             &state->runtime.vm,
             "psi.session.ensure_default_path", "", &ignored);
         free(ignored);
+        /* session.load() fires session-start when --session loads a
+         * file. For the fresh-session branch we fire it manually so
+         * extensions see one lifecycle event either way. */
+        (void)psi_vm_call_string_procedure(
+            &state->runtime.vm,
+            "psi.session.announce_start", "", &ignored);
+        free(ignored);
     }
     return PSI_STATUS_OK;
 }
@@ -2473,7 +2480,18 @@ static int psi_tui_state_init(struct psi_tui_state *state, const struct psi_cli_
 
 static void psi_tui_state_free(struct psi_tui_state *state) {
     size_t index;
+    char *ignored = NULL;
     if (state == NULL) return;
+    /* Fire session-shutdown before tearing the VM down so extensions
+     * with live Lua state (log file handles, counters, timers) can
+     * flush. Must happen while vm.L is still alive — the call is
+     * skipped if init failed and state->runtime was never set up. */
+    if (state->runtime.vm.L != NULL) {
+        (void)psi_vm_call_string_procedure(
+            &state->runtime.vm,
+            "psi.session.announce_shutdown", "", &ignored);
+        free(ignored);
+    }
     for (index = 0u; index < state->entry_count; index++) {
         psi_tui_free_entry(&state->entries[index]);
     }

@@ -47,12 +47,48 @@ function M.find(name)
   return nil
 end
 
+-- Per-session active-tools allowlist. When nil, all registered tools
+-- are offered to the model (default). When set to a set of names via
+-- M.set_active({"read","grep"}), select_specs returns only those
+-- tools, narrowing what the LLM can call. Lets extensions / skills
+-- scope an agent to a safe subset without unregistering tools
+-- globally. Reset with M.set_active(nil).
+local active_allowlist = nil
+
+function M.set_active(names)
+  if names == nil then
+    active_allowlist = nil
+    return
+  end
+  if type(names) ~= "table" then return end
+  local set = {}
+  for _, n in ipairs(names) do
+    if type(n) == "string" and n ~= "" then set[n] = true end
+  end
+  active_allowlist = set
+end
+
+function M.get_active()
+  if active_allowlist == nil then
+    local out = {}
+    for i, t in ipairs(registry) do out[i] = t.name end
+    return out
+  end
+  local out = {}
+  for _, t in ipairs(registry) do
+    if active_allowlist[t.name] then out[#out + 1] = t.name end
+  end
+  return out
+end
+
 -- Entry point for C-side schema serialization. user_text lets hosts
--- filter tools per-turn; current implementation returns all tools.
+-- filter tools per-turn; honours M.set_active if a scope is active.
 function M.select_specs(user_text)
   local out = {}
-  for i, t in ipairs(registry) do
-    out[i] = records.tool_to_alist(t)
+  for _, t in ipairs(registry) do
+    if active_allowlist == nil or active_allowlist[t.name] then
+      out[#out + 1] = records.tool_to_alist(t)
+    end
   end
   return out
 end

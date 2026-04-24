@@ -332,6 +332,85 @@ def t_render_write_diff(psi: Psi):
     assert_contains(out, "delta", "diff payload")
 
 
+@test("events/context_mutation")
+def t_context_event(psi: Psi):
+    """The context event is emitted with a mutable messages table
+    just before the provider call. Subscribers mutate in place and
+    their edits are reflected on the wire. Verified here via a Lua
+    round-trip: register a handler, build a dummy api_messages table,
+    fire the event, confirm mutation sticks."""
+    out = psi.eval(
+        'local fired = 0\n'
+        + 'local seen_provider = ""\n'
+        + 'psi.events.on("context", function(p)\n'
+        + '  fired = fired + 1\n'
+        + '  seen_provider = p.provider or ""\n'
+        + '  p.messages[#p.messages + 1] = "appended"\n'
+        + 'end)\n'
+        + 'local msgs = {"a", "b"}\n'
+        + 'psi.events.emit("context", {\n'
+        + '  messages = msgs, provider = "ollama",\n'
+        + '  model = "x", system_prompt = "s"\n'
+        + '})\n'
+        + 'return fired .. "|" .. seen_provider .. "|" .. #msgs'
+    )
+    assert_contains(out, "1|ollama|3",
+                    f"context event shape wrong: {out!r}")
+
+
+@test("events/session_lifecycle")
+def t_session_lifecycle(psi: Psi):
+    out = psi.eval(
+        'local seen = {}\n'
+        + 'psi.events.on("session-start", function(p)\n'
+        + '  seen[#seen + 1] = "start:" .. tostring(p.source)\n'
+        + 'end)\n'
+        + 'psi.events.on("session-shutdown", function()\n'
+        + '  seen[#seen + 1] = "shutdown"\n'
+        + 'end)\n'
+        + 'local s = require("psi.session")\n'
+        + 's.announce_start()\n'
+        + 's.announce_shutdown()\n'
+        + 'return table.concat(seen, ",")'
+    )
+    assert_contains(out, "start:new,shutdown",
+                    "lifecycle events fire in order")
+
+
+@test("tools/set_active_filters")
+def t_set_active(psi: Psi):
+    out = psi.eval(
+        'local t = require("psi.tools")\n'
+        + 'local all = #t.select_specs()\n'
+        + 't.set_active({"read", "grep"})\n'
+        + 'local narrowed = #t.select_specs()\n'
+        + 'local active = table.concat(t.get_active(), ",")\n'
+        + 't.set_active(nil)\n'
+        + 'local restored = #t.select_specs()\n'
+        + 'return string.format("%d|%d|%s|%d", all, narrowed, active, restored)'
+    )
+    parts = out.strip().split("|")
+    assert int(parts[0]) >= 3 and int(parts[1]) == 2, \
+        f"allowlist didn't narrow: {out!r}"
+    assert "read" in parts[2] and "grep" in parts[2]
+    assert parts[0] == parts[3], "nil didn't restore full set"
+
+
+@test("session/send_message")
+def t_send_message(psi: Psi):
+    out = psi.eval(
+        'local s = require("psi.session")\n'
+        + 'local before = psi.session_message_count()\n'
+        + 's.send_message("user", "from extension")\n'
+        + 's.send_message("assistant", "hi")\n'
+        + 'local ok, err = s.send_message("bogus", "x")\n'
+        + 'return psi.session_message_count() - before\n'
+        + '  .. "|" .. tostring(ok) .. "|" .. tostring(err)'
+    )
+    assert_contains(out, "2|false|unsupported role: bogus",
+                    f"send_message wrong shape: {out!r}")
+
+
 @test("render/thinking_delta")
 def t_render_thinking(psi: Psi):
     """boot.lua installs a default render hook for the thinking-delta

@@ -240,6 +240,8 @@ end
 function M.run_repl(opts)
   if opts.session_file and opts.session_file ~= "" then
     session.load(opts.session_file)
+  else
+    session.announce_start()
   end
   print("psi coding agent")
   print("type a prompt to run the agent, /help for commands, or /quit to exit")
@@ -261,11 +263,13 @@ function M.run_repl(opts)
         local saved, err = session.save()
         if not saved then
           io.stderr:write("failed to save session file: " .. tostring(err) .. "\n")
+          session.announce_shutdown()
           return false
         end
       end
     end
   end
+  session.announce_shutdown()
   return true
 end
 

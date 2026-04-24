@@ -287,6 +287,22 @@ function M.run_turn(opts, cfg)
     end
     local api_messages = M.build_api_messages(plain, system_prompt, cfg)
 
+    -- Fire `context` so extensions can mutate the messages array
+    -- before it hits the wire (RAG injection, stripping noisy tool
+    -- results, mid-context compression, etc.). Subscribers mutate
+    -- payload.messages in place — the array is shared, not copied,
+    -- so standard table ops (insert/remove/assign) take effect.
+    -- Keep this cheap: it runs once per turn iteration, so a slow
+    -- handler directly delays the provider call.
+    if psi.events then
+      psi.events.emit("context", {
+        messages = api_messages,
+        model = model,
+        provider = cfg.provider_name,
+        system_prompt = system_prompt,
+      })
+    end
+
     local body = cfg.request_body({
       model = model,
       messages = api_messages,

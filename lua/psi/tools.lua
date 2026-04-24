@@ -380,6 +380,8 @@ M.register = registry.register
 M.add_before_hook = registry.add_before_hook
 M.add_after_hook = registry.add_after_hook
 M.clear_hooks = registry.clear_hooks
+M.set_active = registry.set_active
+M.get_active = registry.get_active
 
 -- Helper for before-hooks to cleanly cancel a tool call. Returning
 -- the result from a before-hook short-circuits dispatch — the tool's

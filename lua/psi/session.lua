@@ -193,6 +193,28 @@ function M.append_user(text)
   psi.session_append("user", text or "", psi.json_encode(body))
 end
 
+-- Public extension API: inject a message into the in-memory session
+-- without triggering an agent turn. role is "user" | "assistant".
+-- Use this to prime a conversation, replay a logged prompt, or have
+-- an extension post a note that the model will see on the next turn.
+-- Use psi.session.save() afterwards if you want it persisted.
+--
+-- This is the supported wrapper over M.append_user / M.append_assistant
+-- (which are marked internal). Prefer send_message from extension code.
+function M.send_message(role, text)
+  if role == "user" then
+    M.append_user(text or "")
+    return true
+  elseif role == "assistant" then
+    -- Minimal metadata; extension-injected text doesn't have usage
+    -- stats or a model. Callers that need those should call
+    -- append_assistant directly.
+    M.append_assistant(text or "", { { type = "text", text = text or "" } }, {})
+    return true
+  end
+  return false, "unsupported role: " .. tostring(role)
+end
+
 -- blocks: Anthropic-shape array (type=text|tool_use|thinking).
 -- opts: {usage?, stop_reason?, error_message?, model?, provider?, response_id?, api?}
 function M.append_assistant(text, blocks, opts)
@@ -627,7 +649,37 @@ function M.load(path)
   -- so this is the correct starting point.
   last_saved_path  = path
   last_saved_count = psi.session_message_count()
+  if psi.events and psi.events.emit then
+    psi.events.emit("session-start", {
+      id = psi.session_id(), path = path, source = "load",
+      message_count = last_saved_count,
+    })
+  end
   return true
+end
+
+-- Fire session-start for the freshly-initialised session whose path
+-- was picked via ensure_default_path (or set via --session). Called
+-- from C right after runtime init so extensions see a single lifecycle
+-- event regardless of whether the session was loaded from disk or
+-- created fresh.
+function M.announce_start()
+  if not psi.events or not psi.events.emit then return end
+  psi.events.emit("session-start", {
+    id = psi.session_id(), path = psi.session_path() or "",
+    source = "new", message_count = psi.session_message_count(),
+  })
+end
+
+-- Symmetric with session-start. Host calls this once, just before
+-- exit, so subscribers can flush logs / close fds / write a summary.
+-- Idempotent: if no subscribers or no events bus, no-op.
+function M.announce_shutdown()
+  if not psi.events or not psi.events.emit then return end
+  psi.events.emit("session-shutdown", {
+    id = psi.session_id(), path = psi.session_path() or "",
+    message_count = psi.session_message_count(),
+  })
 end
 
 -- Write the first `at_count` messages of the current session to a new

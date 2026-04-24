@@ -718,6 +718,18 @@ function M.run_turn(opts)
     end
     local api_messages = build_api_messages(plain)
 
+    -- See openai_compat.run_turn for the mutation contract. Mirror
+    -- the context event here so extensions that want to rewrite the
+    -- message list don't have to special-case the Anthropic path.
+    if psi.events then
+      psi.events.emit("context", {
+        messages = api_messages,
+        model = model,
+        provider = "anthropic",
+        system_prompt = system_prompt,
+      })
+    end
+
     local request = {
       model = model,
       max_tokens = max_tokens,
