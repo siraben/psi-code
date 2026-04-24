@@ -377,6 +377,74 @@ def t_session_lifecycle(psi: Psi):
                     "lifecycle events fire in order")
 
 
+@test("prompt/set_active_filters_system_prompt")
+def t_set_active_prompt(psi: Psi):
+    """set_active must also filter the system-prompt "Available tools"
+    list — otherwise the model sees tools it can't dispatch and
+    wastes tokens calling them. Matches pi's selectedTools option."""
+    out = psi.eval(
+        'local tools = require("psi.tools")\n'
+        + 'local prompt = require("psi.prompt")\n'
+        + 'tools.set_active({"read"})\n'
+        + 'local sp = prompt.system_prompt()\n'
+        + 'tools.set_active(nil)\n'
+        + 'return tostring(sp:find("%- read:") ~= nil) .. "|"\n'
+        + '  .. tostring(sp:find("%- bash:") ~= nil) .. "|"\n'
+        + '  .. tostring(sp:find("%- grep:") ~= nil)'
+    )
+    assert_contains(out, "true|false|false",
+                    "active set didn't filter prompt tools list")
+
+
+@test("prompt_templates/load_and_expand")
+def t_prompt_templates(psi: Psi):
+    """Templates load from PSI_PROMPTS_DIR, frontmatter parses,
+    arg substitution handles $1, $@, ${@:N}, ${@:N:L}."""
+    tmpdir = psi.tmp / "tplprompts"
+    tmpdir.mkdir(exist_ok=True)
+    (tmpdir / "greet.md").write_text(
+        "---\n"
+        "description: Say hello to $1\n"
+        "argument-hint: <name>\n"
+        "---\n"
+        "Hello $1. All: $@. Skip one: ${@:2}. Two from 2: ${@:2:2}.\n"
+    )
+    expr = (
+        'local pt = require("psi.prompt_templates")\n'
+        + 'pt.load()\n'
+        + 'local list = pt.list()\n'
+        + 'local a = (#list == 1)\n'
+        + 'local t = list[1]\n'
+        + 'local b = (t.description == "Say hello to $1")\n'
+        + 'local c = (t.argument_hint == "<name>")\n'
+        + 'local expanded = pt.expand("/greet Alice Bob Carol Dave")\n'
+        + 'return tostring(a) .. "|" .. tostring(b) .. "|"\n'
+        + '  .. tostring(c) .. "|" .. (expanded or "<nil>")'
+    )
+    out = psi.run("--eval", expr,
+                  env_extra={"PSI_PROMPTS_DIR": str(tmpdir)}).stdout.strip()
+    parts = out.strip().split("|", 3)
+    assert parts[0] == "true", f"expected 1 template, got: {out!r}"
+    assert parts[1] == "true", f"description wrong: {out!r}"
+    assert parts[2] == "true", f"argument_hint wrong: {out!r}"
+    body = parts[3]
+    assert_contains(body, "Hello Alice", "$1 substituted")
+    assert_contains(body, "All: Alice Bob Carol Dave", "$@ substituted")
+    assert_contains(body, "Skip one: Bob Carol Dave", "${@:N} slice")
+    assert_contains(body, "Two from 2: Bob Carol", "${@:N:L} slice")
+
+
+@test("prompt_templates/not_a_template_returns_nil")
+def t_prompt_templates_miss(psi: Psi):
+    out = psi.eval(
+        'local pt = require("psi.prompt_templates")\n'
+        + 'pt.load()\n'
+        + 'return tostring(pt.expand("/nosuchtemplate foo"))'
+    )
+    assert_contains(out, "nil",
+                    f"unknown slash must return nil: {out!r}")
+
+
 @test("tools/set_active_filters")
 def t_set_active(psi: Psi):
     out = psi.eval(

@@ -81,6 +81,22 @@ function M.get_active()
   return out
 end
 
+-- Same filter as get_active but returns the full Tool records
+-- (name / description / prompt_snippet / guidelines / impl). Used by
+-- psi.prompt.system_prompt so the "Available tools:" section in the
+-- system prompt reflects what the model can actually call — without
+-- this, set_active hides tools from dispatch but the prompt still
+-- advertises them, and the model wastes tokens calling tools that
+-- get rejected.
+function M.active()
+  if active_allowlist == nil then return registry end
+  local out = {}
+  for _, t in ipairs(registry) do
+    if active_allowlist[t.name] then out[#out + 1] = t end
+  end
+  return out
+end
+
 -- Entry point for C-side schema serialization. user_text lets hosts
 -- filter tools per-turn; honours M.set_active if a scope is active.
 function M.select_specs(user_text)

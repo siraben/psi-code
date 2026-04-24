@@ -215,6 +215,44 @@ These are part of the stable surface:
 | `psi.tui.register_status_hook(fn)` | Append a short status-bar snippet. `fn()` is called on every redraw (must be cheap) and returns a string or nil. Useful for tokens/sec meters, background-task indicators, etc. Suppressed while an active status message is on screen. |
 | `psi.tools.set_active(names)` / `get_active()` | Narrow the tool set offered to the model for subsequent turns. Pass a list of tool names to restrict; pass `nil` to clear the scope and restore all registered tools. Useful for skill-scoped agents (e.g. `tools.set_active({"read","grep"})` for a read-only investigation). |
 | `psi.session.send_message(role, text)` | Inject a user or assistant message into the in-memory session without triggering a turn. `role` is `"user"` or `"assistant"`. Call `psi.session.save()` afterwards to persist. Replaces the former internal-only `append_user` / `append_assistant` for extension use. |
+| `psi.prompt_templates.load()` / `list()` / `find(name)` / `expand(text)` | Loader + lookup + runtime expansion for user-authored slash-command templates. `/reload` reloads them. See "Prompt templates" below. |
+
+### Prompt templates
+
+Drop a `.md` file in any of:
+
+- `$PSI_PROMPTS_DIR` (colon-separated list, env override)
+- `$XDG_CONFIG_HOME/psi/prompts/` (default `~/.config/psi/prompts/`)
+- `./.psi/prompts/` (project-local — overrides global on name collision)
+
+…and typing `/<filename> args…` in the REPL or TUI expands the body
+with bash-style argument substitution and sends the result as the
+user's next turn. Filename minus `.md` becomes the slash-command name.
+
+Frontmatter (optional, between leading `---` lines):
+
+```markdown
+---
+description: short one-liner shown in /help
+argument-hint: "<path> [limit]"
+---
+Review the file $1, paying attention to lines around $2.
+Full args: $@ (aka $ARGUMENTS).
+```
+
+Argument placeholders (run on the body, not on the args):
+
+| Pattern | Meaning |
+|---|---|
+| `$1`, `$2`, … | 1-indexed positional arg (empty string when absent) |
+| `$@`, `$ARGUMENTS` | all args joined with single spaces |
+| `${@:N}` | args from position N onwards |
+| `${@:N:L}` | L args starting from N |
+
+Argument parsing is bash-ish: whitespace-separated, single- and
+double-quoted strings are preserved as one token.
+
+Ported from pi-mono's `prompt-templates.ts` (MIT, (c) 2025 Mario Zechner).
 
 Prelude helpers on `psi.prelude` (`trim`, `split`, `safe_json_decode`,
 `safe_read`, `uuid_short`, `iso_timestamp`, `as_array`, `path_join`) are

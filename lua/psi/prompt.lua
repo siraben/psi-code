@@ -98,7 +98,12 @@ function M.clear_transformers()
 end
 
 function M.system_prompt()
-  local all_tools = tools.all()
+  -- Honour psi.tools.set_active(...): the "Available tools:" list
+  -- must mirror what the model can actually dispatch, and the
+  -- guideline inference (grep/find/ls vs bash) must key off the
+  -- active set too — not the full registry. Mirrors pi's
+  -- `selectedTools` option in buildSystemPrompt.
+  local all_tools = tools.active()
   local have = tool_set(all_tools)
 
   local buf = { PREAMBLE, "\n\nAvailable tools:\n" }

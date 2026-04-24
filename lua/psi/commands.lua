@@ -238,6 +238,12 @@ local function cmd_reload()
         "print", "reload failed: " .. tostring(err))
     end
   end
+  -- Prompt templates are cheap to rescan and usually edited side-by-
+  -- side with extensions; reloading them here lets users iterate on
+  -- a template.md without restarting psi.
+  if psi.prompt_templates and psi.prompt_templates.load then
+    pcall(psi.prompt_templates.load)
+  end
   return records.new_command_action("print", "extensions reloaded")
 end
 
@@ -350,7 +356,22 @@ function M.handle(line)
       or  "clone failed"
     return records.new_command_action("print", msg)
   end
-  return dispatch_registered(line)
+  local registered = dispatch_registered(line)
+  if registered ~= nil then return registered end
+
+  -- Prompt template fallback: `/foo args…` where foo.md was loaded
+  -- from ~/.config/psi/prompts/ (or project/./.psi/prompts/) is
+  -- treated like a user turn whose text is the expanded template
+  -- body. Returns an "expand" action so the caller (REPL or TUI)
+  -- submits it as a turn rather than printing it.
+  if psi.prompt_templates and psi.prompt_templates.expand then
+    local expanded = psi.prompt_templates.expand(line)
+    if type(expanded) == "string" and expanded ~= "" then
+      return records.new_command_action("expand", expanded)
+    end
+  end
+
+  return nil
 end
 
 -- Bridge for C (TUI): returns nil or a {kind-string, payload} sequence.

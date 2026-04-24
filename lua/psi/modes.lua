@@ -233,6 +233,21 @@ local function handle_slash_command(opts, line)
     print("name set to '" .. tostring(action.payload) .. "'")
     return true, false
   end
+  if kind == "expand" then
+    -- Prompt-template expansion: treat the expanded body as a
+    -- user turn. Print it so the user sees what the template
+    -- actually sent (templates can be opaque for new users).
+    print("> " .. (action.payload or ""))
+    local ok = run_agent_turn(opts, action.payload or "")
+    if ok and opts.session_file and opts.session_file ~= "" then
+      local saved, err = session.save()
+      if not saved then
+        io.stderr:write("failed to save session file: " .. tostring(err) .. "\n")
+        return false, false
+      end
+    end
+    return true, false
+  end
   io.stderr:write("unknown command\n")
   return true, false
 end

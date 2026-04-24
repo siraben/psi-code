@@ -40,6 +40,7 @@ psi.prompt = require("psi.prompt")
 psi.agent = require("psi.agent")
 psi.render = require("psi.render")
 psi.commands = require("psi.commands")
+psi.prompt_templates = require("psi.prompt_templates")
 psi.tui = require("psi.tui")
 psi.modes = require("psi.modes")
 psi.markdown = require("psi.markdown")
@@ -190,3 +191,4 @@ function psi.load_extensions()
 end
 
 psi.load_extensions()
+psi.prompt_templates.load()

@@ -1934,7 +1934,14 @@ static void psi_tui_rebuild_from_session(struct psi_tui_state *state) {
     state->scroll_offset = 0;
 }
 
-static int psi_tui_handle_command(struct psi_tui_state *state, const char *line) {
+/* Dispatch a slash command. If the command expands to a prompt
+ * template body (action kind "expand"), the expanded text is copied
+ * into *expanded_text so the caller can submit it as a turn; the
+ * caller owns the buffer and must free it. Otherwise *expanded_text
+ * is left untouched. */
+static int psi_tui_handle_command(
+    struct psi_tui_state *state, const char *line, char **expanded_text
+) {
     char *action_name;
     char *action_text;
     long keep_recent;
@@ -1970,6 +1977,15 @@ static int psi_tui_handle_command(struct psi_tui_state *state, const char *line)
         psi_tui_set_status(state, "", 0);
     } else if (action_name != NULL && strcmp(action_name, "compact") == 0) {
         status = psi_tui_start_compact(state, keep_recent);
+    } else if (action_name != NULL && strcmp(action_name, "expand") == 0) {
+        /* Prompt-template expansion: the slash command resolved to a
+         * template body which we want to submit as a user turn. Hand
+         * the text back to the caller so it can run the normal
+         * turn-submit path (redraw, busy flag, stream observer,
+         * autosave) instead of duplicating that state machine here. */
+        if (action_text != NULL && expanded_text != NULL) {
+            *expanded_text = psi_strdup(action_text);
+        }
     } else {
         psi_tui_set_status(state, "unknown command", 1);
     }
@@ -2253,9 +2269,13 @@ static int psi_tui_submit(struct psi_tui_state *state) {
     state->cursor = 0u;
 
     if (line[0] == '/') {
-        status = psi_tui_handle_command(state, line);
+        char *expanded = NULL;
+        status = psi_tui_handle_command(state, line, &expanded);
         free(line);
-        return status;
+        if (expanded == NULL) return status;
+        /* Prompt-template expansion — continue on the user-turn path
+         * using the expanded text as the submitted line. */
+        line = expanded;
     }
 
     psi_tui_add_entry(state, PSI_TUI_ENTRY_USER, NULL, line, 0);
