@@ -50,6 +50,16 @@ local function fork_output_path()
   return "sessions/fork-" .. id .. "-" .. tostring(os.time()) .. ".jsonl"
 end
 
+-- /clone writes a full copy of the current session at the current
+-- position. Mirrors pi's /clone ("duplicate session at current
+-- position") and differs from /fork, which keeps the first N entries
+-- only. Implementation reuses session.fork(total, out_path) — fork
+-- with at_count = message_count is the natural full-session dump.
+local function clone_output_path()
+  local id = psi.session_id() or tostring(os.time())
+  return "sessions/clone-" .. id .. "-" .. tostring(os.time()) .. ".jsonl"
+end
+
 -- ---------- session status (/session) ----------
 
 local function last_assistant_summary()
@@ -267,6 +277,9 @@ function M.handle(line)
   if line == "/help" or line == "/h" then
     return records.new_command_action("print", prompt.help_text())
   end
+  if line == "/hotkeys" then
+    return records.new_command_action("print", prompt.hotkeys_text())
+  end
   if is_quit(line) then
     return records.new_command_action("quit", nil)
   end
@@ -299,6 +312,16 @@ function M.handle(line)
     end
     return records.new_command_action("resume", path)
   end
+  if starts_word(line, "/import") then
+    -- Alias for /resume: pi names it /import when loading a
+    -- JSONL session from another source (another project, a
+    -- shared transcript, etc.). Semantically identical for psi.
+    local path = arg_after(line, "/import")
+    if path == "" then
+      return records.new_command_action("print", "usage: /import <path>")
+    end
+    return records.new_command_action("resume", path)
+  end
   if starts_word(line, "/export") then
     local path = arg_after(line, "/export")
     return cmd_export(path)
@@ -315,6 +338,16 @@ function M.handle(line)
     local out = fork_output_path()
     local ok = session.fork(keep, out)
     local msg = ok and ("forked " .. tostring(keep) .. " entries to " .. out) or "fork failed"
+    return records.new_command_action("print", msg)
+  end
+  if starts_word(line, "/clone") then
+    local rest = arg_after(line, "/clone")
+    local out = (rest ~= "" and rest) or clone_output_path()
+    local total = psi.session_message_count()
+    local ok = session.fork(total, out)
+    local msg = ok
+      and string.format("cloned %d entries to %s", total, out)
+      or  "clone failed"
     return records.new_command_action("print", msg)
   end
   return dispatch_registered(line)
