@@ -106,7 +106,7 @@ BENCHES: list[tuple[str, str]] = [
         local s = require('psi.session')
         local path = '/tmp/psi-bench-session.jsonl'
         os.remove(path)
-        psi.session_set_path(path)  -- ensure save() writes on every call
+        psi.session_set_path(path)
         -- Append 100 messages with substantial text so we exercise the
         -- per-entry JSON encode path realistically.
         for i = 1, 100 do
@@ -123,16 +123,53 @@ BENCHES: list[tuple[str, str]] = [
         """,
     ),
     (
+        "session_turn_shape",
+        r"""
+        -- Realistic turn shape: start with an existing session on
+        -- disk (100 entries), then do a "turn" — append 8 new
+        -- entries with 4 flushes spread across them (roughly
+        -- simulating a 3-tool turn: after provider response, after
+        -- each tool result, at turn end).
+        local s = require('psi.session')
+        local path = '/tmp/psi-bench-turn.jsonl'
+        os.remove(path)
+        psi.session_set_path(path)
+        for i = 1, 100 do
+          s.append_user(string.rep('m', 200) .. ' ' .. i)
+        end
+        s.save()  -- seed file
+        local TURNS = 5
+        local start = os.clock()
+        for t = 1, TURNS do
+          -- 8 appends, 4 flushes
+          s.append_user('prompt ' .. t)
+          s.append_assistant('response ' .. t)
+          s.save()
+          s.append_assistant('tool-use block ' .. t)
+          s.save()
+          s.append_tool_result('id' .. t, 'bash', 'some output', false)
+          s.save()
+          s.append_assistant('final text ' .. t)
+          s.save()
+        end
+        local dt = (os.clock() - start) * 1000
+        local size = #(psi.read_file(path) or '')
+        os.remove(path)
+        io.write(string.format('ms: %.1f  turns: %d  final_bytes: %d\n',
+                               dt, TURNS, size))
+        """,
+    ),
+    (
         "sse_feed_fragmented",
         r"""
-        -- Adversarial: long assistant text split into many small SSE
-        -- chunks exercises the sse_feed `leftover..chunk` concat path.
-        -- With today's implementation this is O(N^2) in chunk count
-        -- because every append triggers a full realloc of `leftover`.
+        -- Realistic adversarial workload: several large SSE events,
+        -- each fragmented into tiny TCP chunks. Exercises the
+        -- stateful sse parser (no cross-chunk leftover concat).
+        local anthro = require('psi.anthropic')
+        local new_sse_parser = anthro._test.new_sse_parser
+        local sse_push = anthro._test.sse_push
         local CHUNKS_PER_EVENT = 200
         local EVENTS = 50
-        -- Build one full SSE event of size ~(CHUNKS_PER_EVENT*16) and
-        -- then cut it into 16-byte pieces. EVENTS copies.
         local piece = 'abcdefghijklmnop'  -- 16 bytes
         local body_chunks = {}
         for _ = 1, EVENTS do
@@ -145,23 +182,18 @@ BENCHES: list[tuple[str, str]] = [
             s = s + 16
           end
         end
-        local N = 1
-        local leftover = ''
+        local N = 10
+        local events_seen = 0
         local start = os.clock()
         for _ = 1, N do
-          leftover = ''
+          local parser = new_sse_parser()
           for _, chunk in ipairs(body_chunks) do
-            leftover = leftover .. chunk
-            while true do
-              local nl = leftover:find('\n\n', 1, true)
-              if not nl then break end
-              leftover = leftover:sub(nl + 2)
-            end
+            sse_push(parser, chunk, function() events_seen = events_seen + 1 end)
           end
         end
         local dt = (os.clock() - start) * 1000
-        io.write(string.format('ms: %.1f  iterations: %d  chunks: %d\n',
-                               dt, N, #body_chunks))
+        io.write(string.format('ms: %.1f  iterations: %d  chunks: %d  events: %d\n',
+                               dt, N, #body_chunks, events_seen))
         """,
     ),
     (

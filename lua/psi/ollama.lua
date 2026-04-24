@@ -237,17 +237,31 @@ local function handle_line(line, state, observer)
   end
 end
 
-local function sse_feed_ndjson(buffer, state, observer)
-  local pos = 1
-  while true do
-    local nl = buffer:find("\n", pos, true)
-    if not nl then break end
-    local line = buffer:sub(pos, nl - 1)
+-- Stateful NDJSON parser. Same rationale as the Anthropic SSE parser
+-- over in psi/anthropic.lua: accumulate the current in-flight line
+-- as a table, concat once per `\n`, never hold a cross-chunk
+-- "leftover" string. Ollama streams are line-delimited JSON; each
+-- complete line is one event.
+local function new_ndjson_parser()
+  return { line = {} }
+end
+
+local function ndjson_push(parser, chunk, state, observer)
+  local start = 1
+  local len = #chunk
+  while start <= len do
+    local nl = chunk:find("\n", start, true)
+    if not nl then
+      parser.line[#parser.line + 1] = chunk:sub(start)
+      break
+    end
+    parser.line[#parser.line + 1] = chunk:sub(start, nl - 1)
+    local line = table.concat(parser.line)
+    parser.line = {}
     if line:sub(-1) == "\r" then line = line:sub(1, -2) end
     if #line > 0 then handle_line(line, state, observer) end
-    pos = nl + 1
+    start = nl + 1
   end
-  return buffer:sub(pos)
 end
 
 -- ---------- Append Ollama results into the session (pi shape) ----------
@@ -346,7 +360,7 @@ function M.run_turn(opts)
     if opts.max_tokens then request.options.num_predict = opts.max_tokens end
 
     local state = new_state()
-    local leftover = ""
+    local parser = new_ndjson_parser()
     local sched = require("psi.sched")
 
     local handle, begin_err = psi.http_stream_begin(url, headers, psi.json_encode(request))
@@ -359,8 +373,7 @@ function M.run_turn(opts)
       if abort_check() then break end
       local chunk, done = sched.http_poll(handle, 50)
       if chunk ~= nil then
-        leftover = leftover .. chunk
-        leftover = sse_feed_ndjson(leftover, state, observer)
+        ndjson_push(parser, chunk, state, observer)
       end
       if done then break end
     end

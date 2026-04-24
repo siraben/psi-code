@@ -254,38 +254,57 @@ end
 -- corrupting streamed tool_use JSON and causing the agent to call
 -- the tool with empty input ("missing string field: path"). TCP
 -- fragmentation + large input_json_delta events made this triggerable.
-local function sse_feed(buffer, carry, on_event)
-  local pending_event = carry.event
-  local pending_data = carry.data
-  local pos = 1
-  while true do
-    local nl = buffer:find("\n", pos, true)
+-- Stateful SSE parser. Replaces the old `leftover = leftover .. chunk`
+-- + sse_feed pair, which paid O(N²) in chunk count when an event
+-- body was split across many small chunks (Lua strings are
+-- immutable; every concat reallocates). Here we accumulate the
+-- current in-flight LINE as a table, concat once per `\n`, and
+-- never hold a multi-chunk `leftover` string at all.
+--
+-- State shape:
+--   { line = {},              -- table of pending-line chunks
+--     pending_event = string|nil,
+--     pending_data  = string|nil }
+local function new_sse_parser()
+  return { line = {}, pending_event = nil, pending_data = nil }
+end
+
+local function sse_dispatch_line(parser, line, on_event)
+  -- Strip trailing \r for CRLF servers.
+  if line:sub(-1) == "\r" then
+    line = line:sub(1, -2)
+  end
+  if line:sub(1, 7) == "event: " then
+    parser.pending_event = line:sub(8)
+  elseif line:sub(1, 6) == "data: " then
+    parser.pending_data = line:sub(7)
+  elseif line == "" then
+    if parser.pending_event and parser.pending_data then
+      local data = safe_decode(parser.pending_data)
+      if data then
+        on_event(parser.pending_event, data)
+      end
+    end
+    parser.pending_event, parser.pending_data = nil, nil
+  end
+end
+
+local function sse_push(parser, chunk, on_event)
+  local start = 1
+  local len = #chunk
+  while start <= len do
+    local nl = chunk:find("\n", start, true)
     if not nl then
+      -- No terminator in this chunk; stash the tail and wait for more.
+      parser.line[#parser.line + 1] = chunk:sub(start)
       break
     end
-    local line = buffer:sub(pos, nl - 1)
-    -- Strip trailing \r for CRLF servers.
-    if line:sub(-1) == "\r" then
-      line = line:sub(1, -2)
-    end
-    pos = nl + 1
-    if line:sub(1, 7) == "event: " then
-      pending_event = line:sub(8)
-    elseif line:sub(1, 6) == "data: " then
-      pending_data = line:sub(7)
-    elseif line == "" then
-      if pending_event and pending_data then
-        local data = safe_decode(pending_data)
-        if data then
-          on_event(pending_event, data)
-        end
-      end
-      pending_event, pending_data = nil, nil
-    end
+    parser.line[#parser.line + 1] = chunk:sub(start, nl - 1)
+    local line = table.concat(parser.line)
+    parser.line = {}
+    sse_dispatch_line(parser, line, on_event)
+    start = nl + 1
   end
-  carry.event = pending_event
-  carry.data = pending_data
-  return buffer:sub(pos)
 end
 
 -- ---------- Stream-state accumulator ----------
@@ -710,13 +729,16 @@ function M.run_turn(opts)
     local body = psi.json_encode(request)
 
     local state = new_state()
-    local leftover = ""
-    local sse_carry = { event = nil, data = nil }
+    local parser = new_sse_parser()
     local sched = require("psi.sched")
 
     -- Async pull-loop. http_stream_begin spawns a helper thread that
     -- runs curl_easy_perform; we cooperatively yield to the host
-    -- between chunks so the TUI redraw loop keeps running.
+    -- between chunks so the TUI redraw loop keeps running. Chunks
+    -- stream into the stateful SSE parser, which never holds a
+    -- multi-chunk "leftover" string — the old `leftover ..= chunk`
+    -- approach paid O(N²) in chunk count for events fragmented
+    -- across many TCP segments.
     local handle, begin_err = psi.http_stream_begin(url, headers, body)
     if handle == nil then
       save_failed_partial(state, model, "error", tostring(begin_err))
@@ -728,8 +750,7 @@ function M.run_turn(opts)
       if abort_check() then break end
       local chunk, done = sched.http_poll(handle, 50)
       if chunk ~= nil then
-        leftover = leftover .. chunk
-        leftover = sse_feed(leftover, sse_carry, function(event_type, data)
+        sse_push(parser, chunk, function(event_type, data)
           dispatch_sse(state, event_type, data, observer)
         end)
       end
@@ -855,5 +876,11 @@ function M.run_turn(opts)
   )
   return false
 end
+
+-- Exported for tests/bench.py only. Safe to drop if internal.
+M._test = {
+  new_sse_parser = new_sse_parser,
+  sse_push = sse_push,
+}
 
 return M

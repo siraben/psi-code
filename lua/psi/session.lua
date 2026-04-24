@@ -335,10 +335,41 @@ local function write_session_file(path, header, messages, count)
   return true
 end
 
+-- Append-only companion to write_session_file. Called on every save
+-- after the first when the message count has only grown — writes
+-- messages[from_idx..#messages] to the existing file without
+-- rewriting the header or earlier entries. A 100-entry session
+-- with a 5-entry delta drops from 105-line rewrite to 5-line
+-- append; on iSH this turns a ~50ms save into a ~2ms append.
+local function append_session_file(path, messages, from_idx, count)
+  local f, err = io.open(path, "a")
+  if not f then
+    return false, err
+  end
+  local n = count or #messages
+  local ok, werr = pcall(function()
+    for i = from_idx, n do
+      write_line(f, to_disk_entry(messages[i]))
+    end
+  end)
+  f:close()
+  if not ok then
+    return false, werr
+  end
+  return true
+end
+
+-- Last-save state for append-only optimisation. Invalidated to
+-- force a full rewrite when: the path changes, the file is gone,
+-- or the message count shrinks (compaction / clear).
+local last_saved_path  = nil
+local last_saved_count = 0
+
 -- Persist the current session to disk.
 --
 -- Return contract:
---   true                           — wrote the file successfully
+--   true                           — wrote the file (or all entries
+--                                    were already on disk; no-op).
 --   false, "no session path set"   — no path configured; nothing was
 --                                    written. Distinguishable from a
 --                                    true write so extensions that
@@ -348,6 +379,16 @@ end
 --                                    returned `true` silently and
 --                                    hid the misconfiguration.
 --   false, err                     — disk / permission / I/O error.
+--
+-- Append-only fast path: after the first successful save, later
+-- saves append the new entries instead of rewriting the whole
+-- file. Conditions that force a full rewrite:
+--   * path changed (`/resume`, fork to new file)
+--   * file is missing on disk
+--   * message count shrunk (compaction or /new cleared the
+--     in-memory session — the on-disk earlier entries are stale
+--     and must be replaced)
+--   * first ever save for this path
 function M.save(path)
   M.ensure_id()
   if not path or path == "" then
@@ -356,7 +397,41 @@ function M.save(path)
   if not path or path == "" then
     return false, "no session path set"
   end
-  return write_session_file(path, session_header(), psi.session_messages())
+  local messages = psi.session_messages()
+  local count = #messages
+
+  local force_full =
+       (path ~= last_saved_path)
+    or (count < last_saved_count)
+    or (last_saved_count == 0)
+    or (not psi.file_exists(path))
+
+  if force_full then
+    local ok, err = write_session_file(path, session_header(), messages, count)
+    if ok then
+      last_saved_path  = path
+      last_saved_count = count
+    else
+      -- Failed rewrite leaves the file in an uncertain state; the
+      -- next successful save will force another full rewrite.
+      last_saved_path  = nil
+      last_saved_count = 0
+    end
+    return ok, err
+  end
+
+  if count == last_saved_count then
+    return true
+  end
+
+  local ok, err = append_session_file(path, messages, last_saved_count + 1, count)
+  if ok then
+    last_saved_count = count
+  else
+    last_saved_path  = nil
+    last_saved_count = 0
+  end
+  return ok, err
 end
 
 -- ---------- Loader: v2 native + v1 upconvert ----------
@@ -475,6 +550,12 @@ function M.load(path)
   end
   psi.session_set_path(path)
 
+  -- Any previously-cached save cursor belongs to a different
+  -- session file. Clear it so the first save after load re-opens
+  -- the append cursor against this file's actual length.
+  last_saved_path  = nil
+  last_saved_count = 0
+
   local f = io.open(path, "r")
   if not f then
     if not psi.session_id() or psi.session_id() == "" then
@@ -517,6 +598,11 @@ function M.load(path)
   if not psi.session_id() or psi.session_id() == "" then
     psi.session_set_id(prelude.uuid_short())
   end
+  -- Stamp the save cursor so subsequent appends write only NEW
+  -- entries. The on-disk file already has exactly these messages,
+  -- so this is the correct starting point.
+  last_saved_path  = path
+  last_saved_count = psi.session_message_count()
   return true
 end
 
@@ -585,6 +671,17 @@ end
 require("psi.tool_registry").add_after_hook(record_file_op)
 
 -- Replace session with [compaction-summary] + last keep_recent messages.
+--
+-- Fires `compaction-start` before the rewrite and `compaction-end`
+-- after, so extensions (autosave, exporters, observers) can flush or
+-- snapshot the transcript on either side. Mirrors pi's
+-- `compaction_start` / `compaction_end` agent events.
+--
+-- Payload for both events:
+--   { total = <pre-rewrite message count>,
+--     keep_recent = <requested retention>,
+--     compacted = <messages that will be/were folded into the summary> }
+-- compaction-end additionally gets `summary = <text>`.
 function M.do_compact(keep_recent, summary_text)
   local messages = M.messages()
   local total = #messages
@@ -593,6 +690,14 @@ function M.do_compact(keep_recent, summary_text)
   end
   local compacted_count = total - keep_recent
   local tail = prelude.drop(messages, compacted_count)
+
+  if psi.events and psi.events.emit then
+    psi.events.emit("compaction-start", {
+      total = total,
+      keep_recent = keep_recent,
+      compacted = compacted_count,
+    })
+  end
 
   local read_files, modified_files = M.pending_file_ops()
   local first_kept = tail[1]
@@ -616,6 +721,15 @@ function M.do_compact(keep_recent, summary_text)
     M.append_message(m)
   end
   M.reset_file_ops()
+
+  if psi.events and psi.events.emit then
+    psi.events.emit("compaction-end", {
+      total = total,
+      keep_recent = keep_recent,
+      compacted = compacted_count,
+      summary = summary_text,
+    })
+  end
   return true
 end
 

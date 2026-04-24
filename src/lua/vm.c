@@ -424,15 +424,36 @@ static int lfn_process_run(lua_State *L) {
  * from a Lua coroutine via psi.sched.proc_poll; the main thread
  * stays free to service the TUI event loop in between.
  *
- * Handle lifetime: the light-userdata pointer is owned by the
- * caller; begin returns it, finish frees it. Lua coroutine code
- * MUST call finish or leak the handle + child process.
+ * Handle lifetime: full userdata + __gc, same rationale as
+ * http_stream — a coroutine that errors between begin and finish
+ * must not leak the fork()ed child + pipe fds. __gc on the
+ * userdata will reap a leaked child by SIGTERMing it and running
+ * psi_process_finish.
  * ------------------------------------------------------------------ */
+
+#define PSI_PROCESS_HANDLE_MT "psi.process_handle"
+
+static struct psi_process_handle **psi_vm_process_ud_check(lua_State *L, int idx) {
+    return (struct psi_process_handle **)luaL_checkudata(L, idx, PSI_PROCESS_HANDLE_MT);
+}
+
+static int lfn_process_gc(lua_State *L) {
+    struct psi_process_handle **ud = psi_vm_process_ud_check(L, 1);
+    if (*ud != NULL) {
+        char *out = NULL;
+        int ex = -1, tr = 0;
+        psi_process_finish(*ud, &out, &ex, &tr);
+        free(out);
+        *ud = NULL;
+    }
+    return 0;
+}
 
 static int lfn_process_begin(lua_State *L) {
     const char *command = luaL_checkstring(L, 1);
     const struct psi_host_context *host = PSI_VM_HOST(L);
     struct psi_process_handle *h;
+    struct psi_process_handle **ud;
     int status;
 
     h = NULL;
@@ -445,21 +466,25 @@ static int lfn_process_begin(lua_State *L) {
         lua_pushstring(L, "failed to spawn shell");
         return 2;
     }
-    lua_pushlightuserdata(L, h);
+    ud = (struct psi_process_handle **)lua_newuserdata(L, sizeof(*ud));
+    *ud = h;
+    luaL_setmetatable(L, PSI_PROCESS_HANDLE_MT);
     return 1;
 }
 
 static int lfn_process_poll(lua_State *L) {
+    struct psi_process_handle **ud;
     struct psi_process_handle *h;
     int timeout_ms;
     char *chunk;
     size_t chunk_len;
     int result;
 
-    if (lua_type(L, 1) != LUA_TLIGHTUSERDATA) {
-        return luaL_error(L, "process_poll: handle expected");
+    ud = psi_vm_process_ud_check(L, 1);
+    h = *ud;
+    if (h == NULL) {
+        return luaL_error(L, "process_poll: handle already finished");
     }
-    h = (struct psi_process_handle *)lua_touserdata(L, 1);
     timeout_ms = (int)luaL_optinteger(L, 2, 0);
     chunk = NULL;
     chunk_len = 0u;
@@ -490,15 +515,23 @@ static int lfn_process_poll(lua_State *L) {
 }
 
 static int lfn_process_finish(lua_State *L) {
+    struct psi_process_handle **ud;
     struct psi_process_handle *h;
     char *output;
     int status;
     int truncated;
 
-    if (lua_type(L, 1) != LUA_TLIGHTUSERDATA) {
-        return luaL_error(L, "process_finish: handle expected");
+    ud = psi_vm_process_ud_check(L, 1);
+    h = *ud;
+    if (h == NULL) {
+        /* Idempotent double-finish: return a zero-shaped result. */
+        lua_newtable(L);
+        lua_pushstring(L, "");       lua_setfield(L, -2, "output");
+        lua_pushinteger(L, -1);      lua_setfield(L, -2, "status");
+        lua_pushboolean(L, 0);       lua_setfield(L, -2, "truncated");
+        return 1;
     }
-    h = (struct psi_process_handle *)lua_touserdata(L, 1);
+    *ud = NULL;  /* consumed before the C call so __gc skips */
     output = NULL;
     status = -1;
     truncated = 0;
@@ -728,10 +761,32 @@ static int lfn_http_post_stream(lua_State *L) {
  *
  * Begin spawns a helper thread that runs curl_easy_perform; poll
  * drains one chunk at a time with a timeout; finish joins the thread
- * and returns the HTTP status code. The handle is a light-userdata
- * value held by the Lua caller (psi.sched / psi.anthropic). Never
- * garbage-collected automatically — callers MUST call finish.
+ * and returns the HTTP status code.
+ *
+ * Ownership: the handle is returned as a FULL userdata with a
+ * metatable that has a __gc finaliser. If the Lua caller explicitly
+ * calls finish (the normal path), the pointer is nulled out so the
+ * finaliser is a no-op. If the coroutine errors between begin and
+ * finish (OOM mid-sse_feed, bug in anthropic.lua), the userdata
+ * becomes unreachable and __gc reaps the pthread + curl handle +
+ * queued chunks. Before this change the handle was light userdata
+ * with no GC — errors leaked everything.
  * ------------------------------------------------------------------ */
+
+#define PSI_HTTP_STREAM_MT "psi.http_stream"
+
+static struct psi_http_stream **psi_vm_http_stream_ud_check(lua_State *L, int idx) {
+    return (struct psi_http_stream **)luaL_checkudata(L, idx, PSI_HTTP_STREAM_MT);
+}
+
+static int lfn_http_stream_gc(lua_State *L) {
+    struct psi_http_stream **ud = psi_vm_http_stream_ud_check(L, 1);
+    if (*ud != NULL) {
+        psi_http_stream_finish(*ud);
+        *ud = NULL;
+    }
+    return 0;
+}
 
 static int lfn_http_stream_begin(lua_State *L) {
     const char *url = luaL_checkstring(L, 1);
@@ -741,6 +796,7 @@ static int lfn_http_stream_begin(lua_State *L) {
     size_t header_count;
     const struct psi_host_context *host;
     struct psi_http_stream *h;
+    struct psi_http_stream **ud;
     int status;
 
     luaL_checktype(L, 2, LUA_TTABLE);
@@ -765,21 +821,26 @@ static int lfn_http_stream_begin(lua_State *L) {
         lua_pushstring(L, "failed to start http stream");
         return 2;
     }
-    lua_pushlightuserdata(L, h);
+
+    ud = (struct psi_http_stream **)lua_newuserdata(L, sizeof(*ud));
+    *ud = h;
+    luaL_setmetatable(L, PSI_HTTP_STREAM_MT);
     return 1;
 }
 
 static int lfn_http_stream_poll(lua_State *L) {
+    struct psi_http_stream **ud;
     struct psi_http_stream *h;
     int timeout_ms;
     char *chunk;
     size_t chunk_len;
     int result;
 
-    if (lua_type(L, 1) != LUA_TLIGHTUSERDATA) {
-        return luaL_error(L, "http_stream_poll: handle expected");
+    ud = psi_vm_http_stream_ud_check(L, 1);
+    h = *ud;
+    if (h == NULL) {
+        return luaL_error(L, "http_stream_poll: handle already finished");
     }
-    h = (struct psi_http_stream *)lua_touserdata(L, 1);
     timeout_ms = (int)luaL_optinteger(L, 2, 0);
     chunk = NULL;
     chunk_len = 0u;
@@ -802,13 +863,18 @@ static int lfn_http_stream_poll(lua_State *L) {
 }
 
 static int lfn_http_stream_finish(lua_State *L) {
+    struct psi_http_stream **ud;
     struct psi_http_stream *h;
     long status;
 
-    if (lua_type(L, 1) != LUA_TLIGHTUSERDATA) {
-        return luaL_error(L, "http_stream_finish: handle expected");
+    ud = psi_vm_http_stream_ud_check(L, 1);
+    h = *ud;
+    if (h == NULL) {
+        /* Idempotent: explicit finish after GC, or double-finish. */
+        lua_pushinteger(L, 0);
+        return 1;
     }
-    h = (struct psi_http_stream *)lua_touserdata(L, 1);
+    *ud = NULL;  /* flag consumed before the C call so __gc is a no-op */
     status = psi_http_stream_finish(h);
     lua_pushinteger(L, (lua_Integer)status);
     return 1;
@@ -1112,7 +1178,23 @@ static int lfn_tool_call(lua_State *L) {
  * VM lifecycle
  * ------------------------------------------------------------------ */
 
+/* Install a metatable with a __gc finaliser under `name` in the
+ * registry (luaL_newmetatable / luaL_setmetatable convention).
+ * Idempotent: re-calling leaves the same metatable in place. */
+static void psi_vm_register_gc_mt(lua_State *L, const char *name, lua_CFunction gc_fn) {
+    if (luaL_newmetatable(L, name)) {
+        lua_pushcfunction(L, gc_fn);
+        lua_setfield(L, -2, "__gc");
+    }
+    lua_pop(L, 1);
+}
+
 static void psi_vm_register_psi(lua_State *L) {
+    /* Handle metatables. Must be registered BEFORE any begin() can
+     * fire so luaL_setmetatable always finds them. */
+    psi_vm_register_gc_mt(L, PSI_HTTP_STREAM_MT, lfn_http_stream_gc);
+    psi_vm_register_gc_mt(L, PSI_PROCESS_HANDLE_MT, lfn_process_gc);
+
     lua_newtable(L);
 
 #define PSI_REG(name, fn) \
