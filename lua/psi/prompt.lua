@@ -78,6 +78,25 @@ local function write_line(buf, prefix, line)
   buf[#buf + 1] = prefix .. line .. "\n"
 end
 
+-- System-prompt transformers. Each registered fn receives the
+-- currently-assembled prompt string and returns a replacement string
+-- (or nil / "" to leave the prompt unchanged). Runs in registration
+-- order after the built-in assembly, so transformers stack.
+--
+-- Use this from an extension when you want to inject project-specific
+-- guidance, swap a tone, or override parts of the prompt entirely.
+-- For additive content, just concatenate; for replacement, return a
+-- wholly different string.
+local transformers = {}
+
+function M.register_transformer(fn)
+  transformers[#transformers + 1] = fn
+end
+
+function M.clear_transformers()
+  transformers = {}
+end
+
 function M.system_prompt()
   local all_tools = tools.all()
   local have = tool_set(all_tools)
@@ -131,7 +150,14 @@ function M.system_prompt()
   end
   buf[#buf + 1] = "\nCurrent date: " .. psi.current_date()
   buf[#buf + 1] = "\nCurrent working directory: " .. psi.cwd()
-  return table.concat(buf)
+  local out = table.concat(buf)
+  for _, fn in ipairs(transformers) do
+    local transformed = fn(out)
+    if type(transformed) == "string" and transformed ~= "" then
+      out = transformed
+    end
+  end
+  return out
 end
 
 -- ---------- compaction request ----------
@@ -233,22 +259,61 @@ end
 
 M.HELP_TEXT = table.concat({
   "/help            show available commands\n",
+  "/hotkeys         show keyboard shortcuts\n",
   "/quit            exit the shell  (aliases: /q, :quit, :q)\n",
   "/session         show current session info (id, file, model, usage)\n",
   "/new             start a fresh session in place (alias: /clear)\n",
   "/resume <path>   load a session file from disk\n",
+  "/import <path>   import a JSONL session (alias: /resume)\n",
   "/name <text>     set the session display name\n",
   "/model <spec>    switch model mid-session (e.g. ollama/llama3.1)\n",
   "/copy            copy the last assistant message to the clipboard\n",
   "/export [path]   write the session as markdown (default: sessions/<id>.md)\n",
   "/compact [N]     summarize older context, keep the most recent N messages\n",
   "/fork [N]        save the first N entries to a new session file\n",
+  "/clone [path]    duplicate the current session at its current position\n",
   "/reload          re-run extension discovery\n",
   "/system-prompt   print the current coding-agent system prompt",
 })
 
+-- Keyboard shortcuts surfaced by /hotkeys. Keeping the canonical
+-- list in Lua (rather than hard-coded in the C TUI main-loop
+-- switch) lets extensions or future CLIs display it consistently.
+M.HOTKEYS_TEXT = table.concat({
+  "keyboard shortcuts\n",
+  "\n",
+  "input editing (readline-style):\n",
+  "  Ctrl-A        beginning of line\n",
+  "  Ctrl-E        end of line\n",
+  "  Ctrl-B / ←    move left one char\n",
+  "  Ctrl-F / →    move right one char\n",
+  "  Alt-B         move left one word\n",
+  "  Alt-F         move right one word\n",
+  "  Ctrl-W        delete previous word\n",
+  "  Alt-D         delete next word\n",
+  "  Alt-Backspace delete previous word (alias)\n",
+  "  Ctrl-K        kill to end of line\n",
+  "  Ctrl-U        kill to start of line\n",
+  "  Ctrl-D        forward-delete (or EOF on empty line)\n",
+  "  Ctrl-L        redraw\n",
+  "\n",
+  "transcript navigation:\n",
+  "  ↑ / ↓          scroll one line\n",
+  "  PgUp / PgDn    scroll one page\n",
+  "\n",
+  "flow control:\n",
+  "  Enter                  submit turn\n",
+  "  Esc                    abort current turn (while busy)\n",
+  "  Ctrl-Z                 suspend psi (use `fg` to resume)\n",
+  "  Ctrl-D on empty input  exit",
+})
+
 function M.help_text()
   return M.HELP_TEXT
+end
+
+function M.hotkeys_text()
+  return M.HOTKEYS_TEXT
 end
 
 -- Bootstrap print-mode handler (called by C with the user's prompt).

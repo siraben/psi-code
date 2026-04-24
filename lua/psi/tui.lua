@@ -7,6 +7,30 @@ local prelude = require("psi.prelude")
 
 local M = {}
 
+-- Status-line hooks. Extensions can register fns that return a short
+-- string appended to the TUI status line. Called on every redraw, so
+-- they must be cheap and side-effect-free. Return nil / "" to skip.
+--
+-- Example:
+--   psi.tui.register_status_hook(function()
+--     return "ext:tps " .. last_tps_value
+--   end)
+--
+-- This is the lightest-weight TUI widget slot: no C plumbing, works
+-- in the existing single status-line layout, and is automatically
+-- suppressed when a status message (set via psi_tui_set_status) is
+-- active. For a dedicated row with arbitrary content, wait for a
+-- real widget API — this is the pi-gap shim.
+local status_hooks = {}
+
+function M.register_status_hook(fn)
+  status_hooks[#status_hooks + 1] = fn
+end
+
+function M.clear_status_hooks()
+  status_hooks = {}
+end
+
 local function short_id(id)
   if type(id) ~= "string" or id == "" then
     return "-"
@@ -19,7 +43,13 @@ end
 -- Returns a single string with fields separated by two spaces.
 function M.status_line(arg_json)
   local arg = prelude.safe_json_decode(arg_json, {})
-  local model  = arg.model or "?"
+  -- Prefer the runtime model override (set via psi.agent.set_model)
+  -- over whatever C passed in, so a live `/model` swap or an
+  -- extension-driven change is reflected in the footer without a
+  -- restart. require() is resolved lazily to avoid a boot-time
+  -- cycle (agent ↔ prompt ↔ tools ↔ tui).
+  local ok, agent = pcall(require, "psi.agent")
+  local model = (ok and agent.current_model(arg.model)) or arg.model or "?"
   local busy   = arg.busy
   local scroll = tonumber(arg.scroll) or 0
 
@@ -40,6 +70,12 @@ function M.status_line(arg_json)
   end
   if busy then
     parts[#parts + 1] = "working…"
+  end
+  for _, fn in ipairs(status_hooks) do
+    local ok_hook, extra = pcall(fn)
+    if ok_hook and type(extra) == "string" and extra ~= "" then
+      parts[#parts + 1] = extra
+    end
   end
   return table.concat(parts, "  ")
 end

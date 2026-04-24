@@ -332,6 +332,66 @@ def t_render_write_diff(psi: Psi):
     assert_contains(out, "delta", "diff payload")
 
 
+@test("prompt/transformer")
+def t_prompt_transformer(psi: Psi):
+    """psi.prompt.register_transformer runs after built-in assembly
+    and can rewrite the returned prompt string."""
+    out = psi.eval(
+        'local p = require("psi.prompt")\n'
+        + 'p.register_transformer(function(s) return s .. " [TAIL]" end)\n'
+        + 'local sp = p.system_prompt()\n'
+        + 'p.clear_transformers()\n'
+        + 'return sp:sub(-6)'
+    )
+    assert_contains(out, "[TAIL]", "transformer appended tail marker")
+
+
+@test("tools/cancel_helper")
+def t_tools_cancel(psi: Psi):
+    """psi.tools.cancel returns a failure ToolResult that a before-hook
+    can use to short-circuit dispatch. Real tool impl must not run."""
+    out = psi.eval(
+        'local t = require("psi.tools")\n'
+        + 'local real_ran = false\n'
+        + 't.add_before_hook(function(name, input)\n'
+        + '  if name == "bash" then return t.cancel("nope") end\n'
+        + 'end)\n'
+        + '-- Register a fake tool whose impl flips a flag; if\n'
+        + '-- cancel short-circuits, impl must not run.\n'
+        + 'local r = t.dispatch("bash", { command = "echo x" })\n'
+        + 't.clear_hooks()\n'
+        + 'return tostring(r.ok) .. "|" .. tostring(r.error)'
+    )
+    assert_contains(out, "false|nope", "cancel result shape")
+
+
+@test("agent/set_model")
+def t_agent_set_model(psi: Psi):
+    out = psi.eval(
+        'local a = require("psi.agent")\n'
+        + 'a.set_model("openrouter/x/y")\n'
+        + 'local got = a.current_model("anthropic/fallback")\n'
+        + 'a.set_model(nil)\n'
+        + 'local cleared = a.current_model("anthropic/fallback")\n'
+        + 'return got .. "|" .. cleared'
+    )
+    assert_contains(out, "openrouter/x/y|anthropic/fallback",
+                    "override then clear")
+
+
+@test("tui/status_hook")
+def t_tui_status_hook(psi: Psi):
+    out = psi.eval(
+        'local tui = require("psi.tui")\n'
+        + 'tui.register_status_hook(function() return "ext:foo" end)\n'
+        + 'local line = tui.status_line(\n'
+        + '  psi.json_encode({model="m", busy=false, scroll=0}))\n'
+        + 'tui.clear_status_hooks()\n'
+        + 'return line'
+    )
+    assert_contains(out, "ext:foo", "status hook contribution shows")
+
+
 @test("render/replace_mode")
 def t_render_replace(psi: Psi):
     """A render hook returning {replace=true, text=...} must drop

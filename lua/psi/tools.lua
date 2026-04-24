@@ -381,4 +381,24 @@ M.add_before_hook = registry.add_before_hook
 M.add_after_hook = registry.add_after_hook
 M.clear_hooks = registry.clear_hooks
 
+-- Helper for before-hooks to cleanly cancel a tool call. Returning
+-- the result from a before-hook short-circuits dispatch — the tool's
+-- real impl is never invoked, and the returned ToolResult becomes
+-- what the LLM sees. Use this when denying permission, blocking a
+-- dangerous command, or substituting a stubbed reply in tests:
+--
+--   psi.tools.add_before_hook(function(name, input)
+--     if name == "bash" and input.command:find("rm %-rf") then
+--       return psi.tools.cancel("refused: destructive rm -rf")
+--     end
+--   end)
+--
+-- `reason` is surfaced to the model in the error field so it can
+-- explain the failure. If `tool_name` is supplied it's recorded on
+-- the result; otherwise the tool name is filled in by the dispatcher.
+function M.cancel(reason, tool_name)
+  return records.tool_failure(tool_name or "tool",
+                              reason or "cancelled by before-hook")
+end
+
 return M

@@ -42,6 +42,30 @@ end
 
 function M.provider_for(model) return pick_provider(model) end
 
+-- Runtime model switch. Extensions (or a slash command) can call
+-- M.set_model("openrouter/google/gemini-3-flash-preview") at any
+-- time; subsequent turns resolve to the new model, including the
+-- prefix-based provider choice. Pass nil to clear the override and
+-- fall back to whatever the C host passed via
+-- psi_agent_runtime_configure (CLI --model / $PSI_MODEL).
+--
+-- Reading from psi.tui.status_line picks this up automatically so
+-- the TUI footer reflects the live model string.
+local override_model = nil
+
+function M.set_model(name)
+  if name == nil or name == "" then
+    override_model = nil
+  else
+    override_model = name
+  end
+end
+
+function M.current_model(fallback)
+  if override_model ~= nil then return override_model end
+  return fallback
+end
+
 -- Append the user's turn, build the system prompt, and drive the
 -- streaming tool loop via the chosen provider's run_turn.
 --
@@ -55,7 +79,7 @@ function M.run_turn(opts)
   session.append_user(user_text)
   session.save()
 
-  local provider, real_model = pick_provider(opts.model)
+  local provider, real_model = pick_provider(M.current_model(opts.model))
   local system_prompt = prompt.system_prompt()
   return sched.run(function()
     return provider.run_turn({
@@ -77,7 +101,7 @@ function M.run_compact(opts)
     return true, "session is already small enough"
   end
 
-  local provider, real_model = pick_provider(opts.model)
+  local provider, real_model = pick_provider(M.current_model(opts.model))
   local request = prompt.compaction_request(keep_recent)
   local ok, summary = provider.complete_text({
     system_prompt = request[1],

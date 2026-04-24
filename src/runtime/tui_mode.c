@@ -5,6 +5,8 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 #include <cjson/cJSON.h>
 #include <ncurses.h>
@@ -174,7 +176,38 @@ static void psi_tui_scroll_by(struct psi_tui_state *state, int delta) {
     state->scroll_offset = next_offset;
 }
 
+/* Build $XDG_STATE_HOME/psi/debug.log (or $HOME/.local/state/psi/
+ * debug.log). Returns 0 on success and fills `out`; non-zero means
+ * fall back to /dev/null. Creates parent directories as needed. */
+static int psi_tui_debug_log_path(char *out, size_t out_len) {
+    const char *xdg;
+    const char *home;
+    char base[4096];
+    char parent[4096];
+
+    xdg = getenv("XDG_STATE_HOME");
+    if (xdg != NULL && xdg[0] != '\0') {
+        snprintf(base, sizeof(base), "%s/psi", xdg);
+    } else {
+        home = getenv("HOME");
+        if (home == NULL || home[0] == '\0') return -1;
+        snprintf(base, sizeof(base), "%s/.local/state/psi", home);
+    }
+
+    /* Create each parent directory if missing. mkdir is the
+     * simplest portable path; we ignore EEXIST. */
+    snprintf(parent, sizeof(parent), "%s", base);
+    mkdir(parent, 0700);
+
+    if (snprintf(out, out_len, "%s/debug.log", base) >= (int)out_len) {
+        return -1;
+    }
+    return 0;
+}
+
 static int psi_tui_stdio_guard_begin(struct psi_tui_stdio_guard *guard) {
+    char log_path[4096];
+
     if (guard == NULL) {
         return PSI_STATUS_ERROR;
     }
@@ -183,9 +216,26 @@ static int psi_tui_stdio_guard_begin(struct psi_tui_stdio_guard *guard) {
     guard->stderr_saved = -1;
     guard->null_fd = -1;
 
-    guard->null_fd = open("/dev/null", O_WRONLY);
+    /* Route stderr writes during the turn to an append-only debug
+     * log instead of /dev/null. The TUI's ncurses canvas still has
+     * to own the real terminal, but invisibly discarding stderr
+     * means extension hooks that write diagnostics there (e.g. a
+     * turn-end event handler calling io.stderr:write) vanish with
+     * no recovery. The log at $XDG_STATE_HOME/psi/debug.log lets
+     * users tail -f to see those writes in a second pane. */
+    if (psi_tui_debug_log_path(log_path, sizeof(log_path)) == 0) {
+        guard->null_fd = open(log_path,
+                              O_WRONLY | O_CREAT | O_APPEND, 0600);
+    } else {
+        guard->null_fd = -1;
+    }
+    /* Fall back to /dev/null if the log couldn't be opened — the
+     * TUI must never let stderr keep writing to the terminal. */
     if (guard->null_fd < 0) {
-        return PSI_STATUS_ERROR;
+        guard->null_fd = open("/dev/null", O_WRONLY);
+        if (guard->null_fd < 0) {
+            return PSI_STATUS_ERROR;
+        }
     }
 
     guard->stderr_saved = dup(STDERR_FILENO);
@@ -2052,6 +2102,33 @@ static void psi_tui_input_once(struct psi_tui_state *state, int ch) {
  * dispatches to psi_tui_tick above so the UI keeps repainting and
  * the user can press Esc. By the time this function returns the
  * turn is fully complete and the session is persisted. */
+/* Fire a render event through the Lua hook chain, and if any hook
+ * produces visible text add it as an INFO entry in the transcript.
+ * Used to expose `before-turn` / `after-turn` to extensions in TUI
+ * mode — print/REPL mode fires them via psi.modes.fire, but the TUI
+ * has its own turn driver so we have to call the hook chain directly
+ * here. */
+static void psi_tui_fire_render_event(
+    struct psi_tui_state *state,
+    const char *event_name,
+    const char *user_text
+) {
+    cJSON *payload;
+    char *rendered;
+
+    payload = cJSON_CreateObject();
+    if (payload == NULL) return;
+    if (user_text != NULL) {
+        cJSON_AddStringToObject(payload, "text", user_text);
+    }
+    rendered = psi_tui_render_event_text(state, event_name, payload);
+    cJSON_Delete(payload);
+    if (rendered != NULL && rendered[0] != '\0') {
+        psi_tui_add_entry(state, PSI_TUI_ENTRY_INFO, NULL, rendered, 0);
+    }
+    free(rendered);
+}
+
 static int psi_tui_run_turn_sync(struct psi_tui_state *state, const char *line) {
     struct psi_agent_observer observer;
     struct psi_tui_stdio_guard stdio_guard;
@@ -2072,6 +2149,12 @@ static int psi_tui_run_turn_sync(struct psi_tui_state *state, const char *line) 
     host->tick_userdata = state;
 
     response_text = NULL;
+
+    /* Fire before-turn BEFORE the stdio guard so extension output
+     * goes to the terminal (via the transcript) rather than the
+     * debug log. Same for after-turn below. */
+    psi_tui_fire_render_event(state, "before-turn", line);
+
     stdio_guard.active = 0;
     status = psi_tui_stdio_guard_begin(&stdio_guard);
     if (status == PSI_STATUS_OK) {
@@ -2111,6 +2194,9 @@ static int psi_tui_run_turn_sync(struct psi_tui_state *state, const char *line) 
 
     state->streaming_assistant_index = -1;
     state->streaming_thinking_index = -1;
+
+    psi_tui_fire_render_event(state, "after-turn", line);
+
     return status;
 }
 

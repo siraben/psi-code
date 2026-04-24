@@ -178,6 +178,22 @@ rather than hard-coding names.
 Most extensions should use `psi.events.on` instead. Use render hooks
 only when you need to mutate the on-screen output.
 
+**TUI mode:** `before-turn` and `after-turn` render-hook output is
+surfaced as info entries in the transcript. `assistant-text` is *not*
+piped through the hook chain in TUI (streamed tokens go straight to
+the assistant-entry renderer); use the `assistant-text-delta` event
+via `psi.events.on` if you need per-delta visibility.
+
+**Do not use `io.stderr:write` from a hook running during a TUI
+turn.** The TUI redirects stderr to `$XDG_STATE_HOME/psi/debug.log`
+(default `~/.local/state/psi/debug.log`) while a turn is in flight so
+provider/curl chatter doesn't corrupt the ncurses canvas. Bytes
+written during the turn are appended to the log, not shown. To show
+text in the transcript, return it as a string from a render hook; to
+show text in the status bar, register a `psi.tui.register_status_hook`
+(see below). Tail the debug log with `tail -F
+~/.local/state/psi/debug.log` in another pane for diagnostics.
+
 ### Safe C primitives on `psi`
 
 These are part of the stable surface:
@@ -193,6 +209,10 @@ These are part of the stable surface:
 | `psi.embedded_doc(name)` / `psi.embedded_doc_names()` | Fetch doc files bundled into the binary (e.g. `README.md`). |
 | `psi.embedded_source(name)` / `psi.embedded_source_names()` | Fetch the raw Lua source of an embedded module (e.g. `psi.render`). Useful for live introspection when there is no on-disk path. |
 | `psi.tool_call(name, input)` | Dispatch a tool through the full before/after hook chain. **Prefer this over calling `tool.impl` directly** — `impl` skips hook processing (permissions, redaction, extension transforms). |
+| `psi.tools.cancel(reason)` | Shorthand for a failure `ToolResult` used in before-hooks to short-circuit dispatch. Example: `tools.add_before_hook(function(n, i) if n == "bash" and i.command:find("rm %-rf") then return tools.cancel("refused") end end)`. |
+| `psi.prompt.register_transformer(fn)` | Append a system-prompt rewriter. Receives the assembled prompt, returns a replacement (or `nil` to leave it). Runs after built-in assembly; transformers stack in registration order. |
+| `psi.agent.set_model(name)` / `psi.agent.current_model(fallback)` | Switch the default model at runtime (any prefix psi understands: `anthropic/`, `ollama/`, `openrouter/`). Picked up on the *next* turn; the TUI status line reflects it immediately. Pass `nil` to clear. |
+| `psi.tui.register_status_hook(fn)` | Append a short status-bar snippet. `fn()` is called on every redraw (must be cheap) and returns a string or nil. Useful for tokens/sec meters, background-task indicators, etc. Suppressed while an active status message is on screen. |
 
 Prelude helpers on `psi.prelude` (`trim`, `split`, `safe_json_decode`,
 `safe_read`, `uuid_short`, `iso_timestamp`, `as_array`, `path_join`) are
