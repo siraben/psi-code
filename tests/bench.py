@@ -197,6 +197,54 @@ BENCHES: list[tuple[str, str]] = [
         """,
     ),
     (
+        "gc_pressure_tables",
+        r"""
+        -- Allocation-heavy workload: build a throwaway table of 50
+        -- nested tables per iteration, 5000 iterations. Exercises the
+        -- short-lived-allocation lifecycle the GC has to handle
+        -- during streaming (each SSE chunk parse, each markdown line
+        -- render, each turn builds and discards thousands of small
+        -- tables). Shows the mode switch (generational vs incremental)
+        -- clearly.
+        local N = 5000
+        local K = 50
+        local acc = 0
+        local start = os.clock()
+        for _ = 1, N do
+          local t = {}
+          for i = 1, K do
+            t[i] = { i, tostring(i), { i * 2, "x" } }
+          end
+          acc = acc + #t
+        end
+        local dt = (os.clock() - start) * 1000
+        io.write(string.format('ms: %.1f  iterations: %d  per_iter_allocs: %d  acc: %d\n',
+                               dt, N, K * 4, acc))
+        """,
+    ),
+    (
+        "gc_pressure_strings",
+        r"""
+        -- String-heavy: many small concats + gsub passes. Simulates
+        -- the markdown render path shape (before memoisation kicked
+        -- in for the identical-line case). With generational GC short-
+        -- string churn is cheap; with incremental the pause/stepmul
+        -- tuning matters more.
+        local N = 5000
+        local base = 'Here is some **text** with `code` and *italics*.'
+        local start = os.clock()
+        for _ = 1, N do
+          local s = base .. ' ' .. tostring(math.random(1000))
+          s = s:gsub('%*%*(.-)%*%*', '<b>%1</b>')
+          s = s:gsub('`(.-)`', '<c>%1</c>')
+          s = s:gsub('%*(.-)%*', '<i>%1</i>')
+          _ = #s
+        end
+        local dt = (os.clock() - start) * 1000
+        io.write(string.format('ms: %.1f  iterations: %d\n', dt, N))
+        """,
+    ),
+    (
         "run_all_resume_cost",
         r"""
         -- Dry-run cost of sched.run_all driving K no-op coroutines.

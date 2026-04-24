@@ -6,6 +6,25 @@
 -- through psi.tools.*, psi.session.*, psi.prompt.*, psi.render.*,
 -- psi.commands.*.
 
+-- Runtime tuning: Lua 5.4's generational GC wins on psi's workload.
+-- Most allocations are short-lived (SSE chunks parsed into tables
+-- then discarded, gsub replacement strings, per-line markdown
+-- spans, per-tick scratch tables from sched.run_all). With
+-- incremental the same workload pays ~15% more than with
+-- generational on the hot paths that churn. Set PSI_GC_MODE to
+-- override ("incremental" reverts; "off" disables autocollection
+-- entirely — don't do this unless you know what you want).
+do
+  local mode = os.getenv("PSI_GC_MODE")
+  if mode == "off" then
+    collectgarbage("stop")
+  elseif mode == "incremental" then
+    collectgarbage("incremental")
+  else
+    collectgarbage("generational")
+  end
+end
+
 psi.prelude = require("psi.prelude")
 psi.sched = require("psi.sched")
 psi.events = require("psi.events")
