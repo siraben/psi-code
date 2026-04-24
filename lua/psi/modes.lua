@@ -35,6 +35,16 @@ local function print_observer()
           state.assistant_wrote_text = true
         end
       end,
+      -- Route reasoning-model thinking through the render pipeline
+      -- so REPL / --agent / --print callers can see it (boot.lua
+      -- installs a default dim-prefixed renderer). Without this the
+      -- thinking stream vanishes — models like qwen3 that emit
+      -- everything in the thinking channel look like they returned
+      -- nothing at all. The TUI has its own observer.thinking_delta
+      -- path, so this only fires in non-TUI modes.
+      on_thinking_delta = function(text)
+        fire("thinking-delta", { text = text or "" })
+      end,
       on_tool_call = function(id, name, input_json)
         fire(
           "tool-call",

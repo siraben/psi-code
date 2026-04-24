@@ -38,6 +38,13 @@ end
 local function new_state()
   return {
     text = "",
+    -- Ollama emits reasoning-model output in a separate `thinking`
+    -- field (Qwen3, DeepSeek-R1, …) distinct from `content`. Keep
+    -- its running accumulator here so openai_compat.persist_assistant
+    -- can materialise a thinking content block in the session, and
+    -- so the on_thinking_delta observer / thinking-delta event see
+    -- parity with the Anthropic provider.
+    thinking = "",
     tool_calls = {}, -- [i] = {id, name, arguments}
     usage = nil,
     stop_reason = nil,
@@ -57,6 +64,15 @@ local function handle_line(line, state, observer)
       end
       if psi.events then
         psi.events.emit("assistant-text-delta", { text = msg.content })
+      end
+    end
+    if type(msg.thinking) == "string" and msg.thinking ~= "" then
+      state.thinking = state.thinking .. msg.thinking
+      if observer.on_thinking_delta then
+        observer.on_thinking_delta(msg.thinking)
+      end
+      if psi.events then
+        psi.events.emit("thinking-delta", { text = msg.thinking })
       end
     end
     if type(msg.tool_calls) == "table" then

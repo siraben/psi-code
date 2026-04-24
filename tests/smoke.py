@@ -332,6 +332,35 @@ def t_render_write_diff(psi: Psi):
     assert_contains(out, "delta", "diff payload")
 
 
+@test("render/thinking_delta")
+def t_render_thinking(psi: Psi):
+    """boot.lua installs a default render hook for the thinking-delta
+    event so reasoning-model (Qwen3, DeepSeek-R1, etc.) output is
+    visible in REPL / --agent / --print. Without the hook the whole
+    thinking stream is swallowed and a turn can look empty. The label
+    fires once per turn, not per-delta."""
+    out = psi.eval(
+        'local r = require("psi.render")\n'
+        + 'local a = r.handle_event("thinking-delta", { text = "first " })\n'
+        + 'local b = r.handle_event("thinking-delta", { text = "second" })\n'
+        + 'r.handle_event("after-turn", {})\n'
+        + 'local c = r.handle_event("thinking-delta", { text = "turn2" })\n'
+        + '-- strip ANSI for easier assertions\n'
+        + 'local function strip(s)\n'
+        + '  return (s:gsub("\\27%[[%d;]*m", ""))\n'
+        + 'end\n'
+        + 'return strip(a) .. "|" .. strip(b) .. "|" .. strip(c)'
+    )
+    a, b, c = out.strip().split("|")
+    assert_contains(a, "thinking: first",
+                    "first delta carries the thinking label")
+    assert "thinking:" not in b, \
+        f"label must fire only once per turn, got: {b!r}"
+    assert_contains(b, "second", "second delta renders text")
+    assert_contains(c, "thinking: turn2",
+                    "after-turn resets the one-shot label")
+
+
 @test("session/ensure_default_path")
 def t_session_default_path(psi: Psi):
     """Without --session, TUI calls psi.session.ensure_default_path

@@ -232,6 +232,14 @@ end
 
 function M.persist_assistant(state, model, tool_calls, cfg, stop_override, error_message)
   local blocks = {}
+  -- Reasoning-model thinking (Qwen3, DeepSeek-R1, …) arrives via a
+  -- separate field on the wire and is accumulated by the provider's
+  -- parser into state.thinking. Persist it as a thinking block so
+  -- the session keeps a full record — the Lua-side assistant text
+  -- column still tracks only visible content.
+  if type(state.thinking) == "string" and state.thinking ~= "" then
+    blocks[#blocks + 1] = { type = "thinking", thinking = state.thinking }
+  end
   if state.text ~= "" then
     blocks[#blocks + 1] = { type = "text", text = state.text }
   end

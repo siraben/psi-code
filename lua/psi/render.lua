@@ -19,6 +19,7 @@ local hooks = {} -- {event_name = {fn1, fn2, ...}}
 local event_catalog = {
   "before-turn",
   "assistant-text",
+  "thinking-delta",
   "tool-call",
   "tool-result",
   "after-turn",

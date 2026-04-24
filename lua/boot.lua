@@ -86,6 +86,33 @@ psi.render.register_hook("after-turn", function()
   return "\n"
 end)
 
+-- Default renderer for reasoning-model thinking in non-TUI modes.
+-- Qwen3, DeepSeek-R1, and similar models emit a separate thinking
+-- stream before (or instead of) visible content; without this hook
+-- REPL / --agent / --print would swallow it entirely and look hung.
+-- Wrap the stream in dim italics with a one-shot "thinking:" label
+-- so the reasoning is visible but visually distinct from the final
+-- answer. Opt out with PSI_SHOW_THINKING=0.
+local thinking_shown = false
+psi.render.register_hook("thinking-delta", function(payload)
+  if os.getenv("PSI_SHOW_THINKING") == "0" then return "" end
+  local text = payload and payload.text or ""
+  if text == "" then return "" end
+  local pre = thinking_shown and "" or (psi.ansi.dim("thinking: "))
+  thinking_shown = true
+  return pre .. psi.ansi.dim(text)
+end)
+psi.render.register_hook("after-turn", function()
+  -- Reset the one-shot label so the next turn's thinking gets its
+  -- own header. Also flush a blank line if thinking was shown, to
+  -- separate it from the final answer.
+  if thinking_shown then
+    thinking_shown = false
+    return "\n"
+  end
+  return ""
+end)
+
 -- Convenience shim so user code can write psi.tool_call(name, input).
 function psi.tool_call(name, input)
   return psi.tools.dispatch_alist(name, input)
@@ -96,7 +123,8 @@ end
 -- because each bridge handler returns nil (contributes "" to the
 -- string-concat contract).
 for _, ev in ipairs({
-  "assistant-text", "tool-call", "tool-result", "before-turn", "after-turn",
+  "assistant-text", "thinking-delta",
+  "tool-call", "tool-result", "before-turn", "after-turn",
 }) do
   psi.render.register_hook(ev, function(payload)
     psi.events.emit(ev, payload)
