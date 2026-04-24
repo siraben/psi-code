@@ -17,23 +17,23 @@ struct psi_vm;
 struct psi_agent_observer;
 struct psi_abort_signal;
 
-/* Usage-mirror for the TUI status line. Written by the worker
- * thread via psi.set_usage() (through context.record_usage); read
- * by the TUI main thread when painting the footer.
+/* Usage-mirror for the TUI status line.
  *
- * `volatile long` is enough here: on all supported 32-/64-bit
- * platforms `long` stores are single-word and therefore atomic;
- * the main thread may observe a momentary mix of old+new fields
- * across the six members for at most one store, which is
- * harmless for display. No mutex — locking would block the hot
- * redraw path while the worker is mid-HTTP-stream. */
+ * Written by psi.set_usage() (from lua/psi/context.lua record_usage)
+ * and read by psi.tui.status_line, both on the single main thread
+ * that owns lua_State. The mirror predates the coroutine rewrite,
+ * when a worker thread wrote and the main thread read concurrently —
+ * the `volatile` qualifier protected against torn reads and
+ * compiler reordering in that era. After the rewrite there is
+ * exactly one thread touching these fields; `volatile` would only
+ * cost us register keeping / constant folding. Plain `long`. */
 struct psi_host_usage {
-    volatile long input;
-    volatile long output;
-    volatile long cache_read;
-    volatile long cache_write;
-    volatile long total;
-    volatile long context_window;
+    long input;
+    long output;
+    long cache_read;
+    long cache_write;
+    long total;
+    long context_window;
 };
 
 /* Host tick hook.

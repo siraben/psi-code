@@ -1016,10 +1016,22 @@ static int psi_tui_entry_style(
     int *color_pair,
     int *attrs
 ) {
+    /* Wrap indent policy: for speaker / annotation entries, only the
+     * FIRST rendered line carries a prefix — continuation lines flow
+     * at column 0 so wrapped messages don't pay a 5–10 column tax.
+     * Tool-execution entries are the exception; they keep the
+     * ╭─/│/╰─ panel border on every wrapped line because it's the
+     * visual frame, not a label.
+     *
+     * Colour alone (pair + attrs) distinguishes `info` entries now —
+     * no `[info]` prefix. `error` and `compaction` keep a first-line
+     * label but drop their continuation pad. This matches pi-tui's
+     * "backgrounded box" aesthetic more closely without pulling in a
+     * full pi-tui framework. */
     switch (entry->kind) {
         case PSI_TUI_ENTRY_USER:
             *prefix_first = "You: ";
-            *prefix_rest = "     ";
+            *prefix_rest = "";
             *color_pair = 2;
             *attrs = A_BOLD;
             return PSI_STATUS_OK;
@@ -1046,14 +1058,14 @@ static int psi_tui_entry_style(
             *attrs = 0;
             return PSI_STATUS_OK;
         case PSI_TUI_ENTRY_ERROR:
-            *prefix_first = "[error] ";
-            *prefix_rest = "        ";
+            *prefix_first = "error: ";
+            *prefix_rest = "";
             *color_pair = 6;
             *attrs = A_BOLD;
             return PSI_STATUS_OK;
         case PSI_TUI_ENTRY_COMPACTION:
-            *prefix_first = "[compact] ";
-            *prefix_rest = "          ";
+            *prefix_first = "— ";
+            *prefix_rest = "";
             *color_pair = 7;
             *attrs = A_BOLD;
             return PSI_STATUS_OK;
@@ -1065,10 +1077,10 @@ static int psi_tui_entry_style(
             return PSI_STATUS_OK;
         case PSI_TUI_ENTRY_INFO:
         default:
-            *prefix_first = "[info] ";
-            *prefix_rest = "       ";
+            *prefix_first = "";
+            *prefix_rest = "";
             *color_pair = 7;
-            *attrs = 0;
+            *attrs = A_DIM;
             return PSI_STATUS_OK;
     }
 }
@@ -2304,7 +2316,7 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
     }
 
     if (psi_tui_state_init(&state, options) != PSI_STATUS_OK) {
-        fprintf(stderr, "TUI state init failed (mutex)\n");
+        fprintf(stderr, "TUI state init failed\n");
         return PSI_STATUS_ERROR;
     }
     if (psi_tui_reserve_input(&state, 1u) != PSI_STATUS_OK) {
