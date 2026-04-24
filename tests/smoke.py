@@ -332,6 +332,27 @@ def t_render_write_diff(psi: Psi):
     assert_contains(out, "delta", "diff payload")
 
 
+@test("session/ensure_default_path")
+def t_session_default_path(psi: Psi):
+    """Without --session, TUI calls psi.session.ensure_default_path
+    which must pick an XDG-style location so autosave has a target.
+    Skipping this made every turn show "failed to save session file"
+    in the status bar (session 71f5944b symptom)."""
+    out = psi.eval(
+        'local s = require("psi.session")\n'
+        + 'local first = s.ensure_default_path()\n'
+        + 'local second = s.ensure_default_path()\n'
+        + 'return tostring(first == second) .. "|"\n'
+        + '       .. tostring(psi.session_path() == first) .. "|"\n'
+        + '       .. (first or "<nil>")'
+    )
+    ok_idem, ok_set, path = out.strip().split("|", 2)
+    assert ok_idem == "true", f"not idempotent: {out!r}"
+    assert ok_set == "true", f"session_path not set: {out!r}"
+    assert "/psi/sessions/" in path, f"unexpected path shape: {path!r}"
+    assert path.endswith(".jsonl"), f"missing .jsonl: {path!r}"
+
+
 @test("prompt/transformer")
 def t_prompt_transformer(psi: Psi):
     """psi.prompt.register_transformer runs after built-in assembly

@@ -2444,6 +2444,19 @@ static int psi_tui_setup_runtime(struct psi_tui_state *state, const struct psi_c
             psi_agent_runtime_free(&state->runtime);
             return PSI_STATUS_ERROR;
         }
+    } else {
+        /* Without --session the host had no on-disk target, so every
+         * save() returned "no session path set" and the TUI status
+         * line kept showing "failed to save session file" each turn.
+         * Ask Lua to assign a default in $XDG_STATE_HOME/psi/sessions/
+         * so autosave Just Works. The return string is discarded;
+         * failure (e.g. no $HOME) just leaves the session path empty
+         * and preserves the old behaviour. */
+        char *ignored = NULL;
+        (void)psi_vm_call_string_procedure(
+            &state->runtime.vm,
+            "psi.session.ensure_default_path", "", &ignored);
+        free(ignored);
     }
     return PSI_STATUS_OK;
 }

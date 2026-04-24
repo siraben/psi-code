@@ -66,6 +66,30 @@ function M.ensure_id()
   end
 end
 
+-- Pick a default on-disk location for the session JSONL. Follows the
+-- XDG Base Directory spec: $XDG_STATE_HOME/psi/sessions/<id>.jsonl,
+-- falling back to $HOME/.local/state/psi/sessions/<id>.jsonl. Called
+-- when the host (TUI) starts a session without --session, so every
+-- turn's autosave has somewhere to land instead of returning
+-- "no session path set" and surfacing "failed to save session file"
+-- in the status line.
+function M.ensure_default_path()
+  local current = psi.session_path()
+  if current and current ~= "" then return current end
+  M.ensure_id()
+  local id = psi.session_id()
+  local base = os.getenv("XDG_STATE_HOME")
+  if not base or base == "" then
+    local home = os.getenv("HOME") or ""
+    if home == "" then return nil end
+    base = home .. "/.local/state"
+  end
+  local dir = base .. "/psi/sessions"
+  local path = dir .. "/" .. id .. ".jsonl"
+  psi.session_set_path(path)
+  return path
+end
+
 local function stamp_entry(body)
   body = body or {}
   body.id = body.id or prelude.uuid_short()
