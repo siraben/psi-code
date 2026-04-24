@@ -14,7 +14,7 @@ architecture it is porting.
 | Project context discovery | `packages/coding-agent/src/core/resource-loader.ts` | Ported for `AGENTS.md` / `CLAUDE.md` discovery from cwd to root. Skills, prompt templates, and theme loading are not ported yet. |
 | System prompt assembly | `packages/coding-agent/src/core/system-prompt.ts` | Ported via `psi.prompt`. Assembled from tool metadata, guidelines, cwd, date, and project context files; prompt caching applied per `pi`. |
 | Interactive shell | `packages/coding-agent/src/modes/interactive/` | Ported. `libedit`-backed coding-agent shell over the streamed loop, slash commands include `/help`, `/session`, `/fork`, `/compact`, `/new`, `/clear`, `/reload`, `/system-prompt`, `/quit`, tier-1/2/3 additions. |
-| Full-screen TUI | `packages/tui/` | Ported core. `--tui` runs the streamed agent loop under `ncursesw` with a worker-thread runner, rich status line (cwd / model / session / token usage), unicode tool-call borders, live markdown, readline editing (Alt-B/F/D/Backspace, Ctrl-W/K/U), Esc-abort, and Ctrl-Z suspend. Smaller than `pi`'s TUI: no session tree view, no modals, no theme switching. |
+| Full-screen TUI | `packages/tui/` | Ported core. `--tui` runs the streamed agent loop under `ncursesw` on a single thread — the agent turn is a Lua coroutine driven by `psi.sched`, yielding cooperatively on HTTP / process poll so the redraw loop keeps up. Rich status line (cwd / model / session / token usage), unicode tool-call borders, live markdown, readline editing (Alt-B/F/D/Backspace, Ctrl-W/K/U), Esc-abort, and Ctrl-Z suspend. Smaller than `pi`'s TUI: no session tree view, no modals, no theme switching. |
 | RPC mode | `packages/coding-agent/src/modes/rpc/` | Not started. |
 | Compaction and summaries | `packages/coding-agent/src/core/compaction/` | Ported. Manual and dynamic token-aware auto-compaction; file-op provenance from `psi.session` feeds the compaction prompt. Not yet branch-aware. |
 | Hooks and extensions | `packages/coding-agent/src/core/skills.ts`, `src/core/extensions/` | Early-to-partial. `psi.tool_registry` exposes before/after tool-call hooks; `psi.events` is a neutral pub/sub bus; `psi.commands.register` opens slash commands to extensions; boot loads Lua files from `$PSI_EXTENSIONS_DIR`, `~/.config/psi/extensions/`, and `./.psi/extensions/`. No npm/git package manager, no TS transpile, no sandboxing. |
@@ -36,7 +36,10 @@ architecture it is porting.
   unicode glyphs render correctly rather than appearing as caret-notation
   escapes.
 - `argtable3`: CLI option parsing.
-- `pthread`: used by the TUI worker-thread turn runner.
+- `pthread`: used only by the `src/core/http_async.c` helper thread
+  that runs `curl_easy_perform` behind a chunk queue. The TUI no
+  longer has a worker thread; the agent turn runs as a Lua
+  coroutine on the same thread that owns `lua_State` and ncurses.
 - process execution: the safer process layer uses POSIX `fork`/`exec` on Unix
   and falls back to `system()` elsewhere. That is practical, but not strict
   portable C89.
@@ -57,8 +60,10 @@ and extension richness:
    `psi.ollama` into a small `psi.provider` interface so adding a
    third backend is a declarative step.
 3. **Session tree navigation.** Walk the `parentSession` pointers
-   in session headers; add `/tree`, `/clone`, and forks that
-   persist sibling branches alongside the active leaf.
+   in session headers; add `/tree` and branch-aware forks that
+   persist sibling branches alongside the active leaf. `/clone`
+   and `/fork` already ship — they write to flat files rather
+   than a tree walker. `/resume` / `/import` load a single file.
 4. **Branch-aware compaction.** Let compaction know about siblings
    instead of treating the transcript as linear.
 5. **RPC mode.** JSONL over stdin/stdout reusing the same runtime

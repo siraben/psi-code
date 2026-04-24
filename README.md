@@ -41,9 +41,11 @@ This repository currently contains:
 - an Ollama provider for local-first iteration (see
   [docs/providers.md](docs/providers.md))
 - a default interactive coding-agent shell backed by the same
-  streamed agent loop, with slash commands (`/help`, `/session`,
-  `/fork`, `/compact`, `/new`, `/clear`, `/reload`,
-  `/system-prompt`, `/quit`, tier-1/2/3 additions)
+  streamed agent loop, with slash commands (`/help`, `/hotkeys`,
+  `/session`, `/new`, `/clear`, `/resume`, `/import`, `/name`,
+  `/model`, `/copy`, `/export`, `/compact`, `/fork`, `/clone`,
+  `/reload`, `/system-prompt`, `/quit`). Extensions add their own
+  via `psi.commands.register`.
 - a full-screen `--tui` mode with rich status (cwd / model /
   session / token usage), unicode tool-call borders, live
   markdown rendering, mode-aware hints, readline-style editing
@@ -145,8 +147,10 @@ original plain-text-only form.
 
 Current limitations of `--agent`:
 
-- the TUI is smaller than `pi`'s; session tree navigation, clone,
-  name, import/export, and a session picker are not yet built
+- the TUI is smaller than `pi`'s; session tree navigation
+  (`/tree`) and an interactive session picker aren't built yet.
+  `/clone`, `/fork`, `/name`, `/import`, `/export` all work but
+  operate on flat JSONL files rather than a tree walker.
 - no RPC mode yet
 - no streaming resume/retry logic
 - session persistence is still a flat active-branch JSONL rather
@@ -194,6 +198,10 @@ for the authoring guide.
   assembly, session records/format, provider loops (Anthropic,
   Ollama), agent orchestration, slash commands, events bus,
   context mirror, render/diff/ANSI/markdown helpers, prelude
-- `tests/`: smoke suite (`tests/smoke.py` — stdlib-only Python,
-  runs offline tests by default and live Anthropic tests when
-  `ANTHROPIC_API_KEY` is set) and valgrind harness
+- `tests/`: stdlib-only Python test harnesses —
+  `smoke.py` runs offline tests by default and live Anthropic
+  tests when `ANTHROPIC_API_KEY` is set; `bench.py` runs hot-path
+  microbenchmarks (markdown, sse parser, session save, run_all,
+  GC pressure) locally or on a remote target defined in
+  `tests/bench.targets.json` (template at `.example.json`); plus
+  the `valgrind.sh` memcheck harness.

@@ -133,9 +133,18 @@ session state.
 | `psi.commands.register(name, handler)` | `handler(args_string, raw_line) -> CommandAction\|nil`. Overwrites on duplicate. |
 | `psi.commands.unregister(name)` | Remove a previously registered command. |
 
-Built-in commands (`/help`, `/session`, `/system-prompt`, `/compact`,
-`/fork`) take precedence over registered ones — extensions cannot
-shadow them.
+Built-in commands take precedence over registered ones —
+extensions cannot shadow them. Full list:
+
+```
+/help  /hotkeys  /quit (+ /q, :quit, :q)  /session  /system-prompt
+/new (alias: /clear)  /reload  /copy
+/resume <path>  /import <path>  (alias: /resume)
+/name <text>  /model <spec>
+/export [path]  /fork [N]  /clone [path]  /compact [N]
+```
+
+Canonical source: `lua/psi/prompt.lua M.HELP_TEXT`.
 
 **CommandAction** (from `psi.records.new_command_action(kind, payload)`):
 ```lua
@@ -183,12 +192,14 @@ path.
 | `after-provider-response` | Right after the assistant message is saved, before tool dispatch or auto-compaction. | `{ usage, stop_reason, response_id, model }` |
 | `assistant-text-delta` | Every streamed text chunk. High frequency. | `{ text = "<chunk>" }` |
 | `tool-call-delta` | Every streamed chunk of a tool_use block's input JSON. | `{ id, partial_json }` |
-| `thinking-delta` | Every streamed thinking-block chunk (if the model emits thinking). | `{ text }` |
+| `thinking-delta` | Every streamed thinking-block chunk. **Anthropic provider only** — the Ollama loop doesn't emit thinking today. | `{ text }` |
 | `tool-call` | Before a tool is dispatched. | `{ id, tool, input }` |
 | `tool-result` | After a tool returns. | `{ id, tool, result }` |
 | `assistant-text` | Per aggregated assistant text block (render-level). | `{ text }` |
 | `turn-end` | Final event when a turn ends with no more tool_use (i.e. the full turn is done). | `{ text, model }` |
 | `after-turn` | Right after `turn-end`, during render flush. | `{ text, ["assistant-streamed"] }` |
+| `compaction-start` | Before `psi.session.do_compact` clears the in-memory session and appends the summary. Extensions (e.g. autosave) can flush current on-disk state before the rewrite. | `{ total, keep_recent, compacted }` |
+| `compaction-end` | After the summary + kept tail are appended back. Pair with `compaction-start`; the summary text is included so loggers don't have to re-read the session. | `{ total, keep_recent, compacted, summary }` |
 
 Subscribe pattern:
 
