@@ -48,28 +48,21 @@ function M.process_result(command, tool_call_id)
     })
   end
 
-  local parts = {}
+  -- Stream chunks to the TUI observer (when present) but do NOT
+  -- buffer them in Lua — process.c already buffers into the handle
+  -- up to the 256 KiB ceiling and returns that as `output` from
+  -- process_finish. Keeping a Lua-side parts[] was double-buffering
+  -- (malloc in C, copy into Lua string, append into a table, concat
+  -- once more at the end) for the same bytes.
   while true do
     local chunk, done = sched.proc_poll(handle, 50)
-    if chunk ~= nil and #chunk > 0 then
-      parts[#parts + 1] = chunk
-      -- Fire a live progress event for the TUI (no-op if no
-      -- observer is registered, e.g. under --eval / --print).
-      if psi.tool_progress ~= nil then
-        psi.tool_progress(tool_call_id, chunk)
-      end
+    if chunk ~= nil and #chunk > 0 and psi.tool_progress ~= nil then
+      psi.tool_progress(tool_call_id, chunk)
     end
     if done then break end
   end
 
-  local result = psi.process_finish(handle)
-  -- Prefer the handle's reassembled buffer (covers the case where
-  -- we drained after the 256 KiB ceiling); otherwise use what we
-  -- captured via sched.proc_poll.
-  if result.output == nil or result.output == "" then
-    result.output = table.concat(parts)
-  end
-  return records.process_result_from_alist(result)
+  return records.process_result_from_alist(psi.process_finish(handle))
 end
 
 -- Run a shell command and wrap as a ToolResult.

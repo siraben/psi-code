@@ -1,0 +1,10 @@
+{
+  "_comment": "Copy to bench.targets.json and fill in your own hosts. Each named target maps to a dict the ssh driver in tests/bench.py understands: jump is passed to `ssh -J …`, host/port/user become `ssh -p PORT USER@HOST`, psi is the absolute path of the psi binary on the remote. Pass --remote NAME to tests/bench.py to pick one; default is `remote` when --remote is given without a name.",
+  "remote": {
+    "jump":  "jumpuser@bastion.example.com:22",
+    "host":  "workstation.internal",
+    "port":  22,
+    "user":  "root",
+    "psi":   "/root/psi"
+  }
+}

@@ -135,7 +135,18 @@ end
 -- the sub-coroutines yield to this function rather than to the
 -- outer driver, so the outer coroutine just appears to be taking
 -- a long time to complete.
-local SHORT_WAIT_MS = 20
+--
+-- Scheduler latency: with K concurrent tasks, a full round-robin
+-- pass polls each task's yielded request with `short_wait(K)` ms.
+-- Max latency to notice a ready chunk is K × short_wait. We cap at
+-- 20 ms for K=1 (matches the previous constant) and shrink as K
+-- grows so the floor doesn't scale linearly with concurrency.
+local function short_wait(k)
+  if k <= 1 then return 20 end
+  local per = 20 // k
+  if per < 5 then per = 5 end
+  return per
+end
 
 function M.run_all(fns)
   local tasks = {}
@@ -177,13 +188,14 @@ function M.run_all(fns)
           if type(req) ~= "table" or type(req.kind) ~= "string" then
             req = { kind = "tick" }
           end
+          local wait_ms = short_wait(remaining)
           local short_req = req
           if req.kind == "http" or req.kind == "proc" then
-            short_req = { kind = req.kind, h = req.h, ms = SHORT_WAIT_MS }
+            short_req = { kind = req.kind, h = req.h, ms = wait_ms }
           elseif req.kind == "sleep" then
             local ms = tonumber(req.ms) or 0
-            if ms > SHORT_WAIT_MS then
-              short_req = { kind = "sleep", ms = SHORT_WAIT_MS }
+            if ms > wait_ms then
+              short_req = { kind = "sleep", ms = wait_ms }
             end
           end
           local resolver = M.resolvers[req.kind]

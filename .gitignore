@@ -8,3 +8,7 @@ result-*
 .env
 apr*.jsonl
 pi-mono/
+
+# Per-user bench target config (hostnames, ssh jump hops, binary paths).
+# Template lives at tests/bench.targets.example.json.
+tests/bench.targets.json

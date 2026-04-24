@@ -1508,25 +1508,98 @@ static void psi_tui_append_entry_text(struct psi_tui_state *state, int index, co
     (void)psi_tui_append_text(&state->entries[index].text, text);
 }
 
-/* Count the total rendered line count for the current transcript. Used to
- * preserve scroll anchoring while new content streams in: if the user has
- * scrolled up (scroll_offset > 0), we add the growth delta back to keep
- * their view locked to the same content instead of drifting toward the
- * bottom as lines pile on. Returns 0 on allocation failure. */
-static size_t psi_tui_total_rendered_lines(struct psi_tui_state *state) {
-    struct psi_tui_render_line *lines;
-    size_t line_count;
+/* Dry-run version of psi_tui_render_wrapped's wrap-iteration that
+ * returns only the line count — no string allocation, no render_line
+ * struct, no Lua calls. Used by the scroll-anchor helpers which need
+ * a before/after delta but never look at the lines themselves.
+ *
+ * Replicates the break-search in psi_tui_find_break exactly so the
+ * count matches what build_render_lines would have produced. */
+static size_t psi_tui_count_wrapped(
+    const char *text,
+    const char *prefix_first,
+    const char *prefix_rest,
+    int width
+) {
+    size_t count;
+    const char *cursor;
+    const char *line_start;
+    const char *line_end;
+    const char *prefix;
+    size_t prefix_length;
+    int available;
+    int break_index;
 
-    if (state == NULL) {
-        return 0u;
+    count = 0u;
+    cursor = text != NULL ? text : "";
+    prefix = prefix_first != NULL ? prefix_first : "";
+
+    while (1) {
+        line_start = cursor;
+        line_end = strchr(line_start, '\n');
+        if (line_end == NULL) line_end = line_start + strlen(line_start);
+
+        while (1) {
+            prefix_length = strlen(prefix);
+            available = width - (int)prefix_length;
+            if (available < 1) available = 1;
+            break_index = psi_tui_find_break(line_start, available);
+            count++;
+            line_start += break_index;
+            while (*line_start == ' ') line_start++;
+            prefix = prefix_rest != NULL ? prefix_rest : "";
+            if (*line_start == '\0' || line_start >= line_end) break;
+        }
+
+        if (*line_end == '\0') break;
+        cursor = line_end + 1;
+        prefix = prefix_rest != NULL ? prefix_rest : "";
+        if (*cursor == '\0') {
+            count++;
+            break;
+        }
     }
-    lines = NULL;
-    line_count = 0u;
-    if (psi_tui_build_render_lines(state, &lines, &line_count) != PSI_STATUS_OK) {
-        return 0u;
+    return count;
+}
+
+/* Count the total rendered line count for the current transcript.
+ * Walks state->entries dry-run (no allocations, no Lua) so callers
+ * can use it on the redraw hot path without paying O(total lines)
+ * of malloc/free every scroll-anchor check. */
+static size_t psi_tui_total_rendered_lines(struct psi_tui_state *state) {
+    size_t total;
+    size_t index;
+    const char *prefix_first;
+    const char *prefix_rest;
+    int color_pair;
+    int attrs;
+
+    if (state == NULL) return 0u;
+    total = 0u;
+    for (index = 0u; index < state->entry_count; index++) {
+        const struct psi_tui_entry *entry = &state->entries[index];
+        const struct psi_tui_entry *prev = index > 0u ? &state->entries[index - 1u] : NULL;
+        const struct psi_tui_entry *next =
+            (index + 1u < state->entry_count) ? &state->entries[index + 1u] : NULL;
+        int same_panel_as_prev = (prev != NULL
+            && prev->kind == PSI_TUI_ENTRY_TOOL_CALL
+            && entry->kind == PSI_TUI_ENTRY_TOOL_RESULT)
+            || (prev != NULL
+                && prev->kind == PSI_TUI_ENTRY_TOOL_RESULT
+                && entry->kind == PSI_TUI_ENTRY_TOOL_RESULT);
+        if (total > 0u && !same_panel_as_prev) total++;
+
+        psi_tui_entry_style(entry, &prefix_first, &prefix_rest, &color_pair, &attrs);
+        total += psi_tui_count_wrapped(entry->text, prefix_first, prefix_rest, state->width);
+
+        /* build_render_lines emits a closing ╰─ after the last
+         * tool_result of a panel. Mirror that here. */
+        if (entry->kind == PSI_TUI_ENTRY_TOOL_RESULT
+            && (next == NULL || next->kind != PSI_TUI_ENTRY_TOOL_RESULT)) {
+            total++;
+        }
     }
-    psi_tui_render_free_lines(lines, line_count);
-    return line_count;
+    return total;
 }
 
 /* Anchor-scroll helper: when the user has scrolled up to read older

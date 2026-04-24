@@ -141,8 +141,42 @@ end
 -- fence flag. The TUI drawer calls this per wrapped line; fence
 -- state is tracked across wrapped lines by the TUI's build path
 -- (see psi_tui_render_wrapped) rather than here.
+--
+-- Memoisation: each TUI repaint runs every visible wrapped line
+-- through here. Under a running stream the viewport is repainted
+-- at ~20 Hz for ~40 lines — most of them unchanged between
+-- frames. Caching by (fence, text) is a big win on slow hosts
+-- (~50× on iSH/i686) and free on fast ones. The cache grows until
+-- it hits CACHE_MAX, at which point we blow it away and start
+-- over; simpler than implementing LRU, and the entry set is
+-- small (one entry per distinct wrapped line currently in
+-- memory).
+local cache = {}
+local cache_size = 0
+local CACHE_MAX = 4096
+
+-- Exposed for tests and /reload handlers that want a clean slate.
+function M.clear_render_cache()
+  cache = {}
+  cache_size = 0
+end
+
 function M.render_line(line, in_code_fence)
-  return render_line(line or "", { in_code_fence = in_code_fence and true or false })
+  line = line or ""
+  local key = (in_code_fence and "1|" or "0|") .. line
+  local hit = cache[key]
+  if hit ~= nil then return hit end
+
+  local state = { in_code_fence = in_code_fence and true or false }
+  local result = render_line(line, state)
+
+  if cache_size >= CACHE_MAX then
+    cache = {}
+    cache_size = 0
+  end
+  cache[key] = result
+  cache_size = cache_size + 1
+  return result
 end
 
 function M.render(text)
