@@ -380,6 +380,51 @@ def t_tui_quits(psi: Psi):
     assert_contains(text, "psi coding agent", "TUI header")
 
 
+@test("session/save_no_path_is_distinct")
+def t_save_no_path(psi: Psi):
+    """session.save() with no path must return a distinguishable
+    failure so extensions (like the autosave extension in
+    ~/.config/psi/extensions/) can tell a real write from a no-op.
+    Regression test for the i686-transcripts bug where flushes
+    counter incremented while nothing ever hit disk."""
+    out = psi.eval(
+        'local session = require("psi.session")\n'
+        'local ok, err = session.save()\n'
+        'return tostring(ok) .. " | " .. tostring(err)'
+    )
+    assert_equals(out, "false | no session path set", "no-op save contract")
+
+
+@test("session/save_stamps_id_without_path")
+def t_save_stamps_id(psi: Psi):
+    """session_id must be assigned before any observable event fires,
+    not lazily inside save() behind the path-gate. Regression test
+    for the autosave bug where `after-provider-response` saw
+    session_id()==nil on its first flush because no path was set
+    yet, and the extension fell back to a timestamp filename."""
+    out = psi.eval(
+        'local session = require("psi.session")\n'
+        'print("before:", tostring(psi.session_id()))\n'
+        'session.save()  -- returns false, but should still stamp id\n'
+        'local id = psi.session_id()\n'
+        'return (id ~= nil and #id > 0) and "stamped" or "still-nil"'
+    )
+    assert_contains(out, "stamped", "session id assigned by ensure_id")
+
+
+@test("session/append_stamps_id")
+def t_append_stamps_id(psi: Psi):
+    """Any append_* call is an observable event; id must exist
+    before an extension's hook runs."""
+    out = psi.eval(
+        'local session = require("psi.session")\n'
+        'session.append_user("hi")\n'
+        'local id = psi.session_id()\n'
+        'return (id ~= nil and #id > 0) and "stamped" or "still-nil"'
+    )
+    assert_equals(out, "stamped", "append_user stamps id")
+
+
 @test("session/round_trip")
 def t_session_round_trip(psi: Psi):
     sess = psi.tmp / "session.jsonl"

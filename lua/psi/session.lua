@@ -52,6 +52,20 @@ function M.last_entry_id()
   return last_entry_id
 end
 
+-- Make sure the host session has a stable UUID before the first
+-- stream event fires. Historically we only assigned one lazily
+-- inside M.save(), and only when a session path was already set —
+-- so extensions that hooked `after-provider-response` and asked
+-- for psi.session_id() on their first flush got nil and had to
+-- fall back to a timestamp filename (see the autosave debug
+-- session under i686-transcripts/). Call this anywhere a fresh
+-- entry is about to be persisted or observed by an extension.
+function M.ensure_id()
+  if not psi.session_id() or psi.session_id() == "" then
+    psi.session_set_id(prelude.uuid_short())
+  end
+end
+
 local function stamp_entry(body)
   body = body or {}
   body.id = body.id or prelude.uuid_short()
@@ -60,6 +74,9 @@ local function stamp_entry(body)
     body.parentId = last_entry_id
   end
   last_entry_id = body.id
+  -- Every appended entry is an observable event for extensions,
+  -- so the session id must be stable by now.
+  M.ensure_id()
   return body
 end
 
@@ -318,15 +335,26 @@ local function write_session_file(path, header, messages, count)
   return true
 end
 
+-- Persist the current session to disk.
+--
+-- Return contract:
+--   true                           — wrote the file successfully
+--   false, "no session path set"   — no path configured; nothing was
+--                                    written. Distinguishable from a
+--                                    true write so extensions that
+--                                    track flushes (e.g. autosave)
+--                                    can tell a no-op apart from a
+--                                    real save. Historically this
+--                                    returned `true` silently and
+--                                    hid the misconfiguration.
+--   false, err                     — disk / permission / I/O error.
 function M.save(path)
+  M.ensure_id()
   if not path or path == "" then
     path = psi.session_path()
   end
   if not path or path == "" then
-    return true
-  end
-  if not psi.session_id() or psi.session_id() == "" then
-    psi.session_set_id(prelude.uuid_short())
+    return false, "no session path set"
   end
   return write_session_file(path, session_header(), psi.session_messages())
 end
