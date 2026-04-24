@@ -155,8 +155,25 @@ Canonical source: `lua/psi/prompt.lua M.HELP_TEXT`.
 
 For extensions that want to *change the rendered terminal output*
 (rather than just observe). Handlers receive a payload table and return
-a **string** (or `nil` = "contribute empty string"). Results are
-concatenated in registration order and printed.
+one of:
+
+- `nil` / `false` — contribute nothing (observer-style).
+- a `"string"` — appended to the running render in registration order.
+- `{replace = true, text = "..."}` — **discards** everything earlier
+  hooks in this chain contributed and starts over with `text`.
+  Subsequent hooks in the chain still append. Use this when you need
+  to *replace* a built-in renderer rather than add alongside it (e.g.
+  swap `read`'s default tool-result block for a numbered one).
+
+Render-hook mutations only affect what the **user sees** on the
+terminal. If you also want to change what the **model sees** (the
+tool-result payload fed back into its context), use a
+`psi.tools.add_after_hook` — see below. The two are independent.
+
+`psi.render.events()` returns the list of event names the render
+bridge dispatches (currently `before-turn`, `assistant-text`,
+`tool-call`, `tool-result`, `after-turn`). Extensions can inspect this
+rather than hard-coding names.
 
 Most extensions should use `psi.events.on` instead. Use render hooks
 only when you need to mutate the on-screen output.
@@ -173,6 +190,9 @@ These are part of the stable surface:
 | `psi.is_aborted()` | `true` when Ctrl-C / Esc requested. Poll during long work. |
 | `psi.json_encode(v)` / `psi.json_decode(s)` | JSON. |
 | `psi.session_message_count()` / `psi.session_messages()` | Read current in-memory session. |
+| `psi.embedded_doc(name)` / `psi.embedded_doc_names()` | Fetch doc files bundled into the binary (e.g. `README.md`). |
+| `psi.embedded_source(name)` / `psi.embedded_source_names()` | Fetch the raw Lua source of an embedded module (e.g. `psi.render`). Useful for live introspection when there is no on-disk path. |
+| `psi.tool_call(name, input)` | Dispatch a tool through the full before/after hook chain. **Prefer this over calling `tool.impl` directly** — `impl` skips hook processing (permissions, redaction, extension transforms). |
 
 Prelude helpers on `psi.prelude` (`trim`, `split`, `safe_json_decode`,
 `safe_read`, `uuid_short`, `iso_timestamp`, `as_array`, `path_join`) are

@@ -7,6 +7,14 @@
 --   M.select_specs(user_text) -- alist list for the Anthropic adapter
 --   M.dispatch(name, input)   -- returns ToolResult record
 --   M.dispatch_alist(n, i)    -- returns alist (entry used by vm.c)
+--
+-- IMPORTANT: to invoke a tool and run the registered before/after
+-- hook chain, call M.dispatch(name, input) (or the shim
+-- psi.tool_call(name, input) on the global). The raw `tool.impl`
+-- field on a Tool record is the *unhooked* implementation — calling
+-- it directly (e.g. `find("read").impl(...)`) bypasses permission
+-- gating, redaction, and any transformations extensions have
+-- installed. Treat `impl` as an internal slot.
 
 local records = require("psi.records")
 

@@ -11,6 +11,25 @@ local M = {}
 
 local hooks = {} -- {event_name = {fn1, fn2, ...}}
 
+-- Event catalog. The keys here are the names the hook-dispatch path
+-- (modes.fire / handle_event) emits. Exposed via M.events() so
+-- extensions can discover what's hookable without grep. Keep in sync
+-- with docs/extensions.md §"Event catalog" and with the fire() sites
+-- in psi.modes / psi.anthropic / psi.session.
+local event_catalog = {
+  "before-turn",
+  "assistant-text",
+  "tool-call",
+  "tool-result",
+  "after-turn",
+}
+
+function M.events()
+  local out = {}
+  for i, name in ipairs(event_catalog) do out[i] = name end
+  return out
+end
+
 function M.register_hook(event, fn)
   hooks[event] = hooks[event] or {}
   table.insert(hooks[event], fn)
@@ -28,11 +47,25 @@ function M.run_hooks(event, payload)
   return results
 end
 
+-- A hook may return one of:
+--   nil / false       → contribute nothing (observer-style)
+--   "string"          → append to the running render
+--   {replace=true,
+--    text="..."}      → DISCARD everything accumulated so far by
+--                       earlier hooks in this chain and start over
+--                       with `text`. Subsequent hooks in the chain
+--                       still append. Use this when you want to
+--                       override a built-in renderer (e.g. replace
+--                       read's default tool-result block with a
+--                       numbered one). The last replace wins among
+--                       the chain.
 local function render_hook_results(results)
   local pieces = {}
   for _, item in ipairs(results) do
     if type(item) == "string" then
       pieces[#pieces + 1] = item
+    elseif type(item) == "table" and item.replace then
+      pieces = { item.text or "" }
     end
   end
   return table.concat(pieces)

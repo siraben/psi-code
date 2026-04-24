@@ -1008,6 +1008,48 @@ static int lfn_embedded_doc_names(lua_State *L) {
     return 1;
 }
 
+/* psi.embedded_source(name) -> string | nil
+ * Return the raw Lua source for an embedded module (same name as
+ * `require(...)`, e.g. "psi.render"). Lets extensions and live-runtime
+ * introspection inspect built-in modules without a real filesystem
+ * path. Parallel to embedded_doc but over psi_embedded_lua_table. */
+static int lfn_embedded_source(lua_State *L) {
+    const char *name = luaL_checkstring(L, 1);
+    const struct psi_embedded_lua *e;
+    for (e = psi_embedded_lua_table; e->name != NULL; e++) {
+        if (strcmp(e->name, name) == 0) {
+            unsigned char *buf = (unsigned char *)malloc(e->raw_len + 1u);
+            if (buf == NULL) return luaL_error(L, "out of memory");
+            if (psi_vm_embedded_inflate(e, buf, e->raw_len) != PSI_STATUS_OK) {
+                free(buf);
+                lua_pushnil(L);
+                return 1;
+            }
+            buf[e->raw_len] = 0;
+            lua_pushlstring(L, (const char *)buf, e->raw_len);
+            free(buf);
+            return 1;
+        }
+    }
+    lua_pushnil(L);
+    return 1;
+}
+
+/* psi.embedded_source_names() -> array-of-strings
+ * List every Lua module embedded in the binary. Complement of
+ * embedded_doc_names; useful for extension authors wanting to know
+ * what they can introspect. */
+static int lfn_embedded_source_names(lua_State *L) {
+    const struct psi_embedded_lua *e;
+    int i = 1;
+    lua_newtable(L);
+    for (e = psi_embedded_lua_table; e->name != NULL; e++, i++) {
+        lua_pushstring(L, e->name);
+        lua_rawseti(L, -2, i);
+    }
+    return 1;
+}
+
 static int lfn_session_clear(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
     struct psi_session *s = host ? host->session : NULL;
@@ -1227,6 +1269,8 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("set_usage",             lfn_set_usage);
     PSI_REG("embedded_doc",          lfn_embedded_doc);
     PSI_REG("embedded_doc_names",    lfn_embedded_doc_names);
+    PSI_REG("embedded_source",       lfn_embedded_source);
+    PSI_REG("embedded_source_names", lfn_embedded_source_names);
     PSI_REG("json_encode",           lfn_json_encode);
     PSI_REG("json_decode",           lfn_json_decode);
     PSI_REG("http_post",             lfn_http_post);

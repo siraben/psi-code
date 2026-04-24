@@ -332,6 +332,52 @@ def t_render_write_diff(psi: Psi):
     assert_contains(out, "delta", "diff payload")
 
 
+@test("render/replace_mode")
+def t_render_replace(psi: Psi):
+    """A render hook returning {replace=true, text=...} must drop
+    earlier hooks' output from the chain and start the accumulator
+    over. Later hooks still append. Verifies the replace-mode
+    rough-edge fix from session be5ebe99."""
+    out = psi.eval(
+        'local r = require("psi.render")\n'
+        + 'r.register_hook("before-turn", function() return "first\\n" end)\n'
+        + 'r.register_hook("before-turn", function()\n'
+        + '  return { replace = true, text = "REPLACED\\n" }\n'
+        + 'end)\n'
+        + 'r.register_hook("before-turn", function() return "tail\\n" end)\n'
+        + 'return r.handle_event("before-turn", {})'
+    )
+    assert "first" not in out, "first hook's string should have been dropped"
+    assert_contains(out, "REPLACED", "replacement text present")
+    assert_contains(out, "tail", "later hook still appends after replace")
+
+
+@test("render/event_catalog")
+def t_render_events(psi: Psi):
+    out = psi.eval(
+        'return table.concat(require("psi.render").events(), ",")')
+    for ev in ("before-turn", "tool-call", "tool-result", "after-turn"):
+        assert_contains(out, ev, f"catalog lists {ev}")
+
+
+@test("introspect/embedded_source")
+def t_embedded_source(psi: Psi):
+    """psi.embedded_source must surface a module's raw Lua source so
+    extensions can introspect built-ins without an on-disk path."""
+    out = psi.eval(
+        'local src = psi.embedded_source("psi.render")\n'
+        + 'local names = psi.embedded_source_names()\n'
+        + 'return (src and #src or 0) .. "|" .. #names .. "|"\n'
+        + '       .. tostring(psi.embedded_source("no.such.module"))'
+    )
+    # Format: "<src_len>|<name_count>|nil"
+    parts = out.strip().split("|")
+    assert len(parts) == 3, f"unexpected shape: {out!r}"
+    assert int(parts[0]) > 100, "render source should be non-trivial"
+    assert int(parts[1]) > 10, "should enumerate many modules"
+    assert parts[2] == "nil", "unknown module must return nil"
+
+
 @test("prompt/system_lists_tools")
 def t_system_prompt_tools(psi: Psi):
     out = psi.system_prompt()
