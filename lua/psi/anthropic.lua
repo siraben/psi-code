@@ -152,6 +152,14 @@ local function build_api_messages(session)
   local out = {}
   local pending_tool_calls = {} -- tool_use blocks awaiting results
   local seen_result_ids = {} -- tool_use_ids already paired
+  -- Every tool_use id we have ever emitted on an assistant message
+  -- (across the whole build, not just the current pending set). Used
+  -- to drop orphan tool_result blocks whose tool_use was compacted
+  -- away: Anthropic rejects those with 400 "unexpected tool_use_id
+  -- found in tool_result blocks". Defence-in-depth alongside
+  -- session.do_compact's cut-point snap — a stale session loaded
+  -- from an older psi that lacked the snap still serialises cleanly.
+  local known_tool_use_ids = {}
 
   local function flush_synthetic_results()
     if #pending_tool_calls == 0 then
@@ -201,6 +209,9 @@ local function build_api_messages(session)
           for _, b in ipairs(message.content) do
             if type(b) == "table" and b.type == "toolCall" then
               pending_tool_calls[#pending_tool_calls + 1] = { id = b.id, name = b.name }
+              if b.id ~= nil and b.id ~= "" then
+                known_tool_use_ids[b.id] = true
+              end
             end
           end
         end
@@ -216,8 +227,13 @@ local function build_api_messages(session)
         local b = safe_decode(session[i].data)
         if type(b) == "table" and type(b.message) == "table" then
           local tr = tool_result_block(b.message)
-          blocks[#blocks + 1] = tr
-          if tr.tool_use_id ~= "" then
+          -- Drop orphan tool_results: those whose tool_use_id was
+          -- never emitted on a preceding assistant message (usually
+          -- because compaction trimmed the tool_use away). Serialising
+          -- the block anyway would 400 the wire request. Matches pi's
+          -- compaction-layer guarantee; belt + braces here.
+          if tr.tool_use_id ~= "" and known_tool_use_ids[tr.tool_use_id] then
+            blocks[#blocks + 1] = tr
             seen_result_ids[tr.tool_use_id] = true
           end
         end
@@ -911,6 +927,7 @@ end
 M._test = {
   new_sse_parser = new_sse_parser,
   sse_push = sse_push,
+  build_api_messages = build_api_messages,
 }
 
 return M

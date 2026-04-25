@@ -508,6 +508,93 @@ def t_render_thinking(psi: Psi):
                     "after-turn resets the one-shot label")
 
 
+@test("compaction/snaps_past_orphan_tool_result")
+def t_compact_snap(psi: Psi):
+    """Regression for the Haiku session failure: do_compact must never
+    leave a tool-result as the first kept entry (orphan). Mirrors pi's
+    findValidCutPoints which excludes toolResult from valid cut
+    points. Without the snap, Anthropic 400s with 'unexpected
+    tool_use_id found in tool_result blocks'."""
+    out = psi.eval(
+        'local s = require("psi.session")\n'
+        + '-- Build: user, asst(toolCall), tool-result, user, asst(toolCall), tool-result\n'
+        + 'local records = require("psi.records")\n'
+        + 's.append_user("hi")\n'
+        + 's.append_assistant("", {\n'
+        + '  { type = "tool_use", id = "call-1", name = "bash",\n'
+        + '    input = { command = "ls" } }\n'
+        + '}, {})\n'
+        + 's.append_tool_result("call-1", "bash", "output1", false)\n'
+        + 's.append_user("again")\n'
+        + 's.append_assistant("", {\n'
+        + '  { type = "tool_use", id = "call-2", name = "bash",\n'
+        + '    input = { command = "pwd" } }\n'
+        + '}, {})\n'
+        + 's.append_tool_result("call-2", "bash", "output2", false)\n'
+        + '-- keep_recent=1 would cut at index 5 which is the final\n'
+        + '-- tool-result — would orphan it. Snap must move boundary\n'
+        + '-- forward past the tool-result entries.\n'
+        + 's.do_compact(1, "summary text here")\n'
+        + 'local msgs = s.messages()\n'
+        + '-- After: compaction-summary + whatever the snap decided.\n'
+        + 'local first_kept_role = nil\n'
+        + 'for _, m in ipairs(msgs) do\n'
+        + '  if m.role ~= "compaction-summary" then\n'
+        + '    first_kept_role = m.role\n'
+        + '    break\n'
+        + '  end\n'
+        + 'end\n'
+        + 'return tostring(first_kept_role)'
+    )
+    assert out.strip() != "tool-result", \
+        f"orphan tool-result kept after compaction: {out!r}"
+
+
+@test("anthropic/drops_orphan_tool_result")
+def t_anthropic_orphan_drop(psi: Psi):
+    """build_api_messages must skip tool-result entries whose
+    tool_use_id has no matching tool_use in a preceding assistant
+    message — e.g. a session loaded from an older psi that compacted
+    without the snap. Exactly the Haiku session 71d7999f symptom."""
+    out = psi.eval(
+        'local a = require("psi.anthropic")\n'
+        + 'local prelude = require("psi.prelude")\n'
+        + '-- Synthetic session: compaction + orphan tool-result\n'
+        + '-- (tool_use never appeared) + user + assistant-text.\n'
+        + 'local function msg(role, body)\n'
+        + '  return { role = role, text = "", data = psi.json_encode(body) }\n'
+        + 'end\n'
+        + 'local session = {\n'
+        + '  { role = "compaction-summary", text = "old work",\n'
+        + '    data = psi.json_encode({ summary = "old work" }) },\n'
+        + '  msg("tool-result", { message = {\n'
+        + '    role = "toolResult", toolCallId = "toolu_ORPHAN",\n'
+        + '    toolName = "bash",\n'
+        + '    content = { { type = "text", text = "stale output" } } } }),\n'
+        + '  msg("user", { message = { role = "user",\n'
+        + '    content = { { type = "text", text = "continue" } } } }),\n'
+        + '}\n'
+        + 'local wire = a._test.build_api_messages(session)\n'
+        + '-- Walk wire and assert no tool_result with id "toolu_ORPHAN".\n'
+        + 'local found = false\n'
+        + 'for _, m in ipairs(wire) do\n'
+        + '  if type(m.content) == "table" then\n'
+        + '    for _, b in ipairs(m.content) do\n'
+        + '      if type(b) == "table" and b.type == "tool_result"\n'
+        + '         and b.tool_use_id == "toolu_ORPHAN" then\n'
+        + '        found = true\n'
+        + '      end\n'
+        + '    end\n'
+        + '  end\n'
+        + 'end\n'
+        + 'return tostring(found) .. "|" .. tostring(#wire)'
+    )
+    parts = out.strip().split("|")
+    assert parts[0] == "false", f"orphan tool_result still in wire: {out!r}"
+    # Expected wire: compaction-summary-as-user + the real user msg = 2
+    assert int(parts[1]) >= 1
+
+
 @test("session/ensure_default_path")
 def t_session_default_path(psi: Psi):
     """Without --session, TUI calls psi.session.ensure_default_path

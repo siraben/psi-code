@@ -765,6 +765,22 @@ function M.do_compact(keep_recent, summary_text)
     keep_recent = total
   end
   local compacted_count = total - keep_recent
+
+  -- Snap the compaction boundary forward past any leading tool-result
+  -- entries in the retained tail. Otherwise a cut that lands between
+  -- an assistant's toolCall and its toolResult drops the call but
+  -- keeps the result — the wire request then has a tool_result with
+  -- no matching tool_use and Anthropic rejects it with:
+  --   400 "unexpected tool_use_id found in tool_result blocks ... Each
+  --        tool_result block must have a corresponding tool_use block
+  --        in the previous message"
+  -- Mirrors pi-mono's findValidCutPoints (compaction/compaction.ts:
+  -- 299-337) which disqualifies toolResult messages as cut points.
+  while compacted_count < total
+        and messages[compacted_count + 1]
+        and messages[compacted_count + 1].role == "tool-result" do
+    compacted_count = compacted_count + 1
+  end
   local tail = prelude.drop(messages, compacted_count)
 
   if psi.events and psi.events.emit then

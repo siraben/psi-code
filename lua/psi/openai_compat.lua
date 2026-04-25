@@ -135,6 +135,12 @@ function M.build_api_messages(session, system_prompt, cfg)
 
   local pending_tool_calls = {}
   local seen_result_ids = {}
+  -- Every tool_call id that has ever been emitted on an assistant
+  -- message so far. Used to drop orphan tool-result entries whose
+  -- matching tool_call was compacted away. See anthropic.lua for the
+  -- same defence and session.do_compact for the cut-point snap that
+  -- prevents the orphan from happening in the first place.
+  local known_tool_use_ids = {}
 
   local function flush_synthetic_results()
     for _, tc in ipairs(pending_tool_calls) do
@@ -192,6 +198,9 @@ function M.build_api_messages(session, system_prompt, cfg)
           for _, tc in ipairs(tool_calls) do
             pending_tool_calls[#pending_tool_calls + 1] =
               { id = tc.id, name = tc["function"].name }
+            if tc.id ~= nil and tc.id ~= "" then
+              known_tool_use_ids[tc.id] = true
+            end
           end
         end
         i = i + 1
@@ -210,8 +219,14 @@ function M.build_api_messages(session, system_prompt, cfg)
             end
           end
           local tid = tm.toolCallId or ""
-          out[#out + 1] = tool_result_message(tid, tm.toolName or "", text)
-          if tid ~= "" then seen_result_ids[tid] = true end
+          -- Skip orphans: a tool-result whose tool_call was compacted
+          -- away (never emitted on a preceding assistant message).
+          -- Serialising it would trip the OpenAI-compat server with
+          -- "tool_call_id not found" or similar.
+          if tid ~= "" and known_tool_use_ids[tid] then
+            out[#out + 1] = tool_result_message(tid, tm.toolName or "", text)
+            seen_result_ids[tid] = true
+          end
         end
         i = i + 1
       end
