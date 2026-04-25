@@ -1,39 +1,32 @@
 #!/usr/bin/env python3
-"""9ctl — host-side control for the psi9 9front VM.
+"""9ctl — host-side file ops against the psi9 9front VM.
 
-Uses three transports, picked automatically per subcommand:
+Two transports, both over forwarded TCP:
 
-  * 9P over TCP :17019    — reads/writes /usr/glenda as user 'glenda'.
-                            Fast. Works because exportfs on the VM runs
-                            as glenda and accepts the uname in Tattach.
-  * raw TCP  :2222        — rc shell (via aux/listen1) as user 'none'.
-                            Read-only for most of /usr/glenda; full
-                            access to /usr/glenda/work (which glenda
-                            chmod 1777).
-  * QEMU monitor socket   — sendkey scancode injection into the VM's
-                            text console, typed as user glenda.
+  * 9P over TCP :17019  — reads/writes /usr/glenda as user 'glenda'
+                          via exportfs. ~10ms round-trip.
+  * raw TCP  :2222      — rc shell (aux/listen1) as user 'none'.
+                          Used to `touch` files before 9P writes
+                          (9p write requires the file to exist) and
+                          for fire-and-forget no-output commands.
+                          'none' has limited namespace; for real
+                          shell access use `drawterm-cmd` instead.
 
 Subcommands:
 
-  read REMOTE             — print /usr/glenda/REMOTE to stdout
-  ls   REMOTE             — list a dir on the VM
-  put  LOCAL REMOTE       — copy a host file into /usr/glenda/REMOTE
-  puts REMOTE             — read stdin, write to /usr/glenda/REMOTE
-  exec CMD [CMD2 ...]     — run rc commands as 'none' over :2222
-  run  CMD                — type CMD at the glenda console
-  type TEXT               — type raw text (no final Return)
-  screenshot [OUT]        — write a PNG of the VNC framebuffer
-  ask  PROMPT [-s SESS]   — run psi9 -a PROMPT on the VM
+  read REMOTE       — print /usr/glenda/REMOTE to stdout
+  ls   REMOTE       — list a dir on the VM
+  put  LOCAL REMOTE — copy a host file into /usr/glenda/REMOTE
+  puts REMOTE      — stdin → /usr/glenda/REMOTE
+  exec CMD [CMD2 ...] — run rc commands as 'none' over :2222
+  screenshot [OUT]  — PNG of VNC framebuffer (diagnostic only)
 
 Env:
-  VM_HOST          (default 127.0.0.1)
-  VM_SHELL_PORT    (default 2222 — listen1 rc-as-none)
-  VM_9P_PORT       (default 17019 — exportfs)
-  VM_MON_SOCK      (default /tmp/9qmon)
-  VM_VNC_DISPLAY   (default 127.0.0.1:0)
-  HOST_HTTP_DIR    (default /tmp/9host, must match `python3 -m http.server 8765`)
-  PLAN9            (default bundled plan9port — looks up `9p`)
-  ANTHROPIC_API_KEY (required for `ask`)
+  VM_HOST       127.0.0.1
+  VM_SHELL_PORT 2222
+  VM_9P_PORT    17019
+  VM_VNC_DISPLAY 127.0.0.1:0
+  PLAN9         bundled plan9port (looks up `9p` and friends)
 """
 
 from __future__ import annotations
@@ -45,23 +38,20 @@ import shutil
 import socket
 import subprocess
 import sys
-import tempfile
-import time
 from pathlib import Path
 
 VM_HOST = os.environ.get("VM_HOST", "127.0.0.1")
 VM_SHELL_PORT = int(os.environ.get("VM_SHELL_PORT", "2222"))
 VM_9P_PORT = int(os.environ.get("VM_9P_PORT", "17019"))
-VM_MON_SOCK = os.environ.get("VM_MON_SOCK", "/tmp/9qmon")
 VM_VNC_DISPLAY = os.environ.get("VM_VNC_DISPLAY", "127.0.0.1:0")
-HOST_HTTP_DIR = Path(os.environ.get("HOST_HTTP_DIR", "/tmp/9host"))
 
 # ---- plan9port resolution -------------------------------------------------
 
 _PLAN9_CACHE: dict[str, str] = {}
 
 def plan9_bin(name: str) -> str:
-    """Find a plan9port binary (e.g. `9p`). Allows override via $PLAN9."""
+    """Find a plan9port binary (e.g. `9p`). Honours $PLAN9; falls back
+    to nix-shell -p plan9port; last resort $PATH."""
     if name in _PLAN9_CACHE:
         return _PLAN9_CACHE[name]
 
@@ -72,7 +62,6 @@ def plan9_bin(name: str) -> str:
             _PLAN9_CACHE[name] = str(cand)
             return str(cand)
 
-    # Fall through: derive PLAN9 from a nix-shell.
     out = subprocess.run(
         ["nix-shell", "-p", "plan9port", "--run", "echo $PLAN9"],
         capture_output=True, text=True, check=False,
@@ -85,7 +74,6 @@ def plan9_bin(name: str) -> str:
             _PLAN9_CACHE[name] = str(cand)
             return str(cand)
 
-    # Last resort: $PATH.
     path = shutil.which(name)
     if path:
         _PLAN9_CACHE[name] = path
@@ -93,19 +81,21 @@ def plan9_bin(name: str) -> str:
 
     sys.exit(f"9ctl: can't find {name!r}; set PLAN9 or install plan9port")
 
+
 def p9(args: list[str], input_data: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
-    """Run plan9port's `9p` against the VM's exportfs."""
+    """Run plan9port's `9p` against the VM's exportfs, as user glenda."""
     bin9p = plan9_bin("9p")
     env = os.environ.copy()
     env["USER"] = "glenda"
-    env["PLAN9"] = env.get("PLAN9", "")
     cmd = [bin9p, "-a", f"tcp!{VM_HOST}!{VM_9P_PORT}"] + args
     return subprocess.run(cmd, input=input_data, capture_output=True, env=env)
+
 
 # ---- TCP :2222 rc-as-none -------------------------------------------------
 
 def rc_exec(cmds: list[str], timeout: float = 10.0) -> str:
-    """Send newline-joined commands to the aux/listen1 rc shell."""
+    """Send newline-joined commands to the aux/listen1 rc shell as
+    'none'. Returns the combined stdout/stderr."""
     payload = ("\n".join(cmds) + "\n").encode()
     with socket.create_connection((VM_HOST, VM_SHELL_PORT), timeout=timeout) as s:
         s.settimeout(timeout)
@@ -122,101 +112,48 @@ def rc_exec(cmds: list[str], timeout: float = 10.0) -> str:
             pass
     return b"".join(chunks).decode("utf-8", errors="replace")
 
-# ---- QEMU monitor sendkey -------------------------------------------------
 
-# Per-char keysym map for sendkey. Mirrors the old qtype.sh logic.
-_KEYSYM = {
-    " ": "spc", "/": "slash", "!": "shift-1", "*": "shift-8",
-    "=": "equal", "-": "minus", ".": "dot", ":": "shift-semicolon",
-    ";": "semicolon", "'": "apostrophe", '"': "shift-apostrophe",
-    "(": "shift-9", ")": "shift-0", "&": "shift-7", "|": "shift-backslash",
-    "<": "shift-comma", ">": "shift-dot", ",": "comma",
-    "~": "shift-grave_accent", "#": "shift-3", "$": "shift-4",
-    "%": "shift-5", "^": "shift-6", "+": "shift-equal", "?": "shift-slash",
-    "_": "shift-minus", "@": "shift-2", "[": "bracket_left",
-    "]": "bracket_right", "{": "shift-bracket_left", "}": "shift-bracket_right",
-    "\\": "backslash", "`": "grave_accent",
-    "\n": "ret", "\t": "tab",
-}
+def touch_remote(remote: str) -> None:
+    """Create /usr/glenda/REMOTE so subsequent 9p writes succeed.
+    Uses the TCP rc shell as 'none'; works in /usr/glenda/work
+    (1777-writable). Glenda-owned dirs need to pre-exist or be
+    created via drawterm-cmd."""
+    rc_exec([f"touch /usr/glenda/{shlex.quote(remote)}"], timeout=5.0)
 
-def mon_send(sendkey_cmd: str) -> None:
-    """Send one line to the QEMU monitor socket."""
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-            s.connect(VM_MON_SOCK)
-            s.sendall((sendkey_cmd + "\n").encode())
-            # Drain briefly so the monitor's echo doesn't back up.
-            s.settimeout(0.2)
-            try:
-                s.recv(8192)
-            except socket.timeout:
-                pass
-    except OSError as e:
-        sys.exit(f"9ctl: QEMU monitor at {VM_MON_SOCK} unreachable: {e}")
-
-def mon_type(text: str, delay: float = 0.03) -> None:
-    """Type text into the VNC console. No final newline unless text ends with one."""
-    for ch in text:
-        if ch in _KEYSYM:
-            sym = _KEYSYM[ch]
-        elif ch.isupper():
-            sym = f"shift-{ch.lower()}"
-        elif ch.isalnum():
-            sym = ch
-        else:
-            sys.exit(f"9ctl: unsupported character {ch!r} in keystroke stream")
-        mon_send(f"sendkey {sym}")
-        time.sleep(delay)
 
 # ---- Subcommands ----------------------------------------------------------
 
-def _p9_passthrough(p9_args: list[str], input_data: bytes | None = None) -> int:
-    """Run `9p` and pipe stdout/stderr through, returning its exit code."""
+def _passthrough(p9_args: list[str], input_data: bytes | None = None) -> int:
+    """Run `9p` and pipe its stdout/stderr through, returning exit code."""
     r = p9(p9_args, input_data=input_data)
     sys.stdout.buffer.write(r.stdout)
     if r.returncode != 0:
         sys.stderr.buffer.write(r.stderr)
     return r.returncode
 
+
 def cmd_read(args: argparse.Namespace) -> int:
-    return _p9_passthrough(["read", args.remote])
+    return _passthrough(["read", args.remote])
 
 def cmd_ls(args: argparse.Namespace) -> int:
-    return _p9_passthrough(["ls", args.remote])
-
-def _touch_remote(remote: str) -> None:
-    """Ensure /usr/glenda/REMOTE exists so 9p write can target it.
-    Touch via VNC (glenda) so ownership is glenda — `none` could create
-    directly under work/ but later builds want glenda-owned files."""
-    mon_type(f"touch /usr/glenda/{remote}\n")
-    time.sleep(0.5)
+    return _passthrough(["ls", args.remote])
 
 def cmd_put(args: argparse.Namespace) -> int:
     data = Path(args.local).read_bytes()
-    _touch_remote(args.remote)
-    return _p9_passthrough(["write", args.remote], input_data=data)
+    touch_remote(args.remote)
+    return _passthrough(["write", args.remote], input_data=data)
 
 def cmd_puts(args: argparse.Namespace) -> int:
     data = sys.stdin.buffer.read()
-    _touch_remote(args.remote)
-    return _p9_passthrough(["write", args.remote], input_data=data)
+    touch_remote(args.remote)
+    return _passthrough(["write", args.remote], input_data=data)
 
 def cmd_exec(args: argparse.Namespace) -> int:
-    out = rc_exec(args.cmd, timeout=args.timeout)
-    sys.stdout.write(out)
-    return 0
-
-def cmd_run(args: argparse.Namespace) -> int:
-    mon_type(args.cmd + "\n")
-    return 0
-
-def cmd_type(args: argparse.Namespace) -> int:
-    mon_type(args.text)
+    sys.stdout.write(rc_exec(args.cmd, timeout=args.timeout))
     return 0
 
 def cmd_screenshot(args: argparse.Namespace) -> int:
     out = args.out or "/tmp/9vnc.png"
-    # Use nix-shell vncdo since it's not always installed globally.
     proc = subprocess.run(
         ["nix-shell", "-p", "python3Packages.vncdo", "--run",
          f"vncdo -s {VM_VNC_DISPLAY} capture {shlex.quote(out)}"],
@@ -228,98 +165,14 @@ def cmd_screenshot(args: argparse.Namespace) -> int:
     print(out)
     return 0
 
-def cmd_job(args: argparse.Namespace) -> int:
-    """Submit an rc script to the persistent worker and wait for output.
-
-    Relies on the `worker.rc` + pre-touched 001.rc..200.rc slots protocol.
-    Picks the next free slot, writes the rc over 9P, creates the .go
-    flag via 9P (also pre-touched), polls for .done, prints .out.
-    """
-    # Read payload from --file or stdin or inline.
-    if args.file:
-        payload = Path(args.file).read_bytes()
-    else:
-        payload = sys.stdin.buffer.read()
-    if not payload:
-        sys.exit("9ctl job: empty rc payload")
-
-    # Scan for the lowest NNN.rc that's still zero-byte. The worker
-    # renames NNN.rc -> NNN.done on completion and slots never get
-    # recycled within a session, so a linear probe suffices. 9p stat
-    # output is "... l LENGTH ..." — pull the integer after `l`.
-    slot = None
-    for i in range(1, 201):
-        name = f"{i:03d}"
-        stat = p9(["stat", f"work/q/{name}.rc"])
-        if stat.returncode != 0:
-            continue
-        parts = stat.stdout.decode("utf-8", errors="replace").split()
-        try:
-            length = int(parts[parts.index("l") + 1])
-        except (ValueError, IndexError):
-            continue
-        if length == 0:
-            slot = name
-            break
-    if slot is None:
-        sys.exit("9ctl job: no free slot in 1..200 (run mkslots.rc to refresh)")
-
-    # Write the rc payload into NNN.rc.
-    w = p9(["write", f"work/q/{slot}.rc"], input_data=payload)
-    if w.returncode != 0:
-        sys.stderr.buffer.write(w.stderr)
-        sys.exit(f"9ctl job: write {slot}.rc failed")
-
-    # Flip .go to signal "run now". 9p write requires the file to
-    # exist, so we rely on mkslots having pre-touched .go placeholders.
-    # If the placeholder is missing, fall back to touching via VNC.
-    g = p9(["write", f"work/q/{slot}.go"], input_data=b"go\n")
-    if g.returncode != 0:
-        _touch_remote(f"work/q/{slot}.go")
-        g = p9(["write", f"work/q/{slot}.go"], input_data=b"go\n")
-        if g.returncode != 0:
-            sys.stderr.buffer.write(g.stderr)
-            sys.exit(f"9ctl job: write {slot}.go failed")
-
-    # Poll for NNN.done.
-    deadline = time.time() + args.timeout
-    while time.time() < deadline:
-        d = p9(["stat", f"work/q/{slot}.done"])
-        if d.returncode == 0:
-            break
-        time.sleep(args.poll_interval)
-    else:
-        sys.exit(f"9ctl job: slot {slot} timed out after {args.timeout}s")
-
-    return _p9_passthrough(["read", f"work/q/{slot}.out"])
-
-def cmd_ask(args: argparse.Namespace) -> int:
-    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if not key:
-        sys.exit("9ctl ask: ANTHROPIC_API_KEY not set")
-    extra = f" -s {shlex.quote(args.session)}" if args.session else ""
-    # Build an rc script on the host and fetch it via hget. This avoids
-    # needing to embed the API key in the typed command.
-    HOST_HTTP_DIR.mkdir(parents=True, exist_ok=True)
-    rc_name = f"_ask_{os.getpid()}.rc"
-    esc_prompt = args.prompt.replace("'", r"'\''")
-    (HOST_HTTP_DIR / rc_name).write_text(
-        "#!/bin/rc\n"
-        f"ANTHROPIC_API_KEY='{key}'\n"
-        f"./6.psi9 -a '{esc_prompt}'{extra}\n"
-    )
-    # Leave HOST_HTTP_DIR/rc_name on disk; user may want to inspect it.
-    mon_type(f"hget http://10.0.2.2:8765/{rc_name} > _ask.rc\n")
-    time.sleep(1)
-    mon_type("rc _ask.rc\n")
-    print("9ctl: launched psi9; inspect VNC or capture screenshot.")
-    return 0
 
 # ---- argparse -------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="9ctl", description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        prog="9ctl", description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     sub = p.add_subparsers(dest="cmd", required=True)
 
     r = sub.add_parser("read", help="print /usr/glenda/REMOTE")
@@ -344,35 +197,17 @@ def build_parser() -> argparse.ArgumentParser:
     ex.add_argument("--timeout", type=float, default=10.0)
     ex.set_defaults(func=cmd_exec)
 
-    rn = sub.add_parser("run", help="type command into glenda console")
-    rn.add_argument("cmd")
-    rn.set_defaults(func=cmd_run)
-
-    ty = sub.add_parser("type", help="type raw text (no auto-newline)")
-    ty.add_argument("text")
-    ty.set_defaults(func=cmd_type)
-
-    sc = sub.add_parser("screenshot", help="PNG of VNC framebuffer")
+    sc = sub.add_parser("screenshot", help="PNG of VNC framebuffer (diagnostic)")
     sc.add_argument("out", nargs="?")
     sc.set_defaults(func=cmd_screenshot)
 
-    jb = sub.add_parser("job", help="submit rc script to worker, wait, print output")
-    jb.add_argument("-f", "--file", help="read rc from FILE (default: stdin)")
-    jb.add_argument("--timeout", type=float, default=120.0)
-    jb.add_argument("--poll-interval", type=float, default=0.5)
-    jb.set_defaults(func=cmd_job)
-
-    ak = sub.add_parser("ask", help="run psi9 -a PROMPT on the VM")
-    ak.add_argument("prompt")
-    ak.add_argument("-s", "--session")
-    ak.set_defaults(func=cmd_ask)
-
     return p
 
+
 def main(argv: list[str]) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    args = build_parser().parse_args(argv)
     return args.func(args)
+
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

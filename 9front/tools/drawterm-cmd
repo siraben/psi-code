@@ -39,6 +39,11 @@ else
   CMD="$(cat)"
 fi
 
+# rcpu sessions get a fresh namespace without webfs/cs/etc. Mount
+# webfs from /srv before running the user command. Failures suppressed
+# so commands that don't need webfs still work.
+CMD="mount -bc '#s/web' /mnt/web >[2]/dev/null; $CMD"
+
 # expect script: feed password to both prompts (drawterm's local auth +
 # server-side dp9ik), then drain output until EOF.
 SCRIPT="$(mktemp)"
