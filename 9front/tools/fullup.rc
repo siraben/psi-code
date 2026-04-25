@@ -49,4 +49,24 @@ webfs -s web
 # 5. rcpu listener on tcp!*!17020 (separate from our exportfs:17019).
 aux/listen1 -t 'tcp!*!17020' /rc/bin/service/tcp17019 &
 
+# 6. Install/refresh the psi wrapper. The wrapper sources the API key,
+#    flips the rio window to auto-scroll-on-output (rio defaults to
+#    no-scroll; long psi output otherwise sticks at the top), cd's
+#    into the build dir, and exec's the binary.
+mkdir -p /usr/glenda/bin/rc
+cat > /usr/glenda/bin/rc/psi <<'WRAP'
+#!/bin/rc
+. /usr/glenda/lib/psi-env >[2]/dev/null
+echo scroll > /dev/wctl >[2]/dev/null
+cd /usr/glenda/psi9-build
+exec /usr/glenda/bin/amd64/psi.bin $*
+WRAP
+chmod +x /usr/glenda/bin/rc/psi
+
+# 7. Make rio's new terminal windows auto-scroll by default. Append
+#    once to glenda's profile so future windows get it for free.
+if(! grep -s 'scroll > /dev/wctl' /usr/glenda/lib/profile){
+	echo 'echo scroll > /dev/wctl >[2]/dev/null' >> /usr/glenda/lib/profile
+}
+
 echo FULLUP-OK
