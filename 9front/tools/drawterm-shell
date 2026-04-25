@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# drawterm-shell — interactive rc shell on the 9front guest.
+#
+# `ssh user@host` for our VM. Uses drawterm/rcpu for TLS-authenticated
+# auth, then expect's `interact` hands the TTY over to you.
+#
+#   drawterm-shell             # drops into rc on the guest
+#   ^D / exit                  # disconnect
+#
+# Auto-mounts /srv/web so webfs (psi, hget) works in the session.
+#
+# Same env as drawterm-cmd: DT_HOST DT_USER DT_PORT DT_PW_FILE.
+
+set -euo pipefail
+
+DT_HOST="${DT_HOST:-127.0.0.1}"
+DT_USER="${DT_USER:-glenda}"
+DT_PORT="${DT_PORT:-17020}"
+DT_PW_FILE="${DT_PW_FILE:-$HOME/.config/psi9-pw}"
+
+if [ ! -r "$DT_PW_FILE" ]; then
+  echo "drawterm-shell: missing $DT_PW_FILE" >&2
+  echo "  echo 'mypass' > $DT_PW_FILE && chmod 600 $DT_PW_FILE" >&2
+  exit 2
+fi
+
+PW="$(cat "$DT_PW_FILE")"
+ADDR="tcp!$DT_HOST!$DT_PORT"
+
+SCRIPT="$(mktemp)"
+trap 'rm -f "$SCRIPT"' EXIT
+cat > "$SCRIPT" <<EXPECT
+log_user 1
+set timeout -1
+spawn drawterm -G -h $ADDR -u $DT_USER
+expect -re {auth\[.*\]: }
+send -- "$PW\r"
+expect -re {password: }
+send -- "$PW\r"
+# Once authenticated, mount webfs into this session's namespace
+# (rcpu starts you in a fresh ns without it). Square brackets need
+# Tcl-escaping; rc's >[2]/dev/null becomes >\[2\]/dev/null in expect.
+expect -re {(cpu|term)%\s*\$}
+send -- "mount -bc '#s/web' /mnt/web >\[2\]/dev/null\r"
+interact
+EXPECT
+
+exec nix-shell -p drawterm expect --run "expect '$SCRIPT'"

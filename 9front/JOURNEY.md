@@ -457,3 +457,92 @@ using `9ctl read` over 9P — faster, no auth.
 
 Both channels stay; `9ctl` remains the right tool for files,
 `drawterm-cmd` for commands.
+
+---
+
+## Phase 8 — interactive shell + UX fixes
+
+After running real psi sessions through drawterm and reading the
+JSONL transcripts, three problems surfaced — two real bugs and one
+ergonomics nit. All three are now fixed in tree.
+
+### Bug 1: shell tool silently failed (status=127)
+
+Every `bash` tool call returned `{status:127, ok:false, output:""}`.
+Cause: `src/core/process.c` did `execl("/bin/sh", "sh", "-lc",
+command)`, and Plan 9 has no `/bin/sh`. Fix: fall through to
+`execl("/bin/rc", "rc", "-c", command)` after the sh attempt fails.
+Two-line change, no impact on Linux/Haiku.
+
+### Bug 2: ANSI codes rendered as literals over rcpu
+
+`psi.ansi.autodetect()` checked `os.getenv("sysname")`, which is
+only set by `/lib/profile`. Drawterm's `-c CMD` doesn't source
+profile, so on rcpu sessions ANSI stayed on and rendered as
+`§[36m·§[0m` literals. Fix: detect Plan 9 by testing for
+`/dev/sysname` existence — always present on Plan 9, absent on
+Linux/Haiku. One conditional in `lua/psi/ansi.lua`.
+
+### Ergo: rio doesn't auto-scroll on output
+
+Rio terminals default to "view stays where you left it"; long psi
+output sticks at the top instead of following the cursor. The
+per-window control is `echo scroll > /dev/wctl`. Wired in two places
+inside `fullup.rc`:
+
+1. The `psi` wrapper does `if(test -f /dev/wctl) echo scroll
+   > /dev/wctl` before exec'ing the binary.
+2. Glenda's `lib/profile` gets the same line appended once. Future
+   rio terms get auto-scroll for free.
+
+The `test -f` guard matters: rcpu sessions don't have `/dev/wctl`
+in their namespace (it's a per-rio-window file), and a bare `>`
+errors with `mounted directory forbids creation: '/dev/wctl'` —
+which actually crashes drawterm during profile sourcing.
+
+### drawterm-shell: interactive sibling of drawterm-cmd
+
+`drawterm-cmd` runs one command then exits — fine for scripted ops.
+For interactive `ssh-into-the-VM` work, `9front/tools/drawterm-shell`
+spawns drawterm without `-c`, feeds the dp9ik password through both
+prompts via expect, then `interact`s the TTY over to the user. After
+auth it auto-mounts `#s/web` so webfs is available immediately.
+
+`expect` gotcha: rc's `>[2]/dev/null` redirect contains square
+brackets, which Tcl interprets as command substitution. Escape:
+`>\[2\]/dev/null`.
+
+### Tooling cleanup pass
+
+`9ctl` shed the VNC-keystroke subcommands (`run`, `type`, `ask`) and
+the worker-queue (`job`) flow. They were Phase-7-era bridges that
+drawterm-cmd now subsumes. Final surface: `read | ls | put | puts |
+exec | screenshot` — 213 lines.
+
+### Final tool surface
+
+```
+9front/tools/
+├── fullup.rc       — guest one-time bootstrap (idempotent re-run)
+├── 9ctl            — host file ops via 9P (read/ls/put/puts) + TCP
+│                     rc-as-none (exec) + VNC capture (screenshot)
+├── drawterm-cmd    — host: run one command on the guest
+└── drawterm-shell  — host: interactive rc shell on the guest
+```
+
+Setup once, on the host:
+
+```
+echo 'mypass' > ~/.config/psi9-pw && chmod 600 ~/.config/psi9-pw
+cp ~/.config/psi9-pw /tmp/9host/_pw && chmod 644 /tmp/9host/_pw
+```
+
+In rio, on the guest, after first VM boot:
+
+```
+hget http://10.0.2.2:8765/fullup.rc | rc
+```
+
+After that, normal day-to-day work is `drawterm-shell` for
+interactive driving and `drawterm-cmd 'rc command'` for batched
+operations. No more keystroke injection.

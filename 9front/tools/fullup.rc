@@ -1,72 +1,119 @@
 #!/bin/rc
-# Full bootstrap: listen1 services + cpu/auth + rcpu listener.
-# Idempotent — re-running is fine.
+# fullup.rc — one-shot persistent bootstrap.
+#
+# Run once from rio after a fresh install:
+#
+#     hget http://10.0.2.2:8765/fullup.rc | rc
+#
+# After this completes, EVERY reboot auto-starts auth + cpu + the
+# rcpu listener. drawterm-cmd / drawterm-shell work straight away.
+# No keystroke injection ever again.
+#
+# What it does:
+#   1. Pull the host-side dp9ik password from /tmp/_pw (host's
+#      /tmp/9host/_pw served at http://10.0.2.2:8765/_pw).
+#   2. Stash hostowner credentials in nvram via auth/wrkey, so the
+#      kernel can pre-load them into factotum at boot.
+#   3. Edit plan9.ini: add `service=cpu`. Triggers /rc/bin/cpurc to
+#      bring up auth/keyfs + factotum + cpu listener every boot.
+#   4. Configure /lib/ndb/local and /lib/ndb/auth so the auth domain
+#      is registered.
+#   5. Build glenda's password into auth/keyfs.
+#   6. Start auth + listeners + webfs(-s) for the current session
+#      (so we don't have to reboot before testing).
 
-# 1. Pull the dp9ik password from the host.
-hget http://10.0.2.2:8765/_pw > /tmp/_pw
-PW=`{cat /tmp/_pw}
-if(~ $PW ''){
-	echo 'fullup: empty password from host — abort'
+PB=/usr/glenda/psi9-build
+PW=`{hget http://10.0.2.2:8765/_pw}
+if(~ $PW '' || ~ $#PW 0){
+	echo 'fullup: empty password from host — abort' >[1=2]
 	exit no-pw
 }
 
-# 2. Bring up our two basic listeners (no-op if address already in use).
-aux/listen1 -t 'tcp!*!2222'  /bin/rc &
-aux/listen1 -t 'tcp!*!17019' /bin/exportfs -r /usr/glenda &
+# ---- 1. plan9.ini: service=cpu + nobootprompt --------------------------
+9fs 9fat
+{
+	awk '
+		/^service=/    { found_svc=1; print "service=cpu"; next }
+		/^nobootprompt=/ { found_nbp=1; print; next }
+		{ print }
+		END {
+			if(!found_svc) print "service=cpu"
+			if(!found_nbp) print "nobootprompt=local!/dev/sd00/fscache"
+		}
+	' /n/9fat/plan9.ini
+} > /tmp/plan9.ini
+cp /tmp/plan9.ini /n/9fat/plan9.ini
+echo '--- plan9.ini ---'
+cat /n/9fat/plan9.ini
 
-# 3. Auth: keyfs + change glenda password + factotum + dp9ik key.
+# ---- 2. nvram credentials ----------------------------------------------
+# auth/wrkey prompts for: authid, authdom, password
+{
+	echo glenda
+	echo 9front
+	echo $PW
+} | auth/wrkey >[2=1] || echo 'auth/wrkey: nonzero exit; continuing'
+
+# ---- 3. ndb -------------------------------------------------------------
+if(! grep -s 'authdom=9front' /lib/ndb/local){
+	echo 'auth=cirno authdom=9front' >> /lib/ndb/local
+}
+if(! grep -s 'hostid=glenda' /lib/ndb/auth){
+	{
+		echo 'hostid=glenda'
+		echo '       uid=!sys uid=!adm uid=*'
+	} >> /lib/ndb/auth
+}
+
+# ---- 4. keyfs + glenda's dp9ik password ---------------------------------
 mkdir -p $home/lib
 touch $home/lib/keys
 chmod 600 $home/lib/keys
 auth/keyfs -p $home/lib/keys >[2]/dev/null
-
-# changeuser non-interactively. The prompts in 9front 11554:
-#   secret:               (new password)
-#   confirm:              (again)
-#   secret expiration:    (Y for never)
-#   post id:              (anything)
-#   group leader:         (blank)
 {
 	echo $PW
 	echo $PW
-	echo
-
-	echo
-} | auth/changeuser -p glenda >[2=1]
-
+	echo n
+	for(i in 1 2 3 4 5 6) echo
+} | auth/changeuser -p glenda >[2=1] || echo 'changeuser: continuing'
 auth/factotum -n >[2]/dev/null
 echo 'key proto=dp9ik dom=9front user=glenda !password='^$PW > /mnt/factotum/ctl
 
-# 4. webfs with /srv/web posted, so rcpu sessions in their own
-#    namespace can mount /mnt/web. Without this, drawterm-cmd
-#    sessions can't reach the network from psi.
+# ---- 5. webfs with /srv/web posted (rcpu sessions can mount it) --------
 for(p in `{ps | grep webfs | awk '{print $2}'}){
 	echo kill > /proc/$p/ctl >[2]/dev/null
 }
 sleep 1
-webfs -s web
+# -m mounts in this namespace (so rio's child terms see /mnt/web);
+# -s web also posts to /srv/web (so rcpu sessions can mount it).
+webfs -m /mnt/web -s web
 
-# 5. rcpu listener on tcp!*!17020 (separate from our exportfs:17019).
+# ---- 6. listeners for THIS session (post-reboot they auto-start) -------
+aux/listen1 -t 'tcp!*!2222'  /bin/rc &
+aux/listen1 -t 'tcp!*!17019' /bin/exportfs -r /usr/glenda &
 aux/listen1 -t 'tcp!*!17020' /rc/bin/service/tcp17019 &
 
-# 6. Install/refresh the psi wrapper. The wrapper sources the API key,
-#    flips the rio window to auto-scroll-on-output (rio defaults to
-#    no-scroll; long psi output otherwise sticks at the top), cd's
-#    into the build dir, and exec's the binary.
+# ---- 7. install psi wrapper ---------------------------------------------
 mkdir -p /usr/glenda/bin/rc
 cat > /usr/glenda/bin/rc/psi <<'WRAP'
 #!/bin/rc
 . /usr/glenda/lib/psi-env >[2]/dev/null
-echo scroll > /dev/wctl >[2]/dev/null
+if(test -f /dev/wctl) echo scroll > /dev/wctl
 cd /usr/glenda/psi9-build
 exec /usr/glenda/bin/amd64/psi.bin $*
 WRAP
 chmod +x /usr/glenda/bin/rc/psi
 
-# 7. Make rio's new terminal windows auto-scroll by default. Append
-#    once to glenda's profile so future windows get it for free.
-if(! grep -s 'scroll > /dev/wctl' /usr/glenda/lib/profile){
-	echo 'echo scroll > /dev/wctl >[2]/dev/null' >> /usr/glenda/lib/profile
-}
+# ---- 8. profile: rio auto-scroll for new windows -----------------------
+# Strip any prior unguarded `echo scroll > /dev/wctl ...` line, then
+# append the guarded form. The unguarded form crashes drawterm on
+# rcpu (no /dev/wctl in that namespace).
+grep -v 'scroll > /dev/wctl' /usr/glenda/lib/profile > /tmp/p.tmp
+echo 'if(test -f /dev/wctl) echo scroll > /dev/wctl' >> /tmp/p.tmp
+cp /tmp/p.tmp /usr/glenda/lib/profile
 
+echo
 echo FULLUP-OK
+echo
+echo 'Reboot to verify: drawterm-shell from host should connect with'
+echo 'no further VM-side action.'
