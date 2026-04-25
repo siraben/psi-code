@@ -44,8 +44,8 @@ local function impl_read(input)
     return records.new_tool_result(true, "read", nil,
       { path = path, text = embedded, source = "embedded" })
   end
-  return records.new_tool_result(true, "read", nil,
-    { path = path, text = psi.read_file(path) })
+  return records.tool_failure("read",
+    "no such file: " .. tostring(path))
 end
 
 -- ---------- write ----------
@@ -201,7 +201,10 @@ end
 local function impl_ls(input, meta)
   local path = registry.optional_string(input, "path", ".")
   local limit = registry.optional_number(input, "limit", 500)
-  local command = "ls -1A " .. shell.quote(path) .. " | sed -n '1," .. tostring(limit) .. "p'"
+  -- Plain `ls PATH | sed`: portable. Linux/BSD ls go one-entry-per-line
+  -- when stdout isn't a tty (which it isn't here, piped to sed); Plan 9
+  -- ls always does, and rejects `-1A`.
+  local command = "ls " .. shell.quote(path) .. " | sed -n '1," .. tostring(limit) .. "p'"
   return shell.run_tool("ls", command, path, true, meta)
 end
 
