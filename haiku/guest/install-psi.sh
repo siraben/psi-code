@@ -36,6 +36,12 @@ if [ ! -f "$MARKER" ]; then
       curl_devel \
       nghttp2 nghttp2_devel libssh2_devel
 
+  say "seed VESA mode 1920x1080 (matches run-vm-persist.sh HAIKU_RES)"
+  mkdir -p /boot/home/config/settings/kernel/drivers
+  cat > /boot/home/config/settings/kernel/drivers/vesa <<'VESA'
+mode 1920 1080 32
+VESA
+
   say "persist sshd via UserBootscript"
   mkdir -p /boot/home/config/settings/boot
   cat > /boot/home/config/settings/boot/UserBootscript <<'BOOT'

@@ -67,6 +67,13 @@ export PATH=/boot/home/bin:$PATH
 PROF
 fi
 
+say "seed VESA mode (so Haiku boots at the QEMU-advertised resolution)"
+mkdir -p "$MNT/home/config/settings/kernel/drivers"
+# 1920x1080x32 matches run-vm-persist.sh HAIKU_RES default.
+cat > "$MNT/home/config/settings/kernel/drivers/vesa" <<'VESA'
+mode 1920 1080 32
+VESA
+
 say "seed UserBootscript: auto-mount PSIGUEST + auto-start sshd"
 mkdir -p "$MNT/home/config/settings/boot"
 cat > "$MNT/home/config/settings/boot/UserBootscript" <<'BOOT'

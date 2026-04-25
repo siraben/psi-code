@@ -17,6 +17,11 @@
 #                     and used by the single-command `go` dispatcher).
 #   HAIKU_ATTACH_CDS  deprecated alias for HAIKU_ATTACH_ISO.
 #   HAIKU_DISPLAY     vnc (default, :0) | gtk | sdl | none
+#   HAIKU_RES         "1920x1080" default; WxH that QEMU's stdvga will
+#                     offer to the guest. Combine with a matching
+#                     mode line in /boot/home/config/settings/kernel/
+#                     drivers/vesa on the guest (fix-boot.sh /
+#                     install-psi.sh seed this).
 set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -45,6 +50,11 @@ case "$MODE" in
   none) DISPLAY_ARGS=(-nographic) ;;
 esac
 
+# Parse desired resolution (default 1920x1080).
+HAIKU_RES="${HAIKU_RES:-1920x1080}"
+RES_W="${HAIKU_RES%x*}"
+RES_H="${HAIKU_RES#*x}"
+
 exec qemu-system-x86_64 \
   "${KVM_FLAG[@]}" \
   -machine q35,accel="$ACCEL" \
@@ -56,7 +66,7 @@ exec qemu-system-x86_64 \
   -boot order="${HAIKU_BOOT_ORDER:-c}" \
   -netdev user,id=n0,hostfwd=tcp::2222-:2222 \
   -device e1000,netdev=n0 \
-  -vga std \
+  -device VGA,xres="$RES_W",yres="$RES_H",xmax="$RES_W",ymax="$RES_H" \
   -device intel-hda -device hda-duplex \
   -usb -device usb-tablet \
   -name "psi on Haiku (persist)" \
