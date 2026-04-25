@@ -41,15 +41,9 @@ function M.autodetect()
     M.enabled = true
     return
   end
-  -- 9front / Plan 9: rio terminals don't interpret CSI. The
-  -- $sysname env var only exists when profile has been sourced
-  -- (rcpu sessions skip that), so check for /dev/sysname instead —
-  -- it's always present on Plan 9 and absent on Linux/Haiku.
-  local sysname = io.open("/dev/sysname", "r")
-  if sysname ~= nil then
-    sysname:close()
+  -- rio terminals on Plan 9 don't interpret CSI.
+  if require("psi.platform").is_plan9() then
     M.enabled = false
-    return
   end
 end
 

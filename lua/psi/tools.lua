@@ -8,6 +8,7 @@ local records = require("psi.records")
 local registry = require("psi.tool_registry")
 local shell = require("psi.tool_shell")
 local prelude = require("psi.prelude")
+local platform = require("psi.platform")
 
 local M = {}
 
@@ -138,26 +139,16 @@ end
 
 -- ---------- grep ----------
 
--- True on Plan 9 / 9front, where shell is rc and `rg`/`grep -r` are
--- absent. Detected via /dev/sysname which only exists on Plan 9.
-local function on_plan9()
-  local f = io.open("/dev/sysname", "r")
-  if f == nil then return false end
-  f:close()
-  return true
-end
-
 local function build_grep_command(pattern, path, glob, limit, context, ignore_case, literal)
-  if on_plan9() then
-    -- Plan 9 grep has no -r, so list files via `du -a` first. The
-    -- shell here is rc; semicolons are fine.
+  if platform.is_plan9() then
+    -- Plan 9 grep has no -r; enumerate files first with walk(1).
     local flags = "-n"
     if ignore_case then flags = flags .. " -i" end
+    if literal     then flags = flags .. " -F" end
     return "g " .. flags .. " " .. shell.quote(pattern)
-           .. " `{du -a " .. shell.quote(path) .. " | awk '{print $2}'}"
+           .. " `{walk -f " .. shell.quote(path) .. "}"
            .. " | sed " .. tostring(limit) .. "q"
   end
-  -- POSIX path: prefer rg (cheap to detect), else grep -r.
   local rg_flags = "-n --no-heading --color never --hidden --max-count "
                    .. tostring(limit)
   if context and context > 0 then rg_flags = rg_flags .. " -C " .. tostring(context) end
@@ -173,7 +164,6 @@ local function build_grep_command(pattern, path, glob, limit, context, ignore_ca
                     .. shell.quote(pattern) .. " " .. shell.quote(path)
                     .. " | sed " .. tostring(limit) .. "q"
 
-  -- bash dispatcher: rg if present, else grep -r.
   return "if command -v rg >/dev/null 2>&1; then " .. rg_cmd
          .. "; else " .. posix_cmd .. "; fi"
 end
@@ -203,10 +193,10 @@ local function impl_find(input, meta)
   local path = registry.optional_string(input, "path", ".")
   local limit = registry.optional_number(input, "limit", 1000)
   local command
-  if on_plan9() then
-    -- Plan 9 has no fd; use du -a (full walk) + awk filter.
-    command = "du -a " .. shell.quote(path)
-              .. " | awk '{print $2}' | grep " .. shell.quote(pattern)
+  if platform.is_plan9() then
+    -- Plan 9 has no fd; walk(1) emits names without stat'ing.
+    command = "walk -f " .. shell.quote(path)
+              .. " | grep " .. shell.quote(pattern)
               .. " | sed " .. tostring(limit) .. "q"
   else
     command = "if command -v fd >/dev/null 2>&1; then "
@@ -283,13 +273,12 @@ registry.register(
   )
 )
 
--- The tool is named `bash` for compatibility with Anthropic's
--- documented tool sets, but it actually runs whatever shell the host
--- exposes — `/bin/sh -lc` on Linux/macOS, `/bin/rc -c` on Plan 9.
--- The description below leans into that so the agent doesn't issue
--- bash-only syntax (e.g. `[[ ]]`, brace expansion) on rc hosts.
+-- Tool name is `bash` for Anthropic-tool-set compatibility, but the
+-- underlying shell is /bin/sh on Linux/macOS and /bin/rc on Plan 9.
+-- Tell the agent so it issues correct syntax on the first try
+-- instead of watching its bash-isms fail.
 local function bash_description()
-  if on_plan9() then
+  if platform.is_plan9() then
     return "Execute a shell command via /bin/rc (Plan 9). "
         .. "Note: this is rc, not bash — use `>[2]/dev/null`, "
         .. "`var=value cmd`, `for(x in list) cmd`, etc."
