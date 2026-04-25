@@ -138,27 +138,44 @@ end
 
 -- ---------- grep ----------
 
+-- True on Plan 9 / 9front, where shell is rc and `rg`/`grep -r` are
+-- absent. Detected via /dev/sysname which only exists on Plan 9.
+local function on_plan9()
+  local f = io.open("/dev/sysname", "r")
+  if f == nil then return false end
+  f:close()
+  return true
+end
+
 local function build_grep_command(pattern, path, glob, limit, context, ignore_case, literal)
-  local parts = {
-    "command -v rg >/dev/null 2>&1 || { echo 'rg is required for grep' >&2; exit 127; }; ",
-    "rg -n --no-heading --color never --hidden --max-count ",
-    tostring(limit),
-  }
-  if context and context > 0 then
-    parts[#parts + 1] = " -C " .. tostring(context)
+  if on_plan9() then
+    -- Plan 9 grep has no -r, so list files via `du -a` first. The
+    -- shell here is rc; semicolons are fine.
+    local flags = "-n"
+    if ignore_case then flags = flags .. " -i" end
+    return "g " .. flags .. " " .. shell.quote(pattern)
+           .. " `{du -a " .. shell.quote(path) .. " | awk '{print $2}'}"
+           .. " | sed " .. tostring(limit) .. "q"
   end
-  if ignore_case then
-    parts[#parts + 1] = " -i"
-  end
-  if literal then
-    parts[#parts + 1] = " -F"
-  end
-  if glob then
-    parts[#parts + 1] = " --glob " .. shell.quote(glob)
-  end
-  parts[#parts + 1] = " " .. shell.quote(pattern)
-  parts[#parts + 1] = " " .. shell.quote(path)
-  return table.concat(parts)
+  -- POSIX path: prefer rg (cheap to detect), else grep -r.
+  local rg_flags = "-n --no-heading --color never --hidden --max-count "
+                   .. tostring(limit)
+  if context and context > 0 then rg_flags = rg_flags .. " -C " .. tostring(context) end
+  if ignore_case then rg_flags = rg_flags .. " -i" end
+  if literal     then rg_flags = rg_flags .. " -F" end
+  if glob        then rg_flags = rg_flags .. " --glob " .. shell.quote(glob) end
+  local rg_cmd = "rg " .. rg_flags .. " " .. shell.quote(pattern) .. " " .. shell.quote(path)
+
+  local posix_flags = "-rn --color=never"
+  if ignore_case then posix_flags = posix_flags .. " -i" end
+  if literal     then posix_flags = posix_flags .. " -F" end
+  local posix_cmd = "grep " .. posix_flags .. " "
+                    .. shell.quote(pattern) .. " " .. shell.quote(path)
+                    .. " | sed " .. tostring(limit) .. "q"
+
+  -- bash dispatcher: rg if present, else grep -r.
+  return "if command -v rg >/dev/null 2>&1; then " .. rg_cmd
+         .. "; else " .. posix_cmd .. "; fi"
 end
 
 local function impl_grep(input, meta)
@@ -185,14 +202,20 @@ local function impl_find(input, meta)
   end
   local path = registry.optional_string(input, "path", ".")
   local limit = registry.optional_number(input, "limit", 1000)
-  local command = "command -v fd >/dev/null 2>&1 || "
-    .. "{ echo 'fd is required for find' >&2; exit 127; }; "
-    .. "fd --hidden --max-results "
-    .. tostring(limit)
-    .. " --glob "
-    .. shell.quote(pattern)
-    .. " "
-    .. shell.quote(path)
+  local command
+  if on_plan9() then
+    -- Plan 9 has no fd; use du -a (full walk) + awk filter.
+    command = "du -a " .. shell.quote(path)
+              .. " | awk '{print $2}' | grep " .. shell.quote(pattern)
+              .. " | sed " .. tostring(limit) .. "q"
+  else
+    command = "if command -v fd >/dev/null 2>&1; then "
+      .. "fd --hidden --max-results " .. tostring(limit)
+      .. " --glob " .. shell.quote(pattern) .. " " .. shell.quote(path)
+      .. "; else find " .. shell.quote(path)
+      .. " -type f -name " .. shell.quote(pattern)
+      .. " 2>/dev/null | head -n " .. tostring(limit) .. "; fi"
+  end
   return shell.run_tool("find", command, path, true, meta)
 end
 
@@ -260,12 +283,26 @@ registry.register(
   )
 )
 
+-- The tool is named `bash` for compatibility with Anthropic's
+-- documented tool sets, but it actually runs whatever shell the host
+-- exposes — `/bin/sh -lc` on Linux/macOS, `/bin/rc -c` on Plan 9.
+-- The description below leans into that so the agent doesn't issue
+-- bash-only syntax (e.g. `[[ ]]`, brace expansion) on rc hosts.
+local function bash_description()
+  if on_plan9() then
+    return "Execute a shell command via /bin/rc (Plan 9). "
+        .. "Note: this is rc, not bash — use `>[2]/dev/null`, "
+        .. "`var=value cmd`, `for(x in list) cmd`, etc."
+  end
+  return "Execute a shell command in the current working directory and return its output."
+end
+
 registry.register(
   records.new_tool(
     "bash",
-    "Execute a shell command in the current working directory and return its output.",
-    "Execute bash commands (ls, rg, find, tests, git, build commands)",
-    { "Use bash for commands such as ls, rg, find, git, and tests." },
+    bash_description(),
+    "Execute shell commands (ls, rg, find, tests, git, build commands). On Plan 9 this is rc, not bash — adjust syntax accordingly.",
+    { "Use the shell tool for commands such as ls, rg, find, git, and tests." },
     schema_object({
       command = schema_type("string"),
       timeout = schema_type("number"),
