@@ -941,6 +941,29 @@ static int psi_tui_md_is_fence_line(const char *text) {
     return 0;
 }
 
+/* Strip a single trailing "\n" (or run of them) from text, return a
+ * heap-allocated trimmed copy. Pretty much every render-hook string
+ * in lua/psi/render.lua and boot.lua appends "\n" at the end — that
+ * terminal newline fed through render_wrapped's split-on-'\n' loop
+ * produces one stray prefix-only line per entry (an entry rendered
+ * as "read /p\n" becomes "read /p" + blank). Trimming once up-front
+ * gives every entry kind a free -1 blank-row without touching 30
+ * call sites, and without breaking intra-text "line1\n\nline2"
+ * double-newlines (the main loop still handles those correctly).
+ * Caller owns the return. */
+static char *psi_tui_trim_trailing_newlines(const char *text) {
+    size_t len;
+    char *copy;
+    if (text == NULL) return psi_strdup("");
+    len = strlen(text);
+    while (len > 0u && text[len - 1u] == '\n') len--;
+    copy = (char *)malloc(len + 1u);
+    if (copy == NULL) return NULL;
+    if (len > 0u) memcpy(copy, text, len);
+    copy[len] = '\0';
+    return copy;
+}
+
 static int psi_tui_render_wrapped(
     struct psi_tui_render_line **lines,
     size_t *count,
@@ -965,8 +988,12 @@ static int psi_tui_render_wrapped(
     int line_attrs;
     int is_assistant;
     int fence_state;
+    char *trimmed;
+    int rc;
 
-    cursor = text != NULL ? text : "";
+    trimmed = psi_tui_trim_trailing_newlines(text);
+    if (trimmed == NULL) return PSI_STATUS_ERROR;
+    cursor = trimmed;
     prefix = prefix_first != NULL ? prefix_first : "";
     is_assistant = (entry != NULL && entry->kind == PSI_TUI_ENTRY_ASSISTANT);
     fence_state = 0;
@@ -1013,7 +1040,8 @@ static int psi_tui_render_wrapped(
             break_index = psi_tui_find_break(line_start, available);
             line_text = (char *)malloc(prefix_length + (size_t)break_index + 1u);
             if (line_text == NULL) {
-                return PSI_STATUS_ERROR;
+                rc = PSI_STATUS_ERROR;
+                goto done;
             }
             memcpy(line_text, prefix, prefix_length);
             if (break_index > 0) {
@@ -1022,7 +1050,8 @@ static int psi_tui_render_wrapped(
             line_text[prefix_length + (size_t)break_index] = '\0';
             if (psi_tui_render_add_line(lines, count, capacity, line_text, color_pair, attrs) != PSI_STATUS_OK) {
                 free(line_text);
-                return PSI_STATUS_ERROR;
+                rc = PSI_STATUS_ERROR;
+                goto done;
             }
             (*lines)[*count - 1u].color_pair = line_color_pair;
             (*lines)[*count - 1u].attrs = line_attrs;
@@ -1045,15 +1074,17 @@ static int psi_tui_render_wrapped(
         }
         cursor = line_end + 1;
         prefix = prefix_rest != NULL ? prefix_rest : "";
-        if (*cursor == '\0') {
-            if (psi_tui_render_add_line(lines, count, capacity, prefix, color_pair, attrs) != PSI_STATUS_OK) {
-                return PSI_STATUS_ERROR;
-            }
-            break;
-        }
+        /* No trailing-newline branch: `trimmed` guarantees text does
+         * not end in '\n', so the previous stray "emit a prefix-only
+         * final row" path is dead by construction. Intra-text
+         * "foo\n\nbar" still produces the intended blank row via the
+         * next loop iteration. */
     }
 
-    return PSI_STATUS_OK;
+    rc = PSI_STATUS_OK;
+done:
+    free(trimmed);
+    return rc;
 }
 
 static int psi_tui_entry_style(
@@ -1577,8 +1608,15 @@ static size_t psi_tui_count_wrapped(
     int available;
     int break_index;
 
+    /* Mirror psi_tui_render_wrapped: trim trailing newlines so the
+     * count matches the render path exactly. Dropping this sync
+     * would make scroll anchors drift by one per entry that had a
+     * trailing newline (most of them). */
+    char *trimmed = psi_tui_trim_trailing_newlines(text);
+    if (trimmed == NULL) return 0u;
+
     count = 0u;
-    cursor = text != NULL ? text : "";
+    cursor = trimmed;
     prefix = prefix_first != NULL ? prefix_first : "";
 
     while (1) {
@@ -1601,11 +1639,9 @@ static size_t psi_tui_count_wrapped(
         if (*line_end == '\0') break;
         cursor = line_end + 1;
         prefix = prefix_rest != NULL ? prefix_rest : "";
-        if (*cursor == '\0') {
-            count++;
-            break;
-        }
+        /* See render_wrapped: trailing-newline branch removed. */
     }
+    free(trimmed);
     return count;
 }
 
