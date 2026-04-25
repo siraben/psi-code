@@ -1,27 +1,46 @@
 # psi on 9front
 
-A hybrid-port of `psi` (Claude coding agent) to **9front** (a Plan 9
+A hybrid-port of `psi` (Claude coding agent) to **9front** (Plan 9
 derivative), sibling of the `haiku/` port in this repo.
+
+## What works
+
+- `psi --agent=TEXT` end-to-end: streaming SSE, tool dispatch,
+  cJSON records.
+- `psi --session=FILE`: multi-turn JSONL persistence.
+- `psi --print`, `--eval`, `--version`, `--system-prompt`.
+- Full Lua agent runtime (all 23 `lua/psi/*.lua` modules).
+- HTTPS via 9front's `webfs(4)`. No curl, no OpenSSL.
+
+## What doesn't
+
+- `--tui` (ncurses) — returns a clear unsupported error.
+- The `bash` tool — Plan 9 has no bash and `process.c` currently
+  hardcodes `/bin/sh -lc`. A follow-up patch should route to
+  `/bin/rc -c` on 9front.
+- Interactive REPL — `readline` is a fgets-based stub.
 
 ## The shape of the port
 
-`psi`'s agent turn loop (≈900 LoC) lives in
-`lua/psi/anthropic.lua` and is OS-agnostic. Only ~540 LoC of C
-libcurl plumbing and ~370 LoC of pthread glue are Linux/Haiku-
-specific. We replace just those pieces:
+The agent turn loop (~900 LoC of `lua/psi/anthropic.lua`) is
+OS-agnostic and ships unchanged. Only the C scaffolding gets
+replaced. Upstream `src/core/*.c` + `src/lua/vm.c` + cJSON +
+argtable3 + Lua 5.4.6 all compile under `pcc` (9front's APE POSIX
+compiler) with tiny shims for the non-portable pieces.
 
 | Linux/Haiku needs    | 9front replacement                   |
 |----------------------|--------------------------------------|
-| `libcurl` + OpenSSL  | `webfs(4)` via `/mnt/web/...`        |
-| `libcjson`           | `libjson` (parse) + hand-rolled emit |
-| `pthread` + cond var | `libthread` procs + Channels + alt   |
-| `libedit` readline   | stub (rc/rio handle line editing)    |
-| `ncurses` TUI        | skipped for MVP                      |
-| `argtable3`          | `ARGBEGIN/ARGEND` in `<libc.h>`      |
-| `gcc` + `make`       | `pcc`/`6c` + `mk`                    |
-| Lua 5.4              | `lu9` port (github.com/okvik/luix)    |
+| `libcurl` + OpenSSL  | `http_webfs.c` on `/mnt/web/...`     |
+| `pthread` + cond var | `http_async_stub.c` (sync buffered)  |
+| `libedit` readline   | `editline_stub.c` (fgets fallback)   |
+| `ncurses` TUI        | `tui_stub.c` (returns unsupported)   |
+| `<err.h>` (argtable) | 4-line shim (`warnx`/`errx`)         |
+| `gcc` + `make`       | `pcc` + `mk`                         |
+| Lua 5.4              | upstream 5.4.6 + ptrdiff patch       |
 
-Everything under `lua/` and most of `src/core/` compile as-is.
+See `patches/lua-5.4.6-lstrlib-ptrdiff.patch` — one-liner fix for a
+Lua position-capture bug that only surfaces on 32-bit-`size_t` /
+64-bit-`ptrdiff_t` systems like 9front APE on amd64.
 
 ## One-time host setup
 
@@ -35,16 +54,14 @@ Everything under `lua/` and most of `src/core/` compile as-is.
 
     bash run-vm.sh                  # KVM, disk-only, VNC :0
 
-## Ship a build
+## Host↔VM control
 
-    bash sync-psi.sh                # tars source, hgets into VM,
-                                    # runs install-psi.rc which
-                                    # does mk + install to /bin.
+After install, bootstrap the job-queue worker once via VNC, then
+drive everything through `tools/9ctl` (9P + TCP, no further
+keystroke injection):
 
-## Verify
-
-    # Inside VM or via 9P export to host:
-    psi --agent 'Say exactly one word: OK'   # → OK
-    psi --version                            # → 0.1.0
+    ./tools/9ctl job -f path/to/cmd.rc       # submit+wait+read
+    ./tools/9ctl read work/psi-link.log      # read any file via 9P
+    ./tools/9ctl put build.rc psi9-build/build.rc
 
 See `JOURNEY.md` for every wall hit along the way.

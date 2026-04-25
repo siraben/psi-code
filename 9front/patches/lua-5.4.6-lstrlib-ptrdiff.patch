@@ -1,0 +1,28 @@
+Lua 5.4.6 lstrlib.c — fix position captures on 32-bit-size_t / 64-bit-ptrdiff_t
+systems (9front APE on amd64: sizeof(size_t)=4 but sizeof(ptrdiff_t)=8).
+
+get_onecapture returns CAP_POSITION (-2) by value, but the return type is
+size_t. On a normal LP64 host size_t and ptrdiff_t are both 8 bytes so the
+value round-trips through (size_t)-2 -> (ptrdiff_t)-2 unchanged. On 9front
+APE, size_t is `unsigned long` (4 bytes), so returning -2 yields 0xFFFFFFFE,
+which is then sign-extended into an 8-byte ptrdiff_t as 0xFFFFFFFE (positive).
+The caller's `l != CAP_POSITION` check then succeeds, push_onecapture calls
+lua_pushlstring with a ~4GB length, and luaM_toobig raises
+"memory allocation error: block too big".
+
+Fix: return ptrdiff_t instead of size_t. The length is semantically signed
+(CAP_POSITION and CAP_UNFINISHED are negative sentinels), so this is the
+correct type anyway; upstream just happened to work on LP64 by coincidence.
+
+--- a/src/lstrlib.c
++++ b/src/lstrlib.c
+@@ -699,7 +699,7 @@
+ ** is the range 's'..'e'. If the capture is a string, return
+ ** its length and put its address in '*cap'. If it is an integer
+ ** (a position), push it on the stack and return CAP_POSITION.
+ */
+-static size_t get_onecapture (MatchState *ms, int i, const char *s,
++static ptrdiff_t get_onecapture (MatchState *ms, int i, const char *s,
+                               const char *e, const char **cap) {
+   if (i >= ms->level) {
+     if (l_unlikely(i != 0))

@@ -1,36 +1,64 @@
-# Build psi9 — Lua-backed Anthropic agent for 9front.
+# 9front port of psi. Builds under the APE POSIX compiler (pcc), not
+# the native kencc (6c). We keep upstream src/ pristine and supply a
+# tiny set of shims for the bits APE lacks:
 #
-# Assumes the tree is laid out like:
-#   mkfile            (this file)
-#   psi9.c            (main + Lua bindings)
-#   http_webfs.c      (HTTP POST via webfs)
-#   lu9/              (cloned from https://github.com/okvik/luix,
-#                      `cd lu9/lua && mk` built first)
+#   http_webfs.c          — libcurl replacement on top of webfs(4)
+#   http_async_stub.c     — pthread-free "async" = sync buffered
+#   editline_stub.c       — libedit fallback (fgets)
+#   embedded_lua_stub.c   — empty embedded-Lua tables (lua/ on disk)
 #
-# Build:
-#     mk
+# Third-party sources are fetched at build time by fetch-lu9.sh /
+# fetch-deps.sh; this mkfile assumes they land under third_party/.
+#
+# Requires: pcc (APE), ar, lua 5.4 sources built into liblua.a,
+# argtable3 amalgamation (argtable3.c/h), cJSON amalgamation
+# (cJSON.c/h). webfs(4) is started automatically by /rc/bin/service/
+# on the target system.
 
 </$objtype/mkfile
 
-CC=$CC
-LD=$LD
+PSIROOT=..
 
-CFLAGS=$CFLAGS -p -Ilu9/lua -Ilu9/lua/shim -DLUA_USE_PLAN9
+CC=pcc
+CFLAGS=-c -D_POSIX_SOURCE -D_BSD_EXTENSION -DARG_REPLACE_GETOPT=0 \
+	-I$PSIROOT/include -I$PSIROOT/src \
+	-Isrc/stubs \
+	-Ithird_party/argtable3 -Ithird_party/cjson-src \
+	-Ithird_party/lua-5.4.6/src
 
-LIBLUA=lu9/lua/liblua.a.$O
+UPSTREAM=\
+	$PSIROOT/src/core/abort.c\
+	$PSIROOT/src/core/common.c\
+	$PSIROOT/src/core/session.c\
+	$PSIROOT/src/core/agent.c\
+	$PSIROOT/src/core/process.c\
+	$PSIROOT/src/runtime/print_mode.c\
+	$PSIROOT/src/runtime/cli.c\
+	$PSIROOT/src/main.c\
+	$PSIROOT/src/lua/vm.c
 
-OBJ=psi9.$O http_webfs.$O
+SHIMS=\
+	src/http_webfs.c\
+	src/http_async_stub.c\
+	src/editline_stub.c\
+	src/embedded_lua_stub.c
 
-all:V: $O.psi9
+VENDORED=\
+	third_party/argtable3/argtable3.c\
+	third_party/cjson-src/cJSON.c
 
-$O.psi9: $OBJ $LIBLUA
-	$LD -o $target $OBJ $LIBLUA -ljson
+OFILES=${UPSTREAM:%.c=%.o} ${SHIMS:%.c=%.o} ${VENDORED:%.c=%.o}
 
-%.$O: %.c
+all:V: psi
+
+psi: $OFILES third_party/lua-5.4.6/src/liblua.a
+	$CC -o psi $OFILES third_party/lua-5.4.6/src/liblua.a -lz -lbsd
+
+%.o: %.c
 	$CC $CFLAGS -o $target $stem.c
 
 clean:V:
-	rm -f *.$O $O.psi9
+	rm -f */*.o */*/*.o psi
 
-install:V: $O.psi9
-	cp $O.psi9 /$objtype/bin/psi9
+install:V: psi
+	cp psi /$objtype/bin/psi

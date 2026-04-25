@@ -272,3 +272,118 @@ streaming body, JSON, process identity) is already proven here.
     ├── http_webfs.c       — HTTP POST via webfs (psi_http_post etc.)
     └── test_webfs.c       — standalone webfs smoke test
 ```
+
+---
+
+## Phase 6 — hybrid port (feature parity with Haiku)
+
+The MVP in Phase 4 was a ~7 KB standalone binary that reimplemented
+just enough of psi to POST to Anthropic. Actual parity meant running
+**the real upstream psi** on 9front, not a bespoke replacement.
+
+### Strategy
+
+Compile as much upstream `src/` + upstream Lua 5.4.6 as possible
+under `pcc` (9front's APE POSIX compiler), supply thin shims for
+the non-portable pieces, and link it all into one `psi` binary.
+
+- Skipped `lu9` (shim.h conflicts with pcc).
+- Vanilla upstream Lua 5.4.6 builds cleanly under pcc with
+  `-D_POSIX_SOURCE -D_BSD_EXTENSION`.
+- All upstream psi core files (`abort.c`, `common.c`, `session.c`,
+  `agent.c`, `process.c`, `print_mode.c`, `cli.c`, `main.c`,
+  `lua/vm.c`) compile unchanged under pcc.
+- argtable3 compiles with `-DARG_REPLACE_GETOPT=1` once we stub
+  `<err.h>` (4-line shim: `warnx` + `errx`).
+- cJSON compiles cleanly; replaces the hand-rolled Phase 4 JSON.
+- libcurl → rewritten `http_webfs.c` (APE-POSIX `open`/`read`/
+  `write` on `/mnt/web/N/*`).
+- pthread → `http_async_stub.c`: synchronous buffered chunks. No
+  background thread; the agent blocks the UI loop for the duration
+  of the stream. Matches the `psi.sched` contract exactly.
+- libedit → `editline_stub.c`: fgets-based `readline`/`add_history`.
+  Good enough for rio; not interactive under rc.
+- ncurses TUI → `tui_stub.c`: returns an error from `--tui`.
+- `psi_embedded_lua_table`/`psi_embedded_docs_table` → empty
+  sentinel tables; psi falls back to `lua/` on disk.
+
+### Gotchas hit along the way
+
+**Shell-quoting noise.** `rc` parses `NAME=value` as assignment and
+trips on `-DARG_REPLACE_GETOPT=0` as a bare token — quote the whole
+flag. Same for `$status` interpolation: use `echo 'done='^$status`
+not `echo "done=$status"`. Streaming rc one-liners through `nc |`
+is a foot-gun; always stage a `.rc` file first.
+
+**Plan 9 APE types aren't LP64 on amd64.** `sizeof(void*) = 8` but
+`sizeof(size_t) = 4`, while `sizeof(ptrdiff_t) = 8`. Lua 5.4.6's
+`lstrlib.c get_onecapture` returns a `size_t`-typed `CAP_POSITION`
+(`-2`), which round-trips through `size_t` as `0xFFFFFFFE`,
+sign-extends back into `ptrdiff_t` as `+0xFFFFFFFE`, and makes the
+caller's `l != CAP_POSITION` check fire incorrectly — followed by
+`lua_pushlstring` with a ~4 GB length, which raises
+`memory allocation error: block too big`. Any position capture
+(`s:match("()/...")`) hits this; since `session.save()` uses one
+in `ensure_parent_dir`, `--session=FILE` was initially dead on
+arrival. Fix: change the return type of `get_onecapture` to
+`ptrdiff_t`. Patch at `9front/patches/lua-5.4.6-lstrlib-ptrdiff.patch`.
+
+**9front `webfs(4)` has no `/status` file.** Unlike Plan-9-from-
+Bell-Labs' webfs, 9front surfaces HTTP status only via the errno
+string returned when `open(/mnt/web/N/body)` fails (2xx opens,
+4xx/5xx returns `"500 Internal Server Error"` or similar in
+errstr). `http_webfs.c` now returns 200 on successful body open
+and parses the leading integer from `strerror(errno)` on failure.
+
+**TCP shell on :2222 runs as `none`, which lacks `/mnt/web` in
+its namespace.** Early builds ran pcc via the TCP channel and
+wrote .o files successfully, but any command needing webfs had to
+run as glenda. The `tools/9ctl` job-queue protocol bootstraps a
+persistent glenda-side `worker.rc` once via VNC; after that, every
+command goes through 9P file drops (`work/q/NNN.rc` + `NNN.go`
+flag) and file reads (`NNN.out`), with no further keystroke
+injection — millisecond round-trips instead of VNC-OCR delays.
+
+### End-to-end verification
+
+```
+% ./9ctl job -f agent.rc
+HELLO
+
+% ./9ctl job -f multi-turn.rc
+# turn 1: "My name is Ben. Remember that."
+Got it, Ben — I'll remember that for the rest of our conversation.
+# turn 2: "What is my name?"
+Your name is Ben.
+# session file:
+5 /usr/glenda/work/sess9.jsonl
+
+% ./9ctl job -f system-prompt.rc
+Plan9
+```
+
+Streaming SSE works; `--session` persists across invocations;
+model probe correctly reports the guest OS. The only tool that
+doesn't work out of the box is `bash` (Plan 9 has no bash and
+`process.c` hardcodes `/bin/sh -lc`) — a 2-line diff away from
+working under rc.
+
+### What's checked in (updated)
+
+```
+9front/
+├── mkfile                      — pcc build (hybrid port)
+├── patches/
+│   └── lua-5.4.6-lstrlib-ptrdiff.patch  — position-capture fix
+├── src/
+│   ├── http_webfs.c            — libcurl replacement on webfs(4)
+│   ├── http_async_stub.c       — pthread-free sync "async" stream
+│   ├── editline_stub.c         — libedit fallback (fgets)
+│   ├── tui_stub.c              — --tui returns unsupported
+│   ├── embedded_lua_stub.c     — empty embed tables
+│   └── stubs/
+│       ├── editline/readline.h
+│       └── err.h               — tiny <err.h> for argtable3
+└── tools/
+    └── 9ctl                    — host↔VM control (Python CLI)
+```
