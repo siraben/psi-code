@@ -12,3 +12,9 @@ pi-mono/
 # Per-user bench target config (hostnames, ssh jump hops, binary paths).
 # Template lives at tests/bench.targets.example.json.
 tests/bench.targets.json
+
+# Haiku VM artifacts — large and reproducible.
+haiku/downloads/
+haiku/guest.iso
+haiku/disk.qcow2
+haiku/guest/stage/
