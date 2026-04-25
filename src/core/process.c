@@ -118,6 +118,8 @@ int psi_process_begin(
         if (dup2(pipe_fds[1], 2) < 0) _exit(127);
         if (close(pipe_fds[1]) != 0) _exit(127);
         execl("/bin/sh", "sh", "-lc", command, (char *)0);
+        /* /bin/sh missing — Plan 9 / 9front. Fall through to rc. */
+        execl("/bin/rc", "rc", "-c", command, (char *)0);
         _exit(127);
 #pragma GCC diagnostic pop
     }
