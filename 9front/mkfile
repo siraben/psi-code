@@ -24,7 +24,7 @@ OBJ=psi9.$O http_webfs.$O
 all:V: $O.psi9
 
 $O.psi9: $OBJ $LIBLUA
-	$LD -o $target $OBJ $LIBLUA
+	$LD -o $target $OBJ $LIBLUA -ljson
 
 %.$O: %.c
 	$CC $CFLAGS -o $target $stem.c
