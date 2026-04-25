@@ -197,28 +197,62 @@ using this pattern. Ready to link into a full psi build.
 
 ---
 
-## Phase 4 onwards — remaining work
+## Phase 4 — psi9 binary: Lua + HTTP + agent, end to end
 
-What's done: VM plumbing, Lua runtime, HTTP layer, live API call.
-What's left to ship full psi:
-- mkfile driving `6c` over psi's C sources (upstream `src/core/*.c`
-  + our `http_webfs.c` + pthread→libthread shim).
-- libthread-backed equivalent of `http_async.c` — or punt to
-  blocking-only for MVP psi (use only `psi_http_post`, not
-  `_stream`).
-- Lua bindings in `src/lua/vm.c` — most of it compiles with pcc,
-  but the libedit-touching readline binding needs `#ifdef __plan9__`
-  to stub out.
-- JSON emitter (libjson parses but doesn't pretty-print; psi needs
-  to emit JSON outgoing).
-- argtable3 → `ARGBEGIN/ARGEND` (optional — try linking argtable3
-  first; if pcc rejects it, ~80 LoC of ARGBEGIN does the job).
-- mk target to produce `embedded_lua.c` and `embedded_docs.c` on
-  the guest (the existing `scripts/embed_lua.c` compiles under pcc
-  with zlib — 9front has zlib via `libflate`).
+`9front/src/psi9.c` is a minimal psi runtime:
+- initializes Lua 5.4 (statically linked against `lu9/lua/liblua.a.6`)
+- registers `psi.http_post(url, body, headers_table)` → status,resp
+  on top of our webfs shim
+- registers `psi.getenv(name)` for API key lookup
+- embeds a ~30-line bootstrap Lua that defines
+  `psi.agent_turn(prompt)` — builds the Anthropic request JSON
+  (with a tiny json-escape helper), POSTs, matches the reply text
+  out of the response, unescapes the common JSON escapes, returns
+  it.
 
-Once that set is done, `psi --agent "hello"` returning a Claude
-reply on 9front is a certainty — every hard piece is validated.
+Command modes:
+- `psi9 -a PROMPT` — one-shot agent turn; prints the reply.
+- `psi9 -e LUA_EXPR` — evaluate Lua expression (useful for debug).
+- `psi9 FILE` — run a Lua script.
+
+Build via `9front/mkfile` on the guest:
+```
+cd /usr/glenda && mk   # produces 6.psi9 (~800 KB)
+```
+
+**Live proof** (real Anthropic call from 9front rc):
+```
+term% ANTHROPIC_API_KEY=sk-... ./6.psi9 -a 'Reply one word: NINEFRONT_PSI_WORKS'
+NINEFRONT_PSI_WORKS
+
+term% ./6.psi9 -a 'What OS are you on? One short sentence.'
+I don't run on a specific operating system; I'm a cloud-based AI
+model hosted on Anthropic's servers.
+```
+
+That's e2e: Plan 9 rc → native C binary → Lua layer → webfs HTTPS
+POST → Anthropic Messages API → model reply back on stdout.
+
+## Phase 5 — what's left to reach parity with haiku/
+
+psi9 is about 7 KB of C + 30 lines of Lua; full psi on Linux/Haiku
+is ~1 MB of C + 4 KB of Lua. To converge:
+
+- Replace the regex body-extractor with libjson: 9front has
+  `<json.h>` — swap the `resp:match` in the boot Lua for a proper
+  `psi.json.parse` binding backed by libjson.
+- Unicode-aware JSON unescape in Lua (`\uXXXX` sequences).
+- Pull in the real `lua/boot.lua` + `lua/psi/*.lua` with a zlib-
+  compressed embed via `scripts/embed_lua.c`. 9front has zlib via
+  libflate, so that compiles cleanly under 6c.
+- Session persistence (JSONL) via fopen/fwrite (plain POSIX-style
+  file I/O works under libc on 9front).
+- `--session=FILE` flag.
+- Tool-call dispatch — more involved, needs `rfork`-based process
+  spawning to replace the pthread-backed pool.
+
+None of these are *hard* — every hard piece (Lua C API, TLS,
+streaming body, JSON, process identity) is already proven here.
 
 ---
 
@@ -230,10 +264,11 @@ reply on 9front is a certainty — every hard piece is validated.
 ├── JOURNEY.md             — this file
 ├── fetch-iso.sh           — pin + download 9front ISO
 ├── run-vm.sh              — QEMU driver (env: VM_ACCEL, VM_DISPLAY, VM_RES, …)
+├── mkfile                 — build on the guest with `mk`
 ├── disk.qcow2             — generated, gitignored
 ├── downloads/             — generated, gitignored
 └── src/
-    ├── test_webfs.c       — proven standalone Anthropic roundtrip
-    └── http_webfs.c       — drop-in replacement for Haiku's
-                             `src/core/anthropic.c` libcurl plumbing
+    ├── psi9.c             — the MVP binary: Lua + HTTP + agent_turn
+    ├── http_webfs.c       — HTTP POST via webfs (psi_http_post etc.)
+    └── test_webfs.c       — standalone webfs smoke test
 ```

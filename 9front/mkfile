@@ -1,0 +1,36 @@
+# Build psi9 — Lua-backed Anthropic agent for 9front.
+#
+# Assumes the tree is laid out like:
+#   mkfile            (this file)
+#   psi9.c            (main + Lua bindings)
+#   http_webfs.c      (HTTP POST via webfs)
+#   lu9/              (cloned from https://github.com/okvik/luix,
+#                      `cd lu9/lua && mk` built first)
+#
+# Build:
+#     mk
+
+</$objtype/mkfile
+
+CC=$CC
+LD=$LD
+
+CFLAGS=$CFLAGS -p -Ilu9/lua -Ilu9/lua/shim -DLUA_USE_PLAN9
+
+LIBLUA=lu9/lua/liblua.a.$O
+
+OBJ=psi9.$O http_webfs.$O
+
+all:V: $O.psi9
+
+$O.psi9: $OBJ $LIBLUA
+	$LD -o $target $OBJ $LIBLUA
+
+%.$O: %.c
+	$CC $CFLAGS -o $target $stem.c
+
+clean:V:
+	rm -f *.$O $O.psi9
+
+install:V: $O.psi9
+	cp $O.psi9 /$objtype/bin/psi9
