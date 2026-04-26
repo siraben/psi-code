@@ -81,7 +81,7 @@ def assert_true(cond, reason: str) -> None:
 
 class Psi:
     def __init__(self, binary: str, tmp: Path):
-        self.binary = binary
+        self.binary = str(Path(binary).resolve())
         self.tmp = tmp
 
     def run(self, *args: str, input_text: str | None = None,
@@ -873,6 +873,54 @@ def t_agent_set_model(psi: Psi):
     )
     assert_contains(out, "openrouter/x/y|anthropic/fallback|true|anthropic",
                     "override then clear")
+
+
+@test("theme/default_dark")
+def t_theme_default(psi: Psi):
+    out = psi.eval(
+        'local t = require("psi.theme")\n'
+        + 'local cur = t.current()\n'
+        + 'return t.current_name() .. "|"\n'
+        + '  .. tostring(cur.tui.chrome.bg) .. "|"\n'
+        + '  .. tostring(cur.tui.accent.fg)'
+    )
+    assert_equals(out, "midnight-ember|234|81", "default theme")
+
+
+@test("theme/settings_selects_extension_theme")
+def t_theme_settings_select(psi: Psi):
+    project = psi.tmp / "theme-project"
+    extdir = psi.tmp / "theme-ext"
+    (project / ".psi").mkdir(parents=True, exist_ok=True)
+    extdir.mkdir(exist_ok=True)
+    (project / ".psi" / "settings.json").write_text(
+        json.dumps({"theme": {"name": "toxic"}})
+    )
+    (extdir / "toxic.lua").write_text(
+        "return function(psi)\n"
+        "  psi.theme.register('toxic', {\n"
+        "    tui = {\n"
+        "      accent = { fg = 118, bg = 233 },\n"
+        "      chrome = { fg = 244, bg = 233 },\n"
+        "    },\n"
+        "  })\n"
+        "end\n"
+    )
+    expr = (
+        'local t = require("psi.theme")\n'
+        + 'local cur = t.current()\n'
+        + 'return t.current_name() .. "|"\n'
+        + '  .. tostring(cur.tui.accent.fg) .. "|"\n'
+        + '  .. tostring(cur.tui.chrome.bg) .. "|"\n'
+        + '  .. tostring(cur.tui.text.fg)'
+    )
+    out = psi.run(
+        "--eval",
+        expr,
+        cwd=project,
+        env_extra={"PSI_EXTENSIONS_DIR": str(extdir)},
+    ).stdout.strip()
+    assert_equals(out, "toxic|118|233|253", "configured theme override")
 
 
 @test("tui/status_hook")
