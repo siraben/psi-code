@@ -18,8 +18,12 @@ local function safe_decode(text, fallback)
 end
 
 local function clamp(value, low, high)
-  if value < low then return low end
-  if value > high then return high end
+  if value < low then
+    return low
+  end
+  if value > high then
+    return high
+  end
   return value
 end
 
@@ -76,8 +80,10 @@ local function refresh_input_layout(state)
   local fallback = default_input_layout(state.height)
   state.input_layout = {
     max_rows = tonumber(layout.max_rows) or fallback.max_rows,
-    prefix_first = type(layout.prefix_first) == "string" and layout.prefix_first or fallback.prefix_first,
-    prefix_rest = type(layout.prefix_rest) == "string" and layout.prefix_rest or fallback.prefix_rest,
+    prefix_first = type(layout.prefix_first) == "string" and layout.prefix_first
+      or fallback.prefix_first,
+    prefix_rest = type(layout.prefix_rest) == "string" and layout.prefix_rest
+      or fallback.prefix_rest,
   }
 end
 
@@ -121,10 +127,15 @@ local function build_input_lines(state)
     else
       local chunk_start = pos
       while chunk_start < line_end do
-        local prefix = (#lines == 0) and state.input_layout.prefix_first or state.input_layout.prefix_rest
+        local prefix = (#lines == 0) and state.input_layout.prefix_first
+          or state.input_layout.prefix_rest
         local take = math.min(input_wrap_width(state.width, prefix), line_end - chunk_start)
         lines[#lines + 1] = { start = chunk_start, len = take }
-        if not cursor_found and state.cursor >= chunk_start and state.cursor <= chunk_start + take then
+        if
+          not cursor_found
+          and state.cursor >= chunk_start
+          and state.cursor <= chunk_start + take
+        then
           cursor_line = #lines
           cursor_col = state.cursor - chunk_start
           cursor_found = true
@@ -327,14 +338,20 @@ local function format_tool_result(tool_name, result)
     return limit_text(tostring(result.output or "")), false
   end
   if tool_name == "write" then
-    return string.format("wrote %s (%d bytes)",
+    return string.format(
+      "wrote %s (%d bytes)",
       tostring(result.path or ""),
-      tonumber(result.bytes_written) or 0), false
+      tonumber(result.bytes_written) or 0
+    ),
+      false
   end
   if tool_name == "edit" then
-    return string.format("edited %s (%d replacements)",
+    return string.format(
+      "edited %s (%d replacements)",
       tostring(result.path or ""),
-      tonumber(result.replacements) or 0), false
+      tonumber(result.replacements) or 0
+    ),
+      false
   end
   if tool_name == "lua" then
     return limit_text(tostring(result.result or "")), false
@@ -479,24 +496,13 @@ local function add_session_entry(state, msg)
         content_text = table.concat(parts)
       end
     end
-    local result_text, is_error = tool_result_text(
-      message.toolCallId,
-      message.toolName,
-      {
-        ok = not message.isError,
-        error = message.isError and content_text or nil,
-        output = content_text,
-        result = content_text,
-      }
-    )
-    add_entry(
-      state,
-      "tool_result",
-      result_text,
-      message.toolName,
-      is_error,
-      message.toolCallId
-    )
+    local result_text, is_error = tool_result_text(message.toolCallId, message.toolName, {
+      ok = not message.isError,
+      error = message.isError and content_text or nil,
+      output = content_text,
+      result = content_text,
+    })
+    add_entry(state, "tool_result", result_text, message.toolName, is_error, message.toolCallId)
     return
   end
 
@@ -719,7 +725,8 @@ local function redraw(state)
   for i = 0, rows.input_rows - 1 do
     local line_index = rows.input_first_line + i
     local line = rows.input_lines[line_index]
-    local prefix = line_index == 1 and state.input_layout.prefix_first or state.input_layout.prefix_rest
+    local prefix = line_index == 1 and state.input_layout.prefix_first
+      or state.input_layout.prefix_rest
     local text = prefix
     if line ~= nil then
       text = text .. state.input:sub(line.start + 1, line.start + line.len)
@@ -728,7 +735,8 @@ local function redraw(state)
   end
 
   local visible_cursor_line = rows.cursor_line - rows.input_first_line + 1
-  local cursor_prefix = rows.cursor_line == 1 and state.input_layout.prefix_first or state.input_layout.prefix_rest
+  local cursor_prefix = rows.cursor_line == 1 and state.input_layout.prefix_first
+    or state.input_layout.prefix_rest
   local cursor_row = rows.input_start_row + visible_cursor_line - 1
   local cursor_col = #cursor_prefix + rows.cursor_col + 1
   cursor_row = clamp(cursor_row, rows.input_start_row, state.height)
@@ -775,12 +783,16 @@ local function delete_word_backward(state)
   local start = state.cursor
   while start > 0 do
     local b = byte_at(state.input, start - 1)
-    if b == nil or not is_space_byte(b) then break end
+    if b == nil or not is_space_byte(b) then
+      break
+    end
     start = start - 1
   end
   while start > 0 do
     local b = byte_at(state.input, start - 1)
-    if b == nil or is_space_byte(b) then break end
+    if b == nil or is_space_byte(b) then
+      break
+    end
     start = start - 1
   end
   state.input = state.input:sub(1, start) .. state.input:sub(state.cursor + 1)
@@ -795,12 +807,16 @@ local function delete_word_forward(state)
   local finish = state.cursor
   while finish < #state.input do
     local b = byte_at(state.input, finish)
-    if b == nil or not is_space_byte(b) then break end
+    if b == nil or not is_space_byte(b) then
+      break
+    end
     finish = finish + 1
   end
   while finish < #state.input do
     local b = byte_at(state.input, finish)
-    if b == nil or is_space_byte(b) then break end
+    if b == nil or is_space_byte(b) then
+      break
+    end
     finish = finish + 1
   end
   state.input = state.input:sub(1, state.cursor) .. state.input:sub(finish + 1)
@@ -811,12 +827,16 @@ local function move_word_backward(state)
   local pos = state.cursor
   while pos > 0 do
     local b = byte_at(state.input, pos - 1)
-    if b == nil or not is_space_byte(b) then break end
+    if b == nil or not is_space_byte(b) then
+      break
+    end
     pos = pos - 1
   end
   while pos > 0 do
     local b = byte_at(state.input, pos - 1)
-    if b == nil or is_space_byte(b) then break end
+    if b == nil or is_space_byte(b) then
+      break
+    end
     pos = pos - 1
   end
   state.cursor = pos
@@ -827,12 +847,16 @@ local function move_word_forward(state)
   local pos = state.cursor
   while pos < #state.input do
     local b = byte_at(state.input, pos)
-    if b == nil or not is_space_byte(b) then break end
+    if b == nil or not is_space_byte(b) then
+      break
+    end
     pos = pos + 1
   end
   while pos < #state.input do
     local b = byte_at(state.input, pos)
-    if b == nil or is_space_byte(b) then break end
+    if b == nil or is_space_byte(b) then
+      break
+    end
     pos = pos + 1
   end
   state.cursor = pos
@@ -883,7 +907,14 @@ local function observer_tool_call(state, tool_call_id, tool_name, input_json)
   local input = safe_decode(input_json, {})
   finish_streaming_assistant(state)
   state.streaming_thinking_index = nil
-  add_entry(state, "tool_call", tool_call_text(tool_call_id, tool_name, input), tool_name, false, tool_call_id)
+  add_entry(
+    state,
+    "tool_call",
+    tool_call_text(tool_call_id, tool_name, input),
+    tool_name,
+    false,
+    tool_call_id
+  )
   add_entry(state, "tool_result", "", tool_name, false, tool_call_id)
   scroll_anchor_after(state, before)
 end
@@ -1071,9 +1102,15 @@ local function handle_command(state, line)
     state.opts.session_file = action.payload
     context.reset_usage()
     rebuild_from_session(state)
-    add_entry(state, "info",
-      "resumed " .. tostring(action.payload)
-      .. " (" .. tostring(psi.session_message_count()) .. " messages)")
+    add_entry(
+      state,
+      "info",
+      "resumed "
+        .. tostring(action.payload)
+        .. " ("
+        .. tostring(psi.session_message_count())
+        .. " messages)"
+    )
     set_status(state, "", false)
     return true
   end
@@ -1150,12 +1187,16 @@ local function apply_action(state, action, arg)
     return
   end
   if action == "move-left" then
-    if state.cursor > 0 then state.cursor = state.cursor - 1 end
+    if state.cursor > 0 then
+      state.cursor = state.cursor - 1
+    end
     state.dirty = true
     return
   end
   if action == "move-right" then
-    if state.cursor < #state.input then state.cursor = state.cursor + 1 end
+    if state.cursor < #state.input then
+      state.cursor = state.cursor + 1
+    end
     state.dirty = true
     return
   end

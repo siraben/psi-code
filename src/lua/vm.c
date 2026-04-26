@@ -464,7 +464,7 @@ static void psi_vm_tui_suspend_terminal(void) {
     sigemptyset(&mask);
     sigaddset(&mask, SIGTSTP);
     sigprocmask(SIG_UNBLOCK, &mask, &prev_mask);
-    raise(SIGTSTP);
+    kill(getpid(), SIGTSTP);
     sigprocmask(SIG_SETMASK, &prev_mask, NULL);
     sigaction(SIGTSTP, &prev, NULL);
     refresh();
@@ -473,7 +473,6 @@ static void psi_vm_tui_suspend_terminal(void) {
 
 static int psi_vm_tui_collect_escape_sequence(char *buffer, size_t buffer_size, int restore_timeout_ms) {
     size_t length;
-    int ch;
     int timeout_ms;
 
     if (buffer == NULL || buffer_size == 0u) {
@@ -484,6 +483,8 @@ static int psi_vm_tui_collect_escape_sequence(char *buffer, size_t buffer_size, 
     buffer[0] = '\0';
     timeout_ms = 25;
     for (;;) {
+        int ch;
+
         wtimeout(stdscr, timeout_ms);
         ch = getch();
         if (ch == ERR) {
@@ -772,7 +773,7 @@ static int lfn_tool_progress(lua_State *L) {
     size_t chunk_len;
     const char *chunk;
     struct psi_host_context *host;
-    struct psi_vm *vm;
+    const struct psi_vm *vm;
 
     tool_id = luaL_optstring(L, 1, NULL);
     chunk = lua_type(L, 2) == LUA_TSTRING ? lua_tolstring(L, 2, &chunk_len) : NULL;
@@ -1723,7 +1724,7 @@ static int lfn_tui_set_tool_progress_handler(lua_State *L) {
  * how the UI stays responsive during a streaming turn. */
 static int lfn_host_tick(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
-    struct psi_vm *vm = host != NULL ? host->vm : NULL;
+    const struct psi_vm *vm = host != NULL ? host->vm : NULL;
     if (host != NULL && host->tick_hook != NULL) {
         host->tick_hook(host->tick_userdata);
     }
