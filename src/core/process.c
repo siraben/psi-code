@@ -111,15 +111,19 @@ int psi_process_begin(
     if (child_pid == 0) {
         /* Child: see psi_process_run_shell for the same logic and
          * the gcc -fanalyzer fd-leak suppression rationale. */
+#if defined(__GNUC__) && !defined(__clang__) && !defined(__TINYC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wanalyzer-fd-leak"
+#endif
         if (close(pipe_fds[0]) != 0) _exit(127);
         if (dup2(pipe_fds[1], 1) < 0) _exit(127);
         if (dup2(pipe_fds[1], 2) < 0) _exit(127);
         if (close(pipe_fds[1]) != 0) _exit(127);
         execl("/bin/sh", "sh", "-lc", command, (char *)0);
         _exit(127);
+#if defined(__GNUC__) && !defined(__clang__) && !defined(__TINYC__)
 #pragma GCC diagnostic pop
+#endif
     }
 
     close(pipe_fds[1]);

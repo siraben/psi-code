@@ -26,7 +26,7 @@
         # LDFLAGS. Works cleanly only on musl-based pkgsStatic because
         # glibc cannot be fully statically linked in general (NSS
         # modules, dlopen).
-        mkPsi = { p, static ? false, extraMakeFlags ? [] }: p.stdenv.mkDerivation {
+        mkPsi = { p, static ? false, extraMakeFlags ? [], extraNativeBuildInputs ? [] }: p.stdenv.mkDerivation {
           pname = if static then "psi-static" else "psi";
           version = "0.1.0";
           src = ./.;
@@ -34,7 +34,7 @@
           nativeBuildInputs = [
             p.gnumake
             p.pkg-config
-          ];
+          ] ++ extraNativeBuildInputs;
 
           buildInputs = [
             p.argtable
@@ -62,7 +62,9 @@
           # files visible, which buildInputs already arranges.
 
           installPhase = ''
-            make PREFIX=$out install
+            runHook preInstall
+            make "''${makeFlagsArray[@]}" PREFIX=$out install
+            runHook postInstall
           '';
 
           # Keep the binary stripped only for dynamic builds. For
@@ -72,6 +74,17 @@
         };
       in {
         packages.default = mkPsi { p = pkgs; };
+        packages.psi-gcc = self.packages.${system}.default;
+        packages.psi-clang = mkPsi {
+          p = pkgs;
+          extraNativeBuildInputs = [ pkgs.clang ];
+          extraMakeFlags = [ "CC=clang" ];
+        };
+        packages.psi-tcc = mkPsi {
+          p = pkgs;
+          extraNativeBuildInputs = [ pkgs.gcc pkgs.tinycc ];
+          extraMakeFlags = [ "CC=tcc" "HOST_CC=cc" "RPATH_LDFLAGS=$(LOCAL_RPATH_LDFLAGS)" ];
+        };
 
         # 32-bit x86 build. Requires the host to have 32-bit compat
         # libraries available (multilib). On x86_64-linux, nixpkgs
@@ -182,6 +195,41 @@
           meta.description = "Run psi Lua and C lint checks";
         };
 
+        # `nix run .#cc-diversity` — build the same source with GCC,
+        # Clang, and TinyCC. Uses separate build directories so the
+        # compilers do not overwrite one another's objects.
+        apps.cc-diversity = let
+          script = pkgs.writeShellApplication {
+            name = "psi-cc-diversity";
+            runtimeInputs = [
+              pkgs.gnumake
+              pkgs.pkg-config
+              pkgs.gcc
+              pkgs.clang
+              pkgs.tinycc
+              pkgs.argtable
+              pkgs.cjson
+              pkgs.curl
+              pkgs.libedit
+              pkgs.lua5_4
+              pkgs.ncurses
+              pkgs.zlib
+            ];
+            text = ''
+              set -eu
+              cd "''${PSI_SRC:-$PWD}"
+              rm -rf build-gcc build-clang build-tcc
+              make BUILD_DIR=build-gcc CC=gcc
+              make BUILD_DIR=build-clang CC=clang
+              make BUILD_DIR=build-tcc CC=tcc HOST_CC=cc "RPATH_LDFLAGS=\$(LOCAL_RPATH_LDFLAGS)"
+            '';
+          };
+        in {
+          type = "app";
+          program = "${script}/bin/psi-cc-diversity";
+          meta.description = "Build psi with GCC, Clang, and TinyCC";
+        };
+
         devShells.default = pkgs.mkShell {
           packages = [
             pkgs.argtable
@@ -197,6 +245,7 @@
             pkgs.lua5_4
             pkgs.lua54Packages.luacheck
             pkgs.stylua
+            pkgs.tinycc
             pkgs.ncurses
             pkgs.valgrind
           ];
