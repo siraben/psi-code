@@ -676,6 +676,15 @@ def t_tui_status_hook(psi: Psi):
     assert_contains(out, "ext:foo", "status hook contribution shows")
 
 
+@test("tui/layout_geometry")
+def t_tui_layout_geometry(psi: Psi):
+    out = psi.eval(
+        'local layout = require("psi.tui_layout").geometry(80, 24)\n'
+        + 'return table.concat({layout.title, layout.transcript.h, layout.input.y}, "|")'
+    )
+    assert_equals(out, "psi coding agent|18|21", "shared TUI layout")
+
+
 @test("render/replace_mode")
 def t_render_replace(psi: Psi):
     """A render hook returning {replace=true, text=...} must drop

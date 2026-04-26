@@ -115,16 +115,43 @@ end
 
 -- ---------- ids / timestamps ----------
 
--- Seed math.random once per process so uuid_short is non-deterministic.
-math.randomseed((os.time() * 1000003) + (os.clock() * 1e6))
+if not (psi and psi.amiga_bridge) then
+  math.randomseed((os.time() * 1000003) + (os.clock() * 1e6))
+end
 
 -- Pseudo-UUIDv4: 16 random bytes rendered as 8-4-4-4-12 hex. Not
 -- cryptographic; used only to tag session entries.
+local uuid_counter = 0
 function M.uuid_short()
+  if not (psi and psi.amiga_bridge) then
+    local t = {}
+    for i = 1, 32 do
+      t[i] = string.format("%x", math.random(0, 15))
+    end
+    return table.concat(t, "", 1, 8)
+      .. "-"
+      .. table.concat(t, "", 9, 12)
+      .. "-"
+      .. "4"
+      .. table.concat(t, "", 14, 16)
+      .. "-"
+      .. string.format("%x", (math.random(0, 3) + 8))
+      .. table.concat(t, "", 18, 20)
+      .. "-"
+      .. table.concat(t, "", 21, 32)
+  end
+
+  uuid_counter = uuid_counter + 1
+  local digits = "0123456789abcdef"
+  local n = uuid_counter
   local t = {}
   for i = 1, 32 do
-    t[i] = string.format("%x", math.random(0, 15))
+    n = n + i * 7
+    while n >= 16 do n = n - 16 end
+    t[i] = digits:sub(n + 1, n + 1)
   end
+  local variant = uuid_counter
+  while variant >= 4 do variant = variant - 4 end
   return table.concat(t, "", 1, 8)
     .. "-"
     .. table.concat(t, "", 9, 12)
@@ -132,14 +159,17 @@ function M.uuid_short()
     .. "4"
     .. table.concat(t, "", 14, 16)
     .. "-"
-    .. string.format("%x", (math.random(0, 3) + 8))
+    .. digits:sub(9 + variant, 9 + variant)
     .. table.concat(t, "", 18, 20)
     .. "-"
     .. table.concat(t, "", 21, 32)
 end
 
 function M.iso_timestamp()
-  return os.date("!%Y-%m-%dT%H:%M:%SZ")
+  if not (psi and psi.amiga_bridge) then
+    return os.date("!%Y-%m-%dT%H:%M:%SZ")
+  end
+  return "2026-04-25T00:00:00Z"
 end
 
 -- ---------- json / eval / io shims ----------

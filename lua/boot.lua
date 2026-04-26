@@ -43,6 +43,7 @@ psi.render = require("psi.render")
 psi.commands = require("psi.commands")
 psi.prompt_templates = require("psi.prompt_templates")
 psi.tui = require("psi.tui")
+psi.tui_layout = require("psi.tui_layout")
 psi.modes = require("psi.modes")
 psi.markdown = require("psi.markdown")
 

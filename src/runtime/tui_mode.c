@@ -2241,6 +2241,9 @@ static int psi_tui_run_turn_sync(struct psi_tui_state *state, const char *line) 
         psi_tui_set_status(state, "agent turn failed", 1);
         psi_tui_finish_streaming_assistant(state);
         psi_tui_add_entry(state, PSI_TUI_ENTRY_ERROR, NULL, detail, 1);
+        if (psi_agent_runtime_save(&state->runtime) != PSI_STATUS_OK) {
+            psi_tui_set_status(state, "agent turn failed; failed to save session file", 1);
+        }
     }
     free(response_text);
 
