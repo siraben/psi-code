@@ -18,7 +18,9 @@
 #endif
 
 #include <time.h>
+#include <errno.h>
 #include <unistd.h>
+#include <dirent.h>
 #include <sys/stat.h>
 
 #include "psi/abort.h"
@@ -95,6 +97,63 @@ static int psi_vm_file_exists(const char *path) {
     struct stat st;
     if (path == NULL || path[0] == '\0') return 0;
     return stat(path, &st) == 0 ? 1 : 0;
+}
+
+static int psi_vm_mkdir_one(const char *path) {
+    struct stat st;
+    if (path == NULL || path[0] == '\0') return PSI_STATUS_ERROR;
+    if (stat(path, &st) == 0) {
+        return S_ISDIR(st.st_mode) ? PSI_STATUS_OK : PSI_STATUS_ERROR;
+    }
+    if (mkdir(path, 0777) == 0) return PSI_STATUS_OK;
+    if (errno == EEXIST && stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+        return PSI_STATUS_OK;
+    }
+    return PSI_STATUS_ERROR;
+}
+
+static int psi_vm_mkdir_p(const char *path) {
+    char *copy;
+    char *p;
+    int status;
+
+    if (path == NULL || path[0] == '\0') return PSI_STATUS_ERROR;
+    copy = psi_strdup(path);
+    if (copy == NULL) return PSI_STATUS_ERROR;
+
+    status = PSI_STATUS_OK;
+    p = copy;
+    if (p[0] == '/') p++;
+    for (; *p != '\0'; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            if (copy[0] != '\0' && psi_vm_mkdir_one(copy) != PSI_STATUS_OK) {
+                status = PSI_STATUS_ERROR;
+                break;
+            }
+            *p = '/';
+        }
+    }
+    if (status == PSI_STATUS_OK && psi_vm_mkdir_one(copy) != PSI_STATUS_OK) {
+        status = PSI_STATUS_ERROR;
+    }
+    free(copy);
+    return status;
+}
+
+static int psi_vm_mkdir_parent(const char *path) {
+    char *parent;
+    int status;
+
+    parent = psi_vm_parent_directory(path);
+    if (parent == NULL) return PSI_STATUS_ERROR;
+    if (strcmp(parent, ".") == 0 || strcmp(parent, "/") == 0) {
+        free(parent);
+        return PSI_STATUS_OK;
+    }
+    status = psi_vm_mkdir_p(parent);
+    free(parent);
+    return status;
 }
 
 static const long PSI_VM_FILE_WRITE_MAX_BYTES = 16777216l;
@@ -799,6 +858,44 @@ static int lfn_parent_directory(lua_State *L) {
 static int lfn_file_exists(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
     lua_pushboolean(L, psi_vm_file_exists(path) ? 1 : 0);
+    return 1;
+}
+
+static int lfn_list_dir(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    DIR *dir;
+    struct dirent *entry;
+    int i;
+
+    dir = opendir(path);
+    if (dir == NULL) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    lua_newtable(L);
+    i = 1;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        lua_pushstring(L, entry->d_name);
+        lua_rawseti(L, -2, i++);
+    }
+    closedir(dir);
+    psi_vm_mark_array(L);
+    return 1;
+}
+
+static int lfn_mkdir_p(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    lua_pushboolean(L, psi_vm_mkdir_p(path) == PSI_STATUS_OK ? 1 : 0);
+    return 1;
+}
+
+static int lfn_mkdir_parent(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    lua_pushboolean(L, psi_vm_mkdir_parent(path) == PSI_STATUS_OK ? 1 : 0);
     return 1;
 }
 
@@ -1579,8 +1676,9 @@ static int lfn_session_messages(lua_State *L) {
 static int lfn_runtime_info(lua_State *L) {
     static const char *PRIMITIVES[] = {
         "version", "log", "session_message_count", "read_file", "file_write",
-        "current_date", "cwd", "parent_directory", "file_exists", "runtime_info",
-        "session_messages", "process_run", "session_append", "session_clear",
+        "current_date", "cwd", "parent_directory", "file_exists", "list_dir",
+        "mkdir_p", "mkdir_parent", "runtime_info", "session_messages",
+        "process_run", "session_append", "session_clear",
         "tool_call",
         NULL
     };
@@ -1937,6 +2035,9 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("cwd",                   lfn_cwd);
     PSI_REG("parent_directory",      lfn_parent_directory);
     PSI_REG("file_exists",           lfn_file_exists);
+    PSI_REG("list_dir",              lfn_list_dir);
+    PSI_REG("mkdir_p",               lfn_mkdir_p);
+    PSI_REG("mkdir_parent",          lfn_mkdir_parent);
     PSI_REG("runtime_info",          lfn_runtime_info);
     PSI_REG("session_messages",      lfn_session_messages);
     PSI_REG("process_run",           lfn_process_run);

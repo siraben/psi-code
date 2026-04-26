@@ -140,20 +140,16 @@ local function list_markdown_files(dir)
   if not psi.file_exists(dir) then
     return {}
   end
-  local quoted = "'" .. dir:gsub("'", "'\\''") .. "'"
-  local ok, handle = pcall(io.popen, "ls -1 " .. quoted .. " 2>/dev/null")
-  if not ok or not handle then
+  local entries = psi.list_dir(dir)
+  if type(entries) ~= "table" then
     return {}
   end
   local out = {}
-  pcall(function()
-    for name in handle:lines() do
-      if name:match("%.md$") then
-        out[#out + 1] = name
-      end
+  for _, name in ipairs(entries) do
+    if type(name) == "string" and name:match("%.md$") then
+      out[#out + 1] = name
     end
-  end)
-  handle:close()
+  end
   table.sort(out)
   return out
 end

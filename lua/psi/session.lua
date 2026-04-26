@@ -324,15 +324,6 @@ end
 
 -- ---------- JSONL persistence ----------
 
-local function ensure_parent_dir(path)
-  local slash = path:match("()/[^/]*$")
-  if not slash or slash <= 1 then
-    return
-  end
-  local dir = path:sub(1, slash - 1)
-  os.execute("mkdir -p '" .. dir:gsub("'", "'\\''") .. "'")
-end
-
 local function write_line(file, obj)
   file:write(psi.json_encode(obj))
   file:write("\n")
@@ -444,7 +435,9 @@ local function to_disk_entry(m)
 end
 
 local function write_session_file(path, header, messages, count)
-  ensure_parent_dir(path)
+  if not psi.mkdir_parent(path) then
+    return false, "failed to create parent directory"
+  end
   local f, err = io.open(path, "w")
   if not f then
     return false, err
