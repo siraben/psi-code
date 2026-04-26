@@ -10,7 +10,7 @@ Primary goals:
 - keep the harness minimal and inspectable
 - make the host runtime portable C89
 - make Lua the first extension surface
-- keep core state and persistence in C
+- keep host primitives in C and policy/session shape in Lua
 - make user customization cheap and progressive
 - support both old and modern toolchains
 - use Nix flakes for reproducible builds and dev shells
@@ -54,14 +54,14 @@ The host core is written in C89 and owns:
 
 - memory management helpers
 - strings and collections
-- message model
-- session model
-- session persistence
-- tool registration and execution
-- provider abstraction
+- the small in-memory message array
+- filesystem/process/HTTP primitives
+- Lua VM embedding
 - runtime configuration
 
-The host core is authoritative for state.
+The host core is not authoritative for agent policy. It provides portable
+primitives and a simple session backing store; Lua owns the durable session
+schema, provider routing, tool registry, and prompt/context projections.
 
 ### 4.2 runtime layer
 
@@ -82,12 +82,15 @@ Lua is used for:
 
 - the tool registry and built-in tool implementations
 - prompt assembly helpers
+- settings and resource discovery
 - skills
 - slash commands
 - hooks (before/after tool calls, file-op tracking, render hooks)
 - optional custom tools
 - event-bus pub/sub for extensions
-- provider loops (Anthropic streaming, Ollama)
+- provider/model/API registry and provider loops (Anthropic streaming,
+  OpenAI-compatible/OpenRouter, Ollama)
+- v3 session JSONL formatting and loading
 - line-oriented rendering for all modes (including markdown)
 - cooperative scheduling of agent turns as coroutines
 - future summary prompt customization
@@ -142,7 +145,7 @@ with cooperative yields internally but no UI interleaving.
 
 ### 4.4 provider layer
 
-The provider layer is a narrow C interface around one or more model backends.
+The provider layer is Lua policy over narrow host HTTP primitives.
 
 It should not know about TUI details, slash commands, or session files.
 It should only know:
@@ -150,6 +153,7 @@ It should only know:
 - how to stream or complete a turn
 - which tool schema format is needed
 - how usage and stop reasons are reported
+- which API adapter and compatibility flags apply to a model/provider
 
 ### 4.5 frontend layer
 
@@ -159,19 +163,20 @@ The frontend should never mutate the session model directly.
 
 ## 5. core runtime object
 
-The central object in `psi` is `psi_runtime`.
+The central host object in `psi` is `psi_runtime`.
 
 It owns:
 
 - current configuration
 - current provider/model selection
 - current session
-- current tool table
 - current embedded Lua VM
 - mode-specific service handles
 
-Conceptually this is the C replacement for `AgentSession` plus the runtime host
-used by `pi`.
+Conceptually this is the C host for a Lua-side `AgentSession`-like runtime.
+The C object is deliberately smaller than pi's `AgentSession`; Lua modules
+provide the session manager, provider registry, resources, settings, tools,
+and orchestration.
 
 Proposed shape:
 
@@ -179,12 +184,12 @@ Proposed shape:
 struct psi_runtime {
     struct psi_config config;
     struct psi_session session;
-    struct psi_tool_registry tools;
     struct psi_vm vm;
 };
 ```
 
-The runtime is long-lived and mode-agnostic.
+The runtime is long-lived and mode-agnostic. The policy surface lives under
+`lua/psi/*.lua`.
 
 ## 6. message model
 
@@ -202,7 +207,9 @@ Required message kinds:
 - branch-summary
 - compaction-summary
 
-The host model is the source of truth. Provider requests are projections.
+The Lua session body is the source of truth. The C message array is a compact
+runtime cache exposed to modes and the embedded VM. Provider requests are
+projections.
 
 This is important because:
 
@@ -212,18 +219,19 @@ This is important because:
 
 ## 7. session model
 
-Sessions should use the same conceptual model as `pi`:
+Sessions use the same conceptual model as `pi` where practical:
 
 - append-only event log on disk
-- tree structure via `id` and `parent_id`
-- one active leaf pointer
-- branch navigation inside a single session file
+- typed JSONL entries with `id` and `parentId`
+- current active branch stored in the in-memory order
+- fork/clone support over the current active branch
 
-Recommended on-disk format:
+Current on-disk format:
 
 - newline-delimited JSON
 - first record is a session header
 - later records are typed entries
+- version 3, compatible with pi's `custom_message` rename
 
 Session entry families:
 
@@ -232,10 +240,11 @@ Session entry families:
 - branch summary entries
 - compaction entries
 - labels and metadata
-- extension/custom persistence entries
+- extension/custom persistence entries and custom model-context messages
 
-The first milestone does not need the full file format, but the in-memory model
-should be shaped for it immediately.
+Interactive tree navigation (`/tree`) and active-leaf branch switching are
+still future work. The schema is now shaped so those can be added without
+changing provider replay again.
 
 ## 8. tools
 
@@ -258,6 +267,9 @@ Tool design rules:
 - Lua owns the registry and can register new tools; dispatch still crosses an
   explicit host callback boundary
 - tool results are persisted as first-class messages
+- mutation tools serialize by path so concurrent tool calls cannot race on the
+  same file
+- tool specs carry execution metadata that frontends/providers can inspect
 - before/after hooks run through `psi.tool_registry` so session provenance
   and file-op tracking can observe every call
 
@@ -308,22 +320,28 @@ hook plumbing; extensions register new tools through it.
 
 ### `psi.session`
 
-Session record construction, on-disk JSONL format (pi-compatible v2
-with parent pointers, cache markers, file-op provenance), load/save
-and fork/compaction plumbing.
+Session record construction, on-disk JSONL format (pi-compatible v3
+with parent pointers, cache markers, file-op provenance, custom entries,
+and custom model-context messages), load/save, fork, and compaction plumbing.
 
 ### `psi.prompt`
 
-System prompt assembly: tool metadata, cwd, date, and discovered
-`AGENTS.md` / `CLAUDE.md` context.
+System prompt assembly: tool metadata, cwd, date, and context discovered by
+`psi.resources`.
 
-### `psi.anthropic`, `psi.ollama`
+### `psi.providers`, `psi.anthropic`, `psi.openai_compat`, `psi.openrouter`, `psi.ollama`
 
-Provider loops. `psi.anthropic` streams the Anthropic Messages API with
-prompt caching, tool-use round-tripping, and per-turn usage accounting;
-`psi.ollama` is a local-first provider for offline iteration. Both
-funnel their deltas through the same observer interface so modes and
-extensions see a single event stream.
+Provider/model/API routing and provider loops. `psi.providers` owns the
+compact registry and routing metadata; `psi.anthropic` streams the Anthropic
+Messages API; `psi.openai_compat` owns the shared OpenAI-compatible skeleton;
+`psi.openrouter` and `psi.ollama` supply provider-specific URL/header/body and
+parser details. All providers funnel deltas through the same observer
+interface so modes and extensions see a single event stream.
+
+### `psi.settings`, `psi.resources`
+
+Layered JSON settings (`~/.config/psi/settings.json` and
+`./.psi/settings.json`) plus global/project context-file discovery.
 
 ### `psi.agent`
 
@@ -333,9 +351,9 @@ provider-agnostic.
 
 ### `psi.context`
 
-Running per-turn usage mirror. Writes back into C (`psi.set_usage`) so
-the TUI status line can read input/output/cache/total/window without
-calling Lua.
+Running per-turn usage mirror. Uses `psi.providers` model metadata when
+available, then writes back into C (`psi.set_usage`) so the TUI status line
+can read input/output/cache/total/window without calling Lua.
 
 ### `psi.render`, `psi.diff`, `psi.ansi`, `psi.markdown`
 

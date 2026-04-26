@@ -33,8 +33,11 @@ local function parse_command_args(argsString)
   for i = 1, #argsString do
     local ch = argsString:sub(i, i)
     if in_quote then
-      if ch == in_quote then in_quote = nil
-      else current[#current + 1] = ch end
+      if ch == in_quote then
+        in_quote = nil
+      else
+        current[#current + 1] = ch
+      end
     elseif ch == '"' or ch == "'" then
       in_quote = ch
     elseif ch == " " or ch == "\t" then
@@ -46,7 +49,9 @@ local function parse_command_args(argsString)
       current[#current + 1] = ch
     end
   end
-  if #current > 0 then args[#args + 1] = table.concat(current) end
+  if #current > 0 then
+    args[#args + 1] = table.concat(current)
+  end
   return args
 end
 
@@ -63,19 +68,27 @@ local function substitute_args(content, args)
   -- ${@:N:L} and ${@:N}
   result = result:gsub("%${@:(%d+):(%d+)}", function(startStr, lenStr)
     local start = tonumber(startStr) or 1
-    if start < 1 then start = 1 end
+    if start < 1 then
+      start = 1
+    end
     local len = tonumber(lenStr) or 0
     local slice = {}
     for i = start, start + len - 1 do
-      if args[i] then slice[#slice + 1] = args[i] end
+      if args[i] then
+        slice[#slice + 1] = args[i]
+      end
     end
     return table.concat(slice, " ")
   end)
   result = result:gsub("%${@:(%d+)}", function(startStr)
     local start = tonumber(startStr) or 1
-    if start < 1 then start = 1 end
+    if start < 1 then
+      start = 1
+    end
     local slice = {}
-    for i = start, #args do slice[#slice + 1] = args[i] end
+    for i = start, #args do
+      slice[#slice + 1] = args[i]
+    end
     return table.concat(slice, " ")
   end)
 
@@ -91,13 +104,20 @@ end
 -- Values are returned as strings (no YAML type inference).
 local function parse_frontmatter(raw)
   local fm, body = {}, raw
-  if raw:sub(1, 3) ~= "---" then return fm, body end
+  if raw:sub(1, 3) ~= "---" then
+    return fm, body
+  end
   local rest = raw:sub(4)
   -- Skip an optional newline immediately after the opener.
-  if rest:sub(1, 1) == "\n" then rest = rest:sub(2)
-  elseif rest:sub(1, 2) == "\r\n" then rest = rest:sub(3) end
+  if rest:sub(1, 1) == "\n" then
+    rest = rest:sub(2)
+  elseif rest:sub(1, 2) == "\r\n" then
+    rest = rest:sub(3)
+  end
   local close_idx = rest:find("\n%-%-%-\r?\n") or rest:find("\n%-%-%-$")
-  if close_idx == nil then return fm, body end
+  if close_idx == nil then
+    return fm, body
+  end
   local header = rest:sub(1, close_idx - 1)
   local after = rest:sub(close_idx)
   -- Strip the closing `---` + optional newline.
@@ -114,15 +134,23 @@ local function parse_frontmatter(raw)
 end
 
 local function list_markdown_files(dir)
-  if not dir or dir == "" then return {} end
-  if not psi.file_exists(dir) then return {} end
+  if not dir or dir == "" then
+    return {}
+  end
+  if not psi.file_exists(dir) then
+    return {}
+  end
   local quoted = "'" .. dir:gsub("'", "'\\''") .. "'"
   local ok, handle = pcall(io.popen, "ls -1 " .. quoted .. " 2>/dev/null")
-  if not ok or not handle then return {} end
+  if not ok or not handle then
+    return {}
+  end
   local out = {}
   pcall(function()
     for name in handle:lines() do
-      if name:match("%.md$") then out[#out + 1] = name end
+      if name:match("%.md$") then
+        out[#out + 1] = name
+      end
     end
   end)
   handle:close()
@@ -162,7 +190,9 @@ function M.load()
   templates = {}
   local env_dirs = os.getenv("PSI_PROMPTS_DIR") or ""
   for dir in (env_dirs .. ":"):gmatch("([^:]*):") do
-    if dir ~= "" then load_from_dir(dir) end
+    if dir ~= "" then
+      load_from_dir(dir)
+    end
   end
   local xdg = os.getenv("XDG_CONFIG_HOME")
   if xdg and xdg ~= "" then
@@ -178,8 +208,12 @@ end
 
 function M.list()
   local out = {}
-  for _, t in pairs(templates) do out[#out + 1] = t end
-  table.sort(out, function(a, b) return a.name < b.name end)
+  for _, t in pairs(templates) do
+    out[#out + 1] = t
+  end
+  table.sort(out, function(a, b)
+    return a.name < b.name
+  end)
   return out
 end
 
@@ -191,7 +225,9 @@ end
 -- return the expanded body as a string. Returns nil otherwise —
 -- callers should treat nil as "not a template; fall through".
 function M.expand(text)
-  if type(text) ~= "string" or text:sub(1, 1) ~= "/" then return nil end
+  if type(text) ~= "string" or text:sub(1, 1) ~= "/" then
+    return nil
+  end
   local space = text:find(" ", 1, true)
   local name, argsString
   if space then
@@ -202,14 +238,18 @@ function M.expand(text)
     argsString = ""
   end
   local tmpl = templates[name]
-  if not tmpl then return nil end
+  if not tmpl then
+    return nil
+  end
   return substitute_args(tmpl.content, parse_command_args(argsString))
 end
 
 -- Short multi-line listing for /help integration.
 function M.help_lines()
   local list = M.list()
-  if #list == 0 then return nil end
+  if #list == 0 then
+    return nil
+  end
   local buf = { "prompt templates (drop .md in ~/.config/psi/prompts/):\n" }
   for _, t in ipairs(list) do
     local hint = t.argument_hint and (" " .. t.argument_hint) or ""

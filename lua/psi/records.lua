@@ -39,7 +39,8 @@ end
 local Tool = make_class("Tool")
 M.Tool = Tool
 
-function M.new_tool(name, description, prompt_snippet, guidelines, input_schema, impl)
+function M.new_tool(name, description, prompt_snippet, guidelines, input_schema, impl, opts)
+  opts = opts or {}
   return setmetatable({
     name = name,
     description = description,
@@ -47,6 +48,9 @@ function M.new_tool(name, description, prompt_snippet, guidelines, input_schema,
     guidelines = guidelines, -- array of strings
     input_schema = input_schema, -- table (JSON-shaped)
     impl = impl, -- function(input) -> ToolResult
+    execution_mode = opts.execution_mode or "parallel",
+    render_call = opts.render_call,
+    render_result = opts.render_result,
   }, Tool)
 end
 
@@ -57,6 +61,7 @@ function M.tool_to_alist(tool)
     prompt_snippet = tool.prompt_snippet,
     prompt_guidelines = tool.guidelines,
     input_schema = tool.input_schema,
+    execution_mode = tool.execution_mode,
   }
 end
 

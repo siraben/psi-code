@@ -27,7 +27,9 @@ local event_catalog = {
 
 function M.events()
   local out = {}
-  for i, name in ipairs(event_catalog) do out[i] = name end
+  for i, name in ipairs(event_catalog) do
+    out[i] = name
+  end
   return out
 end
 
@@ -116,8 +118,10 @@ end
 
 local function tool_banner(tool, path)
   return tool_call_leading()
-    .. "\n" .. ansi.bold(ansi.cyan(tool))
-    .. (path and (" " .. path) or "") .. "\n"
+    .. "\n"
+    .. ansi.bold(ansi.cyan(tool))
+    .. (path and (" " .. path) or "")
+    .. "\n"
 end
 
 local function payload_tool(p)
@@ -145,8 +149,7 @@ end
 
 local function render_bash_call(p)
   local command = payload_input(p).command or ""
-  return tool_call_leading()
-    .. "\n" .. ansi.bold(ansi.cyan("$")) .. " " .. command .. "\n"
+  return tool_call_leading() .. "\n" .. ansi.bold(ansi.cyan("$")) .. " " .. command .. "\n"
 end
 
 local function render_write_call(p)
@@ -173,8 +176,7 @@ end
 
 local function render_lua_call(p)
   local mode = payload_input(p).mode or "summary"
-  return tool_call_leading()
-    .. "\n" .. ansi.bold(ansi.cyan("lua")) .. " " .. mode .. "\n"
+  return tool_call_leading() .. "\n" .. ansi.bold(ansi.cyan("lua")) .. " " .. mode .. "\n"
 end
 
 local function render_generic_call(p)

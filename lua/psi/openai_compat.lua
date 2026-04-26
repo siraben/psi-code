@@ -76,7 +76,9 @@ function M.classify_http_error(status, body, provider_name)
       -- No structured error — include a short trimmed snippet so
       -- the user sees SOMETHING rather than just the status code.
       local trimmed = body:gsub("%s+", " "):sub(1, 200)
-      if trimmed ~= "" then detail = trimmed end
+      if trimmed ~= "" then
+        detail = trimmed
+      end
     end
   end
 
@@ -96,8 +98,12 @@ function M.classify_http_error(status, body, provider_name)
   end
 
   local parts = { string.format("%s request failed (%d)", provider_name, status) }
-  if hint   then parts[#parts + 1] = "— " .. hint   end
-  if detail then parts[#parts + 1] = "— " .. detail end
+  if hint then
+    parts[#parts + 1] = "— " .. hint
+  end
+  if detail then
+    parts[#parts + 1] = "— " .. detail
+  end
   return table.concat(parts, " ")
 end
 
@@ -188,16 +194,19 @@ function M.build_api_messages(session, system_prompt, cfg)
           end
         end
         local entry = { role = "assistant" }
-        if text ~= "" then entry.content = text end
-        if tool_calls then entry.tool_calls = tool_calls end
+        if text ~= "" then
+          entry.content = text
+        end
+        if tool_calls then
+          entry.tool_calls = tool_calls
+        end
         out[#out + 1] = entry
 
         pending_tool_calls = {}
         seen_result_ids = {}
         if tool_calls then
           for _, tc in ipairs(tool_calls) do
-            pending_tool_calls[#pending_tool_calls + 1] =
-              { id = tc.id, name = tc["function"].name }
+            pending_tool_calls[#pending_tool_calls + 1] = { id = tc.id, name = tc["function"].name }
             if tc.id ~= nil and tc.id ~= "" then
               known_tool_use_ids[tc.id] = true
             end
@@ -235,6 +244,25 @@ function M.build_api_messages(session, system_prompt, cfg)
       local summary = (type(body) == "table" and body.summary) or m.text or ""
       out[#out + 1] = { role = "user", content = summary }
       i = i + 1
+    elseif
+      role == "custom"
+      and type(body) == "table"
+      and body.__entry_type == "custom_message"
+      and type(body.message) == "table"
+      and not body.message.hidden
+    then
+      flush_synthetic_results()
+      local text = ""
+      for _, cb in ipairs(body.message.content or {}) do
+        if type(cb) == "table" and cb.type == "text" and type(cb.text) == "string" then
+          text = (text == "" and cb.text) or (text .. cb.text)
+        end
+      end
+      out[#out + 1] = {
+        role = body.message.role == "assistant" and "assistant" or "user",
+        content = text,
+      }
+      i = i + 1
     else
       i = i + 1
     end
@@ -260,7 +288,10 @@ function M.persist_assistant(state, model, tool_calls, cfg, stop_override, error
   end
   for _, tc in ipairs(tool_calls) do
     blocks[#blocks + 1] = {
-      type = "tool_use", id = tc.id, name = tc.name, input = tc.arguments,
+      type = "tool_use",
+      id = tc.id,
+      name = tc.name,
+      input = tc.arguments,
     }
   end
   local meta = {
@@ -289,11 +320,15 @@ function M.run_turn(opts, cfg)
   local model = opts.model or ""
   local system_prompt = opts.system_prompt or ""
   local tool_specs = opts.tool_specs or M.api_tool_specs("")
-  local abort_check = opts.abort_check or function() return false end
+  local abort_check = opts.abort_check or function()
+    return false
+  end
   local sched = require("psi.sched")
 
   for _ = 1, MAX_TOOL_ITERATIONS do
-    if abort_check() then return false, "aborted" end
+    if abort_check() then
+      return false, "aborted"
+    end
 
     local session_messages = session_mod.messages()
     local plain = {}
@@ -324,6 +359,13 @@ function M.run_turn(opts, cfg)
       tool_specs = tool_specs,
       max_tokens = opts.max_tokens,
     })
+    if psi.events then
+      psi.events.emit("before-provider-request", {
+        provider = cfg.provider_name,
+        model = model,
+        body = body,
+      })
+    end
 
     local state = cfg.new_state()
     local parser = cfg.parser_new()
@@ -336,15 +378,16 @@ function M.run_turn(opts, cfg)
     local raw_body_len = 0
     local RAW_BODY_MAX = 16 * 1024
 
-    local handle, begin_err = psi.http_stream_begin(
-      cfg.url, cfg.headers, psi.json_encode(body))
+    local handle, begin_err = psi.http_stream_begin(cfg.url, cfg.headers, psi.json_encode(body))
     if handle == nil then
       io.stderr:write(cfg.provider_name .. ": " .. tostring(begin_err) .. "\n")
       return false, "error"
     end
 
     while true do
-      if abort_check() then break end
+      if abort_check() then
+        break
+      end
       local chunk, done = sched.http_poll(handle, 50)
       if chunk ~= nil then
         if raw_body_len < RAW_BODY_MAX then
@@ -353,7 +396,9 @@ function M.run_turn(opts, cfg)
         end
         cfg.parser_push(parser, chunk, state, observer)
       end
-      if done then break end
+      if done then
+        break
+      end
     end
     local status = psi.http_stream_finish(handle)
 
@@ -374,8 +419,7 @@ function M.run_turn(opts, cfg)
       return false, reason
     end
     if status < 200 or status >= 300 then
-      local emsg = M.classify_http_error(
-        status, table.concat(raw_body), cfg.provider_name)
+      local emsg = M.classify_http_error(status, table.concat(raw_body), cfg.provider_name)
       if state.text ~= "" or #tool_calls > 0 then
         M.persist_assistant(state, model, tool_calls, cfg, "error", emsg)
       end
@@ -398,7 +442,9 @@ function M.run_turn(opts, cfg)
         stop_reason = state.stop_reason,
         model = model,
       }
-      if cfg.include_response_id then evt.response_id = state.response_id end
+      if cfg.include_response_id then
+        evt.response_id = state.response_id
+      end
       psi.events.emit("after-provider-response", evt)
     end
 
@@ -411,7 +457,9 @@ function M.run_turn(opts, cfg)
 
     -- Concurrent tool dispatch (sched.run_all) — shared across
     -- every provider that uses this skeleton.
-    if abort_check() then return false, "aborted" end
+    if abort_check() then
+      return false, "aborted"
+    end
 
     for _, tc in ipairs(tool_calls) do
       local input_json = psi.json_encode(tc.arguments)
@@ -419,16 +467,14 @@ function M.run_turn(opts, cfg)
         observer.on_tool_call(tc.id, tc.name, input_json)
       end
       if psi.events then
-        psi.events.emit("tool-call",
-          { id = tc.id, tool = tc.name, input = tc.arguments })
+        psi.events.emit("tool-call", { id = tc.id, tool = tc.name, input = tc.arguments })
       end
     end
 
     local tasks = {}
     for i, tc in ipairs(tool_calls) do
       tasks[i] = function()
-        return psi.tools.dispatch_alist(tc.name, tc.arguments,
-                                        { tool_call_id = tc.id })
+        return psi.tools.dispatch_alist(tc.name, tc.arguments, { tool_call_id = tc.id })
       end
     end
     local results = sched.run_all(tasks)
@@ -440,7 +486,8 @@ function M.run_turn(opts, cfg)
         result_alist = r.values[1]
       else
         result_alist = {
-          tool = tc.name, ok = false,
+          tool = tc.name,
+          ok = false,
           error = tostring(r and r.error or "tool dispatch failed"),
         }
       end
@@ -449,18 +496,16 @@ function M.run_turn(opts, cfg)
         observer.on_tool_result(tc.id, tc.name, result_json)
       end
       if psi.events then
-        psi.events.emit("tool-result",
-          { id = tc.id, tool = tc.name, result = result_alist })
+        psi.events.emit("tool-result", { id = tc.id, tool = tc.name, result = result_alist })
       end
-      session_mod.append_tool_result(tc.id, tc.name, result_json,
-                                     not result_alist.ok)
+      session_mod.append_tool_result(tc.id, tc.name, result_json, not result_alist.ok)
     end
     session_mod.save()
   end
 
   io.stderr:write(
-    cfg.provider_name .. " tool loop exceeded "
-    .. tostring(MAX_TOOL_ITERATIONS) .. " iterations\n")
+    cfg.provider_name .. " tool loop exceeded " .. tostring(MAX_TOOL_ITERATIONS) .. " iterations\n"
+  )
   return false
 end
 
@@ -471,7 +516,7 @@ function M.complete_text(opts, cfg)
     model = opts.model or "",
     messages = prelude.as_array({
       { role = "system", content = opts.system_prompt or "" },
-      { role = "user",   content = opts.user_text or "" },
+      { role = "user", content = opts.user_text or "" },
     }),
     tool_specs = prelude.as_array({}),
     max_tokens = opts.max_tokens,
@@ -480,21 +525,22 @@ function M.complete_text(opts, cfg)
   body.tools = nil
   body.stream_options = nil
 
-  local status, response = psi.http_post(cfg.url, cfg.headers,
-                                         psi.json_encode(body))
+  local status, response = psi.http_post(cfg.url, cfg.headers, psi.json_encode(body))
   if status == nil then
-    io.stderr:write(cfg.provider_name .. ": http post failed: "
-                    .. tostring(response) .. "\n")
+    io.stderr:write(cfg.provider_name .. ": http post failed: " .. tostring(response) .. "\n")
     return false
   end
   if status < 200 or status >= 300 then
-    io.stderr:write(("%s: request failed (%d): %s\n"):format(
-      cfg.provider_name, status, response or ""))
+    io.stderr:write(
+      ("%s: request failed (%d): %s\n"):format(cfg.provider_name, status, response or "")
+    )
     return false
   end
 
   local parsed = safe_decode(response)
-  if type(parsed) ~= "table" then return false end
+  if type(parsed) ~= "table" then
+    return false
+  end
   return true, cfg.extract_completion(parsed)
 end
 

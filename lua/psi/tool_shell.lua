@@ -59,7 +59,9 @@ function M.process_result(command, tool_call_id)
     if chunk ~= nil and #chunk > 0 and psi.tool_progress ~= nil then
       psi.tool_progress(tool_call_id, chunk)
     end
-    if done then break end
+    if done then
+      break
+    end
   end
 
   return records.process_result_from_alist(psi.process_finish(handle))

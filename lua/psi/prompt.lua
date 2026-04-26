@@ -1,43 +1,14 @@
 -- psi.prompt: system prompt, compaction request, runtime summary, help text.
 
-local records = require("psi.records")
 local prelude = require("psi.prelude")
 local session = require("psi.session")
 local tools = require("psi.tools")
+local resources = require("psi.resources")
 
 local M = {}
 
--- ---------- project context discovery ----------
-
-local CONTEXT_FILENAMES = { "AGENTS.md", "CLAUDE.md" }
-
 function M.find_context_files()
-  local dir = psi.cwd()
-  local found = {}
-  while true do
-    local local_matches = {}
-    for _, name in ipairs(CONTEXT_FILENAMES) do
-      local path = prelude.path_join(dir, name)
-      if psi.file_exists(path) then
-        local_matches[#local_matches + 1] = records.new_context_file(path, psi.read_file(path))
-      end
-    end
-    -- prepend local_matches so ancestor files come first in final order
-    local merged = {}
-    for _, f in ipairs(local_matches) do
-      merged[#merged + 1] = f
-    end
-    for _, f in ipairs(found) do
-      merged[#merged + 1] = f
-    end
-    found = merged
-    local parent = psi.parent_directory(dir)
-    if parent == dir then
-      break
-    end
-    dir = parent
-  end
-  return found
+  return resources.context_files()
 end
 
 -- ---------- system prompt ----------

@@ -147,11 +147,15 @@ function M.uuid_short()
   local t = {}
   for i = 1, 32 do
     n = n + i * 7
-    while n >= 16 do n = n - 16 end
+    while n >= 16 do
+      n = n - 16
+    end
     t[i] = digits:sub(n + 1, n + 1)
   end
   local variant = uuid_counter
-  while variant >= 4 do variant = variant - 4 end
+  while variant >= 4 do
+    variant = variant - 4
+  end
   return table.concat(t, "", 1, 8)
     .. "-"
     .. table.concat(t, "", 9, 12)

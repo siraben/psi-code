@@ -149,7 +149,6 @@ int psi_process_poll(
     char **chunk, size_t *chunk_len
 ) {
     char read_buffer[PSI_PROCESS_READ_CHUNK];
-    ssize_t read_count;
     long total_waited_ns;
     long max_wait_ns;
 
@@ -170,6 +169,7 @@ int psi_process_poll(
     max_wait_ns = (timeout_ms > 0) ? (long)timeout_ms * 1000000L : 0L;
 
     for (;;) {
+        ssize_t read_count;
         read_count = read(h->pipe_fd, read_buffer, sizeof(read_buffer));
         if (read_count > 0) {
             char *copy;
@@ -189,13 +189,12 @@ int psi_process_poll(
             if (h->output_length < PSI_PROCESS_OUTPUT_MAX_BYTES) {
                 size_t to_copy = (size_t)read_count;
                 if (h->output_length + to_copy > PSI_PROCESS_OUTPUT_MAX_BYTES) {
-                    to_copy = PSI_PROCESS_OUTPUT_MAX_BYTES - h->output_length;
                     h->truncated = 1;
+                    to_copy = PSI_PROCESS_OUTPUT_MAX_BYTES - h->output_length;
                 }
                 if (psi_process_append_bytes(&h->output_buffer, &h->output_length, &h->output_capacity, read_buffer, to_copy) != PSI_STATUS_OK) {
                     /* Keep going — the caller's copy already has the bytes. */
                 }
-                if ((size_t)read_count > to_copy) h->truncated = 1;
             } else {
                 h->truncated = 1;
             }
@@ -293,23 +292,23 @@ int psi_process_finish(
 
 #else /* _WIN32 */
 
-struct psi_process_handle { int unused; };
+struct psi_process_handle { int placeholder; };
 
-int psi_process_begin(const char *cmd, const struct psi_abort_signal *a, struct psi_process_handle **out) {
-    PSI_UNUSED(cmd); PSI_UNUSED(a);
+int psi_process_begin(const char *command, const struct psi_abort_signal *abort_signal, struct psi_process_handle **out) {
+    PSI_UNUSED(command); PSI_UNUSED(abort_signal);
     if (out != NULL) *out = NULL;
     return PSI_STATUS_ERROR;
 }
-int psi_process_poll(struct psi_process_handle *h, int ms, char **c, size_t *n) {
-    PSI_UNUSED(h); PSI_UNUSED(ms);
-    if (c) *c = NULL; if (n) *n = 0u;
+int psi_process_poll(struct psi_process_handle *h, int timeout_ms, char **chunk, size_t *chunk_len) {
+    PSI_UNUSED(h); PSI_UNUSED(timeout_ms);
+    if (chunk) *chunk = NULL; if (chunk_len) *chunk_len = 0u;
     return 2;
 }
-int psi_process_finish(struct psi_process_handle *h, char **out, int *ex, int *tr) {
+int psi_process_finish(struct psi_process_handle *h, char **output_text, int *exit_status, int *truncated) {
     PSI_UNUSED(h);
-    if (out) *out = psi_strdup("");
-    if (ex) *ex = -1;
-    if (tr) *tr = 0;
+    if (output_text) *output_text = psi_strdup("");
+    if (exit_status) *exit_status = -1;
+    if (truncated) *truncated = 0;
     return PSI_STATUS_OK;
 }
 

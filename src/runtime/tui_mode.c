@@ -953,15 +953,10 @@ static int psi_tui_md_is_fence_line(const char *text) {
  * Caller owns the return. */
 static char *psi_tui_trim_trailing_newlines(const char *text) {
     size_t len;
-    char *copy;
     if (text == NULL) return psi_strdup("");
     len = strlen(text);
     while (len > 0u && text[len - 1u] == '\n') len--;
-    copy = (char *)malloc(len + 1u);
-    if (copy == NULL) return NULL;
-    if (len > 0u) memcpy(copy, text, len);
-    copy[len] = '\0';
-    return copy;
+    return psi_strdup_n(text, len);
 }
 
 static int psi_tui_render_wrapped(
@@ -1605,14 +1600,16 @@ static size_t psi_tui_count_wrapped(
     const char *line_end;
     const char *prefix;
     size_t prefix_length;
+    size_t remaining;
     int available;
     int break_index;
+    char *trimmed;
 
     /* Mirror psi_tui_render_wrapped: trim trailing newlines so the
      * count matches the render path exactly. Dropping this sync
      * would make scroll anchors drift by one per entry that had a
      * trailing newline (most of them). */
-    char *trimmed = psi_tui_trim_trailing_newlines(text);
+    trimmed = psi_tui_trim_trailing_newlines(text);
     if (trimmed == NULL) return 0u;
 
     count = 0u;
@@ -1628,6 +1625,8 @@ static size_t psi_tui_count_wrapped(
             prefix_length = strlen(prefix);
             available = width - (int)prefix_length;
             if (available < 1) available = 1;
+            remaining = (size_t)(line_end - line_start);
+            if ((size_t)available > remaining) available = (int)remaining;
             break_index = psi_tui_find_break(line_start, available);
             count++;
             line_start += break_index;
@@ -1846,6 +1845,7 @@ static void psi_tui_observer_tool_result(void *userdata, const char *tool_call_i
 static void psi_tui_add_session_entry(struct psi_tui_state *state, const struct psi_message *message) {
     cJSON *parsed;
     cJSON *payload;
+    cJSON *message_json;
     cJSON *input_json;
     cJSON *result_json;
     cJSON *content_array;
@@ -1853,6 +1853,7 @@ static void psi_tui_add_session_entry(struct psi_tui_state *state, const struct 
     cJSON *type_field;
     const char *tool_call_id;
     const char *tool_name;
+    char *tool_name_copy;
     char *summary;
     int is_error;
 
@@ -1872,14 +1873,16 @@ static void psi_tui_add_session_entry(struct psi_tui_state *state, const struct 
              * content array. Walk the stored data_json and synthesize a
              * tool-call entry for every tool_use block. */
             if (message->data_json != NULL) {
-                content_array = cJSON_Parse(message->data_json);
+                parsed = cJSON_Parse(message->data_json);
+                payload = parsed != NULL ? cJSON_GetObjectItemCaseSensitive(parsed, "message") : NULL;
+                content_array = payload != NULL ? cJSON_GetObjectItemCaseSensitive(payload, "content") : NULL;
                 cJSON_ArrayForEach(block, content_array) {
                     type_field = cJSON_GetObjectItemCaseSensitive(block, "type");
                     if (type_field == NULL || !cJSON_IsString(type_field)) continue;
-                    if (strcmp(type_field->valuestring, "tool_use") != 0) continue;
+                    if (strcmp(type_field->valuestring, "toolCall") != 0) continue;
                     tool_call_id = psi_tui_json_string(block, "id");
                     tool_name = psi_tui_json_string(block, "name");
-                    input_json = cJSON_GetObjectItemCaseSensitive(block, "input");
+                    input_json = cJSON_GetObjectItemCaseSensitive(block, "arguments");
                     payload = cJSON_CreateObject();
                     if (payload == NULL) continue;
                     cJSON_AddStringToObject(payload, "id", tool_call_id != NULL ? tool_call_id : "");
@@ -1898,7 +1901,7 @@ static void psi_tui_add_session_entry(struct psi_tui_state *state, const struct 
                         free(summary);
                     }
                 }
-                cJSON_Delete(content_array);
+                cJSON_Delete(parsed);
             }
             break;
         case PSI_MESSAGE_TOOL_CALL:
@@ -1907,14 +1910,16 @@ static void psi_tui_add_session_entry(struct psi_tui_state *state, const struct 
              * assistant message's content blocks above. */
             break;
         case PSI_MESSAGE_TOOL_RESULT:
-            parsed = message->text != NULL ? cJSON_Parse(message->text) : NULL;
-            tool_call_id = parsed != NULL ? psi_tui_json_string(parsed, "tool_use_id") : NULL;
-            tool_name = parsed != NULL ? psi_tui_json_string(parsed, "tool") : NULL;
-            result_json = parsed != NULL ? cJSON_Parse(psi_tui_json_string(parsed, "content")) : NULL;
+            parsed = message->data_json != NULL ? cJSON_Parse(message->data_json) : NULL;
+            message_json = parsed != NULL ? cJSON_GetObjectItemCaseSensitive(parsed, "message") : NULL;
+            tool_call_id = message_json != NULL ? psi_tui_json_string(message_json, "toolCallId") : NULL;
+            tool_name = message_json != NULL ? psi_tui_json_string(message_json, "toolName") : NULL;
+            tool_name_copy = psi_strdup(tool_name != NULL ? tool_name : "tool");
+            result_json = message->text != NULL ? cJSON_Parse(message->text) : NULL;
             payload = cJSON_CreateObject();
             if (payload != NULL) {
                 cJSON_AddStringToObject(payload, "id", tool_call_id != NULL ? tool_call_id : "");
-                cJSON_AddStringToObject(payload, "tool", tool_name != NULL ? tool_name : "tool");
+                cJSON_AddStringToObject(payload, "tool", tool_name_copy != NULL ? tool_name_copy : "tool");
                 cJSON_AddItemToObject(payload, "result", result_json != NULL ? result_json : cJSON_CreateObject());
                 result_json = NULL;
                 summary = psi_tui_render_event_text(state, "tool-result", payload);
@@ -1923,20 +1928,21 @@ static void psi_tui_add_session_entry(struct psi_tui_state *state, const struct 
                 summary = NULL;
             }
             cJSON_Delete(result_json);
-            is_error = parsed != NULL && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(parsed, "is_error"));
+            is_error = message_json != NULL && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(message_json, "isError"));
             if (summary == NULL || summary[0] == '\0') {
                 free(summary);
                 summary = psi_tui_format_tool_result(
-                    tool_name != NULL ? tool_name : "tool",
-                    parsed != NULL ? psi_tui_json_string(parsed, "content") : message->text,
+                    tool_name_copy != NULL ? tool_name_copy : "tool",
+                    message->text,
                     &is_error
                 );
             }
             cJSON_Delete(parsed);
             if (summary != NULL) {
-                psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_RESULT, tool_name, summary, is_error);
+                psi_tui_add_entry(state, PSI_TUI_ENTRY_TOOL_RESULT, tool_name_copy, summary, is_error);
                 free(summary);
             }
+            free(tool_name_copy);
             break;
         case PSI_MESSAGE_COMPACTION_SUMMARY:
             psi_tui_add_entry(state, PSI_TUI_ENTRY_COMPACTION, NULL, message->text, 0);
@@ -2527,14 +2533,13 @@ static int psi_tui_setup_runtime(struct psi_tui_state *state, const struct psi_c
     return PSI_STATUS_OK;
 }
 
-static int psi_tui_state_init(struct psi_tui_state *state, const struct psi_cli_options *options) {
+static void psi_tui_state_init(struct psi_tui_state *state, const struct psi_cli_options *options) {
     memset(state, 0, sizeof(*state));
     state->options = options;
     state->streaming_assistant_index = -1;
     state->streaming_thinking_index = -1;
     state->running = 1;
     psi_abort_signal_init(&state->abort_signal);
-    return PSI_STATUS_OK;
 }
 
 static void psi_tui_state_free(struct psi_tui_state *state) {
@@ -2570,10 +2575,7 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
         return PSI_STATUS_ERROR;
     }
 
-    if (psi_tui_state_init(&state, options) != PSI_STATUS_OK) {
-        fprintf(stderr, "TUI state init failed\n");
-        return PSI_STATUS_ERROR;
-    }
+    psi_tui_state_init(&state, options);
     if (psi_tui_reserve_input(&state, 1u) != PSI_STATUS_OK) {
         return PSI_STATUS_ERROR;
     }
@@ -2669,7 +2671,7 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
                 sigemptyset(&mask);
                 sigaddset(&mask, SIGTSTP);
                 sigprocmask(SIG_UNBLOCK, &mask, &prev_mask);
-                raise(SIGTSTP);
+                kill(getpid(), SIGTSTP);
                 sigprocmask(SIG_SETMASK, &prev_mask, NULL);
                 sigaction(SIGTSTP, &prev, NULL);
             }

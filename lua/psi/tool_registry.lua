@@ -60,10 +60,14 @@ function M.set_active(names)
     active_allowlist = nil
     return
   end
-  if type(names) ~= "table" then return end
+  if type(names) ~= "table" then
+    return
+  end
   local set = {}
   for _, n in ipairs(names) do
-    if type(n) == "string" and n ~= "" then set[n] = true end
+    if type(n) == "string" and n ~= "" then
+      set[n] = true
+    end
   end
   active_allowlist = set
 end
@@ -71,12 +75,16 @@ end
 function M.get_active()
   if active_allowlist == nil then
     local out = {}
-    for i, t in ipairs(registry) do out[i] = t.name end
+    for i, t in ipairs(registry) do
+      out[i] = t.name
+    end
     return out
   end
   local out = {}
   for _, t in ipairs(registry) do
-    if active_allowlist[t.name] then out[#out + 1] = t.name end
+    if active_allowlist[t.name] then
+      out[#out + 1] = t.name
+    end
   end
   return out
 end
@@ -89,10 +97,14 @@ end
 -- advertises them, and the model wastes tokens calling tools that
 -- get rejected.
 function M.active()
-  if active_allowlist == nil then return registry end
+  if active_allowlist == nil then
+    return registry
+  end
   local out = {}
   for _, t in ipairs(registry) do
-    if active_allowlist[t.name] then out[#out + 1] = t end
+    if active_allowlist[t.name] then
+      out[#out + 1] = t
+    end
   end
   return out
 end
