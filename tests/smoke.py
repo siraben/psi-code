@@ -700,6 +700,22 @@ def t_tui_input_layout(psi: Psi):
     assert_equals(out, '5|"> "|"| "', "Lua-owned TUI input layout")
 
 
+@test("tui/input_wrap_width")
+def t_tui_input_wrap_width(psi: Psi):
+    out = psi.eval(
+        'local d = require("psi.tui_runtime")._debug_input_lines(\n'
+        + '  string.rep("a", 78), 78, 80, "> ", "| ")\n'
+        + 'return table.concat({\n'
+        + '  tostring(#d.lines),\n'
+        + '  tostring(#d.lines[1]),\n'
+        + '  tostring(#d.lines[2]),\n'
+        + '  tostring(d.cursor_line),\n'
+        + '  tostring(d.cursor_col)\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "2|79|3|2|1", "input wraps to drawable width")
+
+
 @test("tui/key_policy")
 def t_tui_key_policy(psi: Psi):
     out = psi.eval(
@@ -816,6 +832,20 @@ def t_tui_quits(psi: Psi):
     # We don't require any specific text — just confirm the binary ran
     # long enough to render its header before accepting /quit.
     assert_contains(text, "psi coding agent", "TUI header")
+
+
+@test("mode/tui_lf_submit")
+def t_tui_lf_submit(psi: Psi):
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [
+            (b"", 0.5),
+            (b"/session\n", 1.0),
+            (b"/quit\n", 1.0),
+        ],
+    )
+    text = strip_ansi(raw)
+    assert_regex(text, r"id:\s+[0-9a-f-]{8}", "bare LF submits commands")
 
 
 @test("mode/tui_multiline_prompt")
