@@ -283,11 +283,17 @@ local function cmd_new_session()
 end
 
 local function cmd_reload()
+  if psi.settings and psi.settings.reload then
+    pcall(psi.settings.reload)
+  end
   if type(psi.load_extensions) == "function" then
     local ok, err = pcall(psi.load_extensions)
     if not ok then
       return records.new_command_action("print", "reload failed: " .. tostring(err))
     end
+  end
+  if psi.theme and psi.theme.apply_configured then
+    pcall(psi.theme.apply_configured)
   end
   -- Prompt templates are cheap to rescan and usually edited side-by-
   -- side with extensions; reloading them here lets users iterate on
