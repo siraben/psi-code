@@ -473,3 +473,78 @@ The flake is the canonical reproducer: `nix build .#psi-amigaos`
 then `nix run .#amitools -- vamos -- result/bin/psi --eval EXPR`
 on any Linux host. No ROMs, no manual tarball pulls, fully
 reproducible from git.
+
+## Phase 7 — embedded Lua modules
+
+`psi --print` now runs the real `psi.prompt.handle_print` from
+`lua/psi/prompt.lua` inside the m68k binary. **No filesystem
+access** — every Lua module is baked into the executable.
+
+### Pieces added
+
+- `amigaos/scripts/embed_lua_raw.c` — host tool. Same output
+  schema as `scripts/embed_lua.c` (the `psi_embedded_lua` struct
+  with `name`/`src`/`len`/`raw_len`) but emits raw byte arrays
+  with `len == raw_len` so the runtime can skip zlib. The m68k
+  binary doesn't need libz.
+- `embed-lua-raw` derivation in `flake.nix` — host build of
+  the above. Runs at build time.
+- `psi-amigaos` derivation now bundles 19 Lua modules (boot.lua
+  + lua/psi/*.lua) by piping them through `embed_lua_raw` then
+  cross-compiling the resulting C array with vbcc.
+- `amigaos/psi-shim/main.c` — installs a custom searcher into
+  `package.searchers[2]` mirroring `psi_vm_embedded_searcher` in
+  `src/lua/vm.c` (minus inflation). Stubs out the C primitives
+  the bundled `psi.prompt` needs (`psi.version`, `psi.cwd`,
+  `psi.session_message_count`, etc.) since those normally come
+  from `vm.c`'s PSI_REG block.
+
+### Gotchas
+
+19. **vbcc rejects implicit `strdup`.** Either `string.h` doesn't
+    expose the prototype or vbcc's strict mode treats it as int-
+    returning. `error 39: invalid types for assignment` on
+    `char *p = strdup(s);`. Fix: hand-rolled `psi_strdup` using
+    `malloc` + `memcpy`.
+
+20. **`argv` storage isn't stable** on AmigaOS the way it is on
+    POSIX. vbcc's `aos68k` startup parses the DOS command line
+    into argv, but the underlying buffer is reused once dos.library
+    activity (or Lua's io setup) advances. By the time a function
+    deep in a Lua call uses `argv[2]`, the bytes are gone.
+    Symptom: `lua_pushstring(L, argv[2])` pushed an empty string;
+    Lua received `""` for any arg called late in main.
+    Fix: snapshot `argv[1]` and `argv[2]` to heap copies (`psi_strdup`)
+    immediately at top of main, before any other allocation.
+
+21. **`embed_lua_raw` byte arrays compile slowly.** A 200 KB
+    array of `0x..,` literals takes vbcc several seconds to parse
+    — much slower than gcc on the same input. Mitigation: drop
+    `-O=1` to `-O=0` for the `embedded_lua.o` step; the bytes
+    aren't code so optimisation buys nothing.
+
+### Demo
+
+```
+$ result-tools/bin/vamos -- result/bin/psi --version
+psi 0.1.0 (AmigaOS m68k, Lua Lua 5.4, embedded modules)
+
+$ result-tools/bin/vamos -- result/bin/psi --print "Hello AmigaOS"
+psi bootstrap online
+version: 0.1.0 (AmigaOS)
+session-messages: 0
+prompt: Hello AmigaOS
+
+$ result-tools/bin/vamos -- result/bin/psi --eval "_VERSION"
+Lua 5.4
+```
+
+That `psi bootstrap online …` block is `lua/psi/prompt.lua`'s
+`M.handle_print` running inside a 381 KB m68k AmigaOS HUNK
+binary on a userspace 68k emulator. The whole chain — embedder
+→ vbcc → vlink → vamos → Musashi → Lua VM → embedded Lua module
+→ stdout — is reproducible from `nix build`.
+
+Next: Phase 8 (process spawning) so tools like `bash` / `grep`
+can actually do something, then Phase 9 (vamos host-bridge for
+HTTP).

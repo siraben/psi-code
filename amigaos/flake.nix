@@ -464,17 +464,63 @@ EOF
         };
 
         # ----------------------------------------------------------
-        # psi-amigaos — v1 entry point: Lua eval / print only. No
-        # HTTP, no TUI, no provider. Validates the cross-toolchain +
-        # Lua stack end-to-end on m68k under vamos. ~140 LOC of C.
+        # embed-lua-raw — host-native build of our zlib-free embedder.
+        # Runs at build time to bake `lua/psi/*.lua` into a C array
+        # consumed by psi-amigaos. The standard scripts/embed_lua.c
+        # uses zlib, which we don't want in the m68k cross-build.
+        # ----------------------------------------------------------
+        embed-lua-raw = pkgs.stdenv.mkDerivation {
+          pname = "embed-lua-raw";
+          version = "0.1.0";
+          src = ./scripts;
+
+          buildPhase = ''
+            runHook preBuild
+            mkdir -p inc/psi
+            cat > inc/psi/embedded_lua.h <<'EOF'
+            #ifndef PSI_EMBEDDED_LUA_H
+            #define PSI_EMBEDDED_LUA_H
+            #include <stddef.h>
+            struct psi_embedded_lua {
+                const char *name;
+                const unsigned char *src;
+                size_t len;
+                size_t raw_len;
+            };
+            extern const struct psi_embedded_lua psi_embedded_lua_table[];
+            #endif
+            EOF
+            cc -O2 -Iinc -o embed_lua_raw embed_lua_raw.c
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            mkdir -p $out/bin
+            cp embed_lua_raw $out/bin/
+          '';
+        };
+
+        # ----------------------------------------------------------
+        # psi-amigaos — v1.1 entry point with embedded Lua bootstrap.
+        # eval / print / version. Bakes lua/psi/*.lua into the binary
+        # via embed-lua-raw so require("psi.prompt") etc. resolve
+        # without a filesystem.
         # ----------------------------------------------------------
         psi-amigaos = pkgs.stdenv.mkDerivation {
           pname = "psi-amigaos";
           version = "0.1.0";
 
-          src = ./psi-shim;
+          # We need both the C shim (./psi-shim) and the Lua sources
+          # (../lua/). Compose them into a synthetic source root.
+          src = pkgs.runCommand "psi-amigaos-src" {} ''
+            mkdir -p $out/psi-shim $out/lua/psi $out/include/psi
+            cp ${./psi-shim}/main.c $out/psi-shim/
+            cp ${../lua}/boot.lua $out/lua/
+            cp ${../lua/psi}/*.lua $out/lua/psi/
+            cp ${./psi-shim}/../scripts/../scripts/embedded_lua_template.h $out/include/psi/embedded_lua.h 2>/dev/null || true
+          '';
 
-          nativeBuildInputs = [ amiga-toolchain ];
+          nativeBuildInputs = [ amiga-toolchain embed-lua-raw ];
 
           dontConfigure = true;
           dontPatch = true;
@@ -482,10 +528,57 @@ EOF
           buildPhase = ''
             runHook preBuild
             export VBCC=${amiga-toolchain}
-            vc +aos68k -O=1 -DLUA_USE_C89 \
+
+            # Generate include/psi/embedded_lua.h that the shim needs.
+            mkdir -p include/psi
+            cat > include/psi/embedded_lua.h <<'EOF'
+            #ifndef PSI_EMBEDDED_LUA_H
+            #define PSI_EMBEDDED_LUA_H
+            #include <stddef.h>
+            struct psi_embedded_lua {
+                const char *name;
+                const unsigned char *src;
+                size_t len;
+                size_t raw_len;
+            };
+            extern const struct psi_embedded_lua psi_embedded_lua_table[];
+            #endif
+            EOF
+
+            # Bake the Lua modules. Bundle every file under lua/.
+            ${embed-lua-raw}/bin/embed_lua_raw \
+              lua/boot.lua \
+              lua/psi/prelude.lua \
+              lua/psi/records.lua \
+              lua/psi/ansi.lua \
+              lua/psi/diff.lua \
+              lua/psi/context.lua \
+              lua/psi/events.lua \
+              lua/psi/platform.lua \
+              lua/psi/sched.lua \
+              lua/psi/session.lua \
+              lua/psi/tool_registry.lua \
+              lua/psi/tool_shell.lua \
+              lua/psi/tools.lua \
+              lua/psi/render.lua \
+              lua/psi/markdown.lua \
+              lua/psi/prompt.lua \
+              lua/psi/prompt_templates.lua \
+              lua/psi/commands.lua \
+              lua/psi/modes.lua \
+              lua/psi/tui.lua \
+              > embedded_lua.c
+
+            # Build the embedded data + the shim, link statically
+            # against liblua.a. vbcc accepts unsigned-char arrays
+            # fine; large literal byte arrays compile a bit slow but
+            # work.
+            vc +aos68k -O=0 -DLUA_USE_C89 -Iinclude \
+                -c -o embedded_lua.o embedded_lua.c
+            vc +aos68k -O=1 -DLUA_USE_C89 -Iinclude \
                 -I${lua-amigaos}/include \
-                -c -o main.o main.c
-            vc +aos68k -o psi main.o \
+                -c -o main.o psi-shim/main.c
+            vc +aos68k -o psi main.o embedded_lua.o \
                 ${lua-amigaos}/lib/liblua.a \
                 -lmieee -lamiga
             runHook postBuild
@@ -497,7 +590,7 @@ EOF
           '';
 
           meta = {
-            description = "psi v1 entry point for AmigaOS m68k (eval / print only)";
+            description = "psi v1.1 entry point for AmigaOS m68k (embedded Lua)";
             license = pkgs.lib.licenses.mit;
             platforms = pkgs.lib.platforms.unix;
           };
@@ -507,7 +600,7 @@ EOF
         packages = {
           inherit vasm-m68k vlink vbcc-m68k vbcc-target-m68k-amigaos
                   amiga-toolchain machine68k amitools lua-amigaos
-                  psi-amigaos;
+                  embed-lua-raw psi-amigaos;
           default = amiga-toolchain;
         };
 
