@@ -279,7 +279,9 @@ job is turn execution and session-correct event emission.
 
 ## Tool system
 
-Tools are registered in Lua and dispatched through a common registry.
+Tools are registered in Lua and dispatched through a common registry. Built-in
+tools live as one module per tool under `lua/psi/tools/`; `lua/psi/tools.lua`
+only wires those modules into the registry and re-exports the registry surface.
 
 The tool layer owns:
 
@@ -287,6 +289,7 @@ The tool layer owns:
 - hookable dispatch (`before` / `after`)
 - structured result records
 - serialization for mutation-sensitive tools when the target is known
+- portable path resolution and filesystem helpers for read/write/listing tools
 - live progress forwarding for long-running shell/process tools
 
 The shell-facing tools should stream incremental progress without buffering the

@@ -55,6 +55,7 @@ can replace any one bit and keep the rest.
 | Endianness assumptions                | ✅ none|
 | `sizeof(long)` assumptions            | ✅ none|
 | Hardcoded paths                       | only `/bin/sh` and `/dev/null` (TUI only) |
+| Lua shelling out for filesystem work  | avoided for built-in read/write/listing, sessions, prompt templates, and extensions; path joins, parent dirs, recursive mkdir, file type, and directory listing are C-backed primitives |
 | `errno` constants beyond C89 set      | `EAGAIN`, `EWOULDBLOCK`, `EINTR` — all POSIX, all universally present |
 | `gettimeofday` (POSIX-2001-obsoleted) | one site in `http_async.c` for `pthread_cond_timedwait` deadline; pthread is already required there, so the dependency is fine where it sits |
 | `nanosleep`                           | POSIX-1b; universal on modern Unices |

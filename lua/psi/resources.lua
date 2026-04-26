@@ -29,7 +29,7 @@ function M.context_files()
   local home = os.getenv("HOME")
   if home and home ~= "" then
     for _, name in ipairs(CONTEXT_FILENAMES) do
-      add_context(found, prelude.path_join(home, ".config/psi/" .. name), "global")
+      add_context(found, prelude.path_join(prelude.path_join(home, ".config/psi"), name), "global")
     end
   end
 
