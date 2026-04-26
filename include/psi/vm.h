@@ -10,6 +10,7 @@ struct psi_vm {
     lua_State *L;
     const char *boot_file;
     struct psi_host_context host;
+    int tui_active;
     int tui_tick_callback_ref;
     int tui_tool_progress_callback_ref;
 };
@@ -17,6 +18,7 @@ struct psi_vm {
 int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *output, FILE *error_output);
 void psi_vm_destroy(struct psi_vm *vm);
 void psi_vm_bind_session(struct psi_vm *vm, struct psi_session *session);
+void psi_vm_set_tui_active(struct psi_vm *vm, int active);
 int psi_vm_eval_to_string(struct psi_vm *vm, const char *expression, char **output_text);
 int psi_vm_call_string_procedure(struct psi_vm *vm, const char *procedure_name, const char *argument, char **output_text);
 int psi_vm_call_procedure0_to_string(struct psi_vm *vm, const char *procedure_name, char **output_text);

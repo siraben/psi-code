@@ -2,12 +2,20 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#if PSI_ENABLE_TUI
 #include <ncurses.h>
+#endif
 #include <lua.h>
 #include "psi/abort.h"
 #include "psi/runtime.h"
 #include "psi/session.h"
 #include "psi/vm.h"
+
+#ifndef PSI_ENABLE_TUI
+#define PSI_ENABLE_TUI 0
+#endif
+
+#if PSI_ENABLE_TUI
 
 static int psi_tui_init_colors(void) {
     if (!has_colors()) {
@@ -101,10 +109,22 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
     set_escdelay(25);
     psi_tui_init_colors();
 
+    psi_vm_set_tui_active(&vm, 1);
     status = psi_tui_run_lua(&vm, options);
+    psi_vm_set_tui_active(&vm, 0);
 
     endwin();
     psi_vm_destroy(&vm);
     psi_session_free(&session);
     return status;
 }
+
+#else
+
+int psi_run_tui_mode(const struct psi_cli_options *options) {
+    PSI_UNUSED(options);
+    fprintf(stderr, "TUI mode is not compiled in\n");
+    return PSI_STATUS_ERROR;
+}
+
+#endif
