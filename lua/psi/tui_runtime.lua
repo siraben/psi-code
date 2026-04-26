@@ -945,10 +945,21 @@ local function fire_turn_event(state, event, payload)
   end
 end
 
+local function after_turn_payload(reply, assistant_streamed)
+  return {
+    text = reply or "",
+    ["assistant-streamed"] = not not assistant_streamed,
+  }
+end
+
 local function run_turn(state, line)
+  local assistant_streamed = false
   local observer = {
     on_assistant_text_delta = function(text)
       observer_text_delta(state, text)
+      if type(text) == "string" and text ~= "" then
+        assistant_streamed = true
+      end
     end,
     on_tool_call = function(id, name, input_json)
       observer_tool_call(state, id, name, input_json)
@@ -978,15 +989,12 @@ local function run_turn(state, line)
   if not ran then
     add_entry(state, "error", reply or "agent turn failed")
     set_status(state, "agent turn failed", true)
-    fire_turn_event(state, "after-turn", { text = "", ["assistant-streamed"] = false })
+    fire_turn_event(state, "after-turn", after_turn_payload("", false))
     session.save()
     return false
   end
 
-  fire_turn_event(state, "after-turn", {
-    text = reply or "",
-    ["assistant-streamed"] = true,
-  })
+  fire_turn_event(state, "after-turn", after_turn_payload(reply, assistant_streamed))
 
   if not ok then
     add_entry(state, "error", reply ~= "" and reply or "provider request failed")
@@ -1286,9 +1294,6 @@ local function bootstrap_session(opts)
     if not ok then
       return false, err
     end
-    if psi.session_message_count() == 0 then
-      session.announce_start()
-    end
     return true
   end
 
@@ -1361,6 +1366,14 @@ function M._debug_input_lines(input, cursor, width, prefix_first, prefix_rest)
     cursor_line = cursor_line,
     cursor_col = cursor_col,
   }
+end
+
+function M._debug_bootstrap_session(opts)
+  return bootstrap_session(opts or {})
+end
+
+function M._debug_after_turn_payload(reply, assistant_streamed)
+  return after_turn_payload(reply, assistant_streamed)
 end
 
 return M

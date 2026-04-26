@@ -377,6 +377,24 @@ def t_session_lifecycle(psi: Psi):
                     "lifecycle events fire in order")
 
 
+@test("events/tui_bootstrap_load_fires_single_session_start")
+def t_tui_bootstrap_single_session_start(psi: Psi):
+    path = psi.tmp / "empty-session.jsonl"
+    path.write_text("")
+    out = psi.eval(
+        f'local path = {json.dumps(str(path))}\n'
+        + 'local count = 0\n'
+        + 'psi.events.on("session-start", function()\n'
+        + '  count = count + 1\n'
+        + 'end)\n'
+        + 'local ok, err = require("psi.tui_runtime")._debug_bootstrap_session({\n'
+        + '  session_file = path,\n'
+        + '})\n'
+        + 'return tostring(ok) .. "|" .. tostring(err) .. "|" .. tostring(count)'
+    )
+    assert_equals(out.strip(), "true|nil|1", "single session-start on bootstrap load")
+
+
 @test("prompt/set_active_filters_system_prompt")
 def t_set_active_prompt(psi: Psi):
     """set_active must also filter the system-prompt "Available tools"
@@ -766,6 +784,18 @@ def t_render_events(psi: Psi):
         'return table.concat(require("psi.render").events(), ",")')
     for ev in ("before-turn", "tool-call", "tool-result", "after-turn"):
         assert_contains(out, ev, f"catalog lists {ev}")
+
+
+@test("render/tui_after_turn_payload")
+def t_tui_after_turn_payload(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local a = rt._debug_after_turn_payload("", false)\n'
+        + 'local b = rt._debug_after_turn_payload("reply", true)\n'
+        + 'return tostring(a["assistant-streamed"]) .. "|" .. a.text .. "|"\n'
+        + '  .. tostring(b["assistant-streamed"]) .. "|" .. b.text'
+    )
+    assert_equals(out.strip(), "false||true|reply", "TUI after-turn payload")
 
 
 @test("introspect/embedded_source")

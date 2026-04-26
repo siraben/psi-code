@@ -1,567 +1,259 @@
 # psi architecture
 
-## 1. goals
+This document describes the runtime shape `psi` is expected to satisfy.
+It is a current-state and forward-state document only. Code and docs should
+move toward this model; migration history and compatibility notes do not
+belong here.
 
-`psi` should preserve the useful parts of `pi`'s harness model while removing
-the TypeScript-first assumptions from the implementation.
+## Design rules
 
-Primary goals:
+- Keep the host small. C exists for OS, terminal, process, filesystem, HTTP,
+  and Lua embedding boundaries.
+- Keep policy in Lua. Session orchestration, provider logic, rendering,
+  commands, layout, and tool policy belong in `lua/psi/*.lua`.
+- Keep execution single-threaded at the Lua boundary. One thread owns
+  `lua_State`; no helper thread may call into Lua.
+- Keep frontends thin. Print, REPL, and TUI are different I/O shells over the
+  same runtime.
+- Prefer append-only state. Sessions, tool events, and compaction artifacts
+  should be recorded as durable facts rather than mutable snapshots.
+- Favor explicit seams. If a behavior is host-dependent, expose a narrow
+  primitive and keep the policy above it in Lua.
+- Treat architecture docs as target behavior. New work should describe how the
+  system should work, not how older code happened to work.
 
-- keep the harness minimal and inspectable
-- make the host runtime portable C89
-- make Lua the first extension surface
-- keep host primitives in C and policy/session shape in Lua
-- make user customization cheap and progressive
-- support both old and modern toolchains
-- use Nix flakes for reproducible builds and dev shells
+## Runtime layers
 
-## 2. non-goals
+### 1. Host boundary in C
 
-The first implementation slice is not trying to ship all of `pi`.
+The C layer provides a narrow execution substrate:
 
-Not in the first milestone:
+- process bootstrap and CLI parsing
+- Lua VM creation and registration of the `psi.*` host API
+- append/read helpers for the in-memory session cache
+- filesystem primitives
+- shell/process primitives
+- HTTP streaming primitives
+- terminal primitives for `--tui`
+- abort signaling
 
-- full interactive TUI parity
-- package manager parity with npm and git package loading
-- multi-provider OAuth support
-- rich extension widgets
-- subagents
-- browser integrations
+The C layer should not own agent policy, prompt construction, provider loops,
+session semantics, rendering policy, or slash-command behavior.
 
-These are possible later, but they are not structural prerequisites.
+### 2. Lua runtime
 
-## 3. reference concepts from pi
+Lua owns the runtime model:
 
-The `pi-mono` codebase suggests a few ideas worth preserving exactly at the
-architectural level:
+- top-level mode dispatch in `lua/psi/modes.lua`
+- session loading, saving, projection, and metadata in `lua/psi/session.lua`
+- provider loops in `lua/psi/anthropic.lua`, `lua/psi/openai_compat.lua`,
+  `lua/psi/openrouter.lua`, and `lua/psi/ollama.lua`
+- cooperative scheduling in `lua/psi/sched.lua`
+- tool registry and built-in tool implementations
+- prompt assembly, context shaping, render hooks, and event hooks
+- TUI state, rendering, and key policy
 
-- one central session/runtime object
-- tree-based session history, not flat transcripts
-- a small built-in tool vocabulary
-- multiple frontends over the same core
-- summaries as first-class session artifacts
-- progressive disclosure for skills and project context
-
-In `psi`, those ideas stay. The implementation substrate changes.
-
-## 4. top-level layering
-
-`psi` is split into five layers.
+Lua is the default place to implement features unless the feature must touch
+the terminal, OS, or embedded VM boundary directly.
 
-### 4.1 host core
+### 3. Frontends
 
-The host core is written in C89 and owns:
+Frontends consume the same runtime and differ only in presentation:
 
-- memory management helpers
-- strings and collections
-- the small in-memory message array
-- filesystem/process/HTTP primitives
-- Lua VM embedding
-- runtime configuration
+- `--print` emits a single rendered response
+- `--agent` runs one streaming turn through the stdout renderer
+- `--repl` loops on line input and reuses the same agent/session pipeline
+- `--tui` renders a full-screen terminal UI through Lua-owned state
 
-The host core is not authoritative for agent policy. It provides portable
-primitives and a simple session backing store; Lua owns the durable session
-schema, provider routing, tool registry, and prompt/context projections.
+Frontends should not fork their own provider or session semantics.
 
-### 4.2 runtime layer
+## Execution model
 
-The runtime layer assembles the host core into actual modes:
+### Single owner of Lua
 
-- print mode
-- interactive mode
-- TUI mode
-- RPC mode
+`lua_State` has exactly one owner thread. All Lua code, render hooks, provider
+loops, tool hooks, and TUI state transitions execute on that thread.
 
-Each mode is only an I/O shell around the same session object.
+This rule is the core concurrency guarantee. It removes shared-memory races
+inside Lua and turns runtime concurrency into explicit cooperative
+interleaving.
 
-### 4.3 Lua VM layer
+### Helper threads and subprocesses
 
-Lua 5.4 is embedded as the extension runtime.
+The runtime may use helper execution contexts for I/O:
 
-Lua is used for:
+- `src/core/http_async.c` performs streaming HTTP work behind a pollable handle
+- `src/core/process.c` manages shell child processes behind a pollable handle
 
-- the tool registry and built-in tool implementations
-- prompt assembly helpers
-- settings and resource discovery
-- skills
-- slash commands
-- hooks (before/after tool calls, file-op tracking, render hooks)
-- optional custom tools
-- event-bus pub/sub for extensions
-- provider/model/API registry and provider loops (Anthropic streaming,
-  OpenAI-compatible/OpenRouter, Ollama)
-- v3 session JSONL formatting and loading
-- line-oriented rendering for all modes (including markdown)
-- cooperative scheduling of agent turns as coroutines
-- future summary prompt customization
+Those helpers communicate with Lua through byte buffers, status flags, and
+poll functions exposed by C. They never run Lua callbacks and never mutate Lua
+state directly.
 
-The host embeds Lua and exposes the runtime through a `psi.*` module surface
-assembled in `lua/boot.lua`. See §10 for the current module list.
+### Cooperative scheduler
 
-User code stays close to stock Lua 5.4 semantics, with host-specific
-functionality confined to the `psi.*` modules.
+`lua/psi/sched.lua` is the scheduler for agent turns and concurrent tool work.
 
-#### Concurrency model: single thread, Lua coroutines
+- `sched.run(fn, ...)` runs a turn inside a coroutine
+- yield requests such as `http`, `proc`, `sleep`, and `tick` are resolved by
+  the scheduler
+- between resumes, the scheduler calls `psi.host_tick()` so the active host can
+  keep making progress
 
-`lua_State` is strictly single-threaded and that fact drives the
-whole host design. Rather than fight it, psi commits to a single OS
-thread per process and expresses "do work while the UI stays
-responsive" through Lua coroutines on top of non-blocking C
-primitives.
+In `--tui`, `psi.host_tick()` lets the UI keep pumping input and redraw while a
+provider stream or shell process is in flight. In non-TUI modes, the same
+coroutine logic runs without a UI loop.
 
-Two C helpers make this possible:
-
-- `src/core/http_async.c` runs `curl_easy_perform` on an internal
-  helper pthread, enqueues chunks into a mutex-protected buffer, and
-  exposes `psi_http_stream_begin / _poll / _finish`. The helper
-  thread never touches Lua — it only pushes raw bytes.
-- `src/core/process.c` fork/execs the shell command and reads stdout
-  non-blockingly, exposing the same begin / poll / finish triple for
-  `psi_process_*`. The blocking `psi_process_run_shell` is now a
-  thin wrapper that drives the async state machine in a tight loop.
+### Concurrent tools
 
-`lua/psi/sched.lua` wraps every agent turn in a coroutine. Each
-cooperative yield (`sched.http_poll`, `sched.proc_poll`,
-`sched.sleep_ms`) hands a small request table back to the driver;
-between resumes the driver calls `psi.host_tick`, which the TUI
-uses to run one iteration of its own event loop (non-blocking
-getch → input dispatch → redraw when dirty). Because all of this
-happens on the single thread that owns `lua_State`, the main
-redraw path is free to call Lua (markdown, status line, etc.)
-without any race.
+Providers may emit multiple tool calls in one assistant turn. The runtime runs
+those tool calls concurrently through `sched.run_all(...)`.
 
-All the C-side duplicates that existed to work around the old
-worker-thread model — `psi_tui_footer_lines` (C status formatting),
-`psi_tui_draw_assistant_line` (C markdown parser), the event queue
-/ mutex / condvar — have been deleted. The TUI redraws via
-`psi.tui_layout.status_line` + `psi.tui_layout.footer_hint` +
-`psi.tui_layout.input_layout` + `psi.markdown.render_line`, fed
-through a small ANSI-escape FSM that maps `\e[Nm` codes to ncurses
-attrs.
+Concurrency here means cooperative interleaving on the one Lua thread, plus any
+underlying subprocess or HTTP activity driven by pollable handles. There are no
+Lua data races, but there can be real-world side-effect races if two tools
+touch the same external resource.
 
-Non-TUI modes (print, REPL, `--agent`, `--eval`, `--compact`) use
-the same coroutine driver but install no tick hook, so
-`psi.host_tick` is a no-op for them; they run the turn to completion
-with cooperative yields internally but no UI interleaving.
+Current discipline:
 
-### 4.4 provider layer
+- read/search/process style tools can run concurrently
+- file mutation tools that know their target path should serialize that target
+- tools with arbitrary side effects must provide their own serialization policy
+  or accept the consequences of parallel execution
 
-The provider layer is Lua policy over narrow host HTTP primitives.
+The runtime should preserve concurrency where it is safe and narrow it where
+the side effects are ambiguous.
 
-It should not know about TUI details, slash commands, or session files.
-It should only know:
+### Cancellation
 
-- how to stream or complete a turn
-- which tool schema format is needed
-- how usage and stop reasons are reported
-- which API adapter and compatibility flags apply to a model/provider
+Cancellation is modeled as a shared abort signal stored in the host context and
+observed from Lua through `abort_check` / `psi.is_aborted()`.
 
-### 4.5 frontend layer
+- frontends trigger cancellation through host primitives
+- provider loops poll the signal at safe boundaries
+- async process and HTTP helpers honor the same signal
 
-Frontends render host events and send host commands.
+Cancellation must stop future work, preserve session consistency, and leave the
+runtime in a state where the next turn can start normally.
 
-The frontend should never mutate the session model directly.
+## TUI architecture
 
-## 5. core runtime object
+### Ownership split
 
-The central host object in `psi` is `psi_runtime`.
+The full-screen TUI is Lua-owned.
 
-It owns:
+Lua owns:
 
-- current configuration
-- current provider/model selection
-- current session
-- current embedded Lua VM
-- mode-specific service handles
-
-Conceptually this is the C host for a Lua-side `AgentSession`-like runtime.
-The C object is deliberately smaller than pi's `AgentSession`; Lua modules
-provide the session manager, provider registry, resources, settings, tools,
-and orchestration.
+- transcript state
+- input buffer and cursor state
+- scroll state
+- session replay into visible entries
+- keybinding policy
+- multiline wrapping policy
+- status/footer content
+- render passes and cursor placement decisions
+- turn orchestration while the UI is active
 
-Proposed shape:
+C owns only the terminal boundary:
 
-```c
-struct psi_runtime {
-    struct psi_config config;
-    struct psi_session session;
-    struct psi_vm vm;
-};
-```
+- `ncurses` bootstrap and teardown
+- key normalization from terminal escape sequences to semantic keys
+- line drawing primitives
+- cursor visibility/placement primitives
+- screen clear/refresh primitives
+- terminal size queries
+- suspend support
 
-The runtime is long-lived and mode-agnostic. The policy surface lives under
-`lua/psi/*.lua`.
+### TUI module boundaries
 
-## 6. message model
-
-`psi` should keep an explicit message union instead of flattening everything
-into provider-native chat messages.
+- `src/runtime/tui_mode.c` bootstraps ncurses and delegates to Lua mode
+- `src/lua/vm.c` exposes the `psi.tui_*` host primitives
+- `lua/psi/tui_runtime.lua` owns the runtime state machine for `--tui`
+- `lua/psi/tui.lua` maps semantic keys to edit/navigation actions
+- `lua/psi/tui_layout.lua` owns layout policy such as prefixes, footer text,
+  and row caps
 
-Required message kinds:
+The intended rule is simple: C reports terminal facts and performs terminal
+drawing; Lua decides what the interface means and what the screen should say.
 
-- user
-- assistant
-- tool-call
-- tool-result
-- bash-execution
-- custom
-- branch-summary
-- compaction-summary
+## Sessions and lifecycle events
 
-The Lua session body is the source of truth. The C message array is a compact
-runtime cache exposed to modes and the embedded VM. Provider requests are
-projections.
+Sessions are append-only JSONL logs with typed records. The runtime uses them
+as the durable source of truth for conversation state, tool activity,
+compaction summaries, and session metadata.
 
-This is important because:
+Lifecycle guarantees:
 
-- persistence should be stable across providers
-- TUI and RPC need the same event source
-- summaries and host artifacts must survive model changes
+- a loaded or freshly-created session emits one `session-start`
+- a shutting-down frontend emits one `session-shutdown`
+- every frontend should use the same lifecycle semantics
 
-## 7. session model
+Turn/render guarantees:
 
-Sessions use the same conceptual model as `pi` where practical:
+- `before-turn` reflects the user prompt about to run
+- `tool-call` and `tool-result` reflect concrete tool activity
+- `after-turn["assistant-streamed"]` is true only when assistant text was
+  actually observed during the turn
 
-- append-only event log on disk
-- typed JSONL entries with `id` and `parentId`
-- current active branch stored in the in-memory order
-- fork/clone support over the current active branch
+Extensions should be able to rely on those events without needing host-specific
+special cases.
 
-Current on-disk format:
+## Provider model
 
-- newline-delimited JSON
-- first record is a session header
-- later records are typed entries
-- version 3, compatible with pi's `custom_message` rename
+Provider modules implement a shared contract:
 
-Session entry families:
+- accept user text, model choice, token limits, observer callbacks, and abort
+  checks
+- stream assistant text and reasoning deltas through the observer
+- collect tool calls from the provider protocol
+- dispatch tools through the shared tool runtime
+- append durable session records
+- return a final success flag plus assistant text
 
-- message entries
-- configuration changes
-- branch summary entries
-- compaction entries
-- labels and metadata
-- extension/custom persistence entries and custom model-context messages
+Provider code should stay unaware of frontend layout or terminal concerns. Its
+job is turn execution and session-correct event emission.
 
-Interactive tree navigation (`/tree`) and active-leaf branch switching are
-still future work. The schema is now shaped so those can be added without
-changing provider replay again.
+## Tool system
 
-## 8. tools
+Tools are registered in Lua and dispatched through a common registry.
 
-`psi` ships the following default set, registered in `lua/psi/tools.lua`:
+The tool layer owns:
 
-- `read`
-- `write`
-- `edit`
-- `bash`
-- `grep`
-- `find`
-- `ls`
-- `lua`
+- schemas exposed to providers
+- hookable dispatch (`before` / `after`)
+- structured result records
+- serialization for mutation-sensitive tools when the target is known
+- live progress forwarding for long-running shell/process tools
 
-Tool design rules:
+The shell-facing tools should stream incremental progress without buffering the
+same bytes repeatedly in Lua, while still producing a final structured tool
+result for the session log.
 
-- host executes tools through a small C process layer (`src/core/process.c`)
-  and host-ops surface (`src/core/host_ops.c`)
-- provider sees tool schema, not host internals
-- Lua owns the registry and can register new tools; dispatch still crosses an
-  explicit host callback boundary
-- tool results are persisted as first-class messages
-- mutation tools serialize by path so concurrent tool calls cannot race on the
-  same file
-- tool specs carry execution metadata that frontends/providers can inspect
-- before/after hooks run through `psi.tool_registry` so session provenance
-  and file-op tracking can observe every call
+## Extension surface
 
-## 9. Lua integration model
+The primary extension API is the `psi.*` Lua surface plus the event and render
+hook systems.
 
-Lua 5.4 is embedded, not treated as a sidecar process.
+Extensions should be able to:
 
-The host is responsible for:
+- subscribe to lifecycle and turn events
+- add or wrap tools
+- shape rendering output
+- inspect embedded source/docs when needed
+- customize prompts, layout policy, and context
 
-- VM lifecycle
-- loading the bootstrap file (`lua/boot.lua`)
-- loading host modules under `psi.*`
-- registering C functions and userdata for host ops, session access, and
-  process execution
-- translating host errors into Lua errors and back
+Extensions should not need to patch C for runtime policy changes.
 
-Lua is responsible for:
+## Engineering direction
 
-- tool registry contents and default tool implementations
-- declarative skill metadata
-- prompt snippets
-- policy and workflow helpers
-- slash commands, hooks, and render helpers
+Near-term direction:
 
-Important constraint from Lua's embedding model:
+- keep the C codebase below 10k lines
+- continue moving policy and orchestration upward into Lua
+- keep the TUI Lua-owned, with C restricted to terminal primitives
+- keep provider and tool concurrency explicit and reviewable
+- add tests around event ordering, session lifecycle, and concurrent tool
+  behavior whenever the runtime surface changes
 
-- host calls into Lua must go through `lua_pcall` (or an equivalent protected
-  call) so that a Lua error cannot long-jump past C frames that own resources;
-  the host should treat Lua calls as bounded transactions
-
-This means the host treats Lua calls as bounded transactions:
-
-- call into Lua under a protected frame
-- get a value or error back
-- resume host control
-
-## 10. Lua modules
-
-Currently shipped modules (see `lua/psi/`):
-
-### `psi.tools` and `psi.tool_registry`
-
-`psi.tools` holds the built-in tool implementations (`read`, `write`,
-`edit`, `bash`, `grep`, `find`, `ls`, `lua`) and exposes
-`psi.tools.dispatch_alist` for C glue. `psi.tool_registry` owns
-declarative registration, schema capture, dispatch, and before/after
-hook plumbing; extensions register new tools through it.
-
-### `psi.session`
-
-Session record construction, on-disk JSONL format (pi-compatible v3
-with parent pointers, cache markers, file-op provenance, custom entries,
-and custom model-context messages), load/save, fork, and compaction plumbing.
-
-### `psi.prompt`
-
-System prompt assembly: tool metadata, cwd, date, and context discovered by
-`psi.resources`.
-
-### `psi.providers`, `psi.anthropic`, `psi.openai_compat`, `psi.openrouter`, `psi.ollama`
-
-Provider/model/API routing and provider loops. `psi.providers` owns the
-compact registry and routing metadata; `psi.anthropic` streams the Anthropic
-Messages API; `psi.openai_compat` owns the shared OpenAI-compatible skeleton;
-`psi.openrouter` and `psi.ollama` supply provider-specific URL/header/body and
-parser details. All providers funnel deltas through the same observer
-interface so modes and extensions see a single event stream.
-
-### `psi.settings`, `psi.resources`
-
-Layered JSON settings (`~/.config/psi/settings.json` and
-`./.psi/settings.json`) plus global/project context-file discovery.
-
-### `psi.agent`
-
-Thin orchestration wrapper around the current provider — one entry
-point for "run a turn", "run compaction", etc. Keeps the mode layer
-provider-agnostic.
-
-### `psi.context`
-
-Running per-turn usage mirror. Uses `psi.providers` model metadata when
-available, then writes back into C (`psi.set_usage`) so the TUI status line
-can read input/output/cache/total/window without calling Lua.
-
-### `psi.render`, `psi.diff`, `psi.ansi`, `psi.markdown`
-
-Line-oriented render helpers used by every mode, including the TUI.
-`psi.render` owns the assistant-text and tool-call/result hooks;
-`psi.diff` produces unified-diff blocks; `psi.ansi` is the small
-colour helper; `psi.markdown` is the pure-Lua streaming gsub
-renderer that styles assistant output live and also exposes
-`render_line(line, in_code_fence)` for the TUI to call per wrapped
-line. The TUI reuses all of these via a small ANSI-escape parser
-in `src/runtime/tui_mode.c` that converts `\e[Nm` to ncurses attrs.
-
-### `psi.sched`
-
-Coroutine driver used by every agent turn. `sched.run(fn)` runs
-`fn` as a coroutine; each yield describes a wait (`http`, `proc`,
-`sleep`, `tick`) and is resolved by the C side via the
-`psi.http_stream_*` / `psi.process_*` FFIs. Between resumes,
-`psi.host_tick` gives whichever host installed a tick hook (the
-TUI today) a chance to run one iteration of its own event loop.
-This is the bridge that makes the single-threaded architecture
-described in §4.3 work.
-
-### `psi.events`
-
-Neutral pub/sub bus (subscribe / unsubscribe / emit) used by extensions
-for effects that don't fit the render hook's string-concat contract.
-Bridged from the render events in `boot.lua` so extensions don't need
-to pick a side.
-
-### `psi.commands`
-
-Slash-command registration and dispatch (`/help`, `/session`, `/fork`,
-`/compact`, `/new`, `/clear`, ...). Extensions register their own
-commands through `psi.commands.register`.
-
-### `psi.modes`
-
-Implements the non-TUI mode entry points (print, eval, system-prompt,
-agent, compact, REPL) so the C host stays a thin dispatcher.
-
-### `psi.tui`
-
-Mode-aware hint strings and small helpers used by the TUI's C drawer.
-Legacy status-line code lives here but is no longer called by the
-redraw path (see §4.3).
-
-### `psi.records`, `psi.tool_shell`, `psi.prelude`
-
-Structured tool spec / tool result / message record constructors;
-POSIX shell quoting for the `bash` tool; the prelude (UUIDs, JSON
-helpers, safe reads, UTF-16 surrogate sanitising) used by the boot
-script and every other module.
-
-The host should keep these modules intentionally narrow. Direct
-unrestricted host surfaces are easy to add later and hard to remove
-cleanly.
-
-## 11. mode architecture
-
-### 11.1 print mode
-
-Single request, single result, exit.
-
-This is the first implementation target because it exercises:
-
-- CLI parsing
-- runtime initialization
-- Lua bootstrap loading
-- provider-independent request flow
-
-### 11.2 interactive mode
-
-Interactive mode runs on top of `libedit` and reuses the streamed Anthropic
-loop.
-
-### 11.3 TUI mode
-
-`--tui` drives the same runtime under a full-screen `ncursesw` view. The TUI
-is single-threaded: the main thread owns ncurses, the single `lua_State`,
-and all transcript state. When the user presses Enter, `psi_tui_submit`
-calls `psi_tui_run_turn_sync` which invokes the agent turn directly on the
-same thread. The Lua turn runs inside a `psi.sched` coroutine; every
-cooperative yield calls `psi.host_tick`, which routes to `psi_tui_tick` —
-a small function that drains any pending input non-blockingly, dispatches
-Esc / scroll / editing keys, and repaints if the transcript is dirty. A
-UTF-8 locale is set before `initscr()` so unicode glyphs render correctly.
-
-Observer callbacks run inline from the coroutine on the same thread, so
-they mutate `state->entries[]` directly — no queue, no mutex, no
-background thread. `psi_tui_observer_text_delta` etc. just append to the
-streaming entry and set `transcript_dirty`; the next tick repaints.
-
-TUI-specific rendering calls straight into Lua from the draw path:
-
-- `psi.tui_layout.status_line` / `psi.tui_layout.footer_hint` build the
-  footer/status strings
-- `psi.tui_layout.input_layout` chooses prompt prefixes and the nominal
-  visible-row cap for the multiline editor
-- `psi.tui.handle_key` maps normalized keys (`enter`, `shift-enter`,
-  `alt-b`, `ctrl-d`, `text`, ...) to editor actions such as submit,
-  insert newline, delete word, quit, or abort
-- `psi.markdown.render_line` styles each wrapped assistant line
-- a small C ANSI-escape FSM (`psi_tui_draw_ansi_line`) converts the
-  resulting `\e[Nm` codes to ncurses attrs / color pairs
-
-The important rule is that the UI consumes host events rather than
-becoming the place where state lives. Per-entry text is C-owned (because
-the entry array is a C structure), but everything about how it renders
-is Lua.
-
-### 11.4 RPC mode
-
-RPC mode should be a JSONL protocol over stdin/stdout, reusing the same runtime
-object and event stream as interactive mode.
-
-## 12. compaction and branch summaries
-
-These should be implemented as explicit session operations, not hidden prompt
-rewrites.
-
-That implies:
-
-- summaries are persisted
-- summaries are visible to frontends
-- summaries can carry structured details
-- future Lua hooks can customize prompts or details
-
-The first slice can defer implementation, but the runtime should reserve
-message types for them now.
-
-## 13. configuration and discovery
-
-Configuration should be simple and layered:
-
-- global config
-- project config
-- CLI overrides
-
-Discovery surfaces:
-
-- `AGENTS.md` / `CLAUDE.md`
-- future `SKILL.md`
-- local Lua modules under project config paths
-
-As in `pi`, only summary metadata should be promoted into the always-on prompt.
-Detailed skill content should be loaded on demand.
-
-## 14. build and packaging
-
-Build system choices:
-
-- Nix flakes for reproducible builds and development
-- Makefile for local direct builds
-- no code generation required for the first milestone
-
-The flake should:
-
-- pull Lua 5.4 from nixpkgs
-- expose a dev shell with compiler, make, pkg-config, libedit, libcurl,
-  cJSON, and ncursesw
-- build `psi`
-
-The host should be compiled as C89 by default.
-
-## 15. incremental implementation plan
-
-### milestone 1
-
-- flake
-- Makefile
-- core C89 project layout
-- embedded Lua bootstrap
-- `--eval`
-- `--print`
-- minimal session/message data structures
-
-### milestone 2
-
-- persistent session log
-- basic `read`, `write`, `edit`, `bash`
-- first Anthropic-backed model-facing turn loop
-- provider abstraction
-
-### milestone 3
-
-- interactive mode with libedit
-- command parsing
-- project context loading
-- simple skill loading
-- ncurses-based `--tui` over the same runtime
-
-### milestone 4
-
-- tree navigation
-- compaction
-- branch summaries
-- RPC mode
-
-## 16. first implementation slice
-
-The first code in this repository should prove four things:
-
-- C89 host code builds cleanly
-- Nix can reproduce the toolchain and embedded Lua dependency
-- the host can register C functions in Lua
-- Lua bootstrap code can be called from C as part of a runtime flow
-
-That is enough to start building the real harness without committing to the
-wrong boundaries.
+The default question for new code should be: "Can this be expressed as Lua
+policy on top of a narrow host primitive?" If the answer is yes, it belongs in
+Lua.
