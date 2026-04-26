@@ -779,6 +779,21 @@ def t_tui_quits(psi: Psi):
     assert_contains(text, "psi coding agent", "TUI header")
 
 
+@test("mode/tui_multiline_prompt")
+def t_tui_multiline_prompt(psi: Psi):
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [
+            (b"", 0.5),
+            (b"alpha\x1b[27;2;13~bravo\r", 1.0),
+            (b"/quit\r", 1.0),
+        ],
+    )
+    text = strip_ansi(raw)
+    assert_contains(text, "You: alpha", "first line submitted")
+    assert_contains(text, "bravo", "second line submitted")
+
+
 @test("session/save_no_path_is_distinct")
 def t_save_no_path(psi: Psi):
     """session.save() with no path must return a distinguishable
