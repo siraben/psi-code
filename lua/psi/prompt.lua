@@ -233,65 +233,12 @@ function M.runtime_summary()
   return table.concat(buf)
 end
 
-M.HELP_TEXT = table.concat({
-  "/help            show available commands\n",
-  "/hotkeys         show keyboard shortcuts\n",
-  "/quit            exit the shell  (aliases: /q, :quit, :q)\n",
-  "/session         show current session info (id, file, model, usage)\n",
-  "/new             start a fresh session in place (alias: /clear)\n",
-  "/resume <path>   load a session file from disk\n",
-  "/import <path>   import a JSONL session (alias: /resume)\n",
-  "/name <text>     set the session display name\n",
-  "/model <spec>    switch model mid-session (e.g. ollama/llama3.1)\n",
-  "/copy            copy the last assistant message to the clipboard\n",
-  "/export [path]   write the session as markdown (default: sessions/<id>.md)\n",
-  "/compact [N]     summarize older context, keep the most recent N messages\n",
-  "/fork [N]        save the first N entries to a new session file\n",
-  "/clone [path]    duplicate the current session at its current position\n",
-  "/reload          re-run extension discovery\n",
-  "/system-prompt   print the current coding-agent system prompt",
-})
-
--- Keyboard shortcuts surfaced by /hotkeys. Keeping the canonical
--- list in Lua (rather than hard-coded in the C TUI main-loop
--- switch) lets extensions or future CLIs display it consistently.
-M.HOTKEYS_TEXT = table.concat({
-  "keyboard shortcuts\n",
-  "\n",
-  "input editing (readline-style):\n",
-  "  Ctrl-A        beginning of prompt\n",
-  "  Ctrl-E        end of prompt\n",
-  "  Ctrl-B / ←    move left one char\n",
-  "  Ctrl-F / →    move right one char\n",
-  "  Alt-B         move left one word\n",
-  "  Alt-F         move right one word\n",
-  "  Ctrl-W        delete previous word\n",
-  "  Alt-D         delete next word\n",
-  "  Alt-Backspace delete previous word (alias)\n",
-  "  Delete        forward-delete\n",
-  "  Ctrl-D        forward-delete (or EOF on empty input)\n",
-  "  Ctrl-K        kill to end of prompt\n",
-  "  Ctrl-U        kill to start of prompt\n",
-  "  Ctrl-L        redraw\n",
-  "\n",
-  "transcript navigation:\n",
-  "  ↑ / ↓          scroll one line\n",
-  "  PgUp / PgDn    scroll one page\n",
-  "\n",
-  "flow control:\n",
-  "  Enter                  submit turn\n",
-  "  Shift-Enter            insert newline (terminal-dependent)\n",
-  "  Esc                    abort current turn (while busy)\n",
-  "  Ctrl-Z                 suspend psi (use `fg` to resume)\n",
-  "  Ctrl-D on empty input  exit",
-})
-
 function M.help_text()
-  return M.HELP_TEXT
+  return require("psi.commands").help_text()
 end
 
 function M.hotkeys_text()
-  return M.HOTKEYS_TEXT
+  return require("psi.keybindings").hotkeys_text()
 end
 
 -- Bootstrap print-mode handler (called by C with the user's prompt).

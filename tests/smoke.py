@@ -525,6 +525,76 @@ def t_prompt_templates_miss(psi: Psi):
                     f"unknown slash must return nil: {out!r}")
 
 
+@test("commands/help_is_generated")
+def t_commands_help_generated(psi: Psi):
+    out = psi.eval(
+        'local c = require("psi.commands")\n'
+        + 'c.register("greet", {\n'
+        + '  description = "Say hello",\n'
+        + '  argument_hint = "<name>",\n'
+        + '  handler = function() return nil end,\n'
+        + '})\n'
+        + 'return c.help_text()'
+    )
+    assert_contains(out, "built-ins:", "built-in help section")
+    assert_contains(out, "/hotkeys", "built-in command from metadata")
+    assert_contains(out, "extensions:", "extension help section")
+    assert_contains(out, "/greet <name>", "extension argument hint")
+    assert_contains(out, "Say hello", "extension description")
+
+
+@test("commands/help_includes_prompt_templates")
+def t_commands_help_templates(psi: Psi):
+    tmpdir = psi.tmp / "help-prompts"
+    tmpdir.mkdir(exist_ok=True)
+    (tmpdir / "review.md").write_text(
+        "---\n"
+        "description: Review staged changes\n"
+        "argument-hint: [scope]\n"
+        "---\n"
+        "Review $@.\n"
+    )
+    out = psi.run(
+        "--eval",
+        'local pt = require("psi.prompt_templates")\n'
+        + 'local c = require("psi.commands")\n'
+        + 'pt.load()\n'
+        + 'return c.help_text()',
+        env_extra={"PSI_PROMPTS_DIR": str(tmpdir)},
+    ).stdout.strip()
+    assert_contains(out, "prompt templates", "template help section")
+    assert_contains(out, "/review [scope]", "template invocation")
+    assert_contains(out, "Review staged changes", "template description")
+
+
+@test("keybindings/hotkeys_and_footer_are_generated")
+def t_keybindings_generated(psi: Psi):
+    home = psi.tmp / "keybindings-home"
+    (home / ".config" / "psi").mkdir(parents=True, exist_ok=True)
+    (home / ".config" / "psi" / "keybindings.json").write_text(
+        json.dumps({
+            "app.interrupt": "ctrl-z",
+            "tui.input.newLine": "alt-d",
+            "app.redraw": "ctrl-z",
+        })
+    )
+    out = psi.run(
+        "--eval",
+        'local kb = require("psi.keybindings")\n'
+        + 'local hotkeys = kb.hotkeys_text()\n'
+        + 'local footer = kb.footer_hint(psi.json_encode({ busy = true }))\n'
+        + 'return kb.display("app.interrupt") .. "|"\n'
+        + '  .. kb.display("tui.input.newLine") .. "|"\n'
+        + '  .. tostring(hotkeys:find("Ctrl%-Z") ~= nil) .. "|"\n'
+        + '  .. footer .. "|"\n'
+        + '  .. tostring(#kb.conflicts()) .. "|"\n'
+        + '  .. tostring(kb.conflicts()[1].key)',
+        env_extra={"HOME": str(home)},
+    ).stdout.strip()
+    assert_contains(out, "Ctrl-Z|Alt-D|true|Ctrl-Z abort current turn|1|ctrl-z",
+                    "generated keybinding help/footer didn't use overrides")
+
+
 @test("tools/set_active_filters")
 def t_set_active(psi: Psi):
     out = psi.eval(
