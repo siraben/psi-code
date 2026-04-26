@@ -11,7 +11,9 @@
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
+#if PSI_ENABLE_TUI
 #include <ncurses.h>
+#endif
 
 #include <time.h>
 #include <unistd.h>
@@ -28,6 +30,10 @@
 #include "psi/process.h"
 #include "psi/session.h"
 #include "psi/vm.h"
+
+#ifndef PSI_ENABLE_TUI
+#define PSI_ENABLE_TUI 0
+#endif
 
 /* ------------------------------------------------------------------
  * Tiny OS-level helpers used by the FFI date/cwd/file_exists primitives
@@ -98,6 +104,17 @@ static const long PSI_VM_READ_FILE_MAX_BYTES  = 262144l;
 
 static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx);
 static void psi_vm_push_json_value(lua_State *L, const cJSON *v);
+
+#if PSI_ENABLE_TUI
+static int psi_vm_require_tui(lua_State *L) {
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    const struct psi_vm *vm = host != NULL ? host->vm : NULL;
+    if (vm == NULL || !vm->tui_active) {
+        return luaL_error(L, "TUI API is only available in --tui mode");
+    }
+    return 0;
+}
+#endif
 
 static void psi_vm_mark_array(lua_State *L) {
     /* Assumes target table is at top of stack. Attaches __jsontype = "array"
@@ -252,6 +269,8 @@ static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx) {
  * TUI host helpers
  * ------------------------------------------------------------------ */
 
+#if PSI_ENABLE_TUI
+
 #define PSI_VM_TUI_KEY_NAME_MAX 32
 #define PSI_VM_TUI_KEY_TEXT_MAX 8
 
@@ -279,6 +298,10 @@ static void psi_vm_copy_truncated(char *dest, size_t dest_size, const char *src)
     dest[length] = '\0';
 }
 
+#endif
+
+#if PSI_ENABLE_TUI
+
 static void psi_vm_set_registry_callback(lua_State *L, int *ref_slot, int arg_index) {
     if (ref_slot == NULL) {
         lua_pop(L, 1);
@@ -295,6 +318,8 @@ static void psi_vm_set_registry_callback(lua_State *L, int *ref_slot, int arg_in
     lua_pushvalue(L, arg_index);
     *ref_slot = luaL_ref(L, LUA_REGISTRYINDEX);
 }
+
+#endif
 
 static void psi_vm_invoke_registry_callback0(lua_State *L, int ref, const char *label) {
     if (ref == PSI_VM_NOREF) {
@@ -327,6 +352,8 @@ static void psi_vm_invoke_registry_callback2(
         lua_pop(L, 1);
     }
 }
+
+#if PSI_ENABLE_TUI
 
 static void psi_vm_tui_draw_plain_line(int row, const char *text) {
     int max_width;
@@ -648,6 +675,8 @@ static int psi_vm_tui_normalize_key(
     }
     return 0;
 }
+
+#endif
 
 /* ------------------------------------------------------------------
  * FFI primitive procedures (registered on the `psi` global table)
@@ -1597,9 +1626,12 @@ static int lfn_add_history(lua_State *L) {
     return 0;
 }
 
+#if PSI_ENABLE_TUI
+
 static int lfn_tui_size(lua_State *L) {
     int height;
     int width;
+    psi_vm_require_tui(L);
     getmaxyx(stdscr, height, width);
     lua_newtable(L);
     lua_pushinteger(L, (lua_Integer)width);
@@ -1614,6 +1646,7 @@ static int lfn_tui_poll_key(lua_State *L) {
     int ch;
     struct psi_vm_tui_key_event event;
 
+    psi_vm_require_tui(L);
     timeout_ms = luaL_optinteger(L, 1, -1);
     if (timeout_ms < -1) {
         timeout_ms = -1;
@@ -1643,7 +1676,7 @@ static int lfn_tui_poll_key(lua_State *L) {
 }
 
 static int lfn_tui_clear(lua_State *L) {
-    PSI_UNUSED(L);
+    psi_vm_require_tui(L);
     erase();
     return 0;
 }
@@ -1652,6 +1685,7 @@ static int lfn_tui_draw_line(lua_State *L) {
     lua_Integer row = luaL_checkinteger(L, 1);
     size_t len = 0;
     const char *text = lua_type(L, 2) == LUA_TSTRING ? lua_tolstring(L, 2, &len) : "";
+    psi_vm_require_tui(L);
     if (row < 1) {
         row = 1;
     }
@@ -1671,6 +1705,7 @@ static int lfn_tui_set_cursor(lua_State *L) {
     lua_Integer col = luaL_optinteger(L, 2, 1);
     int visible = lua_toboolean(L, 3);
 
+    psi_vm_require_tui(L);
     if (row < 1) row = 1;
     if (col < 1) col = 1;
     if (row > LINES) row = LINES;
@@ -1681,13 +1716,13 @@ static int lfn_tui_set_cursor(lua_State *L) {
 }
 
 static int lfn_tui_refresh(lua_State *L) {
-    PSI_UNUSED(L);
+    psi_vm_require_tui(L);
     refresh();
     return 0;
 }
 
 static int lfn_tui_suspend(lua_State *L) {
-    PSI_UNUSED(L);
+    psi_vm_require_tui(L);
     psi_vm_tui_suspend_terminal();
     return 0;
 }
@@ -1695,6 +1730,7 @@ static int lfn_tui_suspend(lua_State *L) {
 static int lfn_tui_set_tick_handler(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
     struct psi_vm *vm = host != NULL ? host->vm : NULL;
+    psi_vm_require_tui(L);
     if (vm == NULL) {
         lua_pushnil(L);
         return 1;
@@ -1707,6 +1743,7 @@ static int lfn_tui_set_tick_handler(lua_State *L) {
 static int lfn_tui_set_tool_progress_handler(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
     struct psi_vm *vm = host != NULL ? host->vm : NULL;
+    psi_vm_require_tui(L);
     if (vm == NULL) {
         lua_pushnil(L);
         return 1;
@@ -1715,6 +1752,24 @@ static int lfn_tui_set_tool_progress_handler(lua_State *L) {
     psi_vm_set_registry_callback(L, &vm->tui_tool_progress_callback_ref, 1);
     return 0;
 }
+
+#else
+
+static int lfn_tui_unavailable(lua_State *L) {
+    return luaL_error(L, "TUI support is not compiled in");
+}
+
+static int lfn_tui_size(lua_State *L) { return lfn_tui_unavailable(L); }
+static int lfn_tui_poll_key(lua_State *L) { return lfn_tui_unavailable(L); }
+static int lfn_tui_clear(lua_State *L) { return lfn_tui_unavailable(L); }
+static int lfn_tui_draw_line(lua_State *L) { return lfn_tui_unavailable(L); }
+static int lfn_tui_set_cursor(lua_State *L) { return lfn_tui_unavailable(L); }
+static int lfn_tui_refresh(lua_State *L) { return lfn_tui_unavailable(L); }
+static int lfn_tui_suspend(lua_State *L) { return lfn_tui_unavailable(L); }
+static int lfn_tui_set_tick_handler(lua_State *L) { return lfn_tui_unavailable(L); }
+static int lfn_tui_set_tool_progress_handler(lua_State *L) { return lfn_tui_unavailable(L); }
+
+#endif
 
 /* psi.host_tick() -- run one iteration of the host's event loop.
  *
@@ -2043,6 +2098,11 @@ void psi_vm_bind_session(struct psi_vm *vm, struct psi_session *session) {
     if (!vm) return;
     vm->host.session = session;
     /* host pointer in extraspace already points at vm->host from init */
+}
+
+void psi_vm_set_tui_active(struct psi_vm *vm, int active) {
+    if (!vm) return;
+    vm->tui_active = active ? 1 : 0;
 }
 
 /* ------------------------------------------------------------------

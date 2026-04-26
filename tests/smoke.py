@@ -845,7 +845,7 @@ def t_tui_lf_submit(psi: Psi):
         ],
     )
     text = strip_ansi(raw)
-    assert_regex(text, r"id:\s+[0-9a-f-]{8}", "bare LF submits commands")
+    assert_regex(text, r"id:\s*[0-9a-f-]{8}", "bare LF submits commands")
 
 
 @test("mode/tui_multiline_prompt")

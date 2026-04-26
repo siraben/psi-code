@@ -251,7 +251,10 @@ local function append_entry_text(state, index, text)
   if index == nil or not state.entries[index] or text == nil then
     return
   end
-  state.entries[index].text = (state.entries[index].text or "") .. text
+  local entry = state.entries[index]
+  entry.text = (entry.text or "") .. text
+  entry.render_cache_width = nil
+  entry.render_cache_lines = nil
   state.dirty = true
 end
 
@@ -383,21 +386,42 @@ local function tool_result_text(tool_call_id, tool_name, result)
   return format_tool_result(tool_name or "tool", result)
 end
 
-local function count_entry_lines(state, entry)
+local function entry_render_lines(state, entry)
+  if entry.render_cache_width == state.width and entry.render_cache_lines ~= nil then
+    return entry.render_cache_lines
+  end
+
+  local lines = {}
   local first_prefix, rest_prefix = entry_prefixes(entry)
   local trimmed = trim_trailing_newlines(entry.text or "")
-  local count = 0
   local prefix = first_prefix
   local cursor = 1
+  local fence_state = false
 
   while true do
     local nl = trimmed:find("\n", cursor, true)
-    local line = nl and trimmed:sub(cursor, nl - 1) or trimmed:sub(cursor)
-    local remaining = line
+    local source_line = nl and trimmed:sub(cursor, nl - 1) or trimmed:sub(cursor)
+    local source_line_is_fence = entry.kind == "assistant" and is_fence_line(source_line)
+    local line_fence_flag
+    if source_line_is_fence then
+      line_fence_flag = true
+      fence_state = not fence_state
+    else
+      line_fence_flag = fence_state
+    end
+
+    local remaining = source_line
     while true do
       local available = input_wrap_width(state.width, prefix)
       local break_index = find_break(remaining, available)
-      count = count + 1
+      local raw = remaining:sub(1, break_index)
+      lines[#lines + 1] = {
+        kind = entry.kind,
+        text = prefix .. raw,
+        raw = raw,
+        entry = entry,
+        in_code_fence = line_fence_flag,
+      }
       local next_start = break_index + 1
       while next_start <= #remaining and remaining:byte(next_start) == 32 do
         next_start = next_start + 1
@@ -415,7 +439,13 @@ local function count_entry_lines(state, entry)
     prefix = rest_prefix
   end
 
-  return count
+  entry.render_cache_width = state.width
+  entry.render_cache_lines = lines
+  return lines
+end
+
+local function count_entry_lines(state, entry)
+  return #entry_render_lines(state, entry)
 end
 
 local function total_rendered_lines(state)
@@ -581,52 +611,8 @@ local function build_render_lines(state)
       push({ kind = "blank", text = "" })
     end
 
-    local first_prefix, rest_prefix = entry_prefixes(entry)
-    local trimmed = trim_trailing_newlines(entry.text or "")
-    local prefix = first_prefix
-    local cursor = 1
-    local fence_state = false
-
-    while true do
-      local nl = trimmed:find("\n", cursor, true)
-      local source_line = nl and trimmed:sub(cursor, nl - 1) or trimmed:sub(cursor)
-      local source_line_is_fence = entry.kind == "assistant" and is_fence_line(source_line)
-      local line_fence_flag
-      if source_line_is_fence then
-        line_fence_flag = true
-        fence_state = not fence_state
-      else
-        line_fence_flag = fence_state
-      end
-
-      local remaining = source_line
-      while true do
-        local available = input_wrap_width(state.width, prefix)
-        local break_index = find_break(remaining, available)
-        local raw = remaining:sub(1, break_index)
-        push({
-          kind = entry.kind,
-          text = prefix .. raw,
-          raw = raw,
-          entry = entry,
-          in_code_fence = line_fence_flag,
-        })
-        local next_start = break_index + 1
-        while next_start <= #remaining and remaining:byte(next_start) == 32 do
-          next_start = next_start + 1
-        end
-        remaining = remaining:sub(next_start)
-        prefix = rest_prefix
-        if remaining == "" then
-          break
-        end
-      end
-
-      if not nl then
-        break
-      end
-      cursor = nl + 1
-      prefix = rest_prefix
+    for _, line in ipairs(entry_render_lines(state, entry)) do
+      push(line)
     end
 
     if entry.kind == "tool_result" and (not next_entry or next_entry.kind ~= "tool_result") then
@@ -943,6 +929,8 @@ local function observer_tool_result(state, tool_call_id, tool_name, output_json)
     entry.title = tool_name
     entry.text = text or ""
     entry.is_error = not not is_error
+    entry.render_cache_width = nil
+    entry.render_cache_lines = nil
   else
     add_entry(state, "tool_result", text or "", tool_name, is_error, tool_call_id)
   end
