@@ -19,6 +19,10 @@ RPATH_LDFLAGS ?=
 # libc — use nix pkgsStatic (musl-based) rather than a stock distro
 # gcc, since glibc can't be fully statically linked in general.
 STATIC ?= 0
+TUI ?= 1
+ANSI ?= 1
+COLOR ?= 1
+REPL_EDITLINE ?= 1
 ifeq ($(STATIC),1)
 PKG_CONFIG_FLAGS = --static
 LDFLAGS += -static
@@ -39,21 +43,34 @@ BASE_CFLAGS = $(STRICT_CFLAGS)
 pkg_cflags = $(if $(PSI_CFLAGS_$(1)),$(PSI_CFLAGS_$(1)),$(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --cflags $(2) 2>/dev/null))
 pkg_libs   = $(if $(PSI_LIBS_$(1)),$(PSI_LIBS_$(1)),$(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --libs $(2) 2>/dev/null))
 
-LOCAL_CPPFLAGS  = -Iinclude -DPSI_LUA_BOOT_FILE=\"$(LUA_BOOT_FILE)\"
+LOCAL_CPPFLAGS  = -Iinclude -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600
+LOCAL_CPPFLAGS += -DPSI_LUA_BOOT_FILE=\"$(LUA_BOOT_FILE)\"
+LOCAL_CPPFLAGS += -DPSI_ENABLE_TUI=$(TUI)
+LOCAL_CPPFLAGS += -DPSI_ENABLE_ANSI=$(ANSI)
+LOCAL_CPPFLAGS += -DPSI_ENABLE_COLOR=$(COLOR)
+LOCAL_CPPFLAGS += -DPSI_ENABLE_REPL_EDITLINE=$(REPL_EDITLINE)
 LOCAL_CPPFLAGS += $(call pkg_cflags,LUA,lua5.4)
 LOCAL_CPPFLAGS += $(call pkg_cflags,CJSON,libcjson)
+ifeq ($(REPL_EDITLINE),1)
 LOCAL_CPPFLAGS += $(call pkg_cflags,EDIT,libedit)
+endif
 LOCAL_CPPFLAGS += $(call pkg_cflags,CURL,libcurl)
 LOCAL_CPPFLAGS += $(call pkg_cflags,ZLIB,zlib)
+ifeq ($(TUI),1)
 LOCAL_CPPFLAGS += $(call pkg_cflags,NCURSES,ncursesw ncurses)
+endif
 LOCAL_CPPFLAGS += $(call pkg_cflags,ARGTABLE,argtable3)
 
 LOCAL_LDFLAGS  = $(call pkg_libs,LUA,lua5.4)
 LOCAL_LDFLAGS += $(call pkg_libs,CJSON,libcjson)
+ifeq ($(REPL_EDITLINE),1)
 LOCAL_LDFLAGS += $(call pkg_libs,EDIT,libedit)
+endif
 LOCAL_LDFLAGS += $(call pkg_libs,CURL,libcurl)
 LOCAL_LDFLAGS += $(call pkg_libs,ZLIB,zlib)
+ifeq ($(TUI),1)
 LOCAL_LDFLAGS += $(call pkg_libs,NCURSES,ncursesw ncurses)
+endif
 LOCAL_LDFLAGS += $(if $(PSI_LIBS_ARGTABLE),$(PSI_LIBS_ARGTABLE),$(or $(call pkg_libs,ARGTABLE,argtable3),-largtable3))
 LOCAL_LDFLAGS += $(if $(PSI_LIBS_PTHREAD),$(PSI_LIBS_PTHREAD),-lpthread)
 LOCAL_RPATH_LDFLAGS = $(patsubst -L%,-Wl$(comma)-rpath$(comma)%,$(filter -L%,$(LOCAL_LDFLAGS)))
