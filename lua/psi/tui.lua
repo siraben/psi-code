@@ -7,6 +7,10 @@ local prelude = require("psi.prelude")
 
 local M = {}
 
+local function action(name, arg)
+  return { action = name, arg = arg }
+end
+
 -- Status-line hooks. Extensions can register fns that return a short
 -- string appended to the TUI status line. Called on every redraw, so
 -- they must be cheap and side-effect-free. Return nil / "" to skip.
@@ -29,6 +33,75 @@ end
 
 function M.clear_status_hooks()
   status_hooks = {}
+end
+
+-- High-level TUI key policy. C normalizes terminal-specific ncurses
+-- input into semantic key names ("enter", "shift-enter", "alt-b",
+-- "ctrl-d", "text", ...), then Lua decides what that key means in the
+-- current editor state. The host still owns the terminal mechanics:
+-- raw escape parsing, cursor placement, redraw cadence, and actually
+-- mutating the input buffer.
+function M.handle_key(arg)
+  arg = type(arg) == "table" and arg or {}
+  local key = arg.key
+  local busy = not not arg.busy
+  local input_length = tonumber(arg.input_length) or 0
+  local text = arg.text or ""
+
+  if key == "text" then
+    if text ~= "" then
+      return action("insert", text)
+    end
+    return nil
+  end
+
+  if key == "enter" then
+    if not busy and input_length > 0 then
+      return action("submit")
+    end
+    return nil
+  end
+
+  if key == "shift-enter" then return action("insert", "\n") end
+  if key == "backspace" then return action("delete-backward") end
+  if key == "delete" then return action("delete-forward") end
+  if key == "ctrl-w" or key == "alt-backspace" then
+    return action("delete-word-backward")
+  end
+  if key == "alt-d" then return action("delete-word-forward") end
+  if key == "alt-b" then return action("move-word-left") end
+  if key == "alt-f" then return action("move-word-right") end
+  if key == "ctrl-k" then return action("kill-end") end
+  if key == "ctrl-u" then return action("kill-start") end
+  if key == "left" then return action("move-left") end
+  if key == "right" then return action("move-right") end
+  if key == "home" then return action("move-home") end
+  if key == "end" then return action("move-end") end
+  if key == "up" then return action("scroll", "line-up") end
+  if key == "down" then return action("scroll", "line-down") end
+  if key == "page-up" then return action("scroll", "page-up") end
+  if key == "page-down" then return action("scroll", "page-down") end
+  if key == "ctrl-l" then return action("redraw") end
+  if key == "ctrl-z" then return action("suspend") end
+
+  if key == "ctrl-d" then
+    if input_length > 0 then
+      return action("delete-forward")
+    end
+    if not busy then
+      return action("quit")
+    end
+    return nil
+  end
+
+  if key == "escape" then
+    if busy then
+      return action("abort")
+    end
+    return nil
+  end
+
+  return nil
 end
 
 local function short_id(id)
