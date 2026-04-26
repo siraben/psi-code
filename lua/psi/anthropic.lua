@@ -34,6 +34,7 @@ local MAX_TOOL_ITERATIONS = 32
 
 local function api_url()
   local base = os.getenv(BASE_URL_ENV) or BASE_URL_DEFAULT
+  if base == "" then base = BASE_URL_DEFAULT end
   if base:sub(-1) ~= "/" then
     base = base .. "/"
   end
@@ -41,6 +42,9 @@ local function api_url()
 end
 
 local function anthropic_headers(api_key)
+  if api_key == "bridge" and psi.amiga_bridge then
+    api_key = "bridge"
+  end
   return {
     "content-type: application/json",
     "anthropic-version: 2023-06-01",
@@ -52,7 +56,9 @@ local function resolve_model(m)
   if m and m ~= "" then
     return m
   end
-  return os.getenv(MODEL_ENV) or MODEL_DEFAULT
+  local env = os.getenv(MODEL_ENV)
+  if env and env ~= "" then return env end
+  return MODEL_DEFAULT
 end
 
 -- Tool specs for the API: drop prompt_snippet + prompt_guidelines,
@@ -661,6 +667,9 @@ end
 
 function M.complete_text(opts)
   local api_key = os.getenv("ANTHROPIC_API_KEY")
+  if (not api_key or api_key == "") and psi.amiga_bridge_api_key then
+    api_key = psi.amiga_bridge_api_key()
+  end
   if not api_key or api_key == "" then
     io.stderr:write("ANTHROPIC_API_KEY is not set\n")
     return false
@@ -703,6 +712,9 @@ end
 
 function M.run_turn(opts)
   local api_key = os.getenv("ANTHROPIC_API_KEY")
+  if (not api_key or api_key == "") and psi.amiga_bridge_api_key then
+    api_key = psi.amiga_bridge_api_key()
+  end
   if not api_key or api_key == "" then
     io.stderr:write("ANTHROPIC_API_KEY is not set\n")
     return false

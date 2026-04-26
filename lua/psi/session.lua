@@ -159,7 +159,11 @@ local function normalize_stop_reason(r)
 end
 
 local function unix_ms()
-  return math.floor(os.time() * 1000)
+  if not (psi and psi.amiga_bridge) then
+    return math.floor(os.time() * 1000)
+  end
+  -- Avoid large floating-point intermediates on classic AmigaOS math libraries.
+  return 0
 end
 
 local function pi_content_from_blocks(blocks)
