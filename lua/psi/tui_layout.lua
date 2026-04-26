@@ -5,7 +5,6 @@
 -- labels here so those backends can converge on the same screen shape.
 
 local prelude = require("psi.prelude")
-local settings = require("psi.settings")
 
 local M = {}
 local prompt_max_rows_override = nil
@@ -30,10 +29,9 @@ local function default_prompt_max_rows(height)
   return math.min(5, math.max(1, height - 5))
 end
 
-local function resolve_prompt_max_rows(height)
-  local configured = prompt_max_rows_override
-  if configured == nil then
-    configured = settings.get("tui.prompt.max_rows", nil)
+local function resolve_prompt_max_rows(configured, height)
+  if prompt_max_rows_override ~= nil then
+    configured = prompt_max_rows_override
   end
   return clamp_prompt_max_rows(configured, height) or default_prompt_max_rows(height)
 end
@@ -78,7 +76,7 @@ function M.input_layout(arg_json)
   local arg = prelude.safe_json_decode(arg_json, {})
   local height = math.max(12, tonumber(arg.height) or 24)
   return psi.json_encode({
-    max_rows = resolve_prompt_max_rows(height),
+    max_rows = resolve_prompt_max_rows(arg.max_rows, height),
     prefix_first = "> ",
     prefix_rest = "| ",
   })
