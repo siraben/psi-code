@@ -19,6 +19,9 @@ belong here.
   should be recorded as durable facts rather than mutable snapshots.
 - Favor explicit seams. If a behavior is host-dependent, expose a narrow
   primitive and keep the policy above it in Lua.
+- Gate host-dependent capabilities. Optional OS, terminal, and library-backed
+  behavior should compile out cleanly and report availability through
+  `psi.runtime_info()`.
 - Treat architecture docs as target behavior. New work should describe how the
   system should work, not how older code happened to work.
 
@@ -34,7 +37,9 @@ The C layer provides a narrow execution substrate:
 - filesystem primitives
 - shell/process primitives
 - HTTP streaming primitives
-- terminal primitives for `--tui`
+- terminal primitives for `--tui` when TUI support is compiled in
+- line editing through libedit when available, with a plain input fallback
+- ANSI/style/color interpretation when the active renderer supports it
 - abort signaling
 
 The C layer should not own agent policy, prompt construction, provider loops,
@@ -55,6 +60,10 @@ Lua owns the runtime model:
 
 Lua is the default place to implement features unless the feature must touch
 the terminal, OS, or embedded VM boundary directly.
+
+Lua policy must not assume that every host capability is present. It should
+check `psi.runtime_info()` or a module-level capability wrapper and degrade
+cleanly when a feature is disabled.
 
 ### 3. Frontends
 
@@ -174,6 +183,62 @@ C owns only the terminal boundary:
 
 The intended rule is simple: C reports terminal facts and performs terminal
 drawing; Lua decides what the interface means and what the screen should say.
+
+### TUI availability
+
+The TUI is an optional host capability.
+
+- `TUI=1` compiles the ncurses-backed full-screen frontend and the backing
+  `psi.tui_*` primitives
+- `TUI=0` keeps the rest of the runtime buildable without ncurses; `--tui`
+  exits with a clear error
+- even when compiled in, `psi.tui_*` primitives are guarded so non-TUI modes
+  cannot accidentally call terminal operations before ncurses is active
+
+Lua-owned TUI code should treat the host terminal as a capability, not as a
+global assumption.
+
+### ANSI and color
+
+ANSI styling is also capability-driven.
+
+- `ANSI=1` allows Lua renderers to emit SGR styling and lets the ncurses draw
+  bridge interpret those sequences
+- `ANSI=0` makes `psi.ansi` return plain text and skips ANSI parsing in the C
+  draw bridge
+- `COLOR=1` enables color SGR handling and ncurses color-pair initialization
+- `COLOR=0` disables color while still allowing non-color styles such as bold
+  or dim when ANSI support is present
+
+Render helpers should go through `lua/psi/ansi.lua` instead of hard-coding
+escape sequences. This lets dumb terminals, no-color environments, CI logs,
+and small ports all share the same rendering policy.
+
+## Portability and feature gates
+
+Build-time feature gates are part of the host boundary. They let small ports
+or constrained environments build a useful `psi` without carrying every POSIX
+or terminal dependency.
+
+Current gates:
+
+- `TUI`: full-screen ncurses frontend and `psi.tui_*` host primitives
+- `ANSI`: ANSI SGR emission and parsing
+- `COLOR`: color SGR handling and ncurses color-pair setup
+- `REPL_EDITLINE`: libedit-backed REPL input/history; falls back to plain
+  `fgets` input when disabled
+
+The architectural rule for new gates:
+
+- the Makefile flag should map to a `PSI_ENABLE_*` C define
+- unavailable dependencies should be absent from compile and link flags
+- C should return a clear error or provide a small fallback when the feature is
+  disabled
+- Lua should discover availability through `psi.runtime_info()` and degrade
+  policy rather than branching on platform names
+
+This pattern should be reused for future optional boundaries such as network,
+process tools, filesystem persistence, or embedded-asset compression.
 
 ## Sessions and lifecycle events
 
