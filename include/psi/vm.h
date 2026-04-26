@@ -25,9 +25,23 @@ int psi_vm_call_procedure0_to_string(struct psi_vm *vm, const char *procedure_na
 int psi_vm_markdown_render_line(struct psi_vm *vm, const char *text, int in_code_fence, char **output_text);
 
 /* Build the TUI status line + hint line by calling
- * psi.tui.status_line / psi.tui.footer_hint with a JSON arg table. */
+ * psi.tui_layout.status_line / psi.tui_layout.footer_hint with a
+ * JSON arg table. */
 int psi_vm_tui_status_line(struct psi_vm *vm, const char *arg_json, char **output_text);
 int psi_vm_tui_footer_hint(struct psi_vm *vm, const char *arg_json, char **output_text);
+/* Dispatch one normalized TUI key through psi.tui.handle_key and
+ * return the chosen action name/arg pair. */
+int psi_vm_tui_handle_key(
+    struct psi_vm *vm,
+    const char *key_name,
+    const char *text,
+    int busy,
+    size_t input_length,
+    size_t cursor,
+    int scroll,
+    char **action_name,
+    char **action_arg
+);
 int psi_vm_render_event_json(
     struct psi_vm *vm,
     const char *event_name,
