@@ -718,6 +718,40 @@ def t_tui_input_layout(psi: Psi):
     assert_equals(out, '5|"> "|"| "', "Lua-owned TUI input layout")
 
 
+@test("tui/input_layout_override")
+def t_tui_input_layout_override(psi: Psi):
+    out = psi.eval(
+        'local prelude = require("psi.prelude")\n'
+        + 'local layout_mod = require("psi.tui_layout")\n'
+        + 'layout_mod.set_prompt_max_rows(8)\n'
+        + 'local raw = layout_mod.input_layout(\n'
+        + '  psi.json_encode({width = 80, height = 24}))\n'
+        + 'layout_mod.set_prompt_max_rows(nil)\n'
+        + 'local layout = prelude.safe_json_decode(raw, {})\n'
+        + 'return tostring(layout.max_rows or -1)'
+    )
+    assert_equals(out, "8", "Lua override for TUI prompt rows")
+
+
+@test("tui/input_layout_settings")
+def t_tui_input_layout_settings(psi: Psi):
+    ctx = psi.tmp / "tui-layout-settings"
+    (ctx / ".psi").mkdir(parents=True, exist_ok=True)
+    (ctx / ".psi" / "settings.json").write_text(
+        json.dumps({"tui": {"prompt": {"max_rows": 7}}})
+    )
+    out = psi.run(
+        "--eval",
+        'local prelude = require("psi.prelude")\n'
+        + 'local raw = require("psi.tui_layout").input_layout(\n'
+        + '  psi.json_encode({width = 80, height = 24}))\n'
+        + 'local layout = prelude.safe_json_decode(raw, {})\n'
+        + 'return tostring(layout.max_rows or -1)',
+        cwd=ctx,
+    ).stdout.strip()
+    assert_equals(out, "7", "settings-driven TUI prompt rows")
+
+
 @test("tui/input_wrap_width")
 def t_tui_input_wrap_width(psi: Psi):
     out = psi.eval(
