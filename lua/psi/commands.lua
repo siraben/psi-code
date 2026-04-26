@@ -251,6 +251,9 @@ end
 local function cmd_export(rest)
   local path = rest ~= "" and rest or default_export_path()
   local content = render_markdown_session()
+  if not psi.mkdir_parent(path) then
+    return records.new_command_action("print", "export failed: could not create parent directory")
+  end
   local ok = psi.file_write(path, content)
   if ok then
     return records.new_command_action(

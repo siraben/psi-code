@@ -76,16 +76,90 @@ static char *psi_vm_current_cwd(void) {
     }
 }
 
+static int psi_vm_is_abs_path(const char *path) {
+    if (path == NULL || path[0] == '\0') return 0;
+    if (path[0] == '/') return 1;
+    if (isalpha((unsigned char)path[0]) && path[1] == ':' &&
+        (path[2] == '/' || path[2] == '\\')) {
+        return 1;
+    }
+    return 0;
+}
+
+static char *psi_vm_path_join(const char *base, const char *name) {
+    size_t base_len;
+    size_t name_len;
+    size_t need_sep;
+    char *out;
+
+    if (name == NULL) return base != NULL ? psi_strdup(base) : NULL;
+    if (base == NULL || base[0] == '\0' || psi_vm_is_abs_path(name) ||
+        strcmp(base, ".") == 0) {
+        return psi_strdup(name);
+    }
+    if (name[0] == '\0') return psi_strdup(base);
+
+    base_len = strlen(base);
+    name_len = strlen(name);
+    need_sep = (base[base_len - 1u] == '/' || base[base_len - 1u] == '\\') ? 0u : 1u;
+    out = (char *)malloc(base_len + need_sep + name_len + 1u);
+    if (out == NULL) return NULL;
+    memcpy(out, base, base_len);
+    if (need_sep) out[base_len] = '/';
+    memcpy(out + base_len + need_sep, name, name_len + 1u);
+    return out;
+}
+
+static char *psi_vm_expand_path(const char *path) {
+    const char *home;
+    const char *p;
+    char *out;
+
+    if (path == NULL) return NULL;
+    p = path;
+    if (p[0] == '@') p++;
+    if (p[0] != '~' || (p[1] != '\0' && p[1] != '/')) return psi_strdup(p);
+    home = getenv("HOME");
+    if (home == NULL || home[0] == '\0') return psi_strdup(p);
+    if (p[1] == '\0') return psi_strdup(home);
+    out = psi_vm_path_join(home, p + 2);
+    return out;
+}
+
+static char *psi_vm_resolve_path(const char *path) {
+    char *expanded;
+    char *cwd;
+    char *out;
+
+    expanded = psi_vm_expand_path(path);
+    if (expanded == NULL) return NULL;
+    if (psi_vm_is_abs_path(expanded)) return expanded;
+    cwd = psi_vm_current_cwd();
+    if (cwd == NULL) {
+        free(expanded);
+        return NULL;
+    }
+    out = psi_vm_path_join(cwd, expanded);
+    free(cwd);
+    free(expanded);
+    return out;
+}
+
 static char *psi_vm_parent_directory(const char *path) {
-    const char *slash;
+    size_t end;
+    size_t i;
     size_t len;
     char *out;
 
     if (path == NULL || path[0] == '\0') return psi_strdup(".");
-    slash = strrchr(path, '/');
-    if (slash == NULL) return psi_strdup(".");
-    if (slash == path) return psi_strdup("/");
-    len = (size_t)(slash - path);
+    end = strlen(path);
+    while (end > 1u && (path[end - 1u] == '/' || path[end - 1u] == '\\')) end--;
+    i = end;
+    while (i > 0u && path[i - 1u] != '/' && path[i - 1u] != '\\') i--;
+    if (i == 0u) return psi_strdup(".");
+    while (i > 1u && (path[i - 1u] == '/' || path[i - 1u] == '\\')) i--;
+    if (i == 1u && (path[0] == '/' || path[0] == '\\')) return psi_strdup("/");
+    len = i;
     out = (char *)malloc(len + 1u);
     if (out == NULL) return NULL;
     memcpy(out, path, len);
@@ -97,6 +171,15 @@ static int psi_vm_file_exists(const char *path) {
     struct stat st;
     if (path == NULL || path[0] == '\0') return 0;
     return stat(path, &st) == 0 ? 1 : 0;
+}
+
+static const char *psi_vm_file_type_name(const char *path) {
+    struct stat st;
+    if (path == NULL || path[0] == '\0') return NULL;
+    if (stat(path, &st) != 0) return NULL;
+    if (S_ISDIR(st.st_mode)) return "directory";
+    if (S_ISREG(st.st_mode)) return "file";
+    return "other";
 }
 
 static int psi_vm_mkdir_one(const char *path) {
@@ -113,31 +196,38 @@ static int psi_vm_mkdir_one(const char *path) {
 }
 
 static int psi_vm_mkdir_p(const char *path) {
-    char *copy;
-    char *p;
+    char *buf;
+    size_t n;
+    size_t i;
     int status;
+    char sep;
 
     if (path == NULL || path[0] == '\0') return PSI_STATUS_ERROR;
-    copy = psi_strdup(path);
-    if (copy == NULL) return PSI_STATUS_ERROR;
+    buf = psi_strdup(path);
+    if (buf == NULL) return PSI_STATUS_ERROR;
 
     status = PSI_STATUS_OK;
-    p = copy;
-    if (p[0] == '/') p++;
-    for (; *p != '\0'; p++) {
-        if (*p == '/') {
-            *p = '\0';
-            if (copy[0] != '\0' && psi_vm_mkdir_one(copy) != PSI_STATUS_OK) {
+    n = strlen(buf);
+    while (n > 1u && (buf[n - 1u] == '/' || buf[n - 1u] == '\\')) {
+        buf[--n] = '\0';
+    }
+    i = (buf[0] == '/' || buf[0] == '\\') ? 1u : 0u;
+    for (; i < n; i++) {
+        if (buf[i] == '/' || buf[i] == '\\') {
+            sep = buf[i];
+            buf[i] = '\0';
+            if (buf[0] != '\0' && psi_vm_mkdir_one(buf) != PSI_STATUS_OK) {
                 status = PSI_STATUS_ERROR;
                 break;
             }
-            *p = '/';
+            buf[i] = sep;
+            while (i + 1u < n && (buf[i + 1u] == '/' || buf[i + 1u] == '\\')) i++;
         }
     }
-    if (status == PSI_STATUS_OK && psi_vm_mkdir_one(copy) != PSI_STATUS_OK) {
+    if (status == PSI_STATUS_OK && psi_vm_mkdir_one(buf) != PSI_STATUS_OK) {
         status = PSI_STATUS_ERROR;
     }
-    free(copy);
+    free(buf);
     return status;
 }
 
@@ -813,6 +903,100 @@ static int lfn_read_file(lua_State *L) {
     return 1;
 }
 
+static int lfn_read_file_slice(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    long offset = (long)luaL_optinteger(L, 2, 0);
+    long limit = (long)luaL_optinteger(L, 3, 2000);
+    long max_bytes = (long)luaL_optinteger(L, 4, PSI_VM_READ_FILE_MAX_BYTES);
+    FILE *f;
+    char *buffer;
+    size_t cap;
+    size_t len;
+    long line;
+    long total_lines;
+    int ch;
+    int saw_any;
+    int last_was_nl;
+    int truncated;
+    size_t next_cap;
+    char *next;
+
+    if (offset < 0) offset = 0;
+    if (limit <= 0) limit = 1;
+    if (max_bytes <= 0 || max_bytes > PSI_VM_FILE_WRITE_MAX_BYTES) {
+        max_bytes = PSI_VM_READ_FILE_MAX_BYTES;
+    }
+
+    f = fopen(path, "rb");
+    if (!f) { lua_pushnil(L); return 1; }
+    cap = 4096u;
+    buffer = (char *)malloc(cap);
+    if (!buffer) { fclose(f); return luaL_error(L, "out of memory"); }
+
+    len = 0u;
+    line = 0;
+    total_lines = 0;
+    saw_any = 0;
+    last_was_nl = 0;
+    truncated = 0;
+    while ((ch = fgetc(f)) != EOF) {
+        saw_any = 1;
+        last_was_nl = 0;
+        if (line >= offset && line < offset + limit && !truncated) {
+            if ((long)len >= max_bytes) {
+                truncated = 1;
+            } else {
+                if (len + 2u > cap) {
+                    next_cap = cap * 2u;
+                    if ((long)next_cap > max_bytes + 1l) next_cap = (size_t)max_bytes + 1u;
+                    next = (char *)realloc(buffer, next_cap);
+                    if (!next) {
+                        free(buffer);
+                        fclose(f);
+                        return luaL_error(L, "out of memory");
+                    }
+                    buffer = next;
+                    cap = next_cap;
+                }
+                buffer[len++] = (char)ch;
+            }
+        }
+        if (ch == '\n') {
+            total_lines++;
+            line++;
+            last_was_nl = 1;
+        }
+    }
+    fclose(f);
+    if (saw_any && !last_was_nl) total_lines++;
+    while (len > 0u && buffer[len - 1u] == '\n') len--;
+    buffer[len] = '\0';
+
+    lua_newtable(L);
+    lua_pushlstring(L, buffer, len);
+    lua_setfield(L, -2, "text");
+    lua_pushinteger(L, total_lines);
+    lua_setfield(L, -2, "total_lines");
+    lua_pushinteger(L, offset);
+    lua_setfield(L, -2, "offset");
+    lua_pushinteger(L, limit);
+    lua_setfield(L, -2, "limit");
+    if (offset + limit < total_lines) {
+        lua_pushinteger(L, offset + limit);
+        lua_setfield(L, -2, "next_offset");
+        lua_pushboolean(L, 1);
+    } else {
+        lua_pushnil(L);
+        lua_setfield(L, -2, "next_offset");
+        lua_pushboolean(L, truncated ? 1 : 0);
+    }
+    lua_setfield(L, -2, "truncated");
+    lua_pushboolean(L, truncated ? 1 : 0);
+    lua_setfield(L, -2, "truncated_bytes");
+    free(buffer);
+    return 1;
+}
+
 static int lfn_file_write(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
     size_t len;
@@ -855,9 +1039,48 @@ static int lfn_parent_directory(lua_State *L) {
     return 1;
 }
 
+static int lfn_path_join(lua_State *L) {
+    const char *base = luaL_checkstring(L, 1);
+    const char *name = luaL_checkstring(L, 2);
+    char *out = psi_vm_path_join(base, name);
+    if (!out) { lua_pushnil(L); return 1; }
+    lua_pushstring(L, out);
+    free(out);
+    return 1;
+}
+
+static int lfn_path_expand(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    char *out = psi_vm_expand_path(path);
+    if (!out) { lua_pushnil(L); return 1; }
+    lua_pushstring(L, out);
+    free(out);
+    return 1;
+}
+
+static int lfn_path_resolve(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    char *out = psi_vm_resolve_path(path);
+    if (!out) { lua_pushnil(L); return 1; }
+    lua_pushstring(L, out);
+    free(out);
+    return 1;
+}
+
 static int lfn_file_exists(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
     lua_pushboolean(L, psi_vm_file_exists(path) ? 1 : 0);
+    return 1;
+}
+
+static int lfn_file_type(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    const char *kind = psi_vm_file_type_name(path);
+    if (kind == NULL) {
+        lua_pushnil(L);
+    } else {
+        lua_pushstring(L, kind);
+    }
     return 1;
 }
 
@@ -1675,8 +1898,9 @@ static int lfn_session_messages(lua_State *L) {
 
 static int lfn_runtime_info(lua_State *L) {
     static const char *PRIMITIVES[] = {
-        "version", "log", "session_message_count", "read_file", "file_write",
-        "current_date", "cwd", "parent_directory", "file_exists", "list_dir",
+        "version", "log", "session_message_count", "read_file", "read_file_slice",
+        "file_write", "current_date", "cwd", "parent_directory", "path_join",
+        "path_expand", "path_resolve", "file_exists", "file_type", "list_dir",
         "mkdir_p", "mkdir_parent", "runtime_info", "session_messages",
         "process_run", "session_append", "session_clear",
         "tool_call",
@@ -2030,11 +2254,16 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("log",                   lfn_log);
     PSI_REG("session_message_count", lfn_session_message_count);
     PSI_REG("read_file",             lfn_read_file);
+    PSI_REG("read_file_slice",       lfn_read_file_slice);
     PSI_REG("file_write",            lfn_file_write);
     PSI_REG("current_date",          lfn_current_date);
     PSI_REG("cwd",                   lfn_cwd);
     PSI_REG("parent_directory",      lfn_parent_directory);
+    PSI_REG("path_join",             lfn_path_join);
+    PSI_REG("path_expand",           lfn_path_expand);
+    PSI_REG("path_resolve",          lfn_path_resolve);
     PSI_REG("file_exists",           lfn_file_exists);
+    PSI_REG("file_type",             lfn_file_type);
     PSI_REG("list_dir",              lfn_list_dir);
     PSI_REG("mkdir_p",               lfn_mkdir_p);
     PSI_REG("mkdir_parent",          lfn_mkdir_parent);

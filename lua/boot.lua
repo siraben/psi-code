@@ -26,6 +26,7 @@ do
 end
 
 psi.prelude = require("psi.prelude")
+psi.path = require("psi.path")
 psi.sched = require("psi.sched")
 psi.events = require("psi.events")
 psi.ansi = require("psi.ansi")
@@ -173,7 +174,7 @@ end
 
 local function load_extensions_from(dir)
   for _, name in ipairs(list_lua_files(dir)) do
-    local path = dir .. "/" .. name
+    local path = psi.path.join(dir, name)
     local ok, ext = pcall(dofile, path)
     if not ok then
       io.stderr:write("psi: extension " .. path .. " failed to load: " .. tostring(ext) .. "\n")
@@ -197,7 +198,7 @@ function psi.load_extensions()
   end
   local home = os.getenv("HOME")
   if home and home ~= "" then
-    load_extensions_from(home .. "/.config/psi/extensions")
+    load_extensions_from(psi.path.join(home, ".config/psi/extensions"))
   end
   load_extensions_from("./.psi/extensions")
 end

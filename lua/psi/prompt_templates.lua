@@ -156,7 +156,7 @@ end
 
 local function load_from_dir(dir)
   for _, name in ipairs(list_markdown_files(dir)) do
-    local path = dir .. "/" .. name
+    local path = prelude.path_join(dir, name)
     local raw = prelude.safe_read(path)
     if raw then
       local fm, body = parse_frontmatter(raw)
@@ -192,11 +192,11 @@ function M.load()
   end
   local xdg = os.getenv("XDG_CONFIG_HOME")
   if xdg and xdg ~= "" then
-    load_from_dir(xdg .. "/psi/prompts")
+    load_from_dir(prelude.path_join(xdg, "psi/prompts"))
   else
     local home = os.getenv("HOME")
     if home and home ~= "" then
-      load_from_dir(home .. "/.config/psi/prompts")
+      load_from_dir(prelude.path_join(home, ".config/psi/prompts"))
     end
   end
   load_from_dir("./.psi/prompts")
