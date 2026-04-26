@@ -3,7 +3,7 @@
 -- Each mode used to live as its own C function in src/runtime/print_mode.c.
 -- The C host now only inits the VM + session and delegates here; this
 -- module owns the session lifecycle, REPL loop, observer wiring, and
--- command dispatch. TUI mode stays in C for now.
+-- command dispatch.
 
 local agent = require("psi.agent")
 local prelude = require("psi.prelude")
@@ -292,6 +292,10 @@ function M.run_repl(opts)
   return true
 end
 
+function M.run_tui(opts)
+  return require("psi.tui_runtime").run(opts)
+end
+
 -- ---------- dispatcher ----------
 
 local DISPATCH = {
@@ -301,6 +305,7 @@ local DISPATCH = {
   agent = M.run_agent,
   compact = M.run_compact,
   repl = M.run_repl,
+  tui = M.run_tui,
 }
 
 function M.run(opts)
