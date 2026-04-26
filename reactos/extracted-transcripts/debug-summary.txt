@@ -1,0 +1,20 @@
+file: reactos/extracted-transcripts/host-session-8495f1f0-failed-tooluse.jsonl
+
+record 1: type=session id=8495f1f0-f951-414a-a553-dd3e058b3f01 parent=None
+  session cwd=/home/siraben/psi-coding-agent timestamp=2026-04-24T17:58:53Z
+
+record 2: type=message id=c59c29d1-d47c-45fb-a48c-b1a65cd8b285 parent=None
+  role=user model=None stop=None provider=None responseId=None
+  block 1: text='Issue three separate bash tool_use blocks: sleep 3 && echo apple ; sleep 6 && echo banana ; sleep 9 && echo cherry. Then reply done.'
+
+record 3: type=message id=90905531-f2dc-4dc8-add1-7863f77f2538 parent=c59c29d1-d47c-45fb-a48c-b1a65cd8b285
+  role=assistant model=claude-haiku-4-5 stop=toolUse provider=anthropic responseId=msg_01GnH5kLLrzkh4Zrue57tqen
+  usage={'totalTokens': 1875, 'cacheRead': 0, 'cacheWrite': 0, 'input': 1804, 'output': 71}
+  block 1: text="I'll issue three separate bash tool_use blocks as requested."
+  block 2: toolCall id=toolu_01D9VjsVGKvRD6zopZNMiC3z name=bash args={'command': 'sleep 3 && echo apple'}
+
+conclusion:
+- The log ends immediately after an assistant message with stopReason=toolUse.
+- There is no toolResult record and no final assistant record after the bash tool call.
+- That means the process/TUI exited, was killed, timed out, or failed before persisting the tool result/final turn.
+- It is not the ReactOS analog-clock run; ReactOS bridge.log shows HTTP 200s and tui-output.txt ends with CLOCK_DONE.

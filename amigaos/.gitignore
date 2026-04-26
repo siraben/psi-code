@@ -1,3 +1,6 @@
 examples/hello
 result*
 examples/echo
+full-system/generated/
+full-system/shared/
+full-system/bridge/

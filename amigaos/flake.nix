@@ -513,10 +513,12 @@ EOF
           # We need both the C shim (./psi-shim) and the Lua sources
           # (../lua/). Compose them into a synthetic source root.
           src = pkgs.runCommand "psi-amigaos-src" {} ''
-            mkdir -p $out/psi-shim $out/lua/psi $out/include/psi
+            mkdir -p $out/psi-shim $out/lua/psi $out/include/psi $out/amigaos
             cp ${./psi-shim}/main.c $out/psi-shim/
+            cp ${./psi-fsuae-client}/main.c $out/psi-fsuae-client.c
             cp ${../lua}/boot.lua $out/lua/
             cp ${../lua/psi}/*.lua $out/lua/psi/
+            cp ${./psi-http-bridge.py} $out/amigaos/psi-http-bridge.py
             cp ${./psi-shim}/../scripts/../scripts/embedded_lua_template.h $out/include/psi/embedded_lua.h 2>/dev/null || true
           '';
 
@@ -547,26 +549,7 @@ EOF
 
             # Bake the Lua modules. Bundle every file under lua/.
             ${embed-lua-raw}/bin/embed_lua_raw \
-              lua/boot.lua \
-              lua/psi/prelude.lua \
-              lua/psi/records.lua \
-              lua/psi/ansi.lua \
-              lua/psi/diff.lua \
-              lua/psi/context.lua \
-              lua/psi/events.lua \
-              lua/psi/platform.lua \
-              lua/psi/sched.lua \
-              lua/psi/session.lua \
-              lua/psi/tool_registry.lua \
-              lua/psi/tool_shell.lua \
-              lua/psi/tools.lua \
-              lua/psi/render.lua \
-              lua/psi/markdown.lua \
-              lua/psi/prompt.lua \
-              lua/psi/prompt_templates.lua \
-              lua/psi/commands.lua \
-              lua/psi/modes.lua \
-              lua/psi/tui.lua \
+              lua/boot.lua lua/psi/*.lua \
               > embedded_lua.c
 
             # Build the embedded data + the shim, link statically
@@ -581,12 +564,16 @@ EOF
             vc +aos68k -o psi main.o embedded_lua.o \
                 ${lua-amigaos}/lib/liblua.a \
                 -lmieee -lamiga
+            vc +aos68k -O=1 -o psi-fsuae psi-fsuae-client.c
             runHook postBuild
           '';
 
           installPhase = ''
-            mkdir -p $out/bin
+            mkdir -p $out/bin $out/share/psi-amigaos
             cp psi $out/bin/psi
+            cp psi-fsuae $out/bin/psi-fsuae
+            cp amigaos/psi-http-bridge.py $out/bin/psi-amiga-http-bridge
+            chmod +x $out/bin/psi-amiga-http-bridge
           '';
 
           meta = {

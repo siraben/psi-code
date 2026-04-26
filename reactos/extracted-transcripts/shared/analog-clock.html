@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Analog Clock</title>
+<style>
+  body{margin:0;height:100vh;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;
+    background:radial-gradient(#222,#000);font-family:sans-serif;color:#eee}
+  .clock{position:relative;width:300px;height:300px;border-radius:50%;
+    background:#f4f4f4;border:8px solid #333;
+    box-shadow:0 0 30px rgba(0,0,0,.7),inset 0 0 20px rgba(0,0,0,.2)}
+  .num{position:absolute;width:100%;height:100%;text-align:center;
+    font-size:22px;font-weight:bold;color:#222}
+  .num span{position:absolute}
+  .n12{top:8px;left:50%;transform:translateX(-50%)}
+  .n3{right:12px;top:50%;transform:translateY(-50%)}
+  .n6{bottom:8px;left:50%;transform:translateX(-50%)}
+  .n9{left:12px;top:50%;transform:translateY(-50%)}
+  .tick{position:absolute;left:50%;top:0;width:2px;height:10px;
+    background:#333;transform-origin:50% 150px;margin-left:-1px}
+  .hand{position:absolute;left:50%;bottom:50%;transform-origin:bottom;
+    background:#222;border-radius:4px}
+  .hour{width:6px;height:75px;margin-left:-3px}
+  .min{width:4px;height:105px;margin-left:-2px}
+  .sec{width:2px;height:120px;margin-left:-1px;background:#e33}
+  .cap{position:absolute;left:50%;top:50%;width:14px;height:14px;
+    background:#222;border-radius:50%;transform:translate(-50%,-50%);
+    box-shadow:0 0 0 3px #e33}
+  .digital{margin-top:24px;font-size:24px;letter-spacing:2px;
+    font-family:monospace}
+</style>
+</head>
+<body>
+  <div class="clock" id="clock">
+    <div class="num">
+      <span class="n12">12</span><span class="n3">3</span>
+      <span class="n6">6</span><span class="n9">9</span>
+    </div>
+    <div class="hand hour" id="h"></div>
+    <div class="hand min" id="m"></div>
+    <div class="hand sec" id="s"></div>
+    <div class="cap"></div>
+  </div>
+  <div class="digital" id="d">--:--:--</div>
+<script>
+(function(){
+  var clock=document.getElementById('clock');
+  for(var i=0;i<60;i++){
+    var t=document.createElement('div');
+    t.className='tick';
+    t.style.transform='rotate('+(i*6)+'deg)';
+    if(i%5===0)t.style.height='16px',t.style.width='3px';
+    clock.appendChild(t);
+  }
+  function p(n){return n<10?'0'+n:n}
+  function tick(){
+    var n=new Date(),h=n.getHours(),m=n.getMinutes(),s=n.getSeconds();
+    document.getElementById('h').style.transform=
+      'rotate('+((h%12)*30+m*0.5)+'deg)';
+    document.getElementById('m').style.transform=
+      'rotate('+(m*6+s*0.1)+'deg)';
+    document.getElementById('s').style.transform='rotate('+(s*6)+'deg)';
+    document.getElementById('d').textContent=p(h)+':'+p(m)+':'+p(s);
+  }
+  tick();setInterval(tick,1000);
+})();
+</script>
+</body>
+</html>

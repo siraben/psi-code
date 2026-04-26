@@ -1,0 +1,6 @@
+assistant> TUI_OK
+assistant> 
+╭─ write D:/analog-clock.html
+│ written
+╰─
+CLOCK_DONE

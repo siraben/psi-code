@@ -1,0 +1,3 @@
+Say exactly: TUI_OK
+Use the write tool to create D:/analog-clock.html. The content must be one complete self-contained HTML file under 2500 characters with CSS and JavaScript for an analog clock: centered round face, tick marks, numerals 12/3/6/9, hour/minute/second hands, and a digital time label. Do not use the cmd tool. Finish by saying exactly: CLOCK_DONE
+/exit

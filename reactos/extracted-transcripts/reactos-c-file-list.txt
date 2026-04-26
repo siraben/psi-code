@@ -1,0 +1,3848 @@
+ Volume in drive : has no label
+ Volume Serial Number is 2305-34EF
+Directory for ::/
+
+REACTOS      <DIR>     2026-04-26   5:45  ReactOS
+freeldr  sys    409088 2025-03-23  12:05 
+freeldr  ini      1577 2026-04-26   5:46 
+BOOTSECT OLD       512 2026-04-26   5:46 
+PROGRA~1     <DIR>     2026-04-26   5:46  Program Files
+DOCUME~1     <DIR>     2026-04-26   5:46  Documents and Settings
+RECYCLED     <DIR>     2026-04-25  22:52 
+pagefile sys  1609752576 2026-04-26  16:56 
+circle   c        1632 2026-04-26   9:44 
+        9 files       1 610 165 385 bytes
+
+Directory for ::/ReactOS
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+system32     <DIR>     2026-04-26   5:45 
+media        <DIR>     2026-04-26   5:45 
+FONTS        <DIR>     2026-04-26   5:45  Fonts
+bin          <DIR>     2026-04-26   5:45 
+inf          <DIR>     2026-04-26   5:45 
+MICROS~1 NET <DIR>     2026-04-26   5:45  Microsoft.NET
+RESOUR~1     <DIR>     2026-04-26   5:45  Resources
+HELP         <DIR>     2026-04-26   5:45  Help
+CONFIG       <DIR>     2026-04-26   5:45  Config
+CURSORS      <DIR>     2026-04-26   5:45  Cursors
+TEMP         <DIR>     2026-04-26   5:45  Temp
+twain_32     <DIR>     2026-04-26   5:45 
+repair       <DIR>     2026-04-26   5:45 
+WEB          <DIR>     2026-04-26   5:45  Web
+PREFETCH     <DIR>     2026-04-26   5:45  Prefetch
+security     <DIR>     2026-04-26   5:45 
+APPPATCH     <DIR>     2026-04-26   5:45  AppPatch
+winsxs       <DIR>     2026-04-26   5:45 
+3RDPARTY     <DIR>     2026-04-26   5:45  3rdParty
+vgafonts cab     22890 2025-03-23  12:05 
+NOTICE~1 TXT     12138 2026-04-26   5:45  NOTICE_for_Droid_Font.txt
+WINE_G~1 MSI  27959808 2026-04-26   5:45  wine_gecko-2.40-x86.msi
+readme   txt      2661 2026-04-26   5:45 
+hh       exe     51712 2026-04-26   5:45 
+notepad  exe    345088 2026-04-26   5:45 
+regedit  exe   1050112 2026-04-26   5:45 
+winhlp32 exe    314368 2026-04-26   5:45 
+explorer exe   1808384 2026-04-26   5:45 
+FILEBR~1 EXE     29696 2026-04-26   5:45  filebrowser.exe
+twain_32 dll     61440 2026-04-26   5:45 
+EXPLOR~1 EXE   3653632 2026-04-26   5:46  explorer_old.exe
+EXPLOR~1 XML      1116 2026-04-26   5:46  explorer-cfg-template.xml
+system   ini       421 2026-04-26   5:46 
+win      ini       116 2026-04-26   5:46 
+setuplog txt       964 2026-04-26   5:52 
+system       <DIR>     2026-04-26   5:46 
+bootstat dat       136 2026-04-26  16:56 
+INSTAL~1     <DIR>     2026-04-26   5:51  Installer
+       40 files          35 314 682 bytes
+
+Directory for ::/ReactOS/system32
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+config       <DIR>     2026-04-26   5:45 
+drivers      <DIR>     2026-04-26   5:45 
+wbem         <DIR>     2026-04-26   5:45 
+SHELLEXT     <DIR>     2026-04-26   5:45  ShellExt
+spool        <DIR>     2026-04-26   5:45 
+CATROOT      <DIR>     2026-04-26   5:45  CatRoot
+CATROOT2     <DIR>     2026-04-26   5:45  CatRoot2
+bootvid  dll     57344 2025-03-23  12:15 
+c_437    nls     66594 2025-03-23  12:05 
+c_1252   nls     66082 2025-03-23  12:03 
+kdcom    dll     36864 2025-03-23  12:15 
+l_intl   nls      4870 2025-03-20   5:48 
+ntdll    dll   1213952 2025-03-23  12:20 
+ntoskrnl exe   5201920 2025-03-23  12:09 
+hal      dll   1380352 2025-03-23  12:17 
+atactl   exe     93184 2026-04-26   5:45 
+cacls    exe    177152 2026-04-26   5:45 
+calc     exe    526336 2026-04-26   5:45 
+charmap  exe    176640 2026-04-26   5:45 
+clipbrd  exe    153088 2026-04-26   5:45 
+at       exe     95232 2026-04-26   5:45 
+attrib   exe     81920 2026-04-26   5:45 
+certutil exe     50688 2026-04-26   5:45 
+chcp     com     64000 2026-04-26   5:45 
+clip     exe     54784 2026-04-26   5:45 
+comp     exe     67584 2026-04-26   5:45 
+cscript  exe     92672 2026-04-26   5:45 
+dbgprint exe     30720 2026-04-26   5:45 
+doskey   exe     69120 2026-04-26   5:45 
+EVENTC~1 EXE    909312 2026-04-26   5:45  eventcreate.exe
+fc       exe    171008 2026-04-26   5:45 
+find     exe     76288 2026-04-26   5:45 
+fsutil   exe     56320 2026-04-26   5:45 
+help     exe    164864 2026-04-26   5:45 
+hostname exe     34304 2026-04-26   5:45 
+label    exe     70656 2026-04-26   5:45 
+lodctr   exe     27648 2026-04-26   5:45 
+mode     com    107520 2026-04-26   5:45 
+more     com    142336 2026-04-26   5:45 
+reg      exe    419328 2026-04-26   5:45 
+replace  exe    143872 2026-04-26   5:45 
+schtasks exe     51712 2026-04-26   5:45 
+sort     exe     32768 2026-04-26   5:45 
+taskkill exe     64000 2026-04-26   5:45 
+tasklist exe     72704 2026-04-26   5:45 
+timeout  exe     75264 2026-04-26   5:45 
+tree     com     59392 2026-04-26   5:45 
+where    exe     79872 2026-04-26   5:45 
+whoami   exe    102400 2026-04-26   5:45 
+wscript  exe     92672 2026-04-26   5:45 
+xcopy    exe    162304 2026-04-26   5:45 
+control  exe     66560 2026-04-26   5:45 
+ctfmon   exe     73216 2026-04-26   5:45 
+drwtsn32 exe    201728 2026-04-26   5:45 
+dxdiag   exe    404992 2026-04-26   5:45 
+extrac32 exe     49664 2026-04-26   5:45 
+findstr  exe     52224 2026-04-26   5:45 
+fltmc    exe     97280 2026-04-26   5:45 
+fontview exe    118272 2026-04-26   5:45 
+sol      exe    256512 2026-04-26   5:45 
+spider   exe    219136 2026-04-26   5:45 
+winmine  exe   1159168 2026-04-26   5:45 
+kbswitch exe     81408 2026-04-26   5:45 
+kbsdll   dll     30720 2026-04-26   5:45 
+logoff   exe     60928 2026-04-26   5:45 
+magnify  exe    132608 2026-04-26   5:45 
+mmc      exe     87040 2026-04-26   5:45 
+mplay32  exe    126464 2026-04-26   5:45 
+msconfig exe    244224 2026-04-26   5:45 
+devmgmt  exe     70656 2026-04-26   5:45 
+eventvwr exe    395264 2026-04-26   5:45 
+servman  exe    505856 2026-04-26   5:45 
+mshta    exe     34304 2026-04-26   5:45 
+mspaint  exe   1014272 2026-04-26   5:45 
+mstsc    exe    525824 2026-04-26   5:45 
+arp      exe     50176 2026-04-26   5:45 
+dwnl     exe     62464 2026-04-26   5:45 
+finger   exe     36864 2026-04-26   5:45 
+ftp      exe    146944 2026-04-26   5:45 
+ipconfig exe    251904 2026-04-26   5:45 
+net      exe    441344 2026-04-26   5:45 
+netsh    exe     78848 2026-04-26   5:45 
+netstat  exe     92672 2026-04-26   5:45 
+nslookup exe     64512 2026-04-26   5:45 
+ping     exe    114688 2026-04-26   5:45 
+route    exe     35328 2026-04-26   5:45 
+telnet   exe    940032 2026-04-26   5:45 
+tracert  exe     82432 2026-04-26   5:45 
+whois    exe     32256 2026-04-26   5:45 
+wlanconf exe     85504 2026-04-26   5:45 
+notepad  exe    345088 2026-04-26   5:45 
+osk      exe    156160 2026-04-26   5:45 
+rapps    exe   1690112 2026-04-26   5:45 
+rapps    com     33280 2026-04-26   5:45 
+clb      dll     55808 2026-04-26   5:45 
+regedt32 exe     64512 2026-04-26   5:45 
+runas    exe     65024 2026-04-26   5:45 
+sc       exe     92672 2026-04-26   5:45 
+3dtext   scr     77312 2026-04-26   5:45 
+logon    scr    262656 2026-04-26   5:45 
+sdbinst  exe     49152 2026-04-26   5:45 
+setup16  exe     33280 2026-04-26   5:45 
+shutdown exe    226304 2026-04-26   5:45 
+sndrec32 exe    227328 2026-04-26   5:45 
+sndvol32 exe    262144 2026-04-26   5:45 
+taskmgr  exe    696320 2026-04-26   5:45 
+utilman  exe     38912 2026-04-26   5:45 
+umandlg  dll     67072 2026-04-26   5:45 
+winver   exe     30720 2026-04-26   5:45 
+wordpad  exe    370688 2026-04-26   5:45 
+write    exe     59392 2026-04-26   5:45 
+wusa     exe     51712 2026-04-26   5:45 
+audiosrv exe     38912 2026-04-26   5:45 
+browser  dll     53248 2026-04-26   5:45 
+DCOMLA~1 DLL     35328 2026-04-26   5:45  dcomlaunch.dll
+dhcpcsvc dll    160256 2026-04-26   5:45 
+dnsrslvr dll     48128 2026-04-26   5:45 
+eventlog exe    114688 2026-04-26   5:45 
+netlogon dll     79872 2026-04-26   5:45 
+nfsd     exe    537088 2026-04-26   5:45 
+rpcss    exe     67584 2026-04-26   5:45 
+schedsvc dll     69632 2026-04-26   5:45 
+seclogon dll     52224 2026-04-26   5:45 
+shsvcs   dll     53248 2026-04-26   5:45 
+srvsvc   dll     73216 2026-04-26   5:45 
+svchost  exe     51712 2026-04-26   5:45 
+tcpsvcs  exe     54784 2026-04-26   5:45 
+telnetd  exe     57344 2026-04-26   5:45 
+tftpd    exe    100352 2026-04-26   5:45 
+umpnpmgr dll    128512 2026-04-26   5:45 
+w32time  dll     80896 2026-04-26   5:45 
+wkssvc   dll     68608 2026-04-26   5:45 
+wlansvc  exe     44544 2026-04-26   5:45 
+wuauserv dll     32768 2026-04-26   5:45 
+setup    exe     30208 2026-04-26   5:45 
+cmd      exe   1389056 2026-04-26   5:45 
+progman  exe    192512 2026-04-26   5:45 
+autochk  exe    350720 2026-04-26   5:45 
+bootok   exe     28672 2026-04-26   5:45 
+chkdsk   exe     72704 2026-04-26   5:45 
+diskpart exe    787456 2026-04-26   5:45 
+dllhost  exe     28672 2026-04-26   5:45 
+expand   exe     33792 2026-04-26   5:45 
+format   com    128512 2026-04-26   5:45 
+logonui  exe    220672 2026-04-26   5:45 
+lsass    exe     30208 2026-04-26   5:45 
+msiexec  exe    102400 2026-04-26   5:45 
+regsvr32 exe     69120 2026-04-26   5:45 
+rundll32 exe     67584 2026-04-26   5:45 
+runonce  exe     63488 2026-04-26   5:45 
+services exe    208384 2026-04-26   5:45 
+smss     exe    137216 2026-04-26   5:45 
+subst    exe     72704 2026-04-26   5:45 
+userinit exe    341504 2026-04-26   5:45 
+winlogon exe    273408 2026-04-26   5:45 
+dxtn     dll     35328 2026-04-26   5:45 
+libjpeg  dll    534016 2026-04-26   5:45 
+libpng   dll    528384 2026-04-26   5:45 
+libtiff  dll    824832 2026-04-26   5:45 
+libtirpc dll    267264 2026-04-26   5:45 
+libxslt  dll   2963968 2026-04-26   5:45 
+mbedtls  dll    582656 2026-04-26   5:45 
+apphelp  dll    188416 2026-04-26   5:45 
+access   cpl    439296 2026-04-26   5:45 
+appwiz   cpl    421888 2026-04-26   5:45 
+console  dll    274944 2026-04-26   5:45 
+desk     cpl    650240 2026-04-26   5:45 
+hdwwiz   cpl    382464 2026-04-26   5:45 
+hotplug  dll     86528 2026-04-26   5:45 
+inetcpl  cpl    279552 2026-04-26   5:45 
+input    dll    375808 2026-04-26   5:45 
+intl     cpl    381440 2026-04-26   5:45 
+joy      cpl    144384 2026-04-26   5:45 
+main     cpl    895488 2026-04-26   5:45 
+mmsys    cpl    839168 2026-04-26   5:45 
+ncpa     cpl     28160 2026-04-26   5:45 
+ODBCCP~1 CPL     30208 2026-04-26   5:45  odbccp32i.cpl
+OPENGL~1 CPL     79872 2026-04-26   5:45  openglcfg.cpl
+powercfg cpl    321536 2026-04-26   5:45 
+sysdm    cpl    954880 2026-04-26   5:45 
+telephon cpl     46592 2026-04-26   5:45 
+timedate cpl    376832 2026-04-26   5:45 
+usrmgr   cpl    251392 2026-04-26   5:45 
+WINED3~1 CPL     80896 2026-04-26   5:45  wined3dcfg.cpl
+d3d8thk  dll      9840 2026-04-26   5:45 
+ksuser   dll     30208 2026-04-26   5:45 
+amstream dll    227328 2026-04-26   5:45 
+d3d8     dll    259584 2026-04-26   5:45 
+d3d9     dll    326144 2026-04-26   5:45 
+D3DCOM~1 DLL    657920 2026-04-26   5:45  d3dcompiler_43.dll
+d3drm    dll    491520 2026-04-26   5:45 
+d3dx9_24 dll   1118208 2026-04-26   5:45 
+d3dx9_25 dll   1119232 2026-04-26   5:45 
+d3dx9_26 dll   1121792 2026-04-26   5:45 
+d3dx9_27 dll   1121792 2026-04-26   5:45 
+d3dx9_28 dll   1121792 2026-04-26   5:45 
+d3dx9_29 dll   1121792 2026-04-26   5:45 
+d3dx9_30 dll   1121792 2026-04-26   5:45 
+d3dx9_31 dll   1121280 2026-04-26   5:45 
+d3dx9_32 dll   1121792 2026-04-26   5:45 
+d3dx9_33 dll   1121792 2026-04-26   5:45 
+d3dx9_34 dll   1121792 2026-04-26   5:45 
+d3dx9_35 dll   1121792 2026-04-26   5:45 
+d3dx9_36 dll   1121792 2026-04-26   5:45 
+d3dx9_37 dll   1121280 2026-04-26   5:45 
+d3dx9_38 dll   1121280 2026-04-26   5:45 
+d3dx9_39 dll   1121280 2026-04-26   5:45 
+d3dx9_40 dll   1121280 2026-04-26   5:45 
+d3dx9_41 dll   1121280 2026-04-26   5:45 
+d3dx9_42 dll   1120256 2026-04-26   5:45 
+d3dx9_43 dll   1120256 2026-04-26   5:45 
+d3dxof   dll    168448 2026-04-26   5:45 
+ddraw    dll    660992 2026-04-26   5:45 
+devenum  dll    177664 2026-04-26   5:45 
+dinput   dll    272896 2026-04-26   5:45 
+dinput8  dll    273408 2026-04-26   5:45 
+dmusic   dll    185344 2026-04-26   5:45 
+dplay    dll     29184 2026-04-26   5:45 
+dplayx   dll    320512 2026-04-26   5:45 
+dpnhpast dll     43008 2026-04-26   5:45 
+dsound   dll    412672 2026-04-26   5:45 
+dxdiagn  dll    190464 2026-04-26   5:45 
+msdmo    dll     69632 2026-04-26   5:45 
+qcap     dll    325632 2026-04-26   5:45 
+qedit    dll    205824 2026-04-26   5:45 
+quartz   dll   1653248 2026-04-26   5:45 
+d3dwine  dll   2199040 2026-04-26   5:45 
+msctfime ime    394240 2026-04-26   5:45 
+kbda1    dll      6144 2026-04-26   5:45 
+kbda2    dll      6144 2026-04-26   5:45 
+kbda3    dll      6144 2026-04-26   5:45 
+kbdal    dll      6144 2026-04-26   5:45 
+kbdarme  dll      6144 2026-04-26   5:45 
+kbdarmw  dll      5632 2026-04-26   5:45 
+kbdaze   dll      6144 2026-04-26   5:45 
+kbdazel  dll      6144 2026-04-26   5:45 
+kbdbe    dll      6656 2026-04-26   5:45 
+kbdbga   dll      6144 2026-04-26   5:45 
+kbdbgt   dll      6144 2026-04-26   5:45 
+kbdblr   dll      6144 2026-04-26   5:45 
+kbdbr    dll      6656 2026-04-26   5:45 
+kbdbu    dll      6144 2026-04-26   5:45 
+kbdbur   dll      6144 2026-04-26   5:45 
+kbdcan   dll      7680 2026-04-26   5:45 
+kbdcr    dll      7168 2026-04-26   5:45 
+kbdcz    dll      6656 2026-04-26   5:45 
+kbdcz1   dll      6656 2026-04-26   5:45 
+kbdda    dll      7168 2026-04-26   5:45 
+kbddv    dll      6144 2026-04-26   5:45 
+kbdeo    dll      6144 2026-04-26   5:45 
+kbdest   dll      6144 2026-04-26   5:45 
+kbdfc    dll      6656 2026-04-26   5:45 
+kbdfi    dll      7168 2026-04-26   5:45 
+kbdfr    dll      6656 2026-04-26   5:45 
+kbdgeo   dll      6144 2026-04-26   5:45 
+kbdgerg  dll      6656 2026-04-26   5:45 
+kbdgneo  dll      6656 2026-04-26   5:45 
+kbdgr    dll      6656 2026-04-26   5:45 
+kbdgr1   dll      6656 2026-04-26   5:45 
+kbdhe    dll      6144 2026-04-26   5:45 
+kbdheb   dll      6144 2026-04-26   5:45 
+kbdhu    dll      6144 2026-04-26   5:45 
+kbdic    dll      6656 2026-04-26   5:45 
+kbdinasa dll      6144 2026-04-26   5:45 
+kbdinben dll      6144 2026-04-26   5:45 
+kbdindev dll      6144 2026-04-26   5:45 
+kbdinguj dll      6144 2026-04-26   5:45 
+kbdinmal dll      6144 2026-04-26   5:45 
+kbdir    dll      6144 2026-04-26   5:45 
+kbdit    dll      6144 2026-04-26   5:45 
+kbdjpn   dll      6144 2026-04-26   5:45 
+kbdkaz   dll      6144 2026-04-26   5:45 
+kbdkor   dll      6144 2026-04-26   5:45 
+kbdla    dll      6656 2026-04-26   5:45 
+kbdlt1   dll      6144 2026-04-26   5:45 
+kbdlv    dll      6144 2026-04-26   5:45 
+kbdmac   dll      6144 2026-04-26   5:45 
+kbdne    dll      6656 2026-04-26   5:45 
+kbdno    dll      7168 2026-04-26   5:45 
+kbdpl    dll      6144 2026-04-26   5:45 
+kbdpl1   dll      6144 2026-04-26   5:45 
+kbdpo    dll      6656 2026-04-26   5:45 
+kbdro    dll      6144 2026-04-26   5:45 
+kbdrost  dll      8192 2026-04-26   5:45 
+kbdru    dll      6144 2026-04-26   5:45 
+kbdru1   dll      6144 2026-04-26   5:45 
+kbdsf    dll      7168 2026-04-26   5:45 
+kbdsg    dll      7168 2026-04-26   5:45 
+kbdsl    dll      6656 2026-04-26   5:45 
+kbdsl1   dll      6656 2026-04-26   5:45 
+kbdsp    dll      6656 2026-04-26   5:45 
+kbdsw    dll      7168 2026-04-26   5:45 
+kbdtat   dll      6144 2026-04-26   5:45 
+kbdth0   dll      6144 2026-04-26   5:45 
+kbdth1   dll      6144 2026-04-26   5:45 
+kbdth2   dll      6144 2026-04-26   5:45 
+kbdth3   dll      6144 2026-04-26   5:45 
+kbdtuf   dll      6656 2026-04-26   5:45 
+kbdtuq   dll      6656 2026-04-26   5:45 
+kbduk    dll      6144 2026-04-26   5:45 
+kbdur    dll      6144 2026-04-26   5:45 
+kbdurs   dll      6144 2026-04-26   5:45 
+kbdus    dll      6144 2026-04-26   5:45 
+kbdusa   dll      6144 2026-04-26   5:45 
+kbdusl   dll      6144 2026-04-26   5:45 
+kbdusr   dll      6144 2026-04-26   5:45 
+kbdusx   dll      6656 2026-04-26   5:45 
+kbduzb   dll      6144 2026-04-26   5:45 
+kbdvntc  dll      6144 2026-04-26   5:45 
+kbdycc   dll      6144 2026-04-26   5:45 
+kbdycl   dll      7168 2026-04-26   5:45 
+normaliz dll     41984 2026-04-26   5:45 
+nfs41_np dll     56320 2026-04-26   5:45 
+NTDLL_~1 DLL     24576 2026-04-26   5:45  ntdll_vista.dll
+glu32    dll    964096 2026-04-26   5:45 
+opengl32 dll   1184256 2026-04-26   5:45 
+acppage  dll    285696 2026-04-26   5:45 
+cryptext dll     44032 2026-04-26   5:45 
+deskadp  dll     96768 2026-04-26   5:45 
+deskmon  dll     84480 2026-04-26   5:45 
+devcpux  dll     41472 2026-04-26   5:45 
+fontext  dll    255488 2026-04-26   5:45 
+mydocs   dll    233984 2026-04-26   5:45 
+netplwiz dll     72192 2026-04-26   5:45 
+netshell dll    660992 2026-04-26   5:45 
+NTOBJS~1 DLL    482304 2026-04-26   5:45  ntobjshex.dll
+sendmail dll    195584 2026-04-26   5:45 
+SHELLB~1 DLL   2125824 2026-04-26   5:45  shellbtrfs.dll
+stobject dll    477184 2026-04-26   5:45 
+zipfldr  dll   1181184 2026-04-26   5:45 
+acledit  dll     29696 2026-04-26   5:45 
+aclui    dll    136192 2026-04-26   5:45 
+activeds dll     48128 2026-04-26   5:45 
+actxprxy dll   2768896 2026-04-26   5:45 
+advapi32 dll    672768 2026-04-26   5:45 
+ADVAPI~1 DLL     38400 2026-04-26   5:45  advapi32_vista.dll
+advpack  dll    113664 2026-04-26   5:45 
+atl      dll    167424 2026-04-26   5:45 
+atl100   dll    150016 2026-04-26   5:45 
+atl80    dll    152576 2026-04-26   5:45 
+authz    dll     47616 2026-04-26   5:45 
+avicap32 dll     48640 2026-04-26   5:45 
+avifil32 dll    404992 2026-04-26   5:45 
+batt     dll     43008 2026-04-26   5:45 
+bcrypt   dll     78848 2026-04-26   5:45 
+beepmidi dll     36352 2026-04-26   5:45 
+browseui dll   1804288 2026-04-26   5:45 
+bthci    dll     55808 2026-04-26   5:45 
+cabinet  dll    217088 2026-04-26   5:45 
+cards    dll    658432 2026-04-26   5:45 
+cfgmgr32 dll     56832 2026-04-26   5:45 
+clusapi  dll     84480 2026-04-26   5:45 
+comcat   dll     29696 2026-04-26   5:45 
+comctl32 dll   2028032 2026-04-26   5:45 
+comdlg32 dll   1007616 2026-04-26   5:45 
+compstui dll     41472 2026-04-26   5:45 
+credui   dll    160256 2026-04-26   5:45 
+crtdll   dll    665600 2026-04-26   5:45 
+crypt32  dll   1062912 2026-04-26   5:45 
+cryptdlg dll     88064 2026-04-26   5:45 
+cryptdll dll     42496 2026-04-26   5:45 
+cryptnet dll     90624 2026-04-26   5:45 
+cryptui  dll    646656 2026-04-26   5:45 
+dbgeng   dll    192512 2026-04-26   5:45 
+dbghelp  dll    596992 2026-04-26   5:45 
+dciman32 dll     47104 2026-04-26   5:45 
+devmgr   dll    840192 2026-04-26   5:45 
+dnsapi   dll    245760 2026-04-26   5:45 
+esent    dll     81920 2026-04-26   5:45 
+faultrep dll     46592 2026-04-26   5:45 
+fltlib   dll     34816 2026-04-26   5:45 
+fmifs    dll     16384 2026-04-26   5:45 
+fontsub  dll     42496 2026-04-26   5:45 
+fusion   dll    119808 2026-04-26   5:45 
+gdiplus  dll    911360 2026-04-26   5:45 
+getuname dll   1533440 2026-04-26   5:45 
+hhctrl   ocx    254976 2026-04-26   5:45 
+hid      dll     82432 2026-04-26   5:45 
+hlink    dll    128512 2026-04-26   5:45 
+hnetcfg  dll    144896 2026-04-26   5:45 
+httpapi  dll     43520 2026-04-26   5:45 
+iccvid   dll     70656 2026-04-26   5:45 
+icmp     dll     30208 2026-04-26   5:45 
+ieframe  dll    740864 2026-04-26   5:45 
+iernonce dll    170496 2026-04-26   5:45 
+imaadp32 acm     65536 2026-04-26   5:45 
+imagehlp dll     82432 2026-04-26   5:45 
+imm32    dll    386560 2026-04-26   5:45 
+inetcomm dll    308224 2026-04-26   5:45 
+inetmib1 dll     71680 2026-04-26   5:45 
+initpki  dll     42496 2026-04-26   5:45 
+inseng   dll    129536 2026-04-26   5:45 
+iologmsg dll     13009 2026-04-26   5:45 
+iphlpapi dll    195584 2026-04-26   5:45 
+itircl   dll     41984 2026-04-26   5:45 
+itss     dll    151040 2026-04-26   5:45 
+jscript  dll   1370624 2026-04-26   5:45 
+jsproxy  dll     68608 2026-04-26   5:45 
+KERNEL~1 DLL     33792 2026-04-26   5:45  kernel32_vista.dll
+kernel32 dll   3171840 2026-04-26   5:45 
+loadperf dll     44544 2026-04-26   5:45 
+lpk      dll     58368 2026-04-26   5:45 
+lsasrv   dll    387072 2026-04-26   5:45 
+lz32     dll      6809 2026-04-26   5:45 
+mapi32   dll    166400 2026-04-26   5:45 
+mciavi32 dll    138240 2026-04-26   5:45 
+mcicda   dll     77824 2026-04-26   5:45 
+mciqtz32 dll    145920 2026-04-26   5:45 
+mciseq   dll     88064 2026-04-26   5:45 
+mciwave  dll     91648 2026-04-26   5:45 
+mgmtapi  dll     43520 2026-04-26   5:45 
+mlang    dll    141312 2026-04-26   5:45 
+mmdrv    dll     39424 2026-04-26   5:45 
+modemui  dll    409600 2026-04-26   5:45 
+mpr      dll    164864 2026-04-26   5:45 
+mprapi   dll     93696 2026-04-26   5:45 
+msacm32  dll    173056 2026-04-26   5:45 
+msacm32  drv     82944 2026-04-26   5:45 
+msadp32  acm     59904 2026-04-26   5:45 
+msafd    dll    154112 2026-04-26   5:45 
+mscat32  dll     43520 2026-04-26   5:45 
+mscms    dll     98304 2026-04-26   5:45 
+mscoree  dll    232960 2026-04-26   5:45 
+msctf    dll    297472 2026-04-26   5:45 
+msftedit dll     45568 2026-04-26   5:45 
+msg711   acm     55808 2026-04-26   5:45 
+msgina   dll    818688 2026-04-26   5:45 
+msgsm32  acm     48128 2026-04-26   5:45 
+mshtml   dll   2574336 2026-04-26   5:45 
+msi      dll   1769984 2026-04-26   5:45 
+mshtml   tlb    781009 2026-04-26   5:45 
+msimg32  dll     40448 2026-04-26   5:45 
+msimtf   dll     71680 2026-04-26   5:45 
+msisip   dll     47616 2026-04-26   5:45 
+msisys   ocx     40960 2026-04-26   5:45 
+mspatcha dll     71168 2026-04-26   5:45 
+msports  dll    122368 2026-04-26   5:45 
+msrle32  dll     97280 2026-04-26   5:45 
+mssign32 dll     52736 2026-04-26   5:45 
+mssip32  dll     44032 2026-04-26   5:45 
+mstask   dll     94720 2026-04-26   5:45 
+msutb    dll    452608 2026-04-26   5:45 
+msv1_0   dll     81920 2026-04-26   5:45 
+msvcrt   dll    761856 2026-04-26   5:45 
+msvcrt20 dll    893952 2026-04-26   5:45 
+msvcrt40 dll    902144 2026-04-26   5:45 
+msvfw32  dll    179712 2026-04-26   5:45 
+msvidc32 dll     59904 2026-04-26   5:45 
+mswsock  dll     61440 2026-04-26   5:45 
+msxml    dll     68608 2026-04-26   5:45 
+msxml2   dll     68096 2026-04-26   5:45 
+msxml3   dll   3899904 2026-04-26   5:45 
+msxml3r  dll      6865 2026-04-26   5:45 
+msxml4   dll    130560 2026-04-26   5:45 
+msxml6   dll    133120 2026-04-26   5:45 
+mycomput dll      6865 2026-04-26   5:45 
+nddeapi  dll     52224 2026-04-26   5:45 
+netapi32 dll    508928 2026-04-26   5:45 
+netcfgx  dll    602624 2026-04-26   5:45 
+netevent dll     71889 2026-04-26   5:45 
+netid    dll    249856 2026-04-26   5:45 
+netmsg   dll   1474769 2026-04-26   5:45 
+newdev   dll    272896 2026-04-26   5:45 
+npptools dll     49664 2026-04-26   5:45 
+ntdsapi  dll     78848 2026-04-26   5:45 
+ntlanman dll     54272 2026-04-26   5:45 
+ntmarta  dll     55296 2026-04-26   5:45 
+objsel   dll     68096 2026-04-26   5:45 
+odbc32   dll    177664 2026-04-26   5:45 
+odbccp32 dll     90624 2026-04-26   5:45 
+ole32    dll   2167296 2026-04-26   5:45 
+oleacc   dll    468992 2026-04-26   5:45 
+oleaut32 dll   1861120 2026-04-26   5:45 
+olecli32 dll     59904 2026-04-26   5:45 
+oledlg   dll    190976 2026-04-26   5:45 
+olepro32 dll     55808 2026-04-26   5:45 
+olesvr32 dll     44032 2026-04-26   5:45 
+olethk32 dll     47616 2026-04-26   5:45 
+pdh      dll    121344 2026-04-26   5:45 
+pidgen   dll     44544 2026-04-26   5:45 
+powrprof dll     73216 2026-04-26   5:45 
+profmap  dll     30720 2026-04-26   5:45 
+propsys  dll    174592 2026-04-26   5:45 
+psapi    dll     32768 2026-04-26   5:45 
+pstorec  dll     69632 2026-04-26   5:45 
+qmgr     dll    118272 2026-04-26   5:45 
+qmgrprxy dll    338432 2026-04-26   5:45 
+query    dll     56320 2026-04-26   5:45 
+rasadhlp dll     31232 2026-04-26   5:45 
+rasapi32 dll     87040 2026-04-26   5:45 
+rasdlg   dll   1867264 2026-04-26   5:45 
+rasman   dll    103936 2026-04-26   5:45 
+regapi   dll     67072 2026-04-26   5:45 
+resutils dll     70144 2026-04-26   5:45 
+riched20 dll    684544 2026-04-26   5:45 
+riched32 dll     43520 2026-04-26   5:45 
+rpcrt4   dll    820736 2026-04-26   5:45 
+rsabase  dll      7945 2026-04-26   5:45 
+rsaenh   dll    332288 2026-04-26   5:45 
+samlib   dll    120832 2026-04-26   5:45 
+samsrv   dll    398848 2026-04-26   5:45 
+sccbase  dll     49152 2026-04-26   5:45 
+schannel dll    114176 2026-04-26   5:45 
+scrrun   dll    238592 2026-04-26   5:45 
+secur32  dll    219648 2026-04-26   5:45 
+security dll      9066 2026-04-26   5:45 
+sensapi  dll     40960 2026-04-26   5:45 
+serialui dll     59392 2026-04-26   5:45 
+setupapi dll   1456640 2026-04-26   5:45 
+sfc      dll     29696 2026-04-26   5:45 
+sfc_os   dll     30720 2026-04-26   5:45 
+sfcfiles dll     27648 2026-04-26   5:45 
+shdoclc  dll    126161 2026-04-26   5:45 
+shdocvw  dll    420864 2026-04-26   5:45 
+shell32  dll  10607616 2026-04-26   5:45 
+shfolder dll      5929 2026-04-26   5:45 
+shimgvw  dll    254464 2026-04-26   5:45 
+shlwapi  dll    746496 2026-04-26   5:45 
+slbcsp   dll     50176 2026-04-26   5:45 
+sndblst  dll     83968 2026-04-26   5:45 
+snmpapi  dll     70144 2026-04-26   5:45 
+softpub  dll      9000 2026-04-26   5:45 
+srclient dll     31232 2026-04-26   5:45 
+stdole2  tlb     22225 2026-04-26   5:45 
+stdole32 tlb     10449 2026-04-26   5:45 
+sti      dll    132608 2026-04-26   5:45 
+storprop dll     33792 2026-04-26   5:45 
+streamci dll     35840 2026-04-26   5:45 
+sxs      dll     92160 2026-04-26   5:45 
+syssetup dll   1351168 2026-04-26   5:45 
+t2embed  dll     48640 2026-04-26   5:45 
+tapi32   dll    137728 2026-04-26   5:45 
+tapiui   dll    460497 2026-04-26   5:45 
+themeui  dll     40657 2026-04-26   5:45 
+traffic  dll     48640 2026-04-26   5:45 
+ubtrfs   dll    100864 2026-04-26   5:45 
+ucdfs    dll      7168 2026-04-26   5:45 
+uext2    dll    133120 2026-04-26   5:45 
+ufat     dll    119808 2026-04-26   5:45 
+ufatx    dll     13824 2026-04-26   5:45 
+untfs    dll      7168 2026-04-26   5:45 
+updspapi dll     49664 2026-04-26   5:45 
+url      dll     70656 2026-04-26   5:45 
+urlmon   dll   1032192 2026-04-26   5:45 
+userenv  dll    220160 2026-04-26   5:45 
+usp10    dll    408064 2026-04-26   5:45 
+uxtheme  dll    287232 2026-04-26   5:45 
+vbscript dll    526848 2026-04-26   5:45 
+verifier dll     14848 2026-04-26   5:45 
+version  dll     87552 2026-04-26   5:45 
+vssapi   dll     75776 2026-04-26   5:45 
+wdmaud   drv   1718272 2026-04-26   5:45 
+WINDOW~1 DLL   1354240 2026-04-26   5:45  windowscodecs.dll
+WINDOW~2 DLL     65024 2026-04-26   5:45  windowscodecsext.dll
+winemp3  acm    442880 2026-04-26   5:45 
+winfax   dll     40448 2026-04-26   5:45 
+wing32   dll     30720 2026-04-26   5:45 
+winhttp  dll    307200 2026-04-26   5:45 
+wininet  dll    729600 2026-04-26   5:45 
+winmm    dll    652800 2026-04-26   5:45 
+midimap  dll     55808 2026-04-26   5:45 
+winscard dll     58880 2026-04-26   5:45 
+winsta   dll     74752 2026-04-26   5:45 
+wintrust dll    266240 2026-04-26   5:45 
+wlanapi  dll     75776 2026-04-26   5:45 
+wldap32  dll    130048 2026-04-26   5:45 
+wlnotify dll     54272 2026-04-26   5:45 
+wmi      dll     10003 2026-04-26   5:45 
+wmvcore  dll    170496 2026-04-26   5:45 
+ws2_32   dll    194048 2026-04-26   5:45 
+ws2help  dll     49664 2026-04-26   5:45 
+wshirda  dll     32768 2026-04-26   5:45 
+wshom    ocx    159744 2026-04-26   5:45 
+wshtcpip dll     49152 2026-04-26   5:45 
+wsock32  dll     37376 2026-04-26   5:45 
+wtsapi32 dll     61440 2026-04-26   5:45 
+wuapi    dll    130560 2026-04-26   5:45 
+XINPUT~1 DLL     29696 2026-04-26   5:45  xinput1_1.dll
+XINPUT~2 DLL     29696 2026-04-26   5:45  xinput1_2.dll
+XINPUT~3 DLL     45568 2026-04-26   5:45  xinput1_3.dll
+XINPUT~4 DLL     29696 2026-04-26   5:45  xinput9_1_0.dll
+xmllite  dll    175104 2026-04-26   5:45 
+xolehlp  dll     66048 2026-04-26   5:45 
+c_037    nls     66082 2026-04-26   5:45 
+c_10000  nls     66082 2026-04-26   5:45 
+c_10001  nls    162850 2026-04-26   5:45 
+c_10002  nls    195618 2026-04-26   5:45 
+c_10003  nls    177698 2026-04-26   5:45 
+c_10004  nls     66082 2026-04-26   5:45 
+c_10005  nls     66082 2026-04-26   5:45 
+c_10006  nls     66082 2026-04-26   5:45 
+c_10007  nls     66082 2026-04-26   5:45 
+c_10008  nls    173602 2026-04-26   5:45 
+c_10010  nls     66082 2026-04-26   5:45 
+c_10017  nls     66082 2026-04-26   5:45 
+c_10021  nls     66082 2026-04-26   5:45 
+c_10029  nls     66082 2026-04-26   5:45 
+c_10079  nls     66082 2026-04-26   5:45 
+c_10081  nls     66082 2026-04-26   5:45 
+c_10082  nls     66082 2026-04-26   5:45 
+c_1006   nls     66082 2026-04-26   5:45 
+c_1026   nls     66082 2026-04-26   5:45 
+c_1047   nls     66082 2026-04-26   5:45 
+c_1140   nls     66082 2026-04-26   5:45 
+c_1141   nls     66082 2026-04-26   5:45 
+c_1142   nls     66082 2026-04-26   5:45 
+c_1143   nls     66082 2026-04-26   5:45 
+c_1144   nls     66082 2026-04-26   5:45 
+c_1145   nls     66082 2026-04-26   5:45 
+c_1146   nls     66082 2026-04-26   5:45 
+c_1147   nls     66082 2026-04-26   5:45 
+c_1148   nls     66082 2026-04-26   5:45 
+c_1149   nls     66082 2026-04-26   5:45 
+c_1250   nls     66082 2026-04-26   5:45 
+c_1251   nls     66082 2026-04-26   5:45 
+c_1253   nls     66082 2026-04-26   5:45 
+c_1254   nls     66082 2026-04-26   5:45 
+c_1255   nls     66082 2026-04-26   5:45 
+c_1256   nls     66082 2026-04-26   5:45 
+c_1257   nls     66082 2026-04-26   5:45 
+c_1258   nls     66082 2026-04-26   5:45 
+c_1361   nls    189986 2026-04-26   5:45 
+c_20000  nls    180258 2026-04-26   5:45 
+c_20001  nls    186402 2026-04-26   5:45 
+c_20002  nls    173602 2026-04-26   5:45 
+c_20003  nls    185378 2026-04-26   5:45 
+c_20004  nls    180258 2026-04-26   5:45 
+c_20005  nls    187938 2026-04-26   5:45 
+c_20105  nls     66082 2026-04-26   5:45 
+c_20106  nls     66082 2026-04-26   5:45 
+c_20107  nls     66082 2026-04-26   5:45 
+c_20108  nls     66082 2026-04-26   5:45 
+c_20127  nls     66082 2026-04-26   5:45 
+c_20261  nls    139810 2026-04-26   5:45 
+c_20269  nls     66082 2026-04-26   5:45 
+c_20273  nls     66082 2026-04-26   5:45 
+c_20277  nls     66082 2026-04-26   5:45 
+c_20278  nls     66082 2026-04-26   5:45 
+c_20280  nls     66082 2026-04-26   5:45 
+c_20284  nls     66082 2026-04-26   5:45 
+c_20285  nls     66082 2026-04-26   5:45 
+c_20290  nls     66082 2026-04-26   5:45 
+c_20297  nls     66082 2026-04-26   5:45 
+c_20420  nls     66082 2026-04-26   5:45 
+c_20423  nls     66082 2026-04-26   5:45 
+c_20424  nls     66082 2026-04-26   5:45 
+c_20833  nls     66082 2026-04-26   5:45 
+c_20838  nls     66082 2026-04-26   5:45 
+c_20866  nls     66082 2026-04-26   5:45 
+c_20871  nls     66082 2026-04-26   5:45 
+c_20880  nls     66082 2026-04-26   5:45 
+c_20905  nls     66082 2026-04-26   5:45 
+c_20924  nls     66082 2026-04-26   5:45 
+c_21025  nls     66082 2026-04-26   5:45 
+c_21027  nls     66082 2026-04-26   5:45 
+c_21866  nls     66082 2026-04-26   5:45 
+c_28591  nls     66082 2026-04-26   5:45 
+c_28592  nls     66082 2026-04-26   5:45 
+c_28593  nls     66082 2026-04-26   5:45 
+c_28594  nls     66082 2026-04-26   5:45 
+c_28595  nls     66082 2026-04-26   5:45 
+c_28596  nls     66082 2026-04-26   5:45 
+c_28597  nls     66082 2026-04-26   5:45 
+c_28598  nls     66082 2026-04-26   5:45 
+c_28599  nls     66082 2026-04-26   5:45 
+c_28600  nls     66082 2026-04-26   5:45 
+c_28603  nls     66082 2026-04-26   5:45 
+c_28604  nls     66082 2026-04-26   5:45 
+c_28605  nls     66082 2026-04-26   5:45 
+c_28606  nls     66082 2026-04-26   5:45 
+c_29001  nls     66082 2026-04-26   5:45 
+c_424    nls     66082 2026-04-26   5:45 
+c_500    nls     66082 2026-04-26   5:45 
+c_708    nls     66082 2026-04-26   5:45 
+c_720    nls     66594 2026-04-26   5:45 
+c_737    nls     66594 2026-04-26   5:45 
+c_775    nls     66594 2026-04-26   5:45 
+c_850    nls     66594 2026-04-26   5:45 
+c_852    nls     66594 2026-04-26   5:45 
+c_855    nls     66594 2026-04-26   5:45 
+c_857    nls     66594 2026-04-26   5:45 
+c_858    nls     66594 2026-04-26   5:45 
+c_860    nls     66594 2026-04-26   5:45 
+c_861    nls     66594 2026-04-26   5:45 
+c_862    nls     66594 2026-04-26   5:45 
+c_863    nls     66594 2026-04-26   5:45 
+c_864    nls     66594 2026-04-26   5:45 
+c_865    nls     66594 2026-04-26   5:45 
+c_866    nls     66594 2026-04-26   5:45 
+c_869    nls     66594 2026-04-26   5:45 
+c_870    nls     66082 2026-04-26   5:45 
+c_874    nls     66594 2026-04-26   5:45 
+c_875    nls     66082 2026-04-26   5:45 
+c_932    nls    162850 2026-04-26   5:45 
+c_936    nls    196642 2026-04-26   5:45 
+c_949    nls    196642 2026-04-26   5:45 
+c_950    nls    196642 2026-04-26   5:45 
+c_856    nls     66594 2026-04-26   5:45 
+c_878    nls     66082 2026-04-26   5:45 
+ctype    nls      8386 2026-04-26   5:45 
+geo      nls     24772 2026-04-26   5:45 
+l_except nls       168 2026-04-26   5:45 
+locale   nls    209008 2026-04-26   5:45 
+sortkey  nls    262148 2026-04-26   5:45 
+sorttbls nls     21200 2026-04-26   5:45 
+unicode  nls     89588 2026-04-26   5:45 
+appwiz   exe     35328 2026-04-26   5:46 
+arping   exe     48128 2026-04-26   5:46 
+cat      exe     30208 2026-04-26   5:46 
+gflags   exe     45056 2026-04-26   5:46 
+tee      exe     32768 2026-04-26   5:46 
+touch    exe     43008 2026-04-26   5:46 
+uptime   exe     30208 2026-04-26   5:46 
+vcdcli   exe     43520 2026-04-26   5:46 
+vfd      exe    110592 2026-04-26   5:46 
+WINSPO~1 EXE     31232 2026-04-26   5:46  winspool_print.exe
+y        exe     31232 2026-04-26   5:46 
+CREATE~1 EXE     39936 2026-04-26   5:46  createspec.exe
+gdb2     exe     55808 2026-04-26   5:46 
+gdihv    exe     70144 2026-04-26   5:46 
+genguid  exe     31744 2026-04-26   5:46 
+nls2txt  exe     37888 2026-04-26   5:46 
+shimdbg  exe     37376 2026-04-26   5:46 
+SHIMTE~1 EXE     31232 2026-04-26   5:46  shimtest_ros.exe
+SHLEXT~1 EXE    105472 2026-04-26   5:46  shlextdbg.exe
+symdump  exe     46080 2026-04-26   5:46 
+SYSCAL~1 EXE     33792 2026-04-26   5:46  syscalldump.exe
+VGAFON~1 EXE    115200 2026-04-26   5:46  vgafontedit.exe
+NOTIFY~1 DLL     30720 2026-04-26   5:46  notifyhook.dll
+frag     exe    274944 2026-04-26   5:46 
+unfrag   exe    184320 2026-04-26   5:46 
+ncftp    exe    433664 2026-04-26   5:46 
+netreg   exe    707072 2026-04-26   5:46 
+niclist  exe     31232 2026-04-26   5:46 
+roshttpd exe    713216 2026-04-26   5:46 
+notevil  exe     37376 2026-04-26   5:46 
+movefile exe     29184 2026-04-26   5:46 
+nfi      exe     38912 2026-04-26   5:46 
+ntfsinfo exe     34816 2026-04-26   5:46 
+PENDMO~1 EXE     34304 2026-04-26   5:46  pendmoves.exe
+blankscr scr     55296 2026-04-26   5:46 
+BUTTER~1 SCR    227328 2026-04-26   5:46  butterflies.scr
+circles  scr     56832 2026-04-26   5:46 
+cylfrac  scr     63488 2026-04-26   5:46 
+matrix   scr    135680 2026-04-26   5:46 
+mazescr  scr     91648 2026-04-26   5:46 
+ssstars  scr    154624 2026-04-26   5:46 
+STARFI~1 SCR     58880 2026-04-26   5:46  starfield.scr
+ctm      exe     62976 2026-04-26   5:46 
+fontsub  exe    296448 2026-04-26   5:46 
+gettype  exe     37376 2026-04-26   5:46 
+kill     exe     29696 2026-04-26   5:46 
+logevent exe     32768 2026-04-26   5:46 
+lsdd     exe     30720 2026-04-26   5:46 
+pedump   exe     80896 2026-04-26   5:46 
+regexpl  exe    240128 2026-04-26   5:46 
+SCREEN~1 EXE     59392 2026-04-26   5:46  screenshot.exe
+SYSTEM~1 EXE     97792 2026-04-26   5:46  systeminfo.exe
+tlist    exe     45056 2026-04-26   5:46 
+load     exe     29184 2026-04-26   5:46 
+unload   exe     29184 2026-04-26   5:46 
+infinst  exe     29184 2026-04-26   5:46 
+NTS2W3~1 EXE     28160 2026-04-26   5:46  nts2w32err.exe
+objdir   exe     34304 2026-04-26   5:46 
+partinfo exe     39424 2026-04-26   5:46 
+ps       exe     34304 2026-04-26   5:46 
+rosperf  exe     61440 2026-04-26   5:46 
+TICKCO~1 EXE     31232 2026-04-26   5:46  tickcount.exe
+VCDCON~1 EXE     72192 2026-04-26   5:46  vcdcontroltool.exe
+maze     exe     44544 2026-04-26   5:46 
+vfd      dll    246784 2026-04-26   5:46 
+csrsrv   dll    103424 2026-04-26   5:46 
+csrss    exe      9728 2026-04-26   5:46 
+AUTOEXEC NT       1279 2026-04-26   5:46 
+CONFIG   NT       2821 2026-04-26   5:46 
+command  com       360 2026-04-26   5:46 
+ntvdm    exe   1808384 2026-04-26   5:46 
+pifmgr   dll    319185 2026-04-26   5:46 
+vdmdbg   dll     31232 2026-04-26   5:46 
+user     exe     28672 2026-04-26   5:46 
+basesrv  dll     83456 2026-04-26   5:46 
+framebuf dll     53248 2026-04-26   5:46 
+vgaddi   dll     90112 2026-04-26   5:46 
+ftfd     dll   1392640 2026-04-26   5:46 
+gdi32    dll    597504 2026-04-26   5:46 
+GDI32_~1 DLL     68096 2026-04-26   5:46  gdi32_vista.dll
+ntprint  dll     57856 2026-04-26   5:46 
+printui  dll     55296 2026-04-26   5:46 
+spoolss  dll    117248 2026-04-26   5:46 
+spoolsv  exe    121856 2026-04-26   5:46 
+winspool drv    352256 2026-04-26   5:46 
+localui  dll     79360 2026-04-26   5:46 
+localmon dll     86016 2026-04-26   5:46 
+localspl dll    238080 2026-04-26   5:46 
+user32   dll   1581568 2026-04-26   5:46 
+USER32~1 DLL      7168 2026-04-26   5:46  user32_vista.dll
+winsrv   dll    657408 2026-04-26   5:46 
+win32k   sys   3514368 2026-04-26   5:46 
+$winnt$  inf      2165 2026-04-26   5:46 
+gecko        <DIR>     2026-04-26   5:51 
+      802 files         200 944 293 bytes
+
+Directory for ::/ReactOS/system32/config
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+SYSTEM          790528 2026-04-26   9:56 
+SOFTWARE       1785856 2026-04-26   9:56 
+DEFAULT         167936 2026-04-26   9:56 
+SYSTEM   LOG    201728 2026-04-26   5:46 
+SOFTWARE LOG   1401856 2026-04-26   9:56 
+DEFAULT  LOG    136192 2026-04-26   9:56 
+SECURITY         20480 2026-04-26   9:56 
+SAM              20480 2026-04-26   9:56 
+SAM      LOG     17408 2026-04-26   9:56 
+SYSTEM   ALT    790528 2026-04-26   9:56 
+SECURITY LOG     17408 2026-04-26   9:56 
+APPEVENT EVT   5242880 2026-04-26  16:56  AppEvent.Evt
+SECEVENT EVT   5242880 2026-04-26  16:56  SecEvent.Evt
+SYSEVENT EVT   5242880 2026-04-26  16:56  SysEvent.Evt
+SYSTEM~1     <DIR>     2026-04-26   5:46  systemprofile
+       17 files          21 079 040 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+APPLIC~1     <DIR>     2026-04-26   5:46  Application Data
+DESKTOP      <DIR>     2026-04-26   5:46  Desktop
+FAVORI~1     <DIR>     2026-04-26   5:46  Favorites
+MYDOCU~1     <DIR>     2026-04-26   5:46  My Documents
+NETHOOD      <DIR>     2026-04-26   5:46  NetHood
+PRINTH~1     <DIR>     2026-04-26   5:46  PrintHood
+RECENT       <DIR>     2026-04-26   5:46  Recent
+SENDTO       <DIR>     2026-04-26   5:46  SendTo
+TEMPLA~1     <DIR>     2026-04-26   5:46  Templates
+STARTM~1     <DIR>     2026-04-26   5:46  Start Menu
+LOCALS~1     <DIR>     2026-04-26   5:46  Local Settings
+COOKIES      <DIR>     2026-04-26   5:46  Cookies
+ntuser   dat    147456 2026-04-26   5:46 
+MYMUSI~1     <DIR>     2026-04-26   5:51  My Music
+MYVIDE~1     <DIR>     2026-04-26   5:51  My Videos
+MYPICT~1     <DIR>     2026-04-26   5:51  My Pictures
+       18 files             147 456 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/Application Data
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/Desktop
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/Favorites
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+desktop  ini        71 2026-04-26   5:51 
+        3 files                  71 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/My Documents
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+desktop  ini        72 2026-04-26   5:51 
+        3 files                  72 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/NetHood
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+desktop  ini        71 2026-04-26   5:51 
+        3 files                  71 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/PrintHood
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+desktop  ini        71 2026-04-26   5:51 
+        3 files                  71 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/Recent
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+desktop  ini        71 2026-04-26   5:51 
+        3 files                  71 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/SendTo
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/Templates
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/Start Menu
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+PROGRAMS     <DIR>     2026-04-26   5:46  Programs
+desktop  ini        71 2026-04-26   5:51 
+        4 files                  71 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/Start Menu/Programs
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+STARTUP      <DIR>     2026-04-26   5:46  Startup
+ADMINI~1     <DIR>     2026-04-26   5:51  Administrative Tools
+        4 files                   0 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/Start Menu/Programs/Startup
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/Start Menu/Programs/Administrative Tools
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/Local Settings
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+APPLIC~1     <DIR>     2026-04-26   5:46  Application Data
+TEMP         <DIR>     2026-04-26   5:46  Temp
+TEMPOR~1     <DIR>     2026-04-26   5:46  Temporary Internet Files
+HISTORY      <DIR>     2026-04-26   5:46  History
+        6 files                   0 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/Local Settings/Application Data
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/Local Settings/Temp
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/Local Settings/Temporary Internet Files
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/Local Settings/History
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/Cookies
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/My Music
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+desktop  ini        72 2026-04-26   5:51 
+        3 files                  72 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/My Videos
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+desktop  ini        72 2026-04-26   5:51 
+        3 files                  72 bytes
+
+Directory for ::/ReactOS/system32/config/systemprofile/My Pictures
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+desktop  ini        72 2026-04-26   5:51 
+        3 files                  72 bytes
+
+Directory for ::/ReactOS/system32/drivers
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+etc          <DIR>     2026-04-26   5:45 
+acpi     sys    716800 2025-03-23  12:15 
+nmidebug sys     40960 2025-03-23  12:15 
+sacdrv   sys    200704 2025-03-23  12:16 
+uniata   sys    405504 2025-03-23  12:16 
+buslogic sys     61440 2025-03-23  11:57 
+blue     sys     61440 2025-03-23  12:16 
+cdfs     sys    344064 2025-03-23  12:15 
+cdrom    sys   2478080 2025-03-23  12:17 
+classpnp sys    876544 2025-03-23  12:16 
+isapnp   sys    110592 2025-03-23  12:15 
+disk     sys    233472 2025-03-23  12:16 
+floppy   sys     90112 2025-03-23  12:16 
+i8042prt sys    110592 2025-03-23  12:15 
+hidclass sys     77824 2025-03-23  12:15 
+hidparse sys     81920 2025-03-23  12:17 
+hidusb   sys     57344 2025-03-23  12:15 
+usbccgp  sys     86016 2025-03-23  12:16 
+usbd     sys     40960 2025-03-23  12:16 
+usbhub   sys    184320 2025-03-23  12:16 
+usbport  sys    278528 2025-03-23  12:16 
+usbuhci  sys     77824 2025-03-23  12:16 
+usbohci  sys     77824 2025-03-23  12:16 
+usbehci  sys    102400 2025-03-23  12:16 
+usbstor  sys    102400 2025-03-23  12:16 
+kbdhid   sys     53248 2025-03-23  12:15 
+kbdclass sys     90112 2025-03-23  12:15 
+pci      sys     77824 2025-03-23  12:15 
+scsiport sys    155648 2025-03-23  12:16 
+storport sys     98304 2025-03-23  12:16 
+fastfat  sys    753664 2025-03-23  12:15 
+btrfs    sys   3006464 2025-03-23  12:15 
+ramdisk  sys     77824 2025-03-23  12:16 
+pciide   sys     36864 2025-03-23  12:16 
+pciidex  sys     65536 2025-03-23  12:16 
+pcix     sys    241664 2025-03-23  12:15 
+pcmcia   sys     40960 2025-03-23  12:15 
+swenum   sys     40960 2025-03-23  12:16 
+wmilib   sys     36864 2025-03-23  12:17 
+ksecdd   sys    143360 2025-03-23  12:15 
+mountmgr sys    192512 2025-03-23  12:16 
+partmgr  sys    102400 2025-03-23  12:16 
+beep     sys     40960 2026-04-26   5:45 
+null     sys     36864 2026-04-26   5:45 
+battc    sys     40960 2026-04-26   5:45 
+fbtusb   sys    143360 2026-04-26   5:45 
+cmbatt   sys     94208 2026-04-26   5:45 
+compbatt sys     61440 2026-04-26   5:45 
+ext2fs   sys   1388544 2026-04-26   5:45 
+fs_rec   sys     57344 2026-04-26   5:45 
+msfs     sys     49152 2026-04-26   5:45 
+mup      sys     90112 2026-04-26   5:45 
+NFS41_~1 SYS    552960 2026-04-26   5:45  nfs41_driver.sys
+npfs     sys    151552 2026-04-26   5:45 
+ntfs     sys    290816 2026-04-26   5:45 
+udfs     sys    823296 2026-04-26   5:45 
+mouhid   sys     53248 2026-04-26   5:45 
+inport   sys     65536 2026-04-26   5:45 
+mouclass sys     61440 2026-04-26   5:45 
+sermouse sys     49152 2026-04-26   5:45 
+ks       sys    315392 2026-04-26   5:45 
+bdasup   sys     49152 2026-04-26   5:45 
+afd      sys    212992 2026-04-26   5:45 
+dc21x4   sys    155648 2026-04-26   5:45 
+e1000    sys     77824 2026-04-26   5:45 
+ne2000   sys     81920 2026-04-26   5:45 
+netkvm   sys    241664 2026-04-26   5:45 
+nvnet    sys    131072 2026-04-26   5:45 
+pcnet    sys     65536 2026-04-26   5:45 
+rtl8139  sys     61440 2026-04-26   5:45 
+ndis     sys    274432 2026-04-26   5:45 
+ndisuio  sys     65536 2026-04-26   5:45 
+tcpip    sys    466944 2026-04-26   5:45 
+tdi      sys     40960 2026-04-26   5:45 
+parport  sys     49152 2026-04-26   5:45 
+processr sys     40960 2026-04-26   5:45 
+serenum  sys     57344 2026-04-26   5:45 
+serial   sys     81920 2026-04-26   5:45 
+portcls  sys    380928 2026-04-26   5:45 
+ac97     sys    282624 2026-04-26   5:45 
+CMICON~1 EXE    156160 2026-04-26   5:45  cmicontrol.exe
+cmicpl   cpl    113152 2026-04-26   5:45 
+cmipci   sys    212992 2026-04-26   5:45 
+drmk     sys     45056 2026-04-26   5:45 
+kmixer   sys   1564672 2026-04-26   5:45 
+hdaudbus sys     98304 2026-04-26   5:45 
+wdmaud   sys    241664 2026-04-26   5:45 
+sysaudio sys     65536 2026-04-26   5:45 
+tditest  sys     49152 2026-04-26   5:46 
+vcdrom   sys     61440 2026-04-26   5:46 
+vfd      sys    151552 2026-04-26   5:46 
+bochsmp  sys     49152 2026-04-26   5:46 
+vgapnp   sys     57344 2026-04-26   5:46 
+vga      sys     45056 2026-04-26   5:46 
+videoprt sys    188416 2026-04-26   5:46 
+watchdog sys     32768 2026-04-26   5:46 
+dxapi    sys     40960 2026-04-26   5:46 
+dxg      sys     69632 2026-04-26   5:46 
+dxgthk   sys     32768 2026-04-26   5:46 
+      101 files          22 572 032 bytes
+
+Directory for ::/ReactOS/system32/drivers/etc
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+NETCON~1           763 2026-04-26   5:45  netconfig
+MS-NFS~1 CON       428 2026-04-26   5:45  ms-nfs41-idmap.conf
+quotes            2365 2026-04-26   5:45 
+hosts               45 2026-04-26   5:46 
+KDBINIT            373 2026-04-26   5:46  KDBinit
+networks           392 2026-04-26   5:46 
+protocol          9563 2026-04-26   5:46 
+services        394635 2026-04-26   5:46 
+       10 files             408 564 bytes
+
+Directory for ::/ReactOS/system32/wbem
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+REPOSI~1     <DIR>     2026-04-26   5:45  Repository
+mof          <DIR>     2026-04-26   5:45 
+ADSTATUS     <DIR>     2026-04-26   5:45  AdStatus
+xml          <DIR>     2026-04-26   5:45 
+LOGS         <DIR>     2026-04-26   5:45  Logs
+AUTORE~1     <DIR>     2026-04-26   5:45  AutoRecover
+snmp         <DIR>     2026-04-26   5:45 
+PERFOR~1     <DIR>     2026-04-26   5:45  Performance
+mofcomp  exe     40448 2026-04-26   5:45 
+wmic     exe     54272 2026-04-26   5:45 
+wmisvc   dll     32768 2026-04-26   5:45 
+framedyn dll     73728 2026-04-26   5:45 
+wbemdisp dll    169984 2026-04-26   5:45 
+wbemprox dll    324608 2026-04-26   5:45 
+wmiutils dll     93696 2026-04-26   5:45 
+       17 files             789 504 bytes
+
+Directory for ::/ReactOS/system32/wbem/Repository
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+FS           <DIR>     2026-04-26   5:45 
+        3 files                   0 bytes
+
+Directory for ::/ReactOS/system32/wbem/Repository/FS
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/wbem/mof
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+good         <DIR>     2026-04-26   5:45 
+bad          <DIR>     2026-04-26   5:45 
+        4 files                   0 bytes
+
+Directory for ::/ReactOS/system32/wbem/mof/good
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/wbem/mof/bad
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/wbem/AdStatus
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/wbem/xml
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/wbem/Logs
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/wbem/AutoRecover
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/wbem/snmp
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/wbem/Performance
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/ShellExt
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/spool
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+drivers      <DIR>     2026-04-26   5:45 
+prtprocs     <DIR>     2026-04-26   5:45 
+PRINTERS     <DIR>     2026-04-26   5:45 
+        5 files                   0 bytes
+
+Directory for ::/ReactOS/system32/spool/drivers
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+color        <DIR>     2026-04-26   5:45 
+w32x86       <DIR>     2026-04-26   5:45 
+        4 files                   0 bytes
+
+Directory for ::/ReactOS/system32/spool/drivers/color
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/spool/drivers/w32x86
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+3            <DIR>     2026-04-26   5:45 
+        3 files                   0 bytes
+
+Directory for ::/ReactOS/system32/spool/drivers/w32x86/3
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/spool/prtprocs
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+w32x86       <DIR>     2026-04-26   5:45 
+x64          <DIR>     2026-04-26   5:45 
+        4 files                   0 bytes
+
+Directory for ::/ReactOS/system32/spool/prtprocs/w32x86
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+winprint dll     48640 2026-04-26   5:46 
+        3 files              48 640 bytes
+
+Directory for ::/ReactOS/system32/spool/prtprocs/x64
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/spool/PRINTERS
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/CatRoot
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/CatRoot2
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system32/gecko
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+2        40  <DIR>     2026-04-26   5:51 
+        3 files                   0 bytes
+
+Directory for ::/ReactOS/system32/gecko/2.40
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+WINE_G~1     <DIR>     2026-04-26   5:51  wine_gecko
+        3 files                   0 bytes
+
+Directory for ::/ReactOS/system32/gecko/2.40/wine_gecko
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+DEPEND~1 LIS        29 2015-11-28  20:13  dependentlibs.list
+GMP-FA~1     <DIR>     2026-04-26   5:51  gmp-fakeopenh264
+LIBEGL   DLL    585235 2015-11-28  20:13  libEGL.dll
+DICTIO~1     <DIR>     2026-04-26   5:51  dictionaries
+omni     ja    6432118 2015-11-28  20:13 
+LIBGLE~1 DLL   1615379 2015-11-28  20:13  libGLESv2.dll
+GMP-CL~1     <DIR>     2026-04-26   5:51  gmp-clearkey
+gmp-fake     <DIR>     2026-04-26   5:51 
+VERSION             15 2015-11-28  20:13 
+mozglue  dll    609299 2015-11-28  20:13 
+xul      dll  41013806 2015-11-28  20:13 
+LICENSE            389 2015-11-28  20:13 
+nssckbi  dll    465427 2015-11-28  20:13 
+nssdbm3  dll    138771 2015-11-28  20:13 
+platform ini        46 2015-11-28  20:13 
+PLUGIN~1 EXE    423955 2015-11-28  20:13  plugin-container.exe
+freebl3  dll    417299 2015-11-28  20:13 
+PLUGIN~2 EXE    540691 2015-11-28  20:13  plugin-hang-ui.exe
+nss3     dll   2029587 2015-11-28  20:13 
+softokn3 dll    205843 2015-11-28  20:13 
+       22 files          54 477 889 bytes
+
+Directory for ::/ReactOS/system32/gecko/2.40/wine_gecko/gmp-fakeopenh264
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+1        0   <DIR>     2026-04-26   5:51 
+        3 files                   0 bytes
+
+Directory for ::/ReactOS/system32/gecko/2.40/wine_gecko/gmp-fakeopenh264/1.0
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+FAKEOP~1 INF       116 2015-11-28  20:13  fakeopenh264.info
+FAKEOP~1 DLL    582163 2015-11-28  20:13  fakeopenh264.dll
+FAKEOP~1 VOU        37 2015-11-28  20:13  fakeopenh264.voucher
+        5 files             582 316 bytes
+
+Directory for ::/ReactOS/system32/gecko/2.40/wine_gecko/dictionaries
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+EN-US    AFF      3074 2015-11-28  20:13  en-US.aff
+EN-US    DIC    599588 2015-11-28  20:13  en-US.dic
+        4 files             602 662 bytes
+
+Directory for ::/ReactOS/system32/gecko/2.40/wine_gecko/gmp-clearkey
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+0        1   <DIR>     2026-04-26   5:51 
+        3 files                   0 bytes
+
+Directory for ::/ReactOS/system32/gecko/2.40/wine_gecko/gmp-clearkey/0.1
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+CLEARK~1 INF       310 2015-11-28  20:13  clearkey.info
+clearkey dll    603155 2015-11-28  20:13 
+        4 files             603 465 bytes
+
+Directory for ::/ReactOS/system32/gecko/2.40/wine_gecko/gmp-fake
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+1        0   <DIR>     2026-04-26   5:51 
+        3 files                   0 bytes
+
+Directory for ::/ReactOS/system32/gecko/2.40/wine_gecko/gmp-fake/1.0
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+FAKE~1   INF       128 2015-11-28  20:13  fake.info
+fake     dll    630803 2015-11-28  20:13 
+FAKE~1   VOU        28 2015-11-28  20:13  fake.voucher
+        5 files             630 959 bytes
+
+Directory for ::/ReactOS/media
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+REACTO~1 WAV    143222 2026-04-26   5:45  ReactOS_Critical_Stop.wav
+REACTO~2 WAV    705580 2026-04-26   5:45  ReactOS_LogOn.wav
+REACTO~3 WAV    117878 2026-04-26   5:46  ReactOS_Notify.wav
+REACTO~4 WAV    109412 2026-04-26   5:46  ReactOS_Recycle.wav
+        6 files           1 076 092 bytes
+
+Directory for ::/ReactOS/Fonts
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+DROIDS~1 TTF   3081908 2026-04-26   5:45  DroidSansFallback.ttf
+arial    ttf    180144 2026-04-26   5:45 
+arialbd  ttf    180028 2026-04-26   5:45 
+arialbi  ttf    187684 2026-04-26   5:45 
+ariali   ttf    188084 2026-04-26   5:45 
+ariblk   ttf     56004 2026-04-26   5:45 
+comic    ttf     66344 2026-04-26   5:45 
+comicbd  ttf     76532 2026-04-26   5:45 
+cour     ttf    314804 2026-04-26   5:45 
+courbd   ttf    156100 2026-04-26   5:45 
+courbi   ttf    159032 2026-04-26   5:45 
+couri    ttf    191584 2026-04-26   5:45 
+framd    ttf    352992 2026-04-26   5:45 
+framdit  ttf    328536 2026-04-26   5:45 
+FREESANS TTF   1563256 2026-04-26   5:45  FreeSans.ttf
+FREESA~1 TTF    416128 2026-04-26   5:45  FreeSansBold.ttf
+FREESA~2 TTF    342488 2026-04-26   5:45  FreeSansBoldOblique.ttf
+FREESA~3 TTF    763696 2026-04-26   5:45  FreeSansOblique.ttf
+FSEX301  ttf    575668 2026-04-26   5:45 
+FSEX30~1 TTF    574604 2026-04-26   5:45  FSEX301-L2.ttf
+georgia  ttf     78052 2026-04-26   5:45 
+georgiab ttf     79312 2026-04-26   5:45 
+georgiai ttf     80364 2026-04-26   5:45 
+georgiaz ttf     80344 2026-04-26   5:45 
+lucon    ttf    272612 2026-04-26   5:45 
+MARLETT  TTF     16136 2026-04-26   5:45  Marlett.ttf
+micross  ttf    641804 2026-04-26   5:45 
+pala     ttf    262848 2026-04-26   5:45 
+palab    ttf    259744 2026-04-26   5:45 
+palabi   ttf    259144 2026-04-26   5:45 
+palai    ttf    278228 2026-04-26   5:45 
+SOURCE~1 TTF    293956 2026-04-26   5:45  SourceSansPro-Regular.ttf
+SOURCE~2 TTF    291424 2026-04-26   5:45  SourceSansPro-Bold.ttf
+SOURCE~3 TTF    103608 2026-04-26   5:45  SourceSansPro-BoldIt.ttf
+SOURCE~4 TTF    104236 2026-04-26   5:45  SourceSansPro-It.ttf
+symbol   ttf     26028 2026-04-26   5:45 
+tahoma   ttf    173684 2026-04-26   5:45 
+tahomabd ttf    145608 2026-04-26   5:45 
+times    ttf    204888 2026-04-26   5:45 
+timesbd  ttf    198920 2026-04-26   5:45 
+timesbi  ttf    205404 2026-04-26   5:45 
+timesi   ttf    207432 2026-04-26   5:45 
+trebuc   ttf    174580 2026-04-26   5:45 
+trebucbd ttf    176088 2026-04-26   5:45 
+trebucbi ttf    178820 2026-04-26   5:45 
+trebucit ttf    178916 2026-04-26   5:45 
+UNIVGA16 TTF    260064 2026-04-26   5:45  UniVGA16.ttf
+verdanab ttf    564632 2026-04-26   5:45 
+verdanaz ttf    534876 2026-04-26   5:45 
+verdanai ttf    524184 2026-04-26   5:45 
+verdana  ttf    571444 2026-04-26   5:45 
+wingding ttf      9524 2026-04-26   5:45 
+desktop  ini       117 2026-04-26   5:51 
+       55 files          17 192 637 bytes
+
+Directory for ::/ReactOS/bin
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+testdata     <DIR>     2026-04-26   5:45 
+suppl        <DIR>     2026-04-26   5:45 
+AHKAPP~1 CMD       548 2026-04-26   5:45  AHKAppTests.cmd
+regtest  cmd      1094 2026-04-26   5:45 
+        6 files               1 642 bytes
+
+Directory for ::/ReactOS/bin/testdata
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/bin/suppl
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/inf
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+acpi     inf      6088 2026-04-26   5:45 
+btrfs    inf      7866 2026-04-26   5:45 
+net21x4  inf      9606 2026-04-26   5:45 
+nete1000 inf     23890 2026-04-26   5:45 
+netne    inf      7476 2026-04-26   5:45 
+netkvm   inf     30770 2026-04-26   5:45 
+netnv    inf     24556 2026-04-26   5:45 
+netamd   inf      2920 2026-04-26   5:45 
+netrtl   inf      8170 2026-04-26   5:45 
+cpu      inf     54080 2026-04-26   5:45 
+cdrom    inf     14304 2026-04-26   5:45 
+disk     inf     18700 2026-04-26   5:45 
+ramdisk  inf      4380 2026-04-26   5:45 
+UNIATA~1 INF      3894 2026-04-26   5:45  uniata_comm.inf
+usbstor  inf      6758 2026-04-26   5:45 
+ac97     inf     47508 2026-04-26   5:45 
+CM8738~1 INF     12535 2026-04-26   5:45  CM8738-x32.inf
+hdaudbus inf      8830 2026-04-26   5:45 
+audio    inf      5112 2026-04-26   5:45 
+battery  inf      8760 2026-04-26   5:45 
+bda      inf     22370 2026-04-26   5:45 
+bth      inf      5652 2026-04-26   5:45 
+c_image  inf      1956 2026-04-26   5:45 
+display  inf      8486 2026-04-26   5:45 
+fdc      inf      8854 2026-04-26   5:45 
+flpydisk inf      5750 2026-04-26   5:45 
+hal      inf      8890 2026-04-26   5:45 
+hdc      inf    461380 2026-04-26   5:45 
+input    inf      9502 2026-04-26   5:45 
+keyboard inf     10878 2026-04-26   5:45 
+ks       inf    158956 2026-04-26   5:45 
+kscaptur inf     67830 2026-04-26   5:45 
+legcydrv inf      2940 2026-04-26   5:45 
+machine  inf     89682 2026-04-26   5:45 
+monitor  inf      6622 2026-04-26   5:45 
+msmouse  inf     39440 2026-04-26   5:45 
+NET_NIC  inf      3742 2026-04-26   5:45 
+nettcpip inf     37666 2026-04-26   5:45 
+ports    inf     13484 2026-04-26   5:45 
+scsi     inf     10232 2026-04-26   5:45 
+SHORTC~1 INF    118560 2026-04-26   5:45  shortcuts.inf
+unknown  inf      2560 2026-04-26   5:45 
+usb      inf      7716 2026-04-26   5:45 
+usbport  inf     21392 2026-04-26   5:45 
+volume   inf      3614 2026-04-26   5:45 
+wdmaudio inf     23252 2026-04-26   5:45 
+wmiacpi  inf      3482 2026-04-26   5:45 
+defltwk  inf      5949 2026-04-26   5:45 
+font     inf     11356 2026-04-26   5:45 
+intl     inf    100523 2026-04-26   5:45 
+layout   inf        67 2026-04-26   5:45 
+syssetup inf      3288 2026-04-26   5:45 
+ROSAPP~1 INF     19816 2026-04-26   5:46  rosapps_shortcuts.inf
+bochsmp  inf      2692 2026-04-26   5:46 
+       56 files           1 604 782 bytes
+
+Directory for ::/ReactOS/Microsoft.NET
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+FRAMEW~1     <DIR>     2026-04-26   5:45  Framework
+        3 files                   0 bytes
+
+Directory for ::/ReactOS/Microsoft.NET/Framework
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+V10~1    370 <DIR>     2026-04-26   5:45  v1.0.3705
+V11~1    432 <DIR>     2026-04-26   5:45  v1.1.4322
+V20~1    507 <DIR>     2026-04-26   5:45  v2.0.50727
+        5 files                   0 bytes
+
+Directory for ::/ReactOS/Microsoft.NET/Framework/v1.0.3705
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+fusion   dll    119808 2026-04-26   5:45 
+        3 files             119 808 bytes
+
+Directory for ::/ReactOS/Microsoft.NET/Framework/v1.1.4322
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+fusion   dll    119808 2026-04-26   5:45 
+        3 files             119 808 bytes
+
+Directory for ::/ReactOS/Microsoft.NET/Framework/v2.0.50727
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+fusion   dll    119808 2026-04-26   5:45 
+        3 files             119 808 bytes
+
+Directory for ::/ReactOS/Resources
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+THEMES       <DIR>     2026-04-26   5:45  Themes
+        3 files                   0 bytes
+
+Directory for ::/ReactOS/Resources/Themes
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+LAUTUS       <DIR>     2026-04-26   5:45  Lautus
+MODERN       <DIR>     2026-04-26   5:45  Modern
+LUNAR        <DIR>     2026-04-26   5:45  Lunar
+MIZU         <DIR>     2026-04-26   5:45  Mizu
+        6 files                   0 bytes
+
+Directory for ::/ReactOS/Resources/Themes/Lautus
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+LAUTUS~1 MSS   1063633 2026-04-26   5:46  lautus.msstyles
+        3 files           1 063 633 bytes
+
+Directory for ::/ReactOS/Resources/Themes/Modern
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+MODERN~1 MSS   2852561 2026-04-26   5:46  modern.msstyles
+        3 files           2 852 561 bytes
+
+Directory for ::/ReactOS/Resources/Themes/Lunar
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+LUNAR~1  MSS   1052881 2026-04-26   5:46  lunar.msstyles
+        3 files           1 052 881 bytes
+
+Directory for ::/ReactOS/Resources/Themes/Mizu
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+MIZU~1   MSS   1049809 2026-04-26   5:46  mizu.msstyles
+        3 files           1 049 809 bytes
+
+Directory for ::/ReactOS/Help
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/Config
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/Cursors
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/Temp
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/twain_32
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/repair
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+AUTOEXEC NT       1279 2026-04-26   5:46 
+CONFIG   NT       2821 2026-04-26   5:46 
+        4 files               4 100 bytes
+
+Directory for ::/ReactOS/Web
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+WALLPA~1     <DIR>     2026-04-26   5:45  Wallpaper
+        3 files                   0 bytes
+
+Directory for ::/ReactOS/Web/Wallpaper
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+README   txt      1955 2026-04-26   5:46 
+LICENSE  txt     18649 2026-04-26   5:46 
+BOREALIS JPG    121874 2026-04-26   5:46  Borealis.jpg
+BOREAL~1 JPG    135647 2026-04-26   5:46  Borealis Dark.jpg
+DEEPSE~1 JPG    191173 2026-04-26   5:46  Deep Sea.jpg
+MIZU(4~1 BMP   4665654 2026-04-26   5:46  Mizu (4x3).bmp
+MIZU(1~1 BMP   6220854 2026-04-26   5:46  Mizu (16x9).bmp
+GRASS    JPG    354440 2026-04-26   5:46  Grass.jpg
+POLARL~1 JPG    351423 2026-04-26   5:46  Polarlicht.jpg
+REACTO~1 PNG     60554 2026-04-26   5:46  ReactOS Dark.png
+REACTO~2 PNG     59464 2026-04-26   5:46  ReactOS Light.png
+       13 files          12 181 687 bytes
+
+Directory for ::/ReactOS/Prefetch
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/security
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+DATABASE     <DIR>     2026-04-26   5:45  Database
+logs         <DIR>     2026-04-26   5:45 
+TEMPLA~1     <DIR>     2026-04-26   5:45  templates
+        5 files                   0 bytes
+
+Directory for ::/ReactOS/security/Database
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/security/logs
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/security/templates
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/AppPatch
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+acgenral dll     23040 2026-04-26   5:45 
+aclayers dll     82432 2026-04-26   5:45 
+sysmain  sdb      7940 2026-04-26   5:45 
+        5 files             113 412 bytes
+
+Directory for ::/ReactOS/winsxs
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+MANIFE~1     <DIR>     2026-04-26   5:45  manifests
+X86_MI~1 298 <DIR>     2026-04-26   5:45  x86_microsoft.windows.common-controls_6595b64144ccf1df_5.82.2600.2982_none_deadbeef
+X86_MI~2 298 <DIR>     2026-04-26   5:45  x86_microsoft.windows.common-controls_6595b64144ccf1df_6.0.2600.2982_none_deadbeef
+X86_MI~1 230 <DIR>     2026-04-26   5:45  x86_microsoft.windows.gdiplus_6595b64144ccf1df_1.1.7601.23038_none_deadbeef
+X86_RE~1 0_N <DIR>     2026-04-26   5:45  x86_reactos.apisets_6595b64144ccf1df_1.0.0.0_none_deadbeef
+X86_MI~1 0_N <DIR>     2026-04-26   5:45  x86_microsoft.windows.gdiplus_6595b64144ccf1df_1.0.14393.0_none_deadbeef
+AMD64_~1 298 <DIR>     2026-04-26   5:45  amd64_microsoft.windows.common-controls_6595b64144ccf1df_5.82.2600.2982_none_deadbeef
+AMD64_~2 298 <DIR>     2026-04-26   5:45  amd64_microsoft.windows.common-controls_6595b64144ccf1df_6.0.2600.2982_none_deadbeef
+AMD64_~1 230 <DIR>     2026-04-26   5:45  amd64_microsoft.windows.gdiplus_6595b64144ccf1df_1.1.7601.23038_none_deadbeef
+AMD64_~1 0_N <DIR>     2026-04-26   5:45  amd64_reactos.apisets_6595b64144ccf1df_1.0.0.0_none_deadbeef
+AMD64_~2 0_N <DIR>     2026-04-26   5:45  amd64_microsoft.windows.gdiplus_6595b64144ccf1df_1.0.14393.0_none_deadbeef
+ARM_MI~1 298 <DIR>     2026-04-26   5:45  arm_microsoft.windows.common-controls_6595b64144ccf1df_5.82.2600.2982_none_deadbeef
+ARM_MI~2 298 <DIR>     2026-04-26   5:45  arm_microsoft.windows.common-controls_6595b64144ccf1df_6.0.2600.2982_none_deadbeef
+ARM_MI~1 230 <DIR>     2026-04-26   5:45  arm_microsoft.windows.gdiplus_6595b64144ccf1df_1.1.7601.23038_none_deadbeef
+ARM_RE~1 0_N <DIR>     2026-04-26   5:45  arm_reactos.apisets_6595b64144ccf1df_1.0.0.0_none_deadbeef
+ARM_MI~1 0_N <DIR>     2026-04-26   5:45  arm_microsoft.windows.gdiplus_6595b64144ccf1df_1.0.14393.0_none_deadbeef
+ARM64_~1 298 <DIR>     2026-04-26   5:45  arm64_microsoft.windows.common-controls_6595b64144ccf1df_5.82.2600.2982_none_deadbeef
+ARM64_~2 298 <DIR>     2026-04-26   5:45  arm64_microsoft.windows.common-controls_6595b64144ccf1df_6.0.2600.2982_none_deadbeef
+ARM64_~1 230 <DIR>     2026-04-26   5:45  arm64_microsoft.windows.gdiplus_6595b64144ccf1df_1.1.7601.23038_none_deadbeef
+ARM64_~1 0_N <DIR>     2026-04-26   5:45  arm64_reactos.apisets_6595b64144ccf1df_1.0.0.0_none_deadbeef
+ARM64_~2 0_N <DIR>     2026-04-26   5:45  arm64_microsoft.windows.gdiplus_6595b64144ccf1df_1.0.14393.0_none_deadbeef
+       23 files                   0 bytes
+
+Directory for ::/ReactOS/winsxs/manifests
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+X86_RE~1 MAN     12324 2026-04-26   5:45  x86_reactos.apisets_6595b64144ccf1df_1.0.0.0_none_deadbeef.manifest
+X86_MI~1 MAN      2030 2026-04-26   5:45  x86_microsoft.windows.common-controls_6595b64144ccf1df_5.82.2600.2982_none_deadbeef.manifest
+X86_MI~2 MAN      1609 2026-04-26   5:45  x86_microsoft.windows.common-controls_6595b64144ccf1df_6.0.2600.2982_none_deadbeef.manifest
+X86_MI~3 MAN       331 2026-04-26   5:45  x86_microsoft.windows.gdiplus_6595b64144ccf1df_1.1.7601.23038_none_deadbeef.manifest
+X86_MI~4 MAN       328 2026-04-26   5:45  x86_microsoft.windows.gdiplus_6595b64144ccf1df_1.0.14393.0_none_deadbeef.manifest
+SYSTEM~1 MAN       619 2026-04-26   5:46  systemcompatible.manifest
+FORWAR~1 MAN       827 2026-04-26   5:46  forwardcompatible.manifest
+        9 files              18 068 bytes
+
+Directory for ::/ReactOS/winsxs/x86_microsoft.windows.common-controls_6595b64144ccf1df_5.82.2600.2982_none_deadbeef
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+comctl32 dll   2028032 2026-04-26   5:45 
+        3 files           2 028 032 bytes
+
+Directory for ::/ReactOS/winsxs/x86_microsoft.windows.common-controls_6595b64144ccf1df_6.0.2600.2982_none_deadbeef
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+comctl32 dll   2028032 2026-04-26   5:45 
+        3 files           2 028 032 bytes
+
+Directory for ::/ReactOS/winsxs/x86_microsoft.windows.gdiplus_6595b64144ccf1df_1.1.7601.23038_none_deadbeef
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+gdiplus  dll    911360 2026-04-26   5:45 
+        3 files             911 360 bytes
+
+Directory for ::/ReactOS/winsxs/x86_reactos.apisets_6595b64144ccf1df_1.0.0.0_none_deadbeef
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+API-MS~1 DLL     12288 2026-04-26   5:45  api-ms-win-appmodel-identity-l1-1-0.dll
+API-MS~2 DLL     15360 2026-04-26   5:45  api-ms-win-appmodel-runtime-l1-1-1.dll
+API-MS~3 DLL     11776 2026-04-26   5:45  api-ms-win-appmodel-runtime-l1-1-2.dll
+API-MS~4 DLL      6144 2026-04-26   5:45  api-ms-win-core-apiquery-l1-1-0.dll
+AP2AB6~1 DLL      7168 2026-04-26   5:45  api-ms-win-core-appcompat-l1-1-1.dll
+AP9C81~1 DLL      6144 2026-04-26   5:45  api-ms-win-core-appinit-l1-1-0.dll
+APF17D~1 DLL      7168 2026-04-26   5:45  api-ms-win-core-atoms-l1-1-0.dll
+APAA7E~1 DLL      6656 2026-04-26   5:45  api-ms-win-core-bem-l1-1-0.dll
+APEAF1~1 DLL     14848 2026-04-26   5:45  api-ms-win-core-com-l1-1-0.dll
+APEAF5~1 DLL     15360 2026-04-26   5:45  api-ms-win-core-com-l1-1-1.dll
+APB86C~1 DLL     36352 2026-04-26   5:45  api-ms-win-core-com-private-l1-1-0.dll
+AP31F0~1 DLL      4096 2026-04-26   5:45  api-ms-win-core-comm-l1-1-0.dll
+AP3593~1 DLL      4096 2026-04-26   5:45  api-ms-win-core-console-l1-1-0.dll
+AP3590~1 DLL      5632 2026-04-26   5:45  api-ms-win-core-console-l2-1-0.dll
+AP6E32~1 DLL     19968 2026-04-26   5:45  api-ms-win-core-crt-l1-1-0.dll
+AP6E31~1 DLL      8192 2026-04-26   5:45  api-ms-win-core-crt-l2-1-0.dll
+AP6170~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-datetime-l1-1-0.dll
+AP6570~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-datetime-l1-1-1.dll
+AP194D~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-debug-l1-1-0.dll
+AP1941~1 DLL      4096 2026-04-26   5:45  api-ms-win-core-debug-l1-1-1.dll
+AP0B49~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-delayload-l1-1-0.dll
+AP0B4D~1 DLL      6144 2026-04-26   5:45  api-ms-win-core-delayload-l1-1-1.dll
+APADC8~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-errorhandling-l1-1-0.dll
+APADCC~1 DLL      4096 2026-04-26   5:45  api-ms-win-core-errorhandling-l1-1-1.dll
+APADC0~1 DLL      7168 2026-04-26   5:45  api-ms-win-core-errorhandling-l1-1-2.dll
+APADC4~1 DLL      7168 2026-04-26   5:45  api-ms-win-core-errorhandling-l1-1-3.dll
+AP3BD6~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-fibers-l1-1-0.dll
+AP3FD6~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-fibers-l1-1-1.dll
+AP513F~1 DLL      7168 2026-04-26   5:45  api-ms-win-core-file-l1-1-0.dll
+AP533F~1 DLL     11776 2026-04-26   5:45  api-ms-win-core-file-l1-2-0.dll
+AP573F~1 DLL     12288 2026-04-26   5:45  api-ms-win-core-file-l1-2-1.dll
+AP5B3F~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-file-l1-2-2.dll
+AP523F~1 DLL      6144 2026-04-26   5:45  api-ms-win-core-file-l2-1-0.dll
+AP563F~1 DLL      6144 2026-04-26   5:45  api-ms-win-core-file-l2-1-1.dll
+AP5A3F~1 DLL      6656 2026-04-26   5:45  api-ms-win-core-file-l2-1-2.dll
+AP5BFA~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-handle-l1-1-0.dll
+APDE66~1 DLL      4096 2026-04-26   5:45  api-ms-win-core-heap-l1-1-0.dll
+APD076~1 DLL      4096 2026-04-26   5:45  api-ms-win-core-heap-l1-2-0.dll
+APDF66~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-heap-l2-1-0.dll
+APA0D4~1 DLL      4096 2026-04-26   5:45  api-ms-win-core-heap-obsolete-l1-1-0.dll
+APEF38~1 DLL      4096 2026-04-26   5:45  api-ms-win-core-interlocked-l1-1-0.dll
+APEF3E~1 DLL      7168 2026-04-26   5:45  api-ms-win-core-interlocked-l1-2-0.dll
+APFEDC~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-io-l1-1-0.dll
+APF2EC~1 DLL      6144 2026-04-26   5:45  api-ms-win-core-io-l1-1-1.dll
+AP27F1~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-job-l1-1-0.dll
+AP27F0~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-job-l2-1-0.dll
+APF1CF~1 DLL     10240 2026-04-26   5:45  api-ms-win-core-kernel32-legacy-l1-1-0.dll
+AP02CB~1 DLL     12800 2026-04-26   5:45  api-ms-win-core-kernel32-legacy-l1-1-1.dll
+APFAD3~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-kernel32-private-l1-1-1.dll
+APC448~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-largeinteger-l1-1-0.dll
+AP024D~1 DLL      8192 2026-04-26   5:45  api-ms-win-core-libraryloader-l1-1-0.dll
+AP0241~1 DLL      8192 2026-04-26   5:45  api-ms-win-core-libraryloader-l1-1-1.dll
+AP0247~1 DLL      8192 2026-04-26   5:45  api-ms-win-core-libraryloader-l1-2-0.dll
+AP0243~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-libraryloader-l1-2-1.dll
+AP024F~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-libraryloader-l1-2-2.dll
+APD596~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-localization-l1-1-0.dll
+APD796~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-localization-l1-2-0.dll
+APDB96~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-localization-l1-2-1.dll
+APD696~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-localization-l2-1-0.dll
+AP13D4~1 DLL      4096 2026-04-26   5:45  api-ms-win-core-localization-obsolete-l1-1-0.dll
+AP23DA~1 DLL      4096 2026-04-26   5:45  api-ms-win-core-localization-obsolete-l1-2-0.dll
+AP23D8~1 DLL      4096 2026-04-26   5:45  api-ms-win-core-localization-obsolete-l1-3-0.dll
+AP4778~1 DLL      6656 2026-04-26   5:45  api-ms-win-core-localization-private-l1-1-0.dll
+APEF47~1 DLL      8704 2026-04-26   5:45  api-ms-win-core-localregistry-l1-1-0.dll
+AP0D53~1 DLL      4096 2026-04-26   5:45  api-ms-win-core-memory-l1-1-0.dll
+AP0163~1 DLL      8704 2026-04-26   5:45  api-ms-win-core-memory-l1-1-1.dll
+AP0563~1 DLL     10752 2026-04-26   5:45  api-ms-win-core-memory-l1-1-2.dll
+APF3BF~1 DLL      5120 2026-04-26   5:45  api-ms-win-core-misc-l1-1-0.dll
+APC72D~1 DLL      4096 2026-04-26   5:45  api-ms-win-core-namedpipe-l1-1-0.dll
+APC727~1 DLL      4096 2026-04-26   5:45  api-ms-win-core-namedpipe-l1-2-0.dll
+APA76A~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-namespace-l1-1-0.dll
+APC6B4~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-normalization-l1-1-0.dll
+AP94FF~1 DLL     13312 2026-04-26   5:45  api-ms-win-core-path-l1-1-0.dll
+AP3E7B~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-privateprofile-l1-1-1.dll
+AP705C~1 DLL      4608 2026-04-26   5:45  api-ms-win-core-processenvironment-l1-1-0.dll
+AP725C~1 DLL      4608 2026-04-26   5:45  api-ms-win-core-processenvironment-l1-2-0.dll
+APF5D1~1 DLL      9216 2026-04-26   5:45  api-ms-win-core-processthreads-l1-1-0.dll
+APF9D1~1 DLL     12288 2026-04-26   5:45  api-ms-win-core-processthreads-l1-1-1.dll
+APFDD1~1 DLL     13312 2026-04-26   5:45  api-ms-win-core-processthreads-l1-1-2.dll
+APF1E1~1 DLL      8704 2026-04-26   5:45  api-ms-win-core-processthreads-l1-1-3.dll
+APF3BD~1 DLL      6144 2026-04-26   5:45  api-ms-win-core-processtopology-obsolete-l1-1-0.dll
+APA401~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-profile-l1-1-0.dll
+AP2A3C~1 DLL      6656 2026-04-26   5:45  api-ms-win-core-psapi-ansi-l1-1-0.dll
+AP5BC6~1 DLL     11264 2026-04-26   5:45  api-ms-win-core-psapi-l1-1-0.dll
+AP5410~1 DLL      8192 2026-04-26   5:45  api-ms-win-core-psapi-obsolete-l1-1-0.dll
+AP0B73~1 DLL      8192 2026-04-26   5:45  api-ms-win-core-quirks-l1-1-0.dll
+APA0EE~1 DLL      6144 2026-04-26   5:45  api-ms-win-core-realtime-l1-1-0.dll
+AP323A~1 DLL      9216 2026-04-26   5:45  api-ms-win-core-registry-l1-1-0.dll
+AP333A~1 DLL     10752 2026-04-26   5:45  api-ms-win-core-registry-l2-1-0.dll
+APD9AF~1 DLL      4608 2026-04-26   5:45  api-ms-win-core-registryuserspecific-l1-1-0.dll
+APE093~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-rtlsupport-l1-1-0.dll
+APE293~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-rtlsupport-l1-2-0.dll
+APD785~1 DLL     13312 2026-04-26   5:45  api-ms-win-core-shlwapi-legacy-l1-1-0.dll
+AP226E~1 DLL      5632 2026-04-26   5:45  api-ms-win-core-shlwapi-obsolete-l1-1-0.dll
+AP246E~1 DLL      5632 2026-04-26   5:45  api-ms-win-core-shlwapi-obsolete-l1-2-0.dll
+AP7A64~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-shutdown-l1-1-0.dll
+AP581E~1 DLL      4096 2026-04-26   5:45  api-ms-win-core-sidebyside-l1-1-0.dll
+AP0D2A~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-string-l1-1-0.dll
+AP0E2A~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-string-l2-1-0.dll
+AP9C8A~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-string-obsolete-l1-1-0.dll
+AP0FC3~1 DLL      4096 2026-04-26   5:45  api-ms-win-core-stringansi-l1-1-0.dll
+AP7A35~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-stringloader-l1-1-1.dll
+AP8A27~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-synch-ansi-l1-1-0.dll
+AP7E4B~1 DLL      8704 2026-04-26   5:45  api-ms-win-core-synch-l1-1-0.dll
+AP7E4D~1 DLL     10752 2026-04-26   5:45  api-ms-win-core-synch-l1-2-0.dll
+AP7E41~1 DLL     11264 2026-04-26   5:45  api-ms-win-core-synch-l1-2-1.dll
+AP9BB1~1 DLL      8192 2026-04-26   5:45  api-ms-win-core-sysinfo-l1-1-0.dll
+AP9BB3~1 DLL      8704 2026-04-26   5:45  api-ms-win-core-sysinfo-l1-2-0.dll
+AP9BBF~1 DLL      9216 2026-04-26   5:45  api-ms-win-core-sysinfo-l1-2-1.dll
+AP1F60~1 DLL      7168 2026-04-26   5:45  api-ms-win-core-threadpool-l1-1-0.dll
+AP1170~1 DLL      6656 2026-04-26   5:45  api-ms-win-core-threadpool-l1-2-0.dll
+APBD34~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-threadpool-legacy-l1-1-0.dll
+APD413~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-threadpool-private-l1-1-0.dll
+AP7271~1 DLL      7680 2026-04-26   5:45  api-ms-win-core-timezone-l1-1-0.dll
+APEF4B~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-toolhelp-l1-1-0.dll
+APEE32~1 DLL      8192 2026-04-26   5:45  api-ms-win-core-url-l1-1-0.dll
+AP7216~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-util-l1-1-0.dll
+APE973~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-version-l1-1-0.dll
+APE97F~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-version-l1-1-1.dll
+APA047~1 DLL      6144 2026-04-26   5:45  api-ms-win-core-version-private-l1-1-0.dll
+AP9673~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-versionansi-l1-1-0.dll
+AP8319~1 DLL      6144 2026-04-26   5:45  api-ms-win-core-windowserrorreporting-l1-1-0.dll
+AP8370~1 DLL      9216 2026-04-26   5:45  api-ms-win-core-winrt-error-l1-1-0.dll
+AP8374~1 DLL     12288 2026-04-26   5:45  api-ms-win-core-winrt-error-l1-1-1.dll
+AP49F3~1 DLL      6144 2026-04-26   5:45  api-ms-win-core-winrt-errorprivate-l1-1-1.dll
+APF49D~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-winrt-l1-1-0.dll
+APC54C~1 DLL      6144 2026-04-26   5:45  api-ms-win-core-winrt-registration-l1-1-0.dll
+AP645B~1 DLL      6656 2026-04-26   5:45  api-ms-win-core-winrt-roparameterizediid-l1-1-0.dll
+AP6D86~1 DLL     15360 2026-04-26   5:45  api-ms-win-core-winrt-string-l1-1-0.dll
+AP6196~1 DLL     14848 2026-04-26   5:45  api-ms-win-core-winrt-string-l1-1-1.dll
+AP27B7~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-wow64-l1-1-0.dll
+AP27B3~1 DLL      3584 2026-04-26   5:45  api-ms-win-core-wow64-l1-1-1.dll
+AP1F3D~1 DLL      8192 2026-04-26   5:45  api-ms-win-core-xstate-l1-1-0.dll
+AP104D~1 DLL      7680 2026-04-26   5:45  api-ms-win-core-xstate-l2-1-0.dll
+AP5E92~1 DLL     13824 2026-04-26   5:45  api-ms-win-crt-conio-l1-1-0.dll
+AP941A~1 DLL     34816 2026-04-26   5:45  api-ms-win-crt-convert-l1-1-0.dll
+AP9CF9~1 DLL      8704 2026-04-26   5:45  api-ms-win-crt-environment-l1-1-0.dll
+APAFAB~1 DLL     17408 2026-04-26   5:45  api-ms-win-crt-filesystem-l1-1-0.dll
+AP16F5~1 DLL     10240 2026-04-26   5:45  api-ms-win-crt-heap-l1-1-0.dll
+APC5CF~1 DLL      9216 2026-04-26   5:45  api-ms-win-crt-locale-l1-1-0.dll
+AP219A~1 DLL     94720 2026-04-26   5:45  api-ms-win-crt-math-l1-1-0.dll
+AP94D1~1 DLL     50688 2026-04-26   5:45  api-ms-win-crt-multibyte-l1-1-0.dll
+AP3DB0~1 DLL    403456 2026-04-26   5:45  api-ms-win-crt-private-l1-1-0.dll
+APAA57~1 DLL      4608 2026-04-26   5:45  api-ms-win-crt-process-l1-1-0.dll
+AP7B5C~1 DLL     28160 2026-04-26   5:45  api-ms-win-crt-runtime-l1-1-0.dll
+APFE52~1 DLL     32256 2026-04-26   5:45  api-ms-win-crt-stdio-l1-1-0.dll
+AP79F8~1 DLL     39936 2026-04-26   5:45  api-ms-win-crt-string-l1-1-0.dll
+APA179~1 DLL     20480 2026-04-26   5:45  api-ms-win-crt-time-l1-1-0.dll
+AP2418~1 DLL      8704 2026-04-26   5:45  api-ms-win-crt-utility-l1-1-0.dll
+AP1491~1 DLL     13312 2026-04-26   5:45  api-ms-win-devices-config-l1-1-0.dll
+AP1495~1 DLL     13312 2026-04-26   5:45  api-ms-win-devices-config-l1-1-1.dll
+AP61C8~1 DLL     11264 2026-04-26   5:45  api-ms-win-devices-query-l1-1-1.dll
+APD37B~1 DLL     22016 2026-04-26   5:45  api-ms-win-downlevel-advapi32-l1-1-0.dll
+APD378~1 DLL      4096 2026-04-26   5:45  api-ms-win-downlevel-advapi32-l2-1-0.dll
+APC2CF~1 DLL      3584 2026-04-26   5:45  api-ms-win-downlevel-normaliz-l1-1-0.dll
+AP3A1F~1 DLL      9728 2026-04-26   5:45  api-ms-win-downlevel-ole32-l1-1-0.dll
+APF72F~1 DLL      3584 2026-04-26   5:45  api-ms-win-downlevel-shell32-l1-1-0.dll
+APA8E2~1 DLL     16896 2026-04-26   5:45  api-ms-win-downlevel-shlwapi-l1-1-0.dll
+APA9E2~1 DLL      3584 2026-04-26   5:45  api-ms-win-downlevel-shlwapi-l2-1-0.dll
+APDA0C~1 DLL      4608 2026-04-26   5:45  api-ms-win-downlevel-user32-l1-1-0.dll
+APBF9F~1 DLL      3584 2026-04-26   5:45  api-ms-win-downlevel-version-l1-1-0.dll
+AP958E~1 DLL     44032 2026-04-26   5:45  api-ms-win-dx-d3dkmt-l1-1-0.dll
+APC016~1 DLL      4096 2026-04-26   5:45  api-ms-win-eventing-classicprovider-l1-1-0.dll
+AP935B~1 DLL      3584 2026-04-26   5:45  api-ms-win-eventing-consumer-l1-1-0.dll
+APF206~1 DLL      8192 2026-04-26   5:45  api-ms-win-eventing-controller-l1-1-0.dll
+AP410A~1 DLL      6656 2026-04-26   5:45  api-ms-win-eventing-legacy-l1-1-0.dll
+AP8AA8~1 DLL      8704 2026-04-26   5:45  api-ms-win-eventing-provider-l1-1-0.dll
+AP4DF5~1 DLL      3584 2026-04-26   5:45  api-ms-win-eventlog-legacy-l1-1-0.dll
+APC3A2~1 DLL      6144 2026-04-26   5:45  api-ms-win-gdi-dpiinfo-l1-1-0.dll
+AP0B28~1 DLL      4096 2026-04-26   5:45  api-ms-win-mm-joystick-l1-1-0.dll
+AP5667~1 DLL      7680 2026-04-26   5:45  api-ms-win-mm-misc-l1-1-1.dll
+AP16DC~1 DLL      8192 2026-04-26   5:45  api-ms-win-mm-mme-l1-1-0.dll
+APB1E7~1 DLL      3584 2026-04-26   5:45  api-ms-win-mm-time-l1-1-0.dll
+AP5BF3~1 DLL      3584 2026-04-26   5:45  api-ms-win-ntuser-dc-access-l1-1-0.dll
+AP6813~1 DLL      3584 2026-04-26   5:45  api-ms-win-ntuser-rectangle-l1-1-0.dll
+APFEFD~1 DLL      7168 2026-04-26   5:45  api-ms-win-ntuser-sysparams-l1-1-0.dll
+AP5EFD~1 DLL      8704 2026-04-26   5:45  api-ms-win-perf-legacy-l1-1-0.dll
+APF481~1 DLL      6656 2026-04-26   5:45  api-ms-win-power-base-l1-1-0.dll
+AP0853~1 DLL      8192 2026-04-26   5:45  api-ms-win-power-setting-l1-1-0.dll
+AP164B~1 DLL      3584 2026-04-26   5:45  api-ms-win-rtcore-ntuser-draw-l1-1-0.dll
+AP8F20~1 DLL      7680 2026-04-26   5:45  api-ms-win-rtcore-ntuser-private-l1-1-0.dll
+AP8F30~1 DLL      6144 2026-04-26   5:45  api-ms-win-rtcore-ntuser-private-l1-1-4.dll
+AP63EE~1 DLL      7168 2026-04-26   5:45  api-ms-win-rtcore-ntuser-window-l1-1-0.dll
+AP126C~1 DLL      3584 2026-04-26   5:45  api-ms-win-rtcore-ntuser-winevent-l1-1-0.dll
+APF2E3~1 DLL     14336 2026-04-26   5:45  api-ms-win-rtcore-ntuser-wmpointer-l1-1-0.dll
+APFEE3~1 DLL      6144 2026-04-26   5:45  api-ms-win-rtcore-ntuser-wmpointer-l1-1-3.dll
+AP9DF2~1 DLL      6656 2026-04-26   5:45  api-ms-win-security-activedirectoryclient-l1-1-0.dll
+AP60F3~1 DLL     11264 2026-04-26   5:45  api-ms-win-security-audit-l1-1-1.dll
+AP4351~1 DLL     16896 2026-04-26   5:45  api-ms-win-security-base-l1-1-0.dll
+AP4551~1 DLL     17920 2026-04-26   5:45  api-ms-win-security-base-l1-2-0.dll
+AP178F~1 DLL      6144 2026-04-26   5:45  api-ms-win-security-base-private-l1-1-1.dll
+AP3043~1 DLL     10240 2026-04-26   5:45  api-ms-win-security-credentials-l1-1-0.dll
+AP5A30~1 DLL      5632 2026-04-26   5:45  api-ms-win-security-cryptoapi-l1-1-0.dll
+APAD73~1 DLL     15360 2026-04-26   5:45  api-ms-win-security-grouppolicy-l1-1-0.dll
+AP863B~1 DLL      9216 2026-04-26   5:45  api-ms-win-security-lsalookup-l1-1-0.dll
+AP8637~1 DLL     11264 2026-04-26   5:45  api-ms-win-security-lsalookup-l1-1-1.dll
+AP863E~1 DLL      3584 2026-04-26   5:45  api-ms-win-security-lsalookup-l2-1-0.dll
+AP8632~1 DLL      6144 2026-04-26   5:45  api-ms-win-security-lsalookup-l2-1-1.dll
+AP7AD4~1 DLL      7680 2026-04-26   5:45  api-ms-win-security-lsapolicy-l1-1-0.dll
+AP4E10~1 DLL      3584 2026-04-26   5:45  api-ms-win-security-provider-l1-1-0.dll
+APB1BB~1 DLL      3584 2026-04-26   5:45  api-ms-win-security-sddl-l1-1-0.dll
+AP1F73~1 DLL      3584 2026-04-26   5:45  api-ms-win-security-systemfunctions-l1-1-0.dll
+AP7D23~1 DLL      3584 2026-04-26   5:45  api-ms-win-service-core-l1-1-0.dll
+AP7D2F~1 DLL      6144 2026-04-26   5:45  api-ms-win-service-core-l1-1-1.dll
+APABC4~1 DLL      6144 2026-04-26   5:45  api-ms-win-service-management-l1-1-0.dll
+APBBC9~1 DLL      6656 2026-04-26   5:45  api-ms-win-service-management-l2-1-0.dll
+APD7D9~1 DLL     10752 2026-04-26   5:45  api-ms-win-service-private-l1-1-1.dll
+APC5A9~1 DLL      9728 2026-04-26   5:45  api-ms-win-service-winsvc-l1-1-0.dll
+APC5AB~1 DLL      7168 2026-04-26   5:45  api-ms-win-service-winsvc-l1-2-0.dll
+APB14A~1 DLL      3584 2026-04-26   5:45  api-ms-win-shcore-obsolete-l1-1-0.dll
+AP92C2~1 DLL      8704 2026-04-26   5:45  api-ms-win-shcore-scaling-l1-1-1.dll
+AP481B~1 DLL      7168 2026-04-26   5:45  api-ms-win-shcore-stream-l1-1-0.dll
+AP4810~1 DLL      6656 2026-04-26   5:45  api-ms-win-shcore-thread-l1-1-0.dll
+APFEA0~1 DLL      3584 2026-04-26   5:45  api-ms-win-shell-shellcom-l1-1-0.dll
+APA62F~1 DLL      7168 2026-04-26   5:45  api-ms-win-shell-shellfolders-l1-1-0.dll
+      217 files           2 219 008 bytes
+
+Directory for ::/ReactOS/winsxs/x86_microsoft.windows.gdiplus_6595b64144ccf1df_1.0.14393.0_none_deadbeef
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+gdiplus  dll    911360 2026-04-26   5:45 
+        3 files             911 360 bytes
+
+Directory for ::/ReactOS/winsxs/amd64_microsoft.windows.common-controls_6595b64144ccf1df_5.82.2600.2982_none_deadbeef
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/winsxs/amd64_microsoft.windows.common-controls_6595b64144ccf1df_6.0.2600.2982_none_deadbeef
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/winsxs/amd64_microsoft.windows.gdiplus_6595b64144ccf1df_1.1.7601.23038_none_deadbeef
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/winsxs/amd64_reactos.apisets_6595b64144ccf1df_1.0.0.0_none_deadbeef
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/winsxs/amd64_microsoft.windows.gdiplus_6595b64144ccf1df_1.0.14393.0_none_deadbeef
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/winsxs/arm_microsoft.windows.common-controls_6595b64144ccf1df_5.82.2600.2982_none_deadbeef
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/winsxs/arm_microsoft.windows.common-controls_6595b64144ccf1df_6.0.2600.2982_none_deadbeef
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/winsxs/arm_microsoft.windows.gdiplus_6595b64144ccf1df_1.1.7601.23038_none_deadbeef
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/winsxs/arm_reactos.apisets_6595b64144ccf1df_1.0.0.0_none_deadbeef
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/winsxs/arm_microsoft.windows.gdiplus_6595b64144ccf1df_1.0.14393.0_none_deadbeef
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/winsxs/arm64_microsoft.windows.common-controls_6595b64144ccf1df_5.82.2600.2982_none_deadbeef
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/winsxs/arm64_microsoft.windows.common-controls_6595b64144ccf1df_6.0.2600.2982_none_deadbeef
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/winsxs/arm64_microsoft.windows.gdiplus_6595b64144ccf1df_1.1.7601.23038_none_deadbeef
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/winsxs/arm64_reactos.apisets_6595b64144ccf1df_1.0.0.0_none_deadbeef
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/winsxs/arm64_microsoft.windows.gdiplus_6595b64144ccf1df_1.0.14393.0_none_deadbeef
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/3rdParty
+
+.            <DIR>     2026-04-26   5:45 
+..           <DIR>     2026-04-26   5:45 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/system
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/ReactOS/Installer
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+e5bd     msi  27959808 2026-04-26   5:45 
+        3 files          27 959 808 bytes
+
+Directory for ::/Program Files
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+COMMON~1     <DIR>     2026-04-26   5:46  Common Files
+INTERN~1     <DIR>     2026-04-26   5:52  Internet Explorer
+        4 files                   0 bytes
+
+Directory for ::/Program Files/Common Files
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/Program Files/Internet Explorer
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+iexplore exe     75776 2026-04-26   5:45 
+        3 files              75 776 bytes
+
+Directory for ::/Documents and Settings
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+DEFAUL~1     <DIR>     2026-04-26   5:46  Default User
+ALLUSE~1     <DIR>     2026-04-26   5:46  All Users
+NETWOR~1     <DIR>     2026-04-26   5:52  NetworkService
+ADMINI~1     <DIR>     2026-04-26   5:52  Administrator
+        6 files                   0 bytes
+
+Directory for ::/Documents and Settings/Default User
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+APPLIC~1     <DIR>     2026-04-26   5:46  Application Data
+DESKTOP      <DIR>     2026-04-26   5:46  Desktop
+FAVORI~1     <DIR>     2026-04-26   5:46  Favorites
+MYDOCU~1     <DIR>     2026-04-26   5:46  My Documents
+NETHOOD      <DIR>     2026-04-26   5:46  NetHood
+PRINTH~1     <DIR>     2026-04-26   5:46  PrintHood
+RECENT       <DIR>     2026-04-26   5:46  Recent
+SENDTO       <DIR>     2026-04-26   5:46  SendTo
+TEMPLA~1     <DIR>     2026-04-26   5:46  Templates
+STARTM~1     <DIR>     2026-04-26   5:46  Start Menu
+LOCALS~1     <DIR>     2026-04-26   5:46  Local Settings
+COOKIES      <DIR>     2026-04-26   5:46  Cookies
+ntuser   dat    147456 2026-04-26   5:46 
+MYMUSI~1     <DIR>     2026-04-26   5:51  My Music
+MYVIDE~1     <DIR>     2026-04-26   5:51  My Videos
+MYPICT~1     <DIR>     2026-04-26   5:51  My Pictures
+       18 files             147 456 bytes
+
+Directory for ::/Documents and Settings/Default User/Application Data
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+MICROS~1     <DIR>     2026-04-26   5:52  Microsoft
+        3 files                   0 bytes
+
+Directory for ::/Documents and Settings/Default User/Application Data/Microsoft
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+INTERN~1     <DIR>     2026-04-26   5:52  Internet Explorer
+        3 files                   0 bytes
+
+Directory for ::/Documents and Settings/Default User/Application Data/Microsoft/Internet Explorer
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+QUICKL~1     <DIR>     2026-04-26   5:52  Quick Launch
+        3 files                   0 bytes
+
+Directory for ::/Documents and Settings/Default User/Application Data/Microsoft/Internet Explorer/Quick Launch
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+REACTO~1 LNK      1265 2026-04-26   5:52  ReactOS Explorer.lnk
+COMMAN~1 LNK      1335 2026-04-26   5:52  Command Prompt.lnk
+APPLIC~1 LNK      1387 2026-04-26   5:52  Applications Manager.lnk
+        5 files               3 987 bytes
+
+Directory for ::/Documents and Settings/Default User/Desktop
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+README~1 LNK      1191 2026-04-26   5:52  Read Me.lnk
+COMMAN~1 LNK      1335 2026-04-26   5:52  Command Prompt.lnk
+APPLIC~1 LNK      1387 2026-04-26   5:52  Applications Manager.lnk
+        5 files               3 913 bytes
+
+Directory for ::/Documents and Settings/Default User/Favorites
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+desktop  ini        71 2026-04-26   5:51 
+        3 files                  71 bytes
+
+Directory for ::/Documents and Settings/Default User/My Documents
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+desktop  ini        72 2026-04-26   5:51 
+        3 files                  72 bytes
+
+Directory for ::/Documents and Settings/Default User/NetHood
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+desktop  ini        71 2026-04-26   5:51 
+        3 files                  71 bytes
+
+Directory for ::/Documents and Settings/Default User/PrintHood
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+desktop  ini        71 2026-04-26   5:51 
+        3 files                  71 bytes
+
+Directory for ::/Documents and Settings/Default User/Recent
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+desktop  ini        71 2026-04-26   5:51 
+        3 files                  71 bytes
+
+Directory for ::/Documents and Settings/Default User/SendTo
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+MYDOCU~1 MYD         0 2026-04-26   5:51  My Documents.mydocs
+DESKTO~1 DES         0 2026-04-26   5:51  Desktop (Create shortcut).DeskLink
+COMPRE~1 ZFS         0 2026-04-26   5:51  Compressed (zipped) Folder.ZFSendToTarget
+        5 files                   0 bytes
+
+Directory for ::/Documents and Settings/Default User/Templates
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/Default User/Start Menu
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+PROGRAMS     <DIR>     2026-04-26   5:46  Programs
+desktop  ini        71 2026-04-26   5:51 
+        4 files                  71 bytes
+
+Directory for ::/Documents and Settings/Default User/Start Menu/Programs
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+STARTUP      <DIR>     2026-04-26   5:46  Startup
+ADMINI~1     <DIR>     2026-04-26   5:51  Administrative Tools
+REACTO~1 LNK      1265 2026-04-26   5:52  ReactOS Explorer.lnk
+REACTO~2 LNK      1387 2026-04-26   5:52  ReactOS Applications Manager.lnk
+WINEIN~1 LNK      1465 2026-04-26   5:52  Wine Internet Explorer.lnk
+ACCESS~1     <DIR>     2026-04-26   5:52  Accessories
+GAMES        <DIR>     2026-04-26   5:52  Games
+        9 files               4 117 bytes
+
+Directory for ::/Documents and Settings/Default User/Start Menu/Programs/Startup
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/Default User/Start Menu/Programs/Administrative Tools
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/Default User/Start Menu/Programs/Accessories
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+CALCUL~1 LNK      1336 2026-04-26   5:52  Calculator.lnk
+COMMAN~1 LNK      1335 2026-04-26   5:52  Command Prompt.lnk
+NOTEPAD  LNK      1357 2026-04-26   5:52  Notepad.lnk
+WORDPAD  LNK      1365 2026-04-26   5:52  WordPad.lnk
+PAINT    LNK      1345 2026-04-26   5:52  Paint.lnk
+SYSTEM~1     <DIR>     2026-04-26   5:52  System Tools
+ACCESS~1     <DIR>     2026-04-26   5:52  Accessibility
+ENTERT~1     <DIR>     2026-04-26   5:52  Entertainment
+COMMUN~1     <DIR>     2026-04-26   5:52  Communications
+       11 files               6 738 bytes
+
+Directory for ::/Documents and Settings/Default User/Start Menu/Programs/Accessories/System Tools
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+CHARAC~1 LNK      1343 2026-04-26   5:52  Character Map.lnk
+CLIPBO~1 LNK      1349 2026-04-26   5:52  Clipboard Viewer.lnk
+KEYBOA~1 LNK      1370 2026-04-26   5:52  Keyboard Layout Switcher.lnk
+REGIST~1 LNK      1252 2026-04-26   5:52  Registry Editor.lnk
+TASKMA~1 LNK      1363 2026-04-26   5:52  Task Manager.lnk
+REACTX~1 LNK      1374 2026-04-26   5:52  ReactX Diagnostic.lnk
+FONTSUB  LNK      1363 2026-04-26   5:52  FontSub.lnk
+SNAPSHOT LNK      1380 2026-04-26   5:52  SnapShot.lnk
+VIRTUA~1 LNK      1424 2026-04-26   5:52  Virtual CDRom Control Panel.lnk
+       11 files              12 218 bytes
+
+Directory for ::/Documents and Settings/Default User/Start Menu/Programs/Accessories/Accessibility
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+MAGNIFY  LNK      1335 2026-04-26   5:52  Magnify.lnk
+ON-SCR~1 LNK      1347 2026-04-26   5:52  On-Screen Keyboard.lnk
+ACCESS~1 LNK      1393 2026-04-26   5:52  Accessibility Utility Manager.lnk
+        5 files               4 075 bytes
+
+Directory for ::/Documents and Settings/Default User/Start Menu/Programs/Accessories/Entertainment
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+MULTIM~1 LNK      1369 2026-04-26   5:52  Multimedia Player.lnk
+VOLUME~1 LNK      1364 2026-04-26   5:52  Volume Control.lnk
+SOUNDR~1 LNK      1368 2026-04-26   5:52  Sound Recorder.lnk
+        5 files               4 101 bytes
+
+Directory for ::/Documents and Settings/Default User/Start Menu/Programs/Accessories/Communications
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+REMOTE~1 LNK      1373 2026-04-26   5:52  Remote Desktop Connection.lnk
+        3 files               1 373 bytes
+
+Directory for ::/Documents and Settings/Default User/Start Menu/Programs/Games
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+SOLITA~1 LNK      1311 2026-04-26   5:52  Solitaire.lnk
+WINEMINE LNK      1333 2026-04-26   5:52  WineMine.lnk
+SPIDER~1 LNK      1342 2026-04-26   5:52  Spider Solitaire.lnk
+        5 files               3 986 bytes
+
+Directory for ::/Documents and Settings/Default User/Local Settings
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+APPLIC~1     <DIR>     2026-04-26   5:46  Application Data
+TEMP         <DIR>     2026-04-26   5:46  Temp
+TEMPOR~1     <DIR>     2026-04-26   5:46  Temporary Internet Files
+HISTORY      <DIR>     2026-04-26   5:46  History
+        6 files                   0 bytes
+
+Directory for ::/Documents and Settings/Default User/Local Settings/Application Data
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/Default User/Local Settings/Temp
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/Default User/Local Settings/Temporary Internet Files
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/Default User/Local Settings/History
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/Default User/Cookies
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/Default User/My Music
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+desktop  ini        72 2026-04-26   5:51 
+        3 files                  72 bytes
+
+Directory for ::/Documents and Settings/Default User/My Videos
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+desktop  ini        72 2026-04-26   5:51 
+        3 files                  72 bytes
+
+Directory for ::/Documents and Settings/Default User/My Pictures
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+desktop  ini        72 2026-04-26   5:51 
+        3 files                  72 bytes
+
+Directory for ::/Documents and Settings/All Users
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+APPLIC~1     <DIR>     2026-04-26   5:46  Application Data
+DESKTOP      <DIR>     2026-04-26   5:46  Desktop
+FAVORI~1     <DIR>     2026-04-26   5:46  Favorites
+MYDOCU~1     <DIR>     2026-04-26   5:46  My Documents
+TEMPLA~1     <DIR>     2026-04-26   5:46  Templates
+STARTM~1     <DIR>     2026-04-26   5:46  Start Menu
+DOCUME~1     <DIR>     2026-04-26   5:51  Documents
+        9 files                   0 bytes
+
+Directory for ::/Documents and Settings/All Users/Application Data
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/All Users/Desktop
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/All Users/Favorites
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+desktop  ini        71 2026-04-26   5:51 
+        3 files                  71 bytes
+
+Directory for ::/Documents and Settings/All Users/My Documents
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+desktop  ini        72 2026-04-26   5:51 
+        3 files                  72 bytes
+
+Directory for ::/Documents and Settings/All Users/Templates
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/All Users/Start Menu
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+PROGRAMS     <DIR>     2026-04-26   5:46  Programs
+desktop  ini        71 2026-04-26   5:51 
+        4 files                  71 bytes
+
+Directory for ::/Documents and Settings/All Users/Start Menu/Programs
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+STARTUP      <DIR>     2026-04-26   5:46  Startup
+ADMINI~1     <DIR>     2026-04-26   5:51  Administrative Tools
+        4 files                   0 bytes
+
+Directory for ::/Documents and Settings/All Users/Start Menu/Programs/Startup
+
+.            <DIR>     2026-04-26   5:46 
+..           <DIR>     2026-04-26   5:46 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/All Users/Start Menu/Programs/Administrative Tools
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+SERVIC~1 LNK      1361 2026-04-26   5:52  Service Manager.lnk
+DEVICE~1 LNK      1359 2026-04-26   5:52  Device Manager.lnk
+EVENTV~1 LNK      1360 2026-04-26   5:52  Event Viewer.lnk
+SYSTEM~1 LNK      1392 2026-04-26   5:52  System Configuration.lnk
+        6 files               5 472 bytes
+
+Directory for ::/Documents and Settings/All Users/Documents
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+MYMUSI~1     <DIR>     2026-04-26   5:51  My Music
+MYPICT~1     <DIR>     2026-04-26   5:51  My Pictures
+MYVIDE~1     <DIR>     2026-04-26   5:51  My Videos
+        5 files                   0 bytes
+
+Directory for ::/Documents and Settings/All Users/Documents/My Music
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+desktop  ini        72 2026-04-26   5:51 
+        3 files                  72 bytes
+
+Directory for ::/Documents and Settings/All Users/Documents/My Pictures
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+desktop  ini        72 2026-04-26   5:51 
+        3 files                  72 bytes
+
+Directory for ::/Documents and Settings/All Users/Documents/My Videos
+
+.            <DIR>     2026-04-26   5:51 
+..           <DIR>     2026-04-26   5:51 
+desktop  ini        72 2026-04-26   5:51 
+        3 files                  72 bytes
+
+Directory for ::/Documents and Settings/NetworkService
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+APPLIC~1     <DIR>     2026-04-26   5:52  Application Data
+DESKTOP      <DIR>     2026-04-26   5:52  Desktop
+FAVORI~1     <DIR>     2026-04-26   5:52  Favorites
+MYDOCU~1     <DIR>     2026-04-26   5:52  My Documents
+NETHOOD      <DIR>     2026-04-26   5:52  NetHood
+PRINTH~1     <DIR>     2026-04-26   5:52  PrintHood
+RECENT       <DIR>     2026-04-26   5:52  Recent
+SENDTO       <DIR>     2026-04-26   5:52  SendTo
+TEMPLA~1     <DIR>     2026-04-26   5:52  Templates
+STARTM~1     <DIR>     2026-04-26   5:52  Start Menu
+LOCALS~1     <DIR>     2026-04-26   5:52  Local Settings
+COOKIES      <DIR>     2026-04-26   5:52  Cookies
+ntuser   dat    167936 2026-04-26   9:56 
+MYMUSI~1     <DIR>     2026-04-26   5:52  My Music
+MYVIDE~1     <DIR>     2026-04-26   5:52  My Videos
+MYPICT~1     <DIR>     2026-04-26   5:52  My Pictures
+NTUSER~1 LOG     62464 2026-04-26   9:56  ntuser.dat.LOG
+       19 files             230 400 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Application Data
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+MICROS~1     <DIR>     2026-04-26   5:52  Microsoft
+        3 files                   0 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Application Data/Microsoft
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+INTERN~1     <DIR>     2026-04-26   5:52  Internet Explorer
+        3 files                   0 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Application Data/Microsoft/Internet Explorer
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+QUICKL~1     <DIR>     2026-04-26   5:52  Quick Launch
+        3 files                   0 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Application Data/Microsoft/Internet Explorer/Quick Launch
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+REACTO~1 LNK      1265 2026-04-26   5:52  ReactOS Explorer.lnk
+COMMAN~1 LNK      1335 2026-04-26   5:52  Command Prompt.lnk
+APPLIC~1 LNK      1387 2026-04-26   5:52  Applications Manager.lnk
+        5 files               3 987 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Desktop
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+README~1 LNK      1191 2026-04-26   5:52  Read Me.lnk
+COMMAN~1 LNK      1335 2026-04-26   5:52  Command Prompt.lnk
+APPLIC~1 LNK      1387 2026-04-26   5:52  Applications Manager.lnk
+        5 files               3 913 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Favorites
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+desktop  ini        71 2026-04-26   5:51 
+        3 files                  71 bytes
+
+Directory for ::/Documents and Settings/NetworkService/My Documents
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+desktop  ini        72 2026-04-26   5:51 
+        3 files                  72 bytes
+
+Directory for ::/Documents and Settings/NetworkService/NetHood
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+desktop  ini        71 2026-04-26   5:51 
+        3 files                  71 bytes
+
+Directory for ::/Documents and Settings/NetworkService/PrintHood
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+desktop  ini        71 2026-04-26   5:51 
+        3 files                  71 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Recent
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+desktop  ini        71 2026-04-26   5:51 
+        3 files                  71 bytes
+
+Directory for ::/Documents and Settings/NetworkService/SendTo
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+MYDOCU~1 MYD         0 2026-04-26   5:51  My Documents.mydocs
+DESKTO~1 DES         0 2026-04-26   5:51  Desktop (Create shortcut).DeskLink
+COMPRE~1 ZFS         0 2026-04-26   5:51  Compressed (zipped) Folder.ZFSendToTarget
+        5 files                   0 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Templates
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Start Menu
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+PROGRAMS     <DIR>     2026-04-26   5:52  Programs
+desktop  ini        71 2026-04-26   5:51 
+        4 files                  71 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Start Menu/Programs
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+STARTUP      <DIR>     2026-04-26   5:52  Startup
+ADMINI~1     <DIR>     2026-04-26   5:52  Administrative Tools
+REACTO~1 LNK      1265 2026-04-26   5:52  ReactOS Explorer.lnk
+REACTO~2 LNK      1387 2026-04-26   5:52  ReactOS Applications Manager.lnk
+WINEIN~1 LNK      1465 2026-04-26   5:52  Wine Internet Explorer.lnk
+ACCESS~1     <DIR>     2026-04-26   5:52  Accessories
+GAMES        <DIR>     2026-04-26   5:52  Games
+        9 files               4 117 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Start Menu/Programs/Startup
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Start Menu/Programs/Administrative Tools
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Start Menu/Programs/Accessories
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+CALCUL~1 LNK      1336 2026-04-26   5:52  Calculator.lnk
+COMMAN~1 LNK      1335 2026-04-26   5:52  Command Prompt.lnk
+NOTEPAD  LNK      1357 2026-04-26   5:52  Notepad.lnk
+WORDPAD  LNK      1365 2026-04-26   5:52  WordPad.lnk
+PAINT    LNK      1345 2026-04-26   5:52  Paint.lnk
+SYSTEM~1     <DIR>     2026-04-26   5:52  System Tools
+ACCESS~1     <DIR>     2026-04-26   5:52  Accessibility
+ENTERT~1     <DIR>     2026-04-26   5:52  Entertainment
+COMMUN~1     <DIR>     2026-04-26   5:52  Communications
+       11 files               6 738 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Start Menu/Programs/Accessories/System Tools
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+CHARAC~1 LNK      1343 2026-04-26   5:52  Character Map.lnk
+CLIPBO~1 LNK      1349 2026-04-26   5:52  Clipboard Viewer.lnk
+KEYBOA~1 LNK      1370 2026-04-26   5:52  Keyboard Layout Switcher.lnk
+REGIST~1 LNK      1252 2026-04-26   5:52  Registry Editor.lnk
+TASKMA~1 LNK      1363 2026-04-26   5:52  Task Manager.lnk
+REACTX~1 LNK      1374 2026-04-26   5:52  ReactX Diagnostic.lnk
+FONTSUB  LNK      1363 2026-04-26   5:52  FontSub.lnk
+SNAPSHOT LNK      1380 2026-04-26   5:52  SnapShot.lnk
+VIRTUA~1 LNK      1424 2026-04-26   5:52  Virtual CDRom Control Panel.lnk
+       11 files              12 218 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Start Menu/Programs/Accessories/Accessibility
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+MAGNIFY  LNK      1335 2026-04-26   5:52  Magnify.lnk
+ON-SCR~1 LNK      1347 2026-04-26   5:52  On-Screen Keyboard.lnk
+ACCESS~1 LNK      1393 2026-04-26   5:52  Accessibility Utility Manager.lnk
+        5 files               4 075 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Start Menu/Programs/Accessories/Entertainment
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+MULTIM~1 LNK      1369 2026-04-26   5:52  Multimedia Player.lnk
+VOLUME~1 LNK      1364 2026-04-26   5:52  Volume Control.lnk
+SOUNDR~1 LNK      1368 2026-04-26   5:52  Sound Recorder.lnk
+        5 files               4 101 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Start Menu/Programs/Accessories/Communications
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+REMOTE~1 LNK      1373 2026-04-26   5:52  Remote Desktop Connection.lnk
+        3 files               1 373 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Start Menu/Programs/Games
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+SOLITA~1 LNK      1311 2026-04-26   5:52  Solitaire.lnk
+WINEMINE LNK      1333 2026-04-26   5:52  WineMine.lnk
+SPIDER~1 LNK      1342 2026-04-26   5:52  Spider Solitaire.lnk
+        5 files               3 986 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Local Settings
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+APPLIC~1     <DIR>     2026-04-26   5:52  Application Data
+TEMP         <DIR>     2026-04-26   5:52  Temp
+TEMPOR~1     <DIR>     2026-04-26   5:52  Temporary Internet Files
+HISTORY      <DIR>     2026-04-26   5:52  History
+        6 files                   0 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Local Settings/Application Data
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Local Settings/Temp
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Local Settings/Temporary Internet Files
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Local Settings/History
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/NetworkService/Cookies
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/NetworkService/My Music
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+desktop  ini        72 2026-04-26   5:51 
+        3 files                  72 bytes
+
+Directory for ::/Documents and Settings/NetworkService/My Videos
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+desktop  ini        72 2026-04-26   5:51 
+        3 files                  72 bytes
+
+Directory for ::/Documents and Settings/NetworkService/My Pictures
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+desktop  ini        72 2026-04-26   5:51 
+        3 files                  72 bytes
+
+Directory for ::/Documents and Settings/Administrator
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+APPLIC~1     <DIR>     2026-04-26   5:52  Application Data
+DESKTOP      <DIR>     2026-04-26   5:52  Desktop
+FAVORI~1     <DIR>     2026-04-26   5:52  Favorites
+MYDOCU~1     <DIR>     2026-04-26   5:52  My Documents
+NETHOOD      <DIR>     2026-04-26   5:52  NetHood
+PRINTH~1     <DIR>     2026-04-26   5:52  PrintHood
+RECENT       <DIR>     2026-04-26   5:52  Recent
+SENDTO       <DIR>     2026-04-26   5:52  SendTo
+TEMPLA~1     <DIR>     2026-04-26   5:52  Templates
+STARTM~1     <DIR>     2026-04-26   5:52  Start Menu
+LOCALS~1     <DIR>     2026-04-26   5:52  Local Settings
+COOKIES      <DIR>     2026-04-26   5:52  Cookies
+ntuser   dat    176128 2026-04-26   9:56 
+MYMUSI~1     <DIR>     2026-04-26   5:52  My Music
+MYVIDE~1     <DIR>     2026-04-26   5:52  My Videos
+MYPICT~1     <DIR>     2026-04-26   5:52  My Pictures
+NTUSER~1 LOG     62464 2026-04-26   9:56  ntuser.dat.LOG
+MILLIO~1 C        1339 2026-04-26  10:13  millionth_prime.c
+       20 files             239 931 bytes
+
+Directory for ::/Documents and Settings/Administrator/Application Data
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+MICROS~1     <DIR>     2026-04-26   5:52  Microsoft
+WINE_G~1     <DIR>     2026-04-26   0:27  wine_gecko
+        4 files                   0 bytes
+
+Directory for ::/Documents and Settings/Administrator/Application Data/Microsoft
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+INTERN~1     <DIR>     2026-04-26   5:52  Internet Explorer
+        3 files                   0 bytes
+
+Directory for ::/Documents and Settings/Administrator/Application Data/Microsoft/Internet Explorer
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+QUICKL~1     <DIR>     2026-04-26   5:52  Quick Launch
+        3 files                   0 bytes
+
+Directory for ::/Documents and Settings/Administrator/Application Data/Microsoft/Internet Explorer/Quick Launch
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+REACTO~1 LNK      1265 2026-04-26   5:52  ReactOS Explorer.lnk
+COMMAN~1 LNK      1335 2026-04-26   5:52  Command Prompt.lnk
+APPLIC~1 LNK      1387 2026-04-26   5:52  Applications Manager.lnk
+        5 files               3 987 bytes
+
+Directory for ::/Documents and Settings/Administrator/Application Data/wine_gecko
+
+.            <DIR>     2026-04-26   0:27 
+..           <DIR>     2026-04-26   0:27 
+PERMIS~1 SQL     65536 2026-04-26   0:27  permissions.sqlite
+PLACES~1 SQL  10485760 2026-04-26   9:54  places.sqlite
+PLACES~2 SQL    623080 2026-04-26   9:54  places.sqlite-wal
+PLACES~3 SQL     32768 2026-04-26   1:13  places.sqlite-shm
+WEBAPP~1 SQL     32768 2026-04-26   0:27  webappsstore.sqlite
+PLACES~1 COR  10485760 2026-04-26   0:27  places.sqlite.corrupt
+WEBAPP~2 SQL     98408 2026-04-26   0:28  webappsstore.sqlite-wal
+WEBAPP~3 SQL     32768 2026-04-26   1:13  webappsstore.sqlite-shm
+FORMHI~1 SQL    196608 2026-04-26   1:13  formhistory.sqlite
+       11 files          22 053 456 bytes
+
+Directory for ::/Documents and Settings/Administrator/Desktop
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+README~1 LNK      1191 2026-04-26   5:52  Read Me.lnk
+COMMAN~1 LNK      1335 2026-04-26   5:52  Command Prompt.lnk
+APPLIC~1 LNK      1387 2026-04-26   5:52  Applications Manager.lnk
+        5 files               3 913 bytes
+
+Directory for ::/Documents and Settings/Administrator/Favorites
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+desktop  ini        71 2026-04-26   5:51 
+        3 files                  71 bytes
+
+Directory for ::/Documents and Settings/Administrator/My Documents
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+desktop  ini        72 2026-04-26   5:51 
+        3 files                  72 bytes
+
+Directory for ::/Documents and Settings/Administrator/NetHood
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+desktop  ini        71 2026-04-26   5:51 
+        3 files                  71 bytes
+
+Directory for ::/Documents and Settings/Administrator/PrintHood
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+desktop  ini        71 2026-04-26   5:51 
+        3 files                  71 bytes
+
+Directory for ::/Documents and Settings/Administrator/Recent
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+desktop  ini        71 2026-04-26   5:51 
+        3 files                  71 bytes
+
+Directory for ::/Documents and Settings/Administrator/SendTo
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+MYDOCU~1 MYD         0 2026-04-26   5:51  My Documents.mydocs
+DESKTO~1 DES         0 2026-04-26   5:51  Desktop (Create shortcut).DeskLink
+COMPRE~1 ZFS         0 2026-04-26   5:51  Compressed (zipped) Folder.ZFSendToTarget
+        5 files                   0 bytes
+
+Directory for ::/Documents and Settings/Administrator/Templates
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/Administrator/Start Menu
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+PROGRAMS     <DIR>     2026-04-26   5:52  Programs
+desktop  ini        71 2026-04-26   5:51 
+        4 files                  71 bytes
+
+Directory for ::/Documents and Settings/Administrator/Start Menu/Programs
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+STARTUP      <DIR>     2026-04-26   5:52  Startup
+ADMINI~1     <DIR>     2026-04-26   5:52  Administrative Tools
+REACTO~1 LNK      1265 2026-04-26   5:52  ReactOS Explorer.lnk
+REACTO~2 LNK      1387 2026-04-26   5:52  ReactOS Applications Manager.lnk
+WINEIN~1 LNK      1465 2026-04-26   5:52  Wine Internet Explorer.lnk
+ACCESS~1     <DIR>     2026-04-26   5:52  Accessories
+GAMES        <DIR>     2026-04-26   5:52  Games
+        9 files               4 117 bytes
+
+Directory for ::/Documents and Settings/Administrator/Start Menu/Programs/Startup
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/Administrator/Start Menu/Programs/Administrative Tools
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/Administrator/Start Menu/Programs/Accessories
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+CALCUL~1 LNK      1336 2026-04-26   5:52  Calculator.lnk
+COMMAN~1 LNK      1335 2026-04-26   5:52  Command Prompt.lnk
+NOTEPAD  LNK      1357 2026-04-26   5:52  Notepad.lnk
+WORDPAD  LNK      1365 2026-04-26   5:52  WordPad.lnk
+PAINT    LNK      1345 2026-04-26   5:52  Paint.lnk
+SYSTEM~1     <DIR>     2026-04-26   5:52  System Tools
+ACCESS~1     <DIR>     2026-04-26   5:52  Accessibility
+ENTERT~1     <DIR>     2026-04-26   5:52  Entertainment
+COMMUN~1     <DIR>     2026-04-26   5:52  Communications
+       11 files               6 738 bytes
+
+Directory for ::/Documents and Settings/Administrator/Start Menu/Programs/Accessories/System Tools
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+CHARAC~1 LNK      1343 2026-04-26   5:52  Character Map.lnk
+CLIPBO~1 LNK      1349 2026-04-26   5:52  Clipboard Viewer.lnk
+KEYBOA~1 LNK      1370 2026-04-26   5:52  Keyboard Layout Switcher.lnk
+REGIST~1 LNK      1252 2026-04-26   5:52  Registry Editor.lnk
+TASKMA~1 LNK      1363 2026-04-26   5:52  Task Manager.lnk
+REACTX~1 LNK      1374 2026-04-26   5:52  ReactX Diagnostic.lnk
+FONTSUB  LNK      1363 2026-04-26   5:52  FontSub.lnk
+SNAPSHOT LNK      1380 2026-04-26   5:52  SnapShot.lnk
+VIRTUA~1 LNK      1424 2026-04-26   5:52  Virtual CDRom Control Panel.lnk
+       11 files              12 218 bytes
+
+Directory for ::/Documents and Settings/Administrator/Start Menu/Programs/Accessories/Accessibility
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+MAGNIFY  LNK      1335 2026-04-26   5:52  Magnify.lnk
+ON-SCR~1 LNK      1347 2026-04-26   5:52  On-Screen Keyboard.lnk
+ACCESS~1 LNK      1393 2026-04-26   5:52  Accessibility Utility Manager.lnk
+        5 files               4 075 bytes
+
+Directory for ::/Documents and Settings/Administrator/Start Menu/Programs/Accessories/Entertainment
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+MULTIM~1 LNK      1369 2026-04-26   5:52  Multimedia Player.lnk
+VOLUME~1 LNK      1364 2026-04-26   5:52  Volume Control.lnk
+SOUNDR~1 LNK      1368 2026-04-26   5:52  Sound Recorder.lnk
+        5 files               4 101 bytes
+
+Directory for ::/Documents and Settings/Administrator/Start Menu/Programs/Accessories/Communications
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+REMOTE~1 LNK      1373 2026-04-26   5:52  Remote Desktop Connection.lnk
+        3 files               1 373 bytes
+
+Directory for ::/Documents and Settings/Administrator/Start Menu/Programs/Games
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+SOLITA~1 LNK      1311 2026-04-26   5:52  Solitaire.lnk
+WINEMINE LNK      1333 2026-04-26   5:52  WineMine.lnk
+SPIDER~1 LNK      1342 2026-04-26   5:52  Spider Solitaire.lnk
+        5 files               3 986 bytes
+
+Directory for ::/Documents and Settings/Administrator/Local Settings
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+APPLIC~1     <DIR>     2026-04-26   5:52  Application Data
+TEMP         <DIR>     2026-04-26   5:52  Temp
+TEMPOR~1     <DIR>     2026-04-26   5:52  Temporary Internet Files
+HISTORY      <DIR>     2026-04-26   5:52  History
+        6 files                   0 bytes
+
+Directory for ::/Documents and Settings/Administrator/Local Settings/Application Data
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+RAPPS        <DIR>     2026-04-26   0:40  RApps
+        3 files                   0 bytes
+
+Directory for ::/Documents and Settings/Administrator/Local Settings/Application Data/RApps
+
+.            <DIR>     2026-04-26   0:40 
+..           <DIR>     2026-04-26   0:40 
+appdb        <DIR>     2026-04-26   0:40 
+        3 files                   0 bytes
+
+Directory for ::/Documents and Settings/Administrator/Local Settings/Application Data/RApps/appdb
+
+.            <DIR>     2026-04-26   0:40 
+..           <DIR>     2026-04-26   0:40 
+FAMITR~1 TXT      2806 2026-04-26   0:40  famitracker.txt
+SUMATR~1 TXT      5264 2026-04-26   0:40  sumatrapdf.txt
+GHOSTV~1 TXT      2112 2026-04-26   0:40  ghostview.txt
+PODCAS~1 TXT      1812 2026-04-26   0:40  podcasteasy.txt
+xbgpack1 txt      1548 2026-04-26   0:40 
+wme9     txt      3190 2026-04-26   0:40 
+scummvm  txt      5614 2026-04-26   0:40 
+wglgears txt      2396 2026-04-26   0:40 
+lzdoom   txt      1280 2026-04-26   0:40 
+curl     txt       788 2026-04-26   0:40 
+vb5run   txt      5970 2026-04-26   0:40 
+autoruns txt      1930 2026-04-26   0:40 
+MFC42_~1 TXT      2036 2026-04-26   0:40  mfc42_msvbm60.txt
+VC2015~1 TXT       744 2026-04-26   0:40  vc2015to2019run.txt
+DEPEND~1 TXT      1350 2026-04-26   0:40  dependencywalker.txt
+CLEMEN~1 TXT      1410 2026-04-26   0:40  clementine.txt
+ffmpeg   txt      1710 2026-04-26   0:40 
+REALTE~1 TXT      1364 2026-04-26   0:40  realtek-hd.txt
+gpuz     txt      1126 2026-04-26   0:40 
+FFMPEG~1 TXT      1130 2026-04-26   0:40  ffmpeg-xp_frei0r.txt
+multires txt      1694 2026-04-26   0:40 
+THUNDE~1 TXT      9464 2026-04-26   0:40  thunderbird3.txt
+LIBREO~1 TXT      5384 2026-04-26   0:40  libreofficehelp.txt
+fbide    txt      1306 2026-04-26   0:40 
+fopnu    txt      1064 2026-04-26   0:40 
+grafx2   txt      2068 2026-04-26   0:40 
+HEDGEW~1 TXT       980 2026-04-26   0:40  hedgewars.txt
+mirc     txt      3104 2026-04-26   0:40 
+mcwin32  txt      2482 2026-04-26   0:40 
+sopwith3 txt      1448 2026-04-26   0:40 
+foxit    txt      2872 2026-04-26   0:40 
+nemobar  txt      1034 2026-04-26   0:40 
+sdelete  txt      1400 2026-04-26   0:40 
+mirc6    txt      3000 2026-04-26   0:40 
+MARIO-~1 TXT       904 2026-04-26   0:40  mario-luigi.txt
+ZEROBR~1 TXT      2190 2026-04-26   0:40  zerobrane.txt
+cstalin  txt      2836 2026-04-26   0:40 
+VC2017~1 TXT      7630 2026-04-26   0:40  vc2017run.txt
+lun3r    txt      1866 2026-04-26   0:40 
+PROCES~1 TXT      1630 2026-04-26   0:40  processhacker.txt
+PHOTOF~1 TXT      3328 2026-04-26   0:40  photofiltre.txt
+FILEOP~1 TXT       914 2026-04-26   0:40  fileoptimizer.txt
+ROYALE~1 TXT      1282 2026-04-26   0:40  royalenoirtheme.txt
+WATERC~1 TXT      2410 2026-04-26   0:40  watercolor.txt
+PROJEC~1 TXT      1262 2026-04-26   0:40  project64.txt
+PULSEA~1 TXT       972 2026-04-26   0:40  pulseaudio.txt
+tcc      txt      1866 2026-04-26   0:40 
+zeth     txt      1564 2026-04-26   0:40 
+MESAGA~1 TXT      6266 2026-04-26   0:40  mesagallium.txt
+nvdisp   txt      3242 2026-04-26   0:40 
+FFMPEG~2 TXT       966 2026-04-26   0:40  ffmpeg-shared.txt
+OFFICE~1 TXT      6700 2026-04-26   0:40  officeformatpack.txt
+DEVCPP~1 TXT      3058 2026-04-26   0:40  devcpp_tdm_gcc_x64.txt
+JPN-PA~1 TXT      1966 2026-04-26   0:40  jpn-package.txt
+fap      txt      2490 2026-04-26   0:40 
+LUNA-B~1 TXT       906 2026-04-26   0:40  luna-beta.txt
+QBITOR~1 TXT      1380 2026-04-26   0:40  qbitorrent.txt
+indiftpd txt      6006 2026-04-26   0:40 
+GOG_GA~1 TXT      3390 2026-04-26   0:40  gog_galaxy.txt
+MSWALL~1 TXT       944 2026-04-26   0:40  mswallfluidtex.txt
+waveshop txt      1726 2026-04-26   0:40 
+SUPERT~1 TXT      2440 2026-04-26   0:40  supertuxkart.txt
+mono2    txt      2492 2026-04-26   0:40 
+nvda     txt       946 2026-04-26   0:40 
+NVIDIA~1 TXT      1088 2026-04-26   0:40  nvidiaforceware.txt
+mari0    txt       872 2026-04-26   0:40 
+QEMUMA~1 TXT      1082 2026-04-26   0:40  qemumanager.txt
+fira     txt      3122 2026-04-26   0:40 
+cnt      txt      2528 2026-04-26   0:40 
+winboard txt      6878 2026-04-26   0:40 
+AGATEM~1 TXT      2208 2026-04-26   0:40  agatemulator.txt
+fpnpapi  txt      2336 2026-04-26   0:40 
+IRFANV~1 TXT      4570 2026-04-26   0:40  irfanviewplugins.txt
+CRIMSO~1 TXT       750 2026-04-26   0:40  crimsonfields.txt
+diskview txt      1234 2026-04-26   0:40 
+samba    txt      2758 2026-04-26   0:40 
+xrick    txt       964 2026-04-26   0:40 
+jre      txt      2934 2026-04-26   0:40 
+vc6run   txt      7292 2026-04-26   0:40 
+ARPL-U~1 TXT      2802 2026-04-26   0:40  arpl-uming.txt
+verifier txt      2040 2026-04-26   0:40 
+opera9   txt      4816 2026-04-26   0:40 
+tcpview  txt      2470 2026-04-26   0:40 
+winamp   txt      3636 2026-04-26   0:40 
+PORRAS~1 TXT      1336 2026-04-26   0:40  porrasturvat.txt
+VC2005~1 TXT      6500 2026-04-26   0:40  vc2005sp1run.txt
+freemat  txt      2770 2026-04-26   0:40 
+efsearch txt      2202 2026-04-26   0:40 
+IRFANV~2 TXT      4568 2026-04-26   0:40  irfanview.txt
+winemono txt      2806 2026-04-26   0:40 
+RESTOR~1 TXT      1130 2026-04-26   0:40  restoration.txt
+WATERC~2 TXT      1726 2026-04-26   0:40  watercolorlite.txt
+windbg   txt      1842 2026-04-26   0:40 
+boinc    txt      1374 2026-04-26   0:40 
+abyss    txt     11272 2026-04-26   0:40 
+qb64sdl  txt      4402 2026-04-26   0:40 
+NIRLAU~1 TXT      2360 2026-04-26   0:40  nirlauncher.txt
+shed     txt      2614 2026-04-26   0:40 
+HASHCH~1 TXT       898 2026-04-26   0:40  hashcheck.txt
+otter    txt      2860 2026-04-26   0:40 
+tweakui1 txt      1290 2026-04-26   0:40 
+speccy   txt       848 2026-04-26   0:40 
+CHRIST~1 TXT      2174 2026-04-26   0:40  christmasbound.txt
+NEVERB~1 TXT      3716 2026-04-26   0:40  neverball.txt
+AZULOP~1 TXT      1572 2026-04-26   0:40  azulopenjdk8.txt
+multimc  txt      1686 2026-04-26   0:40 
+VC2008~1 TXT      6900 2026-04-26   0:40  vc2008sp1run.txt
+net40    txt      4570 2026-04-26   0:40 
+snes9x   txt      3804 2026-04-26   0:40 
+supertux txt      2492 2026-04-26   0:40 
+RAINME~1 TXT      1540 2026-04-26   0:40  rainmeter.txt
+MKVTOO~1 TXT      1942 2026-04-26   0:40  mkvtoolnix.txt
+7zip     txt      5522 2026-04-26   0:40 
+ZUNETH~1 TXT      1220 2026-04-26   0:40  zunetheme.txt
+air      txt      3804 2026-04-26   0:40 
+CHROMI~1 TXT      2310 2026-04-26   0:40  chromiumbsu.txt
+pptview  txt      8022 2026-04-26   0:40 
+SBFORV~1 TXT      5714 2026-04-26   0:40  sbforvmware.txt
+bochs    txt      4636 2026-04-26   0:40 
+FIREFO~1 TXT     11618 2026-04-26   0:40  firefox28.txt
+ARMAGE~1 TXT      1096 2026-04-26   0:40  armagetron.txt
+MUSHCL~1 TXT       766 2026-04-26   0:40  mushclient.txt
+LIBREO~2 TXT      3192 2026-04-26   0:40  libreoffice.txt
+chrome   txt      2216 2026-04-26   0:40 
+vbox     txt      1520 2026-04-26   0:40 
+qemu     txt      3856 2026-04-26   0:40 
+ollydbg1 txt       740 2026-04-26   0:40 
+DOUBLE~1 TXT      3446 2026-04-26   0:40  doublecommander.txt
+slashem  txt      1306 2026-04-26   0:40 
+winevdm  txt      1390 2026-04-26   0:40 
+winspypp txt      3682 2026-04-26   0:40 
+TINYSN~1 TXT      1064 2026-04-26   0:40  tinysnake.txt
+SUMMER~1 TXT      2084 2026-04-26   0:40  summerbound.txt
+TRANSM~1 TXT       882 2026-04-26   0:40  transmission.txt
+EXTREM~1 TXT      1078 2026-04-26   0:40  extremetuxracer.txt
+CODEBL~1 TXT      4044 2026-04-26   0:40  codeblocks_gcc.txt
+alreader txt      4452 2026-04-26   0:40 
+VC2010~1 TXT      7188 2026-04-26   0:40  vc2010sp1run.txt
+krita    txt      2258 2026-04-26   0:40 
+API-MO~1 TXT      2062 2026-04-26   0:40  api-monitor.txt
+CODEBL~2 TXT      4244 2026-04-26   0:40  codeblocks.txt
+MAELST~1 TXT      1736 2026-04-26   0:40  maelstorm.txt
+CAVEST~1 TXT       996 2026-04-26   0:40  cavestory.txt
+SUBLIM~1 TXT       800 2026-04-26   0:40  sublime_text.txt
+mypal    txt      1644 2026-04-26   0:40 
+tdm-gcc  txt       914 2026-04-26   0:40 
+lgeneral txt      3114 2026-04-26   0:40 
+reshack  txt      4434 2026-04-26   0:40 
+SUPERC~1 TXT      1646 2026-04-26   0:40  supercars3.txt
+SWIFTS~1 TXT      2680 2026-04-26   0:40  swiftshader.txt
+LBREAK~1 TXT      2728 2026-04-26   0:40  lbreakout2.txt
+xna40    txt      2888 2026-04-26   0:40 
+DAVEGN~1 TXT      1236 2026-04-26   0:40  davegnukem.txt
+git      txt      3962 2026-04-26   0:40 
+DOSBLA~1 TXT      8258 2026-04-26   0:40  dosblaster.txt
+avidemux txt      1030 2026-04-26   0:40 
+cmake    txt      1966 2026-04-26   0:40 
+mpxplay  txt      2356 2026-04-26   0:40 
+nogba    txt       970 2026-04-26   0:40 
+gnucash  txt      4252 2026-04-26   0:40 
+desmume  txt      1654 2026-04-26   0:40 
+idm      txt      1592 2026-04-26   0:40 
+DVDWRI~1 TXT      9370 2026-04-26   0:40  dvdwritenow.txt
+kmeleon  txt      2532 2026-04-26   0:40 
+pidgin   txt      2882 2026-04-26   0:40 
+MSNMES~1 TXT      1842 2026-04-26   0:40  msnmessenger3.txt
+MD5SUM~1 TXT      2432 2026-04-26   0:40  md5summer.txt
+mpc      txt      2446 2026-04-26   0:40 
+DILINU~1 TXT      3478 2026-04-26   0:40  dilinuxreader.txt
+snoopy   txt      2158 2026-04-26   0:40 
+TOTALC~1 TXT      3084 2026-04-26   0:40  totalcommander.txt
+vbam     txt      2802 2026-04-26   0:40 
+vmpk     txt      1588 2026-04-26   0:40 
+ptanks   txt      2248 2026-04-26   0:40 
+tweakui  txt      3704 2026-04-26   0:40 
+slickrun txt      1492 2026-04-26   0:40 
+qtemu    txt      1258 2026-04-26   0:40 
+DIRECT~1 TXT      3974 2026-04-26   0:40  directxfeb2010.txt
+nginx    txt      2532 2026-04-26   0:40 
+FREEST~1 TXT      2122 2026-04-26   0:40  freestopwatch.txt
+GLOBUL~1 TXT      3674 2026-04-26   0:40  globulation2.txt
+remood   txt      4616 2026-04-26   0:40 
+STACKA~1 TXT      1544 2026-04-26   0:40  stackandconquer.txt
+icytower txt      1480 2026-04-26   0:40 
+hover    txt      2326 2026-04-26   0:40 
+FFMPEG~3 TXT      1136 2026-04-26   0:40  ffmpeg-xp_libfdk-aac.txt
+siv      txt      1870 2026-04-26   0:40 
+JETAUDIO TXT      1172 2026-04-26   0:40  jetAudio.txt
+cjkfont  txt      1548 2026-04-26   0:40 
+busybox  txt      1522 2026-04-26   0:40 
+emule    txt      1274 2026-04-26   0:40 
+ultravnc txt      2366 2026-04-26   0:40 
+tixati   txt       972 2026-04-26   0:40 
+PROCES~2 TXT      1684 2026-04-26   0:40  processexplorer.txt
+ROYALE~2 TXT      1518 2026-04-26   0:40  royaletheme.txt
+dolphin  txt      1278 2026-04-26   0:40 
+ARDUIN~1 TXT      4758 2026-04-26   0:40  arduino-ide.txt
+pengupop txt      2948 2026-04-26   0:40 
+RAINLE~1 TXT      1358 2026-04-26   0:40  rainlendar.txt
+fpppapi  txt      2324 2026-04-26   0:40 
+CHROMI~2 TXT      1452 2026-04-26   0:40  chromium-XP_49_0_2623_113-R2_VS2015_SSE2.txt
+audacity txt      4800 2026-04-26   0:40 
+akelpad  txt      2404 2026-04-26   0:40 
+tightvnc txt      3434 2026-04-26   0:40 
+icofx    txt       998 2026-04-26   0:40 
+FOOBAR~1 TXT       862 2026-04-26   0:40  foobar2000.txt
+CHICKE~1 TXT      1210 2026-04-26   0:40  chickeninvaders.txt
+GENSEM~1 TXT      2374 2026-04-26   0:40  gensemulator.txt
+opera36  txt       810 2026-04-26   0:40 
+directx  txt      3170 2026-04-26   0:40 
+pspad    txt      2756 2026-04-26   0:40 
+coretemp txt      1672 2026-04-26   0:40 
+FOLDER~1 TXT      1020 2026-04-26   0:40  foldermarker.txt
+winrar   txt      1476 2026-04-26   0:40 
+pnotepad txt      1214 2026-04-26   0:40 
+winfile  txt      1488 2026-04-26   0:40 
+rocks    txt      4360 2026-04-26   0:40 
+FIREFO~2 TXT     11796 2026-04-26   0:40  firefox36.txt
+dosbox   txt      2456 2026-04-26   0:40 
+firefox  txt     11322 2026-04-26   0:40 
+FTDI-D~1 TXT       804 2026-04-26   0:40  ftdi-driver.txt
+EXEPRO~1 TXT       942 2026-04-26   0:40  exeproperties.txt
+msxml6   txt      4516 2026-04-26   0:40 
+LAZARU~1 TXT      4734 2026-04-26   0:40  lazaruside.txt
+boswars  txt      3402 2026-04-26   0:40 
+abiword  txt      2440 2026-04-26   0:40 
+REALTE~2 TXT      1350 2026-04-26   0:40  realtek-ac97.txt
+TILEWO~1 TXT      5336 2026-04-26   0:40  tileworld.txt
+ultraiso txt      4588 2026-04-26   0:40 
+everedit txt      1474 2026-04-26   0:40 
+rfstools txt      2172 2026-04-26   0:40 
+winmerge txt      2466 2026-04-26   0:40 
+msxml4   txt      4528 2026-04-26   0:40 
+MIRAND~1 TXT      4068 2026-04-26   0:40  mirandaim.txt
+ANT-RE~1 TXT      1078 2026-04-26   0:40  ant-renamer.txt
+clamwin  txt      1952 2026-04-26   0:40 
+FOTOGR~1 TXT      1198 2026-04-26   0:40  fotografix.txt
+roswallp txt      1160 2026-04-26   0:40 
+rosbe    txt      4164 2026-04-26   0:40 
+kompozer txt      3294 2026-04-26   0:40 
+diablo2  txt      3788 2026-04-26   0:40 
+VIRTUA~1 TXT      1544 2026-04-26   0:40  virtualMIDIsynth.txt
+winscp   txt       954 2026-04-26   0:40 
+WINDIR~1 TXT      2082 2026-04-26   0:40  windirstat.txt
+npackd   txt      2564 2026-04-26   0:40 
+agwak    txt      1036 2026-04-26   0:40 
+mysql    txt      1980 2026-04-26   0:40 
+terragen txt      1384 2026-04-26   0:40 
+ccleaner txt      2938 2026-04-26   0:40 
+qmmp     txt      3944 2026-04-26   0:40 
+filemon  txt      1110 2026-04-26   0:40 
+COMCTL~1 TXT      7814 2026-04-26   0:40  comctl32ocx.txt
+unxutils txt      2424 2026-04-26   0:40 
+photivo  txt      1562 2026-04-26   0:40 
+tsvn     txt      2204 2026-04-26   0:40 
+calibre2 txt      2328 2026-04-26   0:40 
+VC2015~2 TXT      8524 2026-04-26   0:40  vc2015run.txt
+plex     txt       962 2026-04-26   0:40 
+winnt3   txt      1008 2026-04-26   0:40 
+winhier  txt      1290 2026-04-26   0:40 
+vbasdl   txt      2486 2026-04-26   0:40 
+pcsxr    txt      1522 2026-04-26   0:40 
+CHROMI~3 TXT      1460 2026-04-26   0:40  chromium-XP_49_0_2623_113_VS2013_SSE3.txt
+scite    txt      6502 2026-04-26   0:40 
+vim      txt      1636 2026-04-26   0:40 
+anki     txt      1248 2026-04-26   0:40 
+superdxb txt      2214 2026-04-26   0:40 
+putty    txt      4236 2026-04-26   0:40 
+revo     txt      2552 2026-04-26   0:40 
+blender  txt      2148 2026-04-26   0:40 
+peazip   txt      3440 2026-04-26   0:40 
+mfc40    txt      5048 2026-04-26   0:40 
+luna     txt       888 2026-04-26   0:40 
+antitwin txt       842 2026-04-26   0:40 
+slate    txt       974 2026-04-26   0:40 
+x64dbg   txt      1678 2026-04-26   0:40 
+msxml3   txt      4702 2026-04-26   0:40 
+zaz      txt      2488 2026-04-26   0:40 
+gimp     txt      5104 2026-04-26   0:40 
+PRECIS~1 TXT      2424 2026-04-26   0:40  precisecalc.txt
+BOUNDA~1 TXT      2208 2026-04-26   0:40  boundaround.txt
+sylpheed txt      1432 2026-04-26   0:40 
+kindlepc txt      3750 2026-04-26   0:40 
+ABIWOR~1 TXT      2526 2026-04-26   0:40  abiword26.txt
+mdac28   txt      2062 2026-04-26   0:40 
+oswan    txt       916 2026-04-26   0:40 
+cygne    txt      1238 2026-04-26   0:40 
+renpy    txt      1014 2026-04-26   0:40 
+npp      txt      4368 2026-04-26   0:40 
+winobj   txt      1278 2026-04-26   0:40 
+fall     txt      2670 2026-04-26   0:40 
+gvd      txt      1078 2026-04-26   0:40 
+dosboxx  txt      1162 2026-04-26   0:40 
+vmmap    txt      1138 2026-04-26   0:40 
+jet40    txt      2462 2026-04-26   0:40 
+net20    txt      3340 2026-04-26   0:40 
+VC2013~1 TXT      7992 2026-04-26   0:40  vc2013run.txt
+HWMONI~1 TXT      1408 2026-04-26   0:40  hwmonitor.txt
+hexedit  txt      2540 2026-04-26   0:40 
+ideasemu txt      1054 2026-04-26   0:40 
+THEPOW~1 TXT       924 2026-04-26   0:40  thepowdertoy.txt
+EXCELV~1 TXT      7600 2026-04-26   0:40  excelview.txt
+jre8     txt      3288 2026-04-26   0:40 
+MUSESC~1 TXT      2068 2026-04-26   0:40  musescore.txt
+celestia txt      1060 2026-04-26   0:40 
+nano-win txt      2326 2026-04-26   0:40 
+python   txt      3776 2026-04-26   0:40 
+OPENOF~1 TXT      8414 2026-04-26   0:40  openoffice.txt
+tgit     txt      1634 2026-04-26   0:40 
+tuxpaint txt      3092 2026-04-26   0:40 
+VECTOR~1 TXT      1042 2026-04-26   0:40  vectoriangiotto.txt
+hydra    txt      1104 2026-04-26   0:40 
+scratch  txt      2016 2026-04-26   0:40 
+CHEATE~1 TXT      1158 2026-04-26   0:40  cheatengine.txt
+opera    txt      4756 2026-04-26   0:40 
+deluge   txt       802 2026-04-26   0:40 
+RISOHE~1 TXT      1822 2026-04-26   0:40  risoheditor.txt
+miktex   txt      2554 2026-04-26   0:40 
+AUDIOG~1 TXT      3182 2026-04-26   0:40  audiograbber.txt
+FOLDER~2 TXT      1628 2026-04-26   0:40  folder2iso.txt
+MSWALL~2 TXT      1378 2026-04-26   0:40  mswallwin11waves.txt
+VC2012~1 TXT      8028 2026-04-26   0:40  vc2012run.txt
+mzimeja  txt      1996 2026-04-26   0:40 
+SCREEN~1 TXT      1442 2026-04-26   0:40  screen2exe.txt
+DEATHR~1 TXT      1258 2026-04-26   0:40  deathrally.txt
+aim      txt      1894 2026-04-26   0:40 
+librecad txt      2470 2026-04-26   0:40 
+watomic  txt      1230 2026-04-26   0:40 
+sunbird  txt      1238 2026-04-26   0:40 
+scribus  txt      4104 2026-04-26   0:40 
+wxmedit  txt      4304 2026-04-26   0:40 
+FINALB~1 TXT      1294 2026-04-26   0:40  finalburnneo.txt
+pingus   txt      1890 2026-04-26   0:40 
+ROM-PR~1 TXT      1032 2026-04-26   0:40  rom-properties.txt
+ONLYOF~1 TXT      2048 2026-04-26   0:40  onlyoffice.txt
+ch341    txt       896 2026-04-26   0:40 
+hxd      txt      2124 2026-04-26   0:40 
+pcsx2-xp txt      1172 2026-04-26   0:40 
+pdfsam   txt      3390 2026-04-26   0:40 
+jre6     txt      2750 2026-04-26   0:40 
+stamina  txt      1792 2026-04-26   0:40 
+smplayer txt      3786 2026-04-26   0:40 
+OPENBO~1 TXT      1074 2026-04-26   0:40  openboard.txt
+python2  txt      3822 2026-04-26   0:40 
+net11    txt      8644 2026-04-26   0:40 
+FARMAN~1 TXT      2672 2026-04-26   0:40  farmanager.txt
+lmms     txt      2494 2026-04-26   0:40 
+net20sp2 txt      4572 2026-04-26   0:40 
+AUDACI~1 TXT      1624 2026-04-26   0:40  audacious.txt
+kvirc    txt      1904 2026-04-26   0:40 
+ccleste  txt      1030 2026-04-26   0:40 
+FREEBA~1 TXT      3178 2026-04-26   0:40  freebasic.txt
+NOTEPA~1 TXT      2064 2026-04-26   0:40  notepad2e.txt
+GHOSTS~1 TXT      2262 2026-04-26   0:40  ghostscript.txt
+gecko    txt      4548 2026-04-26   0:40 
+FREEPA~1 TXT       736 2026-04-26   0:40  freepascal.txt
+OCENAU~1 TXT      1092 2026-04-26   0:40  ocenaudio.txt
+kyodai   txt      2154 2026-04-26   0:40 
+FIREFO~3 TXT      1818 2026-04-26   0:40  firefox-esr.txt
+ollydbg2 txt       888 2026-04-26   0:40 
+sambatng txt      3526 2026-04-26   0:40 
+sdi-tool txt      1324 2026-04-26   0:40 
+scilab   txt      3712 2026-04-26   0:40 
+GLIDEW~1 TXT      4408 2026-04-26   0:40  glidewrapzbag.txt
+vlc      txt      4220 2026-04-26   0:40 
+USBDEV~1 TXT      2864 2026-04-26   0:40  usbdeview.txt
+ohrrpgce txt       894 2026-04-26   0:40 
+LONGHO~1 TXT       964 2026-04-26   0:40  longhorn5048.txt
+ASSAUL~1 TXT      1794 2026-04-26   0:40  assaultcube.txt
+inkscape txt      2440 2026-04-26   0:40 
+THUNDE~2 TXT      9444 2026-04-26   0:40  thunderbird.txt
+OPENAR~1 TXT      2528 2026-04-26   0:40  openarena.txt
+ZINJAI   TXT      1364 2026-04-26   0:40  zinjaI.txt
+wordview txt      8756 2026-04-26   0:40 
+dplus    txt      4234 2026-04-26   0:40 
+cpuz     txt      1010 2026-04-26   0:40 
+SUPERF~1 TXT      2992 2026-04-26   0:40  superfinder.txt
+vb6run   txt      6110 2026-04-26   0:40 
+neko98   txt      1240 2026-04-26   0:40 
+BALLOO~1 TXT       964 2026-04-26   0:40  balloonfight.txt
+EVERYT~1 TXT      2264 2026-04-26   0:40  everythingse.txt
+qlcplus  txt      2370 2026-04-26   0:40 
+lmarbles txt      2542 2026-04-26   0:40 
+AC97FO~1 TXT      5782 2026-04-26   0:40  ac97forvirtualbox.txt
+fceux    txt      1784 2026-04-26   0:40 
+twsynth  txt      2066 2026-04-26   0:40 
+OPENCO~1 TXT      2934 2026-04-26   0:40  opencodecs.txt
+hiawatha txt      2712 2026-04-26   0:40 
+7kaa     txt      1342 2026-04-26   0:40 
+zoomit   txt      1960 2026-04-26   0:40 
+FLASHP~1 TXT      3412 2026-04-26   0:40  flashplayer32.txt
+openttd  txt      4354 2026-04-26   0:40 
+iqpuzzle txt      2050 2026-04-26   0:40 
+icons        <DIR>     2026-04-26   0:40 
+      396 files           1 057 712 bytes
+
+Directory for ::/Documents and Settings/Administrator/Local Settings/Application Data/RApps/appdb/icons
+
+.            <DIR>     2026-04-26   0:40 
+..           <DIR>     2026-04-26   0:40 
+pcsx2-xp ico      4286 2026-04-26   0:40 
+wordview ico      3638 2026-04-26   0:40 
+MESAGA~1 ICO     21054 2026-04-26   0:40  mesagallium.ico
+winrar   ico     16158 2026-04-26   0:40 
+boswars  ico     41662 2026-04-26   0:40 
+chromium ico     53740 2026-04-26   0:40 
+FOLDER~1 ICO      3062 2026-04-26   0:40  folder2iso.ico
+PODCAS~1 ICO     16958 2026-04-26   0:40  podcasteasy.ico
+HASHCH~1 ICO     25214 2026-04-26   0:40  hashcheck.ico
+abyss    ico     18646 2026-04-26   0:40 
+MARIO-~1 ICO      4286 2026-04-26   0:40  mario-luigi.ico
+cmake    ico    159613 2026-04-26   0:40 
+CAVEST~1 ICO     31662 2026-04-26   0:40  cavestory.ico
+PHOTOF~1 ICO     31662 2026-04-26   0:40  photofiltre.ico
+flash    ico    292878 2026-04-26   0:40 
+calibre2 ico      9662 2026-04-26   0:40 
+OPENBO~1 ICO    353118 2026-04-26   0:40  openboard.ico
+arduino  ico      9662 2026-04-26   0:40 
+VECTOR~1 ICO      4286 2026-04-26   0:40  vectoriangiotto.ico
+CHROMI~1 ICO     41662 2026-04-26   0:40  chromiumbsu.ico
+ZINJAI   ICO      9662 2026-04-26   0:40  zinjaI.ico
+AUDIOG~1 ICO      6766 2026-04-26   0:40  audiograbber.ico
+ANT-RE~1 ICO     23246 2026-04-26   0:40  ant-renamer.ico
+rosbe    ico     22486 2026-04-26   0:40 
+twsynth  ico       766 2026-04-26   0:40 
+putty    ico      4078 2026-04-26   0:40 
+python2  ico     43226 2026-04-26   0:40 
+DVDWRI~1 ICO     36710 2026-04-26   0:40  dvdwritenow.ico
+SUMATR~1 ICO     37571 2026-04-26   0:40  sumatrapdf.ico
+vbox     ico      3262 2026-04-26   0:40 
+lun3r    ico      4286 2026-04-26   0:40 
+peazip   ico     32248 2026-04-26   0:40 
+iqpuzzle ico     16958 2026-04-26   0:40 
+SBFORV~1 ICO      3638 2026-04-26   0:40  sbforvmware.ico
+zaz      ico     16958 2026-04-26   0:40 
+ollydbg  ico      1078 2026-04-26   0:40 
+akelpad  ico      2238 2026-04-26   0:40 
+npp      ico    186712 2026-04-26   0:40 
+THEPOW~1 ICO      4286 2026-04-26   0:40  thepowdertoy.ico
+pcsxr    ico     67646 2026-04-26   0:40 
+avidemux ico     43563 2026-04-26   0:40 
+NEWWIN~1 ICO      2238 2026-04-26   0:40  newwinsetup.ico
+lang     ico     51262 2026-04-26   0:40 
+office   ico     27190 2026-04-26   0:40 
+LIBREO~1 ICO      3774 2026-04-26   0:40  libreoffice.ico
+ccleaner ico     71313 2026-04-26   0:40 
+mono     ico     19518 2026-04-26   0:40 
+winspypp ico      1078 2026-04-26   0:40 
+jdk8     ico      9662 2026-04-26   0:40 
+diablo2  ico      3774 2026-04-26   0:40 
+hover    ico       766 2026-04-26   0:40 
+GOG_GA~1 ICO     67646 2026-04-26   0:40  gog_galaxy.ico
+slickrun ico      3262 2026-04-26   0:40 
+DAVEGN~1 ICO      4286 2026-04-26   0:40  davegnukem.ico
+AGATEM~1 ICO     34046 2026-04-26   0:40  agatemulator.ico
+MUSESC~1 ICO     11582 2026-04-26   0:40  musescore.ico
+nvda     ico     28034 2026-04-26   0:40 
+nvdisp   ico     16398 2026-04-26   0:40 
+7zip     ico      3774 2026-04-26   0:40 
+PROCES~1 ICO     22486 2026-04-26   0:40  processexplorer.ico
+waveshop ico      2734 2026-04-26   0:40 
+WALLPA~1 ICO     12526 2026-04-26   0:40  wallpaper.ico
+python   ico     67646 2026-04-26   0:40 
+smplayer ico      9662 2026-04-26   0:40 
+CLEMEN~1 ICO     47553 2026-04-26   0:40  clementine.ico
+OLDWIN~1 ICO      1078 2026-04-26   0:40  oldwinsetup.ico
+fceux    ico    407707 2026-04-26   0:40 
+fbide    ico      1126 2026-04-26   0:40 
+ONLYOF~1 ICO     12219 2026-04-26   0:40  onlyoffice.ico
+RESTOR~1 ICO       766 2026-04-26   0:40  restoration.ico
+JETAUDIO ICO      2670 2026-04-26   0:40  jetAudio.ico
+dolphin  ico     37344 2026-04-26   0:40 
+PROJEC~1 ICO     91558 2026-04-26   0:40  project64.ico
+FIREFO~1 ICO     85989 2026-04-26   0:40  firefox_new.ico
+scribus  ico     41662 2026-04-26   0:40 
+gnucash  ico    165662 2026-04-26   0:40 
+vlc      ico     86358 2026-04-26   0:40 
+wxmedit  ico     22549 2026-04-26   0:40 
+verifier ico      3638 2026-04-26   0:40 
+cygne    ico       766 2026-04-26   0:40 
+antitwin ico     26694 2026-04-26   0:40 
+pptview  ico    170596 2026-04-26   0:40 
+windbg   ico      1078 2026-04-26   0:40 
+photivo  ico     42482 2026-04-26   0:40 
+nogba    ico     67646 2026-04-26   0:40 
+ohrrpgce ico       766 2026-04-26   0:40 
+fap      ico      1134 2026-04-26   0:40 
+CHICKE~1 ICO     41662 2026-04-26   0:40  chickeninvaders.ico
+kmeleon  ico     66409 2026-04-26   0:40 
+realtek  ico       766 2026-04-26   0:40 
+DOSBLA~1 ICO     67646 2026-04-26   0:40  dosblaster.ico
+zoomit   ico      8478 2026-04-26   0:40 
+STACKA~1 ICO     16958 2026-04-26   0:40  stackandconquer.ico
+freemat  ico      9662 2026-04-26   0:40 
+renpy    ico     16158 2026-04-26   0:40 
+IRFANV~1 ICO     41662 2026-04-26   0:40  irfanview.ico
+sunbird  ico    127222 2026-04-26   0:40 
+GENERI~1 ICO     67646 2026-04-26   0:40  genericdriver.ico
+NVIDIA~1 ICO      3262 2026-04-26   0:40  nvidiaforceware.ico
+anki     ico    103420 2026-04-26   0:40 
+sdi-tool ico     15086 2026-04-26   0:40 
+stamina  ico       766 2026-04-26   0:40 
+ffmpeg   ico      9662 2026-04-26   0:40 
+BALLOO~1 ICO     41662 2026-04-26   0:40  balloonfight.ico
+LAZARU~1 ICO    128530 2026-04-26   0:40  lazaruside.ico
+GENSEM~1 ICO     42482 2026-04-26   0:40  gensemulator.ico
+air      ico    270398 2026-04-26   0:40 
+GLOBUL~1 ICO     41662 2026-04-26   0:40  globulation2.ico
+tuxpaint ico     41662 2026-04-26   0:40 
+ARMAGE~1 ICO      2238 2026-04-26   0:40  armagetron.ico
+RAINLE~1 ICO     67646 2026-04-26   0:40  rainlendar.ico
+CRIMSO~1 ICO     41662 2026-04-26   0:40  crimsonfields.ico
+RAINME~1 ICO     17542 2026-04-26   0:40  rainmeter.ico
+xrick    ico      2238 2026-04-26   0:40 
+coretemp ico      5694 2026-04-26   0:40 
+EXTREM~1 ICO     42482 2026-04-26   0:40  extremetuxracer.ico
+PULSEA~1 ICO     21662 2026-04-26   0:40  pulseaudio.ico
+krita    ico      9662 2026-04-26   0:40 
+OPENCO~1 ICO     24382 2026-04-26   0:40  opencodecs.ico
+BOUNDA~1 ICO     41662 2026-04-26   0:40  boundaround.ico
+bochs    ico     29926 2026-04-26   0:40 
+CHEATE~1 ICO      5694 2026-04-26   0:40  cheatengine.ico
+MKVTOO~1 ICO     41662 2026-04-26   0:40  mkvtoolnix.ico
+themes   ico     22486 2026-04-26   0:40 
+FREEPA~1 ICO      4286 2026-04-26   0:40  freepascal.ico
+boinc    ico    270398 2026-04-26   0:40 
+blender  ico      9662 2026-04-26   0:40 
+desmume  ico     12862 2026-04-26   0:40 
+chrome   ico      3774 2026-04-26   0:40 
+vim      ico      1078 2026-04-26   0:40 
+audacity ico     17542 2026-04-26   0:40 
+ASSAUL~1 ICO     41662 2026-04-26   0:40  assaultcube.ico
+git      ico      9662 2026-04-26   0:40 
+mpc      ico     41662 2026-04-26   0:40 
+lzdoom   ico    270398 2026-04-26   0:40 
+hydra    ico      9662 2026-04-26   0:40 
+AZULOP~1 ICO     16958 2026-04-26   0:40  azulopenjdk8.ico
+fbneo    ico     67646 2026-04-26   0:40 
+scratch  ico     15086 2026-04-26   0:40 
+OPENOF~1 ICO     15086 2026-04-26   0:40  openoffice.ico
+winamp   ico     23774 2026-04-26   0:40 
+HWMONI~1 ICO      5694 2026-04-26   0:40  hwmonitor.ico
+VIRTUA~1 ICO     93977 2026-04-26   0:40  virtualMIDIsynth.ico
+idm      ico     15086 2026-04-26   0:40 
+dosbox   ico     11018 2026-04-26   0:40 
+reshack  ico     94283 2026-04-26   0:40 
+siv      ico      3774 2026-04-26   0:40 
+AUDACI~1 ICO     15086 2026-04-26   0:40  audacious.ico
+THUNDE~1 ICO      7134 2026-04-26   0:40  thunderbird.ico
+qemu     ico     15086 2026-04-26   0:40 
+openttd  ico     39814 2026-04-26   0:40 
+lmms     ico     67646 2026-04-26   0:40 
+DEPEND~1 ICO      4286 2026-04-26   0:40  dependencywalker.ico
+pnotepad ico      4286 2026-04-26   0:40 
+FOOBAR~1 ICO     16958 2026-04-26   0:40  foobar2000.ico
+alreader ico     13094 2026-04-26   0:40 
+DEATHR~1 ICO      2238 2026-04-26   0:40  deathrally.ico
+FILEOP~1 ICO    119516 2026-04-26   0:40  fileoptimizer.ico
+FARMAN~1 ICO     29926 2026-04-26   0:40  farmanager.ico
+CODEBL~1 ICO      9662 2026-04-26   0:40  codeblocks.ico
+pidgin   ico     25214 2026-04-26   0:40 
+snes9x   ico    135229 2026-04-26   0:40 
+vbasdl   ico      4710 2026-04-26   0:40 
+OCENAU~1 ICO     57260 2026-04-26   0:40  ocenaudio.ico
+FOLDER~2 ICO     24610 2026-04-26   0:40  foldermarker.ico
+qlcplus  ico     66451 2026-04-26   0:40 
+HEDGEW~1 ICO     35078 2026-04-26   0:40  hedgewars.ico
+CHRIST~1 ICO     42482 2026-04-26   0:40  christmasbound.ico
+winfile  ico     88142 2026-04-26   0:40 
+aim      ico      4286 2026-04-26   0:40 
+API-MO~1 ICO      9662 2026-04-26   0:40  api-monitor.ico
+hxd      ico      3262 2026-04-26   0:40 
+multimc  ico    149959 2026-04-26   0:40 
+winevdm  ico     96707 2026-04-26   0:40 
+ideasemu ico      3262 2026-04-26   0:40 
+tdm-gcc  ico     10806 2026-04-26   0:40 
+opera    ico     19790 2026-04-26   0:40 
+firefox  ico     25214 2026-04-26   0:40 
+FLASHP~1 ICO      3774 2026-04-26   0:40  flashplayer32.ico
+FOTOGR~1 ICO     18718 2026-04-26   0:40  fotografix.ico
+grafx2   ico     41662 2026-04-26   0:40 
+qmmp     ico     16958 2026-04-26   0:40 
+dosboxx  ico     30166 2026-04-26   0:40 
+ROM-PR~1 ICO       318 2026-04-26   0:40  rom-properties.ico
+gimp     ico      9662 2026-04-26   0:40 
+oswan    ico      6766 2026-04-26   0:40 
+gecko    ico      3774 2026-04-26   0:40 
+librecad ico     41662 2026-04-26   0:40 
+PROCES~2 ICO     16958 2026-04-26   0:40  processhacker.ico
+inkscape ico      9662 2026-04-26   0:40 
+devcpp   ico     11502 2026-04-26   0:40 
+vmpk     ico      5302 2026-04-26   0:40 
+FAMITR~1 ICO     10462 2026-04-26   0:40  famitracker.ico
+SUBLIM~1 ICO     16158 2026-04-26   0:40  sublime_text.ico
+supertux ico     18718 2026-04-26   0:40 
+agwak    ico      4286 2026-04-26   0:40 
+gpuz     ico     19518 2026-04-26   0:40 
+abiword  ico      9662 2026-04-26   0:40 
+clamwin  ico     23558 2026-04-26   0:40 
+MAELST~1 ICO       766 2026-04-26   0:40  maelstrom.ico
+nemobar  ico      7406 2026-04-26   0:40 
+cstalin  ico     41662 2026-04-26   0:40 
+cpuz     ico    111074 2026-04-26   0:40 
+ultraiso ico     74826 2026-04-26   0:40 
+EXCELV~1 ICO     55341 2026-04-26   0:40  excelview.ico
+      207 files           7 855 697 bytes
+
+Directory for ::/Documents and Settings/Administrator/Local Settings/Temp
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/Administrator/Local Settings/Temporary Internet Files
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+CONTENT  IE5 <DIR>     2026-04-26   0:27  Content.IE5
+        3 files                   0 bytes
+
+Directory for ::/Documents and Settings/Administrator/Local Settings/Temporary Internet Files/Content.IE5
+
+.            <DIR>     2026-04-26   0:27 
+..           <DIR>     2026-04-26   0:27 
+index    dat     49152 2026-04-26   0:38 
+CHDE2A5S     <DIR>     2026-04-26   0:27 
+89Z1ZR97     <DIR>     2026-04-26   0:27 
+KX448DWY     <DIR>     2026-04-26   0:27 
+GPQR5U0D     <DIR>     2026-04-26   0:27 
+        7 files              49 152 bytes
+
+Directory for ::/Documents and Settings/Administrator/Local Settings/Temporary Internet Files/Content.IE5/CHDE2A5S
+
+.            <DIR>     2026-04-26   0:27 
+..           <DIR>     2026-04-26   0:27 
+FRONT_~1           707 2026-04-26   0:38  front[0]
+        3 files                 707 bytes
+
+Directory for ::/Documents and Settings/Administrator/Local Settings/Temporary Internet Files/Content.IE5/89Z1ZR97
+
+.            <DIR>     2026-04-26   0:27 
+..           <DIR>     2026-04-26   0:27 
+O2EH2A5S          1645 2026-04-26   0:27 
+0NGK2A5S          1645 2026-04-26   0:27 
+OSJQ2A5S          1645 2026-04-26   0:27 
+0DKT2A5S          1645 2026-04-26   0:27 
+SGYLIGI5          1645 2026-04-26   0:27 
+KJCCXLWI          1645 2026-04-26   0:27 
+CLP4CQAV          1645 2026-04-26   0:27 
+W22RDPMC          1645 2026-04-26   0:27 
+4EL9F47S         19457 2026-04-26   0:38 
+JQUERY~1 MIN     86927 2026-04-26   0:38  jquery-3.3.1.min[0]
+BOOTST~1 MIN     39680 2026-04-26   0:38  bootstrap.min[0]
+V5-COM~1 MIN      7422 2026-04-26   0:38  v5-compat.min[0]
+FONT-R~1          2606 2026-04-26   0:38  font-roboto[0]
+STYLE~1  BLU     25647 2026-04-26   0:38  style.blue[0]
+FORK-A~1 MIN     34942 2026-04-26   0:38  fork-awesome.min[0]
+PHOTOS~1          4137 2026-04-26   0:38  photoswipe[0]
+DEFAUL~1         11609 2026-04-26   0:38  default-skin[0]
+HUGO-E~1           336 2026-04-26   0:38  hugo-easy-gallery[0]
+GH-FOR~1          3539 2026-04-26   0:38  gh-fork-ribbon[0]
+BOOTST~2 MIN    121457 2026-04-26   0:38  bootstrap.min[1]
+TESTS-~1         13809 2026-04-26   0:38  tests-2-banner[0]
+REACTO~1         17908 2026-04-26   0:38  ReactOS_0[0]
+LOAD-P~1          2532 2026-04-26   0:38  load-photoswipe[0]
+MIZU-D~1        132568 2026-04-26   0:38  Mizu-Desktop[0]
+BANNER~1         50082 2026-04-26   0:38  banner[0]
+PLACEH~1         45158 2026-04-26   0:38  placeholder[0]
+HOME_0~1          1705 2026-04-26   0:38  home[0]
+       29 files             634 681 bytes
+
+Directory for ::/Documents and Settings/Administrator/Local Settings/Temporary Internet Files/Content.IE5/KX448DWY
+
+.            <DIR>     2026-04-26   0:27 
+..           <DIR>     2026-04-26   0:27 
+PHOTOS~1 MIN      9878 2026-04-26   0:38  photoswipe-ui-default.min[0]
+        3 files               9 878 bytes
+
+Directory for ::/Documents and Settings/Administrator/Local Settings/Temporary Internet Files/Content.IE5/GPQR5U0D
+
+.            <DIR>     2026-04-26   0:27 
+..           <DIR>     2026-04-26   0:27 
+PHOTOS~1 MIN     31903 2026-04-26   0:38  photoswipe.min[0]
+        3 files              31 903 bytes
+
+Directory for ::/Documents and Settings/Administrator/Local Settings/History
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+        2 files                   0 bytes
+
+Directory for ::/Documents and Settings/Administrator/Cookies
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+index    dat     32768 2026-04-26   0:27 
+SZP3HGI5 txt       664 2026-04-26   0:27 
+G5S9HGI5 txt       664 2026-04-26   0:27 
+0NGK2A5S txt       661 2026-04-26   0:27 
+C8HN2A5S txt       663 2026-04-26   0:27 
+4AVFHGI5 txt       663 2026-04-26   0:27 
+OGMYCQAV txt       661 2026-04-26   0:27 
+OSJQ2A5S txt       664 2026-04-26   0:27 
+8YAAXLWI txt       664 2026-04-26   0:27 
+00O1CQAV txt       662 2026-04-26   0:27 
+SGYLIGI5 txt       662 2026-04-26   0:27 
+       13 files              39 396 bytes
+
+Directory for ::/Documents and Settings/Administrator/My Music
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+desktop  ini        72 2026-04-26   5:51 
+        3 files                  72 bytes
+
+Directory for ::/Documents and Settings/Administrator/My Videos
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+desktop  ini        72 2026-04-26   5:51 
+        3 files                  72 bytes
+
+Directory for ::/Documents and Settings/Administrator/My Pictures
+
+.            <DIR>     2026-04-26   5:52 
+..           <DIR>     2026-04-26   5:52 
+desktop  ini        72 2026-04-26   5:51 
+        3 files                  72 bytes
+
+Directory for ::/RECYCLED
+
+.            <DIR>     2026-04-25  22:52 
+..           <DIR>     2026-04-25  22:52 
+desktop  ini        65 2026-04-25  22:52 
+INFO2               20 2026-04-25  22:52 
+        4 files                  85 bytes
+
+Total files listed:
+      2870 files       2 055 563 443 bytes
+                      6 543 736 832 bytes free
+
