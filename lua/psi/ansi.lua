@@ -11,6 +11,7 @@
 local M = {}
 
 local ESC = string.char(27)
+local code_map = {}
 
 M.enabled = true
 M.color_enabled = true
@@ -24,14 +25,33 @@ local function is_color_code(code)
     or code:match("^%d+;9[0-7]$") ~= nil
 end
 
+local function resolve_code(code)
+  local parts = {}
+  code = tostring(code or "")
+  for part in code:gmatch("[^;]+") do
+    parts[#parts + 1] = code_map[part] or part
+  end
+  return #parts > 0 and table.concat(parts, ";") or code
+end
+
+function M.set_code_map(next_map)
+  code_map = {}
+  for key, value in pairs(next_map or {}) do
+    if value ~= nil then
+      code_map[tostring(key)] = tostring(value)
+    end
+  end
+end
+
 function M.color(code, text)
   if not M.enabled then
     return text
   end
-  if not M.color_enabled and is_color_code(code) then
+  local resolved = resolve_code(code)
+  if not M.color_enabled and is_color_code(resolved) then
     return text
   end
-  return ESC .. "[" .. code .. "m" .. text .. ESC .. "[0m"
+  return ESC .. "[" .. resolved .. "m" .. text .. ESC .. "[0m"
 end
 function M.bold(text)
   return M.color("1", text)

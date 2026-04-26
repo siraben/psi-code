@@ -17,6 +17,8 @@ struct psi_vm;
 struct psi_agent_observer;
 struct psi_abort_signal;
 
+#define PSI_HOST_TUI_THEME_PAIR_COUNT 7
+
 /* Usage-mirror for the TUI status line.
  *
  * Written by psi.set_usage() (from lua/psi/context.lua record_usage)
@@ -36,6 +38,17 @@ struct psi_host_usage {
     long context_window;
 };
 
+struct psi_host_tui_theme_pair {
+    int fg;
+    int bg;
+    int is_set;
+};
+
+struct psi_host_tui_theme {
+    int active;
+    struct psi_host_tui_theme_pair pairs[PSI_HOST_TUI_THEME_PAIR_COUNT];
+};
+
 /* Host tick hook.
  *
  * psi.sched calls psi.host_tick() between coroutine resumes. If a
@@ -52,6 +65,7 @@ struct psi_host_context {
     const char *active_tool_id;
     struct psi_abort_signal *abort_signal;
     struct psi_host_usage usage;
+    struct psi_host_tui_theme tui_theme;
     psi_host_tick_fn tick_hook;
     void *tick_userdata;
 };

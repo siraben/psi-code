@@ -186,6 +186,54 @@ Users can override defaults in `~/.config/psi/keybindings.json` or
 { kind = "print" | "compact", payload = "..." | 12 }
 ```
 
+### Themes — `psi.theme`
+
+Theme support stays Lua-first: extensions register a theme spec, then
+select it. The bundled default is a dark TUI theme; custom themes can
+override just the slots they care about and inherit the rest.
+
+| API | Notes |
+|---|---|
+| `psi.theme.register(name, spec)` | Add or replace a named theme. |
+| `psi.theme.use(name_or_spec)` | Apply a registered theme or an ad-hoc spec immediately. |
+| `psi.theme.current()` | Returns the currently applied normalized theme table. |
+| `psi.theme.current_name()` | Returns the active theme name. |
+| `psi.theme.names()` | Sorted array of registered theme names. |
+
+Theme spec shape:
+
+```lua
+{
+  ansi = {
+    ["31"] = "31",   -- optional ANSI SGR remap
+    ["36"] = "36",
+  },
+  tui = {
+    header  = { fg = 111, bg = 234 },
+    accent  = { fg = 81,  bg = 234 },
+    text    = { fg = 253, bg = 234 },
+    warning = { fg = 223, bg = 234 },
+    success = { fg = 150, bg = 234 },
+    error   = { fg = 210, bg = 234 },
+    chrome  = { fg = 245, bg = 234 },
+  },
+}
+```
+
+Example extension:
+
+```lua
+return function(psi)
+  psi.theme.register("toxic", {
+    tui = {
+      accent = { fg = 118, bg = 233 },
+      chrome = { fg = 244, bg = 233 },
+    },
+  })
+  psi.theme.use("toxic")
+end
+```
+
 ### Render hooks — `psi.render.register_hook(event, fn)`
 
 For extensions that want to *change the rendered terminal output*
