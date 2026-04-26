@@ -13,6 +13,19 @@ local M = {}
 
 -- handlers[event] = { fn1, fn2, ... }
 local handlers = {}
+local aliases = {
+  ["session-start"] = "session_start",
+  ["session-shutdown"] = "session_shutdown",
+  ["turn-start"] = "turn_start",
+  ["turn-end"] = "turn_end",
+  ["tool-call"] = "tool_execution_start",
+  ["tool-result"] = "tool_execution_end",
+  ["assistant-text-delta"] = "message_update",
+  ["before-provider-request"] = "before_provider_request",
+  ["after-provider-response"] = "after_provider_response",
+  ["compaction-start"] = "session_before_compact",
+  ["compaction-end"] = "session_compact",
+}
 
 local function list_for(event)
   local list = handlers[event]
@@ -38,6 +51,10 @@ function M.off(event, fn)
 end
 
 function M.emit(event, payload)
+  local alias = aliases[event]
+  if alias and alias ~= event then
+    M.emit(alias, payload)
+  end
   local list = handlers[event]
   if not list then return end
   -- Snapshot the handler list before iterating. A handler that calls

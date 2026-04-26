@@ -92,6 +92,8 @@ are not listed here and may change without notice.
   impl            = function(input) end,
                                       -- input: parsed JSON table;
                                       -- returns a ToolResult
+  execution_mode  = "parallel",       -- metadata; mutation tools may
+                                      -- choose "sequential"
 }
 ```
 
@@ -215,6 +217,11 @@ These are part of the stable surface:
 | `psi.tui.register_status_hook(fn)` | Append a short status-bar snippet. `fn()` is called on every redraw (must be cheap) and returns a string or nil. Useful for tokens/sec meters, background-task indicators, etc. Suppressed while an active status message is on screen. |
 | `psi.tools.set_active(names)` / `get_active()` | Narrow the tool set offered to the model for subsequent turns. Pass a list of tool names to restrict; pass `nil` to clear the scope and restore all registered tools. Useful for skill-scoped agents (e.g. `tools.set_active({"read","grep"})` for a read-only investigation). |
 | `psi.session.send_message(role, text)` | Inject a user or assistant message into the in-memory session without triggering a turn. `role` is `"user"` or `"assistant"`. Call `psi.session.save()` afterwards to persist. Replaces the former internal-only `append_user` / `append_assistant` for extension use. |
+| `psi.session.append_custom(name, data)` | Persist extension data in the session file without adding it to model context. |
+| `psi.session.append_custom_message(text, opts)` | Persist a model-visible custom message. `opts.role` may be `"user"` or `"assistant"`; `opts.hidden=true` keeps it out of provider context. |
+| `psi.providers.all_providers()` / `all_models()` | Inspect the built-in provider/model registry. Provider registration exists internally but is not yet a stable extension API. |
+| `psi.settings.get(path, default)` / `reload()` | Read layered JSON settings from `~/.config/psi/settings.json` and `./.psi/settings.json`. |
+| `psi.resources.context_files()` | Discover global/project context files. Emits `resources_discover`. |
 | `psi.prompt_templates.load()` / `list()` / `find(name)` / `expand(text)` | Loader + lookup + runtime expansion for user-authored slash-command templates. `/reload` reloads them. See "Prompt templates" below. |
 
 ### Prompt templates
@@ -266,9 +273,14 @@ Every event is fired synchronously from the agent turn loop. Order is
 defined below. Handlers must be fast — they run on the turn's critical
 path.
 
+Psi emits its historical hyphenated event names and aliases several of
+them to pi-style underscore names (`turn_end`, `tool_execution_start`,
+`after_provider_response`, etc.) for new extension code.
+
 | Event | Firing site | Payload |
 |---|---|---|
 | `before-turn` | Before each streaming iteration in `anthropic.run_turn`. Also fires once per user prompt. | `{ text = "<user prompt>" }` (via render bridge) |
+| `before-provider-request` | After context mutation and request-body assembly, before `http_stream_begin`. | `{ provider, model, body }` |
 | `after-provider-response` | Right after the assistant message is saved, before tool dispatch or auto-compaction. | `{ usage, stop_reason, response_id, model }` |
 | `assistant-text-delta` | Every streamed text chunk. High frequency. | `{ text = "<chunk>" }` |
 | `tool-call-delta` | Every streamed chunk of a tool_use block's input JSON. | `{ id, partial_json }` |
@@ -281,6 +293,7 @@ path.
 | `compaction-start` | Before `psi.session.do_compact` clears the in-memory session and appends the summary. Extensions (e.g. autosave) can flush current on-disk state before the rewrite. | `{ total, keep_recent, compacted }` |
 | `compaction-end` | After the summary + kept tail are appended back. Pair with `compaction-start`; the summary text is included so loggers don't have to re-read the session. | `{ total, keep_recent, compacted, summary }` |
 | `context` | Right before a provider request is built, once per turn iteration. **The `messages` table is mutable** — handlers may insert, remove, or replace entries and the edits hit the wire. Use for RAG injection, tool-result redaction, mid-context compression. | `{ messages, model, provider, system_prompt }` |
+| `resources_discover` | During context/resource discovery before the system prompt is finalized. | `{ context_files, diagnostics }` |
 | `session-start` | Fired once when a session is loaded (`source="load"`) or freshly created (`source="new"`). Extensions that own log files / counters / timers should initialise here instead of on the first `before-turn`. | `{ id, path, source, message_count }` |
 | `session-shutdown` | Fired once, just before host teardown (TUI state free or REPL exit). Flush your state here — the Lua VM is still live. | `{ id, path, message_count }` |
 

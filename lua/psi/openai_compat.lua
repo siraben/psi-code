@@ -235,6 +235,23 @@ function M.build_api_messages(session, system_prompt, cfg)
       local summary = (type(body) == "table" and body.summary) or m.text or ""
       out[#out + 1] = { role = "user", content = summary }
       i = i + 1
+    elseif role == "custom"
+        and type(body) == "table"
+        and body.__entry_type == "custom_message"
+        and type(body.message) == "table"
+        and not body.message.hidden then
+      flush_synthetic_results()
+      local text = ""
+      for _, cb in ipairs(body.message.content or {}) do
+        if type(cb) == "table" and cb.type == "text" and type(cb.text) == "string" then
+          text = (text == "" and cb.text) or (text .. cb.text)
+        end
+      end
+      out[#out + 1] = {
+        role = body.message.role == "assistant" and "assistant" or "user",
+        content = text,
+      }
+      i = i + 1
     else
       i = i + 1
     end
@@ -324,6 +341,13 @@ function M.run_turn(opts, cfg)
       tool_specs = tool_specs,
       max_tokens = opts.max_tokens,
     })
+    if psi.events then
+      psi.events.emit("before-provider-request", {
+        provider = cfg.provider_name,
+        model = model,
+        body = body,
+      })
+    end
 
     local state = cfg.new_state()
     local parser = cfg.parser_new()

@@ -7,8 +7,8 @@
 --   - should_compact(model): base+tail > window - reserve
 --   - compaction_budget() / turn_prefix_budget(): 0.8 / 0.5 * reserve
 --
--- psi has no model registry, so this module ships a small built-in table
--- with a conservative fallback.
+-- Uses psi.providers model metadata when available, with a conservative
+-- fallback for unknown/custom models.
 
 local M = {}
 
@@ -102,6 +102,13 @@ end
 function M.context_window(model)
   if not model or model == "" then
     return DEFAULT_CONTEXT_WINDOW
+  end
+  local ok, providers = pcall(require, "psi.providers")
+  if ok and providers then
+    local meta = providers.model(model)
+    if type(meta) == "table" and type(meta.context_window) == "number" then
+      return meta.context_window
+    end
   end
   return MODEL_CONTEXT_WINDOWS[model] or DEFAULT_CONTEXT_WINDOW
 end

@@ -9,9 +9,7 @@ local context = require("psi.context")
 local prompt = require("psi.prompt")
 local sched = require("psi.sched")
 local session = require("psi.session")
-local anthropic = require("psi.anthropic")
-local ollama = require("psi.ollama")
-local openrouter = require("psi.openrouter")
+local providers = require("psi.providers")
 
 local M = {}
 
@@ -26,18 +24,8 @@ local M = {}
 --   2. $PSI_PROVIDER env ("ollama" | "anthropic" | "openrouter").
 --   3. Default: anthropic.
 local function pick_provider(model)
-  if type(model) == "string" then
-    local after = model:match("^openrouter/(.+)$")
-    if after then return openrouter, after end
-    after = model:match("^ollama/(.+)$")
-    if after then return ollama, after end
-    after = model:match("^anthropic/(.+)$")
-    if after then return anthropic, after end
-  end
-  local env = os.getenv("PSI_PROVIDER")
-  if env == "ollama" then return ollama, model end
-  if env == "openrouter" then return openrouter, model end
-  return anthropic, model
+  local spec, real_model = providers.resolve_route(model)
+  return providers.load_provider(spec), providers.resolve_model(spec.name, real_model)
 end
 
 function M.provider_for(model) return pick_provider(model) end

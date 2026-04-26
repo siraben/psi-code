@@ -1,8 +1,8 @@
 -- psi.session: session accessors, append wrappers, and compaction.
 --
--- Disk format is the v2 pi-style schema (ported from pi-mono). In memory
+-- Disk format is the v3 pi-style schema (ported from pi-mono). In memory
 -- we still use psi's minimal (role, text, data) triple exposed by the C
--- FFI; `data` is a JSON string encoding the v2 entry body minus `type`.
+-- FFI; `data` is a JSON string encoding the entry body minus `type`.
 -- Example `data` decoded for an assistant message:
 --
 --   { id = "...", parentId = "...", timestamp = "...",
@@ -25,7 +25,7 @@ local prelude = require("psi.prelude")
 
 local M = {}
 
-local SESSION_VERSION = 2
+local SESSION_VERSION = 3
 
 -- Optional display name set via /name; persisted into the session header
 -- so it survives reloads.
@@ -142,20 +142,25 @@ local function normalize_usage(u)
   }
 end
 
--- pi uses camelCase stop reasons. Anthropic emits snake_case over the wire.
-local STOP_REASON_CAMEL = {
-  end_turn = "endTurn",
+-- Store pi-style canonical stop reasons. Anthropic emits snake_case over
+-- the wire, while OpenAI-compatible providers use their own strings.
+local STOP_REASON_CANONICAL = {
+  end_turn = "stop",
   tool_use = "toolUse",
   stop_sequence = "stopSequence",
-  max_tokens = "maxTokens",
+  max_tokens = "length",
   pause_turn = "pauseTurn",
   refusal = "refusal",
+  stop = "stop",
+  length = "length",
+  error = "error",
+  aborted = "aborted",
 }
 local function normalize_stop_reason(r)
   if type(r) ~= "string" then
     return nil
   end
-  return STOP_REASON_CAMEL[r] or r
+  return STOP_REASON_CANONICAL[r] or r
 end
 
 local function unix_ms()
@@ -278,6 +283,39 @@ function M.append_compaction(summary_text, extra)
   psi.session_append("compaction-summary", summary_text or "", psi.json_encode(body))
 end
 
+function M.append_custom(name, data)
+  local body = stamp_entry({
+    __entry_type = "custom",
+    name = name or "custom",
+    data = data or {},
+  })
+  psi.session_append("custom", "", psi.json_encode(body))
+end
+
+function M.append_custom_message(text, opts)
+  opts = opts or {}
+  local body = stamp_entry({
+    __entry_type = "custom_message",
+    message = {
+      role = opts.role or "user",
+      content = prelude.as_array({ text_block(text or "") }),
+      timestamp = unix_ms(),
+      hidden = opts.hidden and true or false,
+    },
+  })
+  psi.session_append("custom", text or "", psi.json_encode(body))
+end
+
+function M.append_model_change(model)
+  local body = stamp_entry({ __entry_type = "model_change", model = model or "" })
+  psi.session_append("custom", "", psi.json_encode(body))
+end
+
+function M.append_thinking_level_change(level)
+  local body = stamp_entry({ __entry_type = "thinking_level_change", thinkingLevel = level or "" })
+  psi.session_append("custom", "", psi.json_encode(body))
+end
+
 -- ---------- JSONL persistence ----------
 
 local function ensure_parent_dir(path)
@@ -304,7 +342,7 @@ local function session_header()
   }
   local parent = psi.session_parent_id()
   if parent and parent ~= "" then
-    hdr.parent = parent
+    hdr.parentSession = parent
   end
   if display_name and display_name ~= "" then
     hdr.name = display_name
@@ -329,6 +367,43 @@ local function to_disk_entry(m)
         role = m.role or "user",
         content = prelude.as_array({ text_block(m.text) }),
       },
+    }
+  end
+  if body.__entry_type == "custom" then
+    return {
+      type = "custom",
+      id = body.id,
+      parentId = body.parentId,
+      timestamp = body.timestamp,
+      name = body.name,
+      data = body.data,
+    }
+  end
+  if body.__entry_type == "custom_message" then
+    return {
+      type = "custom_message",
+      id = body.id,
+      parentId = body.parentId,
+      timestamp = body.timestamp,
+      message = body.message,
+    }
+  end
+  if body.__entry_type == "model_change" then
+    return {
+      type = "model_change",
+      id = body.id,
+      parentId = body.parentId,
+      timestamp = body.timestamp,
+      model = body.model,
+    }
+  end
+  if body.__entry_type == "thinking_level_change" then
+    return {
+      type = "thinking_level_change",
+      id = body.id,
+      parentId = body.parentId,
+      timestamp = body.timestamp,
+      thinkingLevel = body.thinkingLevel,
     }
   end
   if m.role == "compaction-summary" then
@@ -594,6 +669,30 @@ local function append_v2_compaction(parsed)
   psi.session_append("compaction-summary", body.summary or "", psi.json_encode(body))
 end
 
+local function append_v3_custom(parsed)
+  local body = {
+    __entry_type = parsed.type,
+    id = parsed.id,
+    parentId = parsed.parentId,
+    timestamp = parsed.timestamp,
+    name = parsed.name,
+    data = parsed.data,
+    message = parsed.message,
+    model = parsed.model,
+    thinkingLevel = parsed.thinkingLevel,
+  }
+  last_entry_id = body.id or last_entry_id
+  local text = ""
+  if parsed.type == "custom_message" and type(parsed.message) == "table" then
+    for _, b in ipairs(parsed.message.content or {}) do
+      if type(b) == "table" and b.type == "text" and type(b.text) == "string" then
+        text = (text == "" and b.text) or (text .. b.text)
+      end
+    end
+  end
+  psi.session_append("custom", text, psi.json_encode(body))
+end
+
 function M.load(path)
   if not path or path == "" then
     return false, "no path"
@@ -630,6 +729,8 @@ function M.load(path)
         end
         if parsed.parent then
           psi.session_set_parent_id(parsed.parent)
+        elseif parsed.parentSession then
+          psi.session_set_parent_id(parsed.parentSession)
         end
         display_name = type(parsed.name) == "string" and parsed.name or nil
       elseif parsed.type == "message" then
@@ -640,6 +741,11 @@ function M.load(path)
         end
       elseif parsed.type == "compaction" then
         append_v2_compaction(parsed)
+      elseif parsed.type == "custom"
+          or parsed.type == "custom_message"
+          or parsed.type == "model_change"
+          or parsed.type == "thinking_level_change" then
+        append_v3_custom(parsed)
       end
     end
   end
@@ -706,7 +812,7 @@ function M.fork(at_count, out_path)
     id = prelude.uuid_short(),
     timestamp = prelude.iso_timestamp(),
     cwd = os.getenv("PWD") or ".",
-    parent = psi.session_id(),
+    parentSession = psi.session_id(),
   }
   return write_session_file(out_path, header, messages, at_count)
 end

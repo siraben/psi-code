@@ -253,6 +253,17 @@ local function build_api_messages(session)
       local summary = (type(body) == "table" and body.summary) or m.text or ""
       out[#out + 1] = { role = "user", content = summary }
       i = i + 1
+    elseif role == "custom"
+        and type(body) == "table"
+        and body.__entry_type == "custom_message"
+        and type(body.message) == "table"
+        and not body.message.hidden then
+      flush_synthetic_results()
+      out[#out + 1] = {
+        role = body.message.role == "assistant" and "assistant" or "user",
+        content = pi_content_to_anthropic(body.message.content),
+      }
+      i = i + 1
     else
       i = i + 1
     end
@@ -767,6 +778,13 @@ function M.run_turn(opts)
       stream = true,
     }
     local body = psi.json_encode(request)
+    if psi.events then
+      psi.events.emit("before-provider-request", {
+        provider = "anthropic",
+        model = model,
+        body = request,
+      })
+    end
 
     local state = new_state()
     local parser = new_sse_parser()

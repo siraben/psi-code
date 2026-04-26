@@ -8,6 +8,8 @@ local records = require("psi.records")
 local registry = require("psi.tool_registry")
 local shell = require("psi.tool_shell")
 local prelude = require("psi.prelude")
+local truncate = require("psi.truncate")
+local mutation_queue = require("psi.tool_mutation_queue")
 
 local M = {}
 
@@ -32,17 +34,35 @@ local function impl_read(input)
   if not path then
     return records.tool_failure("read", "missing string field: path")
   end
+  local offset = registry.optional_number(input, "offset", 0)
+  local limit = registry.optional_number(input, "limit", 2000)
   -- Disk first; if the file isn't there and the path matches an
   -- embedded psi doc (README.md, docs/*.md), serve the bundled copy
   -- so the agent can self-describe regardless of cwd.
+  local text, source
   if psi.file_exists(path) then
-    return records.new_tool_result(true, "read", nil,
-      { path = path, text = psi.read_file(path) })
+    text = psi.read_file(path)
+  else
+    local embedded = psi.embedded_doc and psi.embedded_doc(path) or nil
+    if embedded then
+      text = embedded
+      source = "embedded"
+    end
   end
-  local embedded = psi.embedded_doc and psi.embedded_doc(path) or nil
-  if embedded then
-    return records.new_tool_result(true, "read", nil,
-      { path = path, text = embedded, source = "embedded" })
+  if text then
+    local sliced, meta = truncate.by_lines(text, offset, limit)
+    local notice = truncate.notice(meta)
+    if notice then sliced = notice .. "\n" .. sliced end
+    return records.new_tool_result(true, "read", nil, {
+      path = path,
+      text = sliced,
+      source = source,
+      offset = offset,
+      limit = limit,
+      total_lines = meta.total_lines,
+      next_offset = meta.next_offset,
+      truncated = meta.truncated,
+    })
   end
   return records.tool_failure("read",
     "no such file: " .. tostring(path))
@@ -59,13 +79,15 @@ local function impl_write(input)
   if type(content) ~= "string" then
     return records.tool_failure("write", "missing string field: content")
   end
-  if not psi.file_write(path, content) then
-    return records.tool_failure("write", "could not write full file")
-  end
-  return records.new_tool_result(true, "write", nil, {
-    path = path,
-    bytes_written = #content,
-  })
+  return mutation_queue.with_path(path, function()
+    if not psi.file_write(path, content) then
+      return records.tool_failure("write", "could not write full file")
+    end
+    return records.new_tool_result(true, "write", nil, {
+      path = path,
+      bytes_written = #content,
+    })
+  end)
 end
 
 -- ---------- edit ----------
@@ -97,33 +119,36 @@ local function impl_edit(input)
   end
   local edits = input.edits
   local old_text, new_text = input.oldText, input.newText
-  local original = prelude.safe_read(path)
-  if not original then
-    return records.tool_failure("edit", "could not read file")
-  end
 
-  local edited, replacements
-  if type(edits) == "table" and #edits > 0 then
-    edited, replacements = apply_edits(original, edits)
-  elseif type(old_text) == "string" and type(new_text) == "string" then
-    edited = prelude.replace_first(original, old_text, new_text)
-    replacements = edited and 1 or nil
-  elseif type(old_text) ~= "string" then
-    return records.tool_failure("edit", "missing string field: oldText")
-  elseif type(new_text) ~= "string" then
-    return records.tool_failure("edit", "missing string field: newText")
-  end
+  return mutation_queue.with_path(path, function()
+    local original = prelude.safe_read(path)
+    if not original then
+      return records.tool_failure("edit", "could not read file")
+    end
 
-  if not edited then
-    return records.tool_failure("edit", "target text not found")
-  end
-  if not psi.file_write(path, edited) then
-    return records.tool_failure("edit", "could not write full file")
-  end
-  return records.new_tool_result(true, "edit", nil, {
-    path = path,
-    replacements = replacements,
-  })
+    local edited, replacements
+    if type(edits) == "table" and #edits > 0 then
+      edited, replacements = apply_edits(original, edits)
+    elseif type(old_text) == "string" and type(new_text) == "string" then
+      edited = prelude.replace_first(original, old_text, new_text)
+      replacements = edited and 1 or nil
+    elseif type(old_text) ~= "string" then
+      return records.tool_failure("edit", "missing string field: oldText")
+    elseif type(new_text) ~= "string" then
+      return records.tool_failure("edit", "missing string field: newText")
+    end
+
+    if not edited then
+      return records.tool_failure("edit", "target text not found")
+    end
+    if not psi.file_write(path, edited) then
+      return records.tool_failure("edit", "could not write full file")
+    end
+    return records.new_tool_result(true, "edit", nil, {
+      path = path,
+      replacements = replacements,
+    })
+  end)
 end
 
 -- ---------- bash ----------
@@ -255,7 +280,11 @@ registry.register(
     "Read the contents of a file. Use this to inspect source files, configuration, and other project assets.",
     "Read file contents",
     { "Use read to examine files instead of cat or sed." },
-    schema_object({ path = schema_type("string") }, { "path" }),
+    schema_object({
+      path = schema_type("string"),
+      offset = schema_type("number"),
+      limit = schema_type("number"),
+    }, { "path" }),
     impl_read
   )
 )
