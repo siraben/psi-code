@@ -4,11 +4,14 @@ INCLUDEDIR = $(PREFIX)/include
 SHAREDIR = $(PREFIX)/share/psi
 
 CC ?= cc
+HOST_CC ?= $(CC)
 PKG_CONFIG ?= pkg-config
+comma := ,
 
 CFLAGS ?= -O2
 CPPFLAGS ?=
 LDFLAGS ?=
+RPATH_LDFLAGS ?=
 
 # STATIC=1 produces a statically linked binary. Each dependency's
 # transitive link dependencies come through pkg-config --static; for a
@@ -23,7 +26,8 @@ else
 PKG_CONFIG_FLAGS =
 endif
 
-BASE_CFLAGS = -std=c89 -pedantic -Wall -Wextra -Werror
+STRICT_CFLAGS ?= -std=c89 -pedantic -Wall -Wextra -Werror
+BASE_CFLAGS = $(STRICT_CFLAGS)
 
 # Per-dependency CFLAGS/LIBS. Each is sourced from pkg-config by
 # default; on platforms without pkg-config (or where a particular
@@ -42,6 +46,7 @@ LOCAL_CPPFLAGS += $(call pkg_cflags,EDIT,libedit)
 LOCAL_CPPFLAGS += $(call pkg_cflags,CURL,libcurl)
 LOCAL_CPPFLAGS += $(call pkg_cflags,ZLIB,zlib)
 LOCAL_CPPFLAGS += $(call pkg_cflags,NCURSES,ncursesw ncurses)
+LOCAL_CPPFLAGS += $(call pkg_cflags,ARGTABLE,argtable3)
 
 LOCAL_LDFLAGS  = $(call pkg_libs,LUA,lua5.4)
 LOCAL_LDFLAGS += $(call pkg_libs,CJSON,libcjson)
@@ -49,8 +54,9 @@ LOCAL_LDFLAGS += $(call pkg_libs,EDIT,libedit)
 LOCAL_LDFLAGS += $(call pkg_libs,CURL,libcurl)
 LOCAL_LDFLAGS += $(call pkg_libs,ZLIB,zlib)
 LOCAL_LDFLAGS += $(call pkg_libs,NCURSES,ncursesw ncurses)
-LOCAL_LDFLAGS += $(if $(PSI_LIBS_ARGTABLE),$(PSI_LIBS_ARGTABLE),-largtable3)
+LOCAL_LDFLAGS += $(if $(PSI_LIBS_ARGTABLE),$(PSI_LIBS_ARGTABLE),$(or $(call pkg_libs,ARGTABLE,argtable3),-largtable3))
 LOCAL_LDFLAGS += $(if $(PSI_LIBS_PTHREAD),$(PSI_LIBS_PTHREAD),-lpthread)
+LOCAL_RPATH_LDFLAGS = $(patsubst -L%,-Wl$(comma)-rpath$(comma)%,$(filter -L%,$(LOCAL_LDFLAGS)))
 
 LUA_BOOT_FILE ?= $(abspath lua/boot.lua)
 
@@ -118,7 +124,7 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 $(EMBED_TOOL): scripts/embed_lua.c | $(BUILD_DIR)
-	$(CC) -O2 $(shell $(PKG_CONFIG) --cflags zlib) -o $@ $< $(shell $(PKG_CONFIG) --libs zlib)
+	$(HOST_CC) -O2 $(shell $(PKG_CONFIG) --cflags zlib) -o $@ $< $(shell $(PKG_CONFIG) --libs zlib)
 
 $(EMBED_OUT): $(EMBED_TOOL) $(LUA_SOURCES)
 	$(EMBED_TOOL) $(LUA_SOURCES) > $@
@@ -133,7 +139,7 @@ $(BUILD_DIR)/embedded_docs.o: $(EMBED_DOCS_OUT) include/psi/embedded_lua.h
 	$(CC) $(CPPFLAGS) -Iinclude $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
 $(TARGET): $(OBJECTS) | $(BUILD_DIR)
-	$(CC) $(LDFLAGS) -o $@ $(OBJECTS) $(LOCAL_LDFLAGS)
+	$(CC) $(LDFLAGS) $(RPATH_LDFLAGS) -o $@ $(OBJECTS) $(LOCAL_LDFLAGS)
 
 $(BUILD_DIR)/main.o: src/main.c include/psi/common.h include/psi/runtime.h include/psi/session.h include/psi/vm.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
