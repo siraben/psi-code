@@ -6,6 +6,7 @@ local markdown = require("psi.markdown")
 local prelude = require("psi.prelude")
 local render = require("psi.render")
 local session = require("psi.session")
+local settings = require("psi.settings")
 local tui = require("psi.tui")
 local tui_layout = require("psi.tui_layout")
 
@@ -74,6 +75,7 @@ local function refresh_input_layout(state)
     height = state.height,
     busy = state.busy,
     scroll = state.scroll_offset,
+    max_rows = settings.get("tui.prompt.max_rows", nil),
   }
   local layout = tui_layout.input_layout_table and tui_layout.input_layout_table(arg)
     or safe_decode(tui_layout.input_layout(psi.json_encode(arg)), {})
@@ -1479,6 +1481,17 @@ end
 
 function M._debug_after_turn_payload(reply, assistant_streamed)
   return after_turn_payload(reply, assistant_streamed)
+end
+
+function M._debug_resolve_input_layout(width, height, busy, scroll)
+  local state = {
+    width = tonumber(width) or 80,
+    height = tonumber(height) or 24,
+    busy = not not busy,
+    scroll_offset = tonumber(scroll) or 0,
+  }
+  refresh_input_layout(state)
+  return state.input_layout
 end
 
 return M
