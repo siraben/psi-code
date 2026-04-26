@@ -14,10 +14,14 @@
 #ifndef PSI_ENABLE_TUI
 #define PSI_ENABLE_TUI 0
 #endif
+#ifndef PSI_ENABLE_COLOR
+#define PSI_ENABLE_COLOR 0
+#endif
 
 #if PSI_ENABLE_TUI
 
 static int psi_tui_init_colors(void) {
+#if PSI_ENABLE_COLOR
     if (!has_colors()) {
         return PSI_STATUS_OK;
     }
@@ -30,6 +34,7 @@ static int psi_tui_init_colors(void) {
     init_pair(5, COLOR_GREEN, -1);
     init_pair(6, COLOR_RED, -1);
     init_pair(7, -1, -1);
+#endif
     return PSI_STATUS_OK;
 }
 
