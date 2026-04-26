@@ -7,7 +7,9 @@
 #include <string.h>
 #include <zlib.h>
 #include <cjson/cJSON.h>
+#if PSI_ENABLE_REPL_EDITLINE
 #include <editline/readline.h>
+#endif
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
@@ -33,6 +35,15 @@
 
 #ifndef PSI_ENABLE_TUI
 #define PSI_ENABLE_TUI 0
+#endif
+#ifndef PSI_ENABLE_ANSI
+#define PSI_ENABLE_ANSI 0
+#endif
+#ifndef PSI_ENABLE_COLOR
+#define PSI_ENABLE_COLOR 0
+#endif
+#ifndef PSI_ENABLE_REPL_EDITLINE
+#define PSI_ENABLE_REPL_EDITLINE 0
 #endif
 
 /* ------------------------------------------------------------------
@@ -369,24 +380,35 @@ static void psi_vm_tui_draw_plain_line(int row, const char *text) {
     }
 }
 
+#if PSI_ENABLE_ANSI
+
 struct psi_vm_tui_ansi_state {
     attr_t attrs;
+#if PSI_ENABLE_COLOR
     int color_pair;
+#endif
 };
 
 static void psi_vm_tui_ansi_apply(struct psi_vm_tui_ansi_state *s, int code) {
     switch (code) {
-        case 0:  s->attrs = 0; s->color_pair = 0; break;
+        case 0:
+            s->attrs = 0;
+#if PSI_ENABLE_COLOR
+            s->color_pair = 0;
+#endif
+            break;
         case 1:  s->attrs |= A_BOLD; break;
         case 2:  s->attrs |= A_DIM; break;
         case 3:  s->attrs |= A_UNDERLINE; break;
         case 4:  s->attrs |= A_UNDERLINE; break;
+#if PSI_ENABLE_COLOR
         case 31: s->color_pair = 6; break;
         case 32: s->color_pair = 5; break;
         case 33: s->color_pair = 4; break;
         case 34: s->color_pair = 1; break;
         case 36: s->color_pair = 2; break;
         case 37: s->color_pair = 3; break;
+#endif
         default: break;
     }
 }
@@ -406,7 +428,9 @@ static void psi_vm_tui_draw_ansi_line(int row, const char *text) {
 
     max_width = COLS > 1 ? COLS - 1 : 0;
     st.attrs = 0;
+#if PSI_ENABLE_COLOR
     st.color_pair = 0;
+#endif
     len = (int)strlen(text);
     col = 0;
     i = 0;
@@ -461,9 +485,11 @@ static void psi_vm_tui_draw_ansi_line(int row, const char *text) {
                 continue;
             }
 
+#if PSI_ENABLE_COLOR
             if (st.color_pair > 0) {
                 cur |= COLOR_PAIR(st.color_pair);
             }
+#endif
             if (cur != 0) {
                 attron(cur);
             }
@@ -476,6 +502,8 @@ static void psi_vm_tui_draw_ansi_line(int row, const char *text) {
         }
     }
 }
+
+#endif
 
 static void psi_vm_tui_suspend_terminal(void) {
     struct sigaction dfl;
@@ -1587,6 +1615,15 @@ static int lfn_runtime_info(lua_State *L) {
     lua_pushstring(L, cwd);
     lua_setfield(L, -2, "current-working-directory");
 
+    lua_pushboolean(L, PSI_ENABLE_ANSI ? 1 : 0);
+    lua_setfield(L, -2, "ansi");
+    lua_pushboolean(L, (PSI_ENABLE_ANSI && PSI_ENABLE_COLOR) ? 1 : 0);
+    lua_setfield(L, -2, "color");
+    lua_pushboolean(L, PSI_ENABLE_REPL_EDITLINE ? 1 : 0);
+    lua_setfield(L, -2, "repl-editline");
+    lua_pushboolean(L, PSI_ENABLE_TUI ? 1 : 0);
+    lua_setfield(L, -2, "tui");
+
     {
         struct psi_session *s = host ? host->session : NULL;
         lua_pushinteger(L, s ? (lua_Integer)s->count : 0);
@@ -1609,6 +1646,7 @@ static int lfn_runtime_info(lua_State *L) {
 /* psi.readline(prompt) -> string or nil (nil on EOF / Ctrl-D). */
 static int lfn_readline(lua_State *L) {
     const char *prompt = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : "";
+#if PSI_ENABLE_REPL_EDITLINE
     char *line = readline(prompt);
     if (line == NULL) {
         lua_pushnil(L);
@@ -1617,12 +1655,32 @@ static int lfn_readline(lua_State *L) {
     lua_pushstring(L, line);
     free(line);
     return 1;
+#else
+    char buffer[4096];
+    size_t len;
+    fputs(prompt, stdout);
+    fflush(stdout);
+    if (fgets(buffer, sizeof(buffer), stdin) == NULL) {
+        lua_pushnil(L);
+        return 1;
+    }
+    len = strlen(buffer);
+    while (len > 0u && (buffer[len - 1u] == '\n' || buffer[len - 1u] == '\r')) {
+        buffer[--len] = '\0';
+    }
+    lua_pushstring(L, buffer);
+    return 1;
+#endif
 }
 
 /* psi.add_history(line) -- libedit history append. */
 static int lfn_add_history(lua_State *L) {
+#if PSI_ENABLE_REPL_EDITLINE
     const char *line = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : NULL;
     if (line != NULL && line[0] != '\0') add_history(line);
+#else
+    PSI_UNUSED(L);
+#endif
     return 0;
 }
 
@@ -1683,8 +1741,12 @@ static int lfn_tui_clear(lua_State *L) {
 
 static int lfn_tui_draw_line(lua_State *L) {
     lua_Integer row = luaL_checkinteger(L, 1);
+#if PSI_ENABLE_ANSI
     size_t len = 0;
     const char *text = lua_type(L, 2) == LUA_TSTRING ? lua_tolstring(L, 2, &len) : "";
+#else
+    const char *text = lua_type(L, 2) == LUA_TSTRING ? lua_tostring(L, 2) : "";
+#endif
     psi_vm_require_tui(L);
     if (row < 1) {
         row = 1;
@@ -1692,11 +1754,15 @@ static int lfn_tui_draw_line(lua_State *L) {
     if (row > LINES) {
         row = LINES;
     }
+#if PSI_ENABLE_ANSI
     if (memchr(text, 0x1b, len) != NULL) {
         psi_vm_tui_draw_ansi_line((int)row - 1, text);
     } else {
         psi_vm_tui_draw_plain_line((int)row - 1, text);
     }
+#else
+    psi_vm_tui_draw_plain_line((int)row - 1, text);
+#endif
     return 0;
 }
 
