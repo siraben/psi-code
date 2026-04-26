@@ -13,7 +13,7 @@
 
 local records = require("psi.records")
 local prelude = require("psi.prelude")
-local prompt = require("psi.prompt")
+local keybindings = require("psi.keybindings")
 local session = require("psi.session")
 
 local M = {}
@@ -295,25 +295,196 @@ local function cmd_reload()
   if psi.prompt_templates and psi.prompt_templates.load then
     pcall(psi.prompt_templates.load)
   end
+  if keybindings.reload then
+    pcall(keybindings.reload)
+  end
   return records.new_command_action("print", "extensions reloaded")
 end
 
 -- ---------- dispatcher + registry ----------
 
+local BUILTIN_COMMANDS = {
+  {
+    name = "help",
+    aliases = { "h" },
+    description = "Show available commands",
+  },
+  {
+    name = "hotkeys",
+    description = "Show keyboard shortcuts",
+  },
+  {
+    name = "quit",
+    aliases = { "q", ":quit", ":q" },
+    description = "Exit the shell",
+  },
+  {
+    name = "session",
+    description = "Show current session info",
+  },
+  {
+    name = "new",
+    aliases = { "clear" },
+    description = "Start a fresh session in place",
+  },
+  {
+    name = "resume",
+    argument_hint = "<path>",
+    description = "Load a session file from disk",
+  },
+  {
+    name = "import",
+    argument_hint = "<path>",
+    description = "Import a JSONL session",
+  },
+  {
+    name = "name",
+    argument_hint = "<text>",
+    description = "Set the session display name",
+  },
+  {
+    name = "model",
+    argument_hint = "<spec>",
+    description = "Switch model mid-session",
+  },
+  {
+    name = "copy",
+    description = "Copy the last assistant message to the clipboard",
+  },
+  {
+    name = "export",
+    argument_hint = "[path]",
+    description = "Write the session as markdown",
+  },
+  {
+    name = "compact",
+    argument_hint = "[N]",
+    description = "Summarize older context, keeping recent messages",
+  },
+  {
+    name = "fork",
+    argument_hint = "[N]",
+    description = "Save the first N entries to a new session file",
+  },
+  {
+    name = "clone",
+    argument_hint = "[path]",
+    description = "Duplicate the current session at its current position",
+  },
+  {
+    name = "reload",
+    description = "Reload extensions, prompt templates, and keybindings",
+  },
+  {
+    name = "system-prompt",
+    description = "Print the current coding-agent system prompt",
+  },
+}
+
 local registered = {}
 
-function M.register(name, handler)
-  if type(name) ~= "string" or type(handler) ~= "function" then
+local function normalize_command_name(name)
+  if type(name) ~= "string" then
+    return nil
+  end
+  name = name:gsub("^/", "")
+  return name ~= "" and name or nil
+end
+
+function M.register(name, handler, opts)
+  if type(handler) == "table" and opts == nil then
+    opts = handler
+    handler = opts.handler
+  end
+  name = normalize_command_name(name)
+  if not name or type(handler) ~= "function" then
     return
   end
-  registered[name:gsub("^/", "")] = handler
+  opts = type(opts) == "table" and opts or {}
+  registered[name] = {
+    name = name,
+    handler = handler,
+    description = opts.description,
+    argument_hint = opts.argument_hint or opts["argument-hint"],
+  }
 end
 
 function M.unregister(name)
-  if type(name) ~= "string" then
+  name = normalize_command_name(name)
+  if not name then
     return
   end
-  registered[name:gsub("^/", "")] = nil
+  registered[name] = nil
+end
+
+function M.builtin_commands()
+  local out = {}
+  for i, cmd in ipairs(BUILTIN_COMMANDS) do
+    out[i] = cmd
+  end
+  return out
+end
+
+function M.registered_commands()
+  local out = {}
+  for _, cmd in pairs(registered) do
+    out[#out + 1] = {
+      name = cmd.name,
+      description = cmd.description,
+      argument_hint = cmd.argument_hint,
+    }
+  end
+  table.sort(out, function(a, b)
+    return a.name < b.name
+  end)
+  return out
+end
+
+local function command_invocation(cmd)
+  local hint = cmd.argument_hint and (" " .. cmd.argument_hint) or ""
+  return "/" .. cmd.name .. hint
+end
+
+local function append_command_lines(lines, commands)
+  local width = 0
+  for _, cmd in ipairs(commands) do
+    width = math.max(width, #command_invocation(cmd))
+  end
+  width = math.max(width, 16)
+  for _, cmd in ipairs(commands) do
+    local aliases = {}
+    for _, alias in ipairs(cmd.aliases or {}) do
+      aliases[#aliases + 1] = alias:sub(1, 1) == ":" and alias or ("/" .. alias)
+    end
+    local desc = cmd.description or ""
+    if #aliases > 0 then
+      desc = desc .. " (aliases: " .. table.concat(aliases, ", ") .. ")"
+    end
+    lines[#lines + 1] =
+      string.format("  %-" .. tostring(width) .. "s  %s\n", command_invocation(cmd), desc)
+  end
+end
+
+function M.help_text()
+  local lines = { "available commands\n", "\nbuilt-ins:\n" }
+  append_command_lines(lines, BUILTIN_COMMANDS)
+
+  local ext = M.registered_commands()
+  if #ext > 0 then
+    lines[#lines + 1] = "\nextensions:\n"
+    append_command_lines(lines, ext)
+  end
+
+  local ok, templates = pcall(require, "psi.prompt_templates")
+  if ok and templates and templates.help_lines then
+    local template_help = templates.help_lines()
+    if type(template_help) == "string" and template_help ~= "" then
+      lines[#lines + 1] = "\n"
+      lines[#lines + 1] = template_help
+    end
+  end
+
+  return table.concat(lines):gsub("%s+$", "")
 end
 
 local function dispatch_registered(line)
@@ -321,11 +492,11 @@ local function dispatch_registered(line)
   if not first then
     return nil
   end
-  local handler = registered[first]
-  if not handler then
+  local command = registered[first]
+  if not command then
     return nil
   end
-  local ok, result = pcall(handler, rest or "", line)
+  local ok, result = pcall(command.handler, rest or "", line)
   if not ok then
     io.stderr:write("psi.commands: /" .. first .. " failed: " .. tostring(result) .. "\n")
     return records.new_command_action("print", "command /" .. first .. " failed")
@@ -339,10 +510,10 @@ end
 
 function M.handle(line)
   if line == "/help" or line == "/h" then
-    return records.new_command_action("print", prompt.help_text())
+    return records.new_command_action("print", M.help_text())
   end
   if line == "/hotkeys" then
-    return records.new_command_action("print", prompt.hotkeys_text())
+    return records.new_command_action("print", keybindings.hotkeys_text())
   end
   if is_quit(line) then
     return records.new_command_action("quit", nil)
@@ -351,6 +522,7 @@ function M.handle(line)
     return records.new_command_action("print", session_status())
   end
   if line == "/system-prompt" then
+    local prompt = require("psi.prompt")
     return records.new_command_action("print", prompt.system_prompt())
   end
   if line == "/copy" then
