@@ -1601,6 +1601,84 @@ int psi_vm_tui_footer_hint(struct psi_vm *vm, const char *arg_json, char **outpu
     return psi_vm_call_string_procedure(vm, "psi.tui_layout.footer_hint", arg_json, output_text);
 }
 
+int psi_vm_tui_handle_key(
+    struct psi_vm *vm,
+    const char *key_name,
+    const char *text,
+    int busy,
+    size_t input_length,
+    size_t cursor,
+    int scroll,
+    char **action_name,
+    char **action_arg
+) {
+    if (!vm || !vm->L || !key_name || !action_name || !action_arg) {
+        return PSI_STATUS_ERROR;
+    }
+
+    *action_name = NULL;
+    *action_arg = NULL;
+
+    if (psi_vm_begin_call(vm->L, "psi.tui.handle_key") != 0) {
+        return PSI_STATUS_ERROR;
+    }
+
+    lua_newtable(vm->L);
+    lua_pushstring(vm->L, key_name);
+    lua_setfield(vm->L, -2, "key");
+    if (text != NULL && text[0] != '\0') {
+        lua_pushstring(vm->L, text);
+        lua_setfield(vm->L, -2, "text");
+    }
+    lua_pushboolean(vm->L, busy ? 1 : 0);
+    lua_setfield(vm->L, -2, "busy");
+    lua_pushinteger(vm->L, (lua_Integer)input_length);
+    lua_setfield(vm->L, -2, "input_length");
+    lua_pushinteger(vm->L, (lua_Integer)cursor);
+    lua_setfield(vm->L, -2, "cursor");
+    lua_pushinteger(vm->L, (lua_Integer)scroll);
+    lua_setfield(vm->L, -2, "scroll");
+
+    if (psi_vm_finish_call(vm->L, 1, 1, "psi.tui.handle_key") != PSI_STATUS_OK) {
+        return PSI_STATUS_ERROR;
+    }
+
+    if (lua_isnil(vm->L, -1) || (lua_isboolean(vm->L, -1) && !lua_toboolean(vm->L, -1))) {
+        lua_pop(vm->L, 1);
+        return PSI_STATUS_OK;
+    }
+    if (!lua_istable(vm->L, -1)) {
+        fprintf(stderr, "invalid Lua TUI key result\n");
+        lua_pop(vm->L, 1);
+        return PSI_STATUS_ERROR;
+    }
+
+    lua_getfield(vm->L, -1, "action");
+    if (lua_type(vm->L, -1) == LUA_TSTRING) {
+        *action_name = psi_strdup(lua_tostring(vm->L, -1));
+        if (*action_name == NULL) {
+            lua_pop(vm->L, 2);
+            return PSI_STATUS_ERROR;
+        }
+    }
+    lua_pop(vm->L, 1);
+
+    lua_getfield(vm->L, -1, "arg");
+    if (lua_type(vm->L, -1) == LUA_TSTRING) {
+        *action_arg = psi_strdup(lua_tostring(vm->L, -1));
+        if (*action_arg == NULL) {
+            free(*action_name);
+            *action_name = NULL;
+            lua_pop(vm->L, 2);
+            return PSI_STATUS_ERROR;
+        }
+    }
+    lua_pop(vm->L, 1);
+
+    lua_pop(vm->L, 1);
+    return PSI_STATUS_OK;
+}
+
 int psi_vm_call_procedure0_to_string(struct psi_vm *vm, const char *procedure_name,
                                       char **output_text) {
     if (!vm || !vm->L || !procedure_name || !output_text) return PSI_STATUS_ERROR;

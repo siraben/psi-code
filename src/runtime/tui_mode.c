@@ -60,6 +60,8 @@ struct psi_tui_render_line {
 #define PSI_TUI_DEFAULT_INPUT_PREFIX_REST  "| "
 #define PSI_TUI_DEFAULT_MAX_INPUT_ROWS 5
 #define PSI_TUI_INPUT_PREFIX_MAX 32
+#define PSI_TUI_KEY_NAME_MAX 32
+#define PSI_TUI_KEY_TEXT_MAX 8
 
 struct psi_tui_state {
     struct psi_agent_runtime runtime;
@@ -112,14 +114,9 @@ struct psi_tui_input_line {
     size_t len;
 };
 
-enum psi_tui_escape_action {
-    PSI_TUI_ESC_NONE = 0,
-    PSI_TUI_ESC_BARE = 1,
-    PSI_TUI_ESC_WORD_BACKWARD = 2,
-    PSI_TUI_ESC_WORD_FORWARD = 3,
-    PSI_TUI_ESC_DELETE_WORD_FORWARD = 4,
-    PSI_TUI_ESC_DELETE_WORD_BACKWARD = 5,
-    PSI_TUI_ESC_NEWLINE = 6
+struct psi_tui_key_event {
+    char key_name[PSI_TUI_KEY_NAME_MAX];
+    char text[PSI_TUI_KEY_TEXT_MAX];
 };
 
 static int psi_tui_add_entry(
@@ -148,6 +145,12 @@ static void psi_tui_kill_to_start(struct psi_tui_state *state);
 static int psi_tui_start_compact(struct psi_tui_state *state, long keep_recent);
 static void psi_tui_submit_if_idle(struct psi_tui_state *state);
 static void psi_tui_refresh_input_layout(struct psi_tui_state *state);
+static void psi_tui_handle_input_key(struct psi_tui_state *state, int ch, int restore_timeout_ms);
+static void psi_tui_apply_key_action(
+    struct psi_tui_state *state,
+    const char *action_name,
+    const char *action_arg
+);
 
 static void psi_tui_copy_truncated(char *dest, size_t dest_size, const char *src) {
     size_t length;
@@ -2424,43 +2427,43 @@ static int psi_tui_collect_escape_sequence(char *buffer, size_t buffer_size, int
     return (int)length;
 }
 
-static int psi_tui_escape_sequence_action(const char *sequence) {
+static const char *psi_tui_escape_sequence_key(const char *sequence) {
     unsigned int first;
     unsigned int second;
     unsigned int third;
     char final;
 
     if (sequence == NULL || sequence[0] == '\0') {
-        return PSI_TUI_ESC_BARE;
+        return "escape";
     }
     if (strcmp(sequence, "b") == 0 || strcmp(sequence, "B") == 0) {
-        return PSI_TUI_ESC_WORD_BACKWARD;
+        return "alt-b";
     }
     if (strcmp(sequence, "f") == 0 || strcmp(sequence, "F") == 0) {
-        return PSI_TUI_ESC_WORD_FORWARD;
+        return "alt-f";
     }
     if (strcmp(sequence, "d") == 0 || strcmp(sequence, "D") == 0) {
-        return PSI_TUI_ESC_DELETE_WORD_FORWARD;
+        return "alt-d";
     }
     if (strcmp(sequence, "\b") == 0 || strcmp(sequence, "\177") == 0) {
-        return PSI_TUI_ESC_DELETE_WORD_BACKWARD;
+        return "alt-backspace";
     }
     if (strcmp(sequence, "\r") == 0 || strcmp(sequence, "\n") == 0) {
-        return PSI_TUI_ESC_NEWLINE;
+        return "shift-enter";
     }
 
     if (sscanf(sequence, "[%u;%u;%u%c", &first, &second, &third, &final) == 4 &&
         final == '~' && first == 27u && third == 13u && second >= 2u) {
-        return PSI_TUI_ESC_NEWLINE;
+        return "shift-enter";
     }
     if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 &&
         (final == 'u' || final == '~') &&
         (first == 13u || first == 57414u) &&
         second >= 2u) {
-        return PSI_TUI_ESC_NEWLINE;
+        return "shift-enter";
     }
 
-    return PSI_TUI_ESC_NONE;
+    return NULL;
 }
 
 static void psi_tui_abort_current_turn(struct psi_tui_state *state) {
@@ -2472,50 +2475,295 @@ static void psi_tui_abort_current_turn(struct psi_tui_state *state) {
     state->transcript_dirty = 1;
 }
 
-static void psi_tui_handle_escape_input(
-    struct psi_tui_state *state,
+static void psi_tui_suspend(struct psi_tui_state *state) {
+    struct sigaction dfl;
+    struct sigaction prev;
+    sigset_t mask;
+    sigset_t prev_mask;
+
+    (void)state;
+    endwin();
+    dfl.sa_handler = SIG_DFL;
+    sigemptyset(&dfl.sa_mask);
+    dfl.sa_flags = 0;
+    sigaction(SIGTSTP, &dfl, &prev);
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGTSTP);
+    sigprocmask(SIG_UNBLOCK, &mask, &prev_mask);
+    raise(SIGTSTP);
+    sigprocmask(SIG_SETMASK, &prev_mask, NULL);
+    sigaction(SIGTSTP, &prev, NULL);
+    refresh();
+    clearok(stdscr, TRUE);
+}
+
+static int psi_tui_normalize_key(
+    int ch,
     int restore_timeout_ms,
-    int bare_escape_aborts
+    struct psi_tui_key_event *event
 ) {
     char sequence[64];
-    int action;
+    const char *key_name;
+
+    if (event == NULL) {
+        return 0;
+    }
+    memset(event, 0, sizeof(*event));
+
+    if (ch == KEY_PPAGE) {
+        psi_tui_copy_truncated(event->key_name, sizeof(event->key_name), "page-up");
+        return 1;
+    }
+    if (ch == KEY_NPAGE) {
+        psi_tui_copy_truncated(event->key_name, sizeof(event->key_name), "page-down");
+        return 1;
+    }
+    if (ch == KEY_UP) {
+        psi_tui_copy_truncated(event->key_name, sizeof(event->key_name), "up");
+        return 1;
+    }
+    if (ch == KEY_DOWN) {
+        psi_tui_copy_truncated(event->key_name, sizeof(event->key_name), "down");
+        return 1;
+    }
+    if (ch == 27) {
+        psi_tui_collect_escape_sequence(sequence, sizeof(sequence), restore_timeout_ms);
+        key_name = psi_tui_escape_sequence_key(sequence);
+        if (key_name == NULL) {
+            return 0;
+        }
+        psi_tui_copy_truncated(event->key_name, sizeof(event->key_name), key_name);
+        return 1;
+    }
+    if (ch == 12) {
+        psi_tui_copy_truncated(event->key_name, sizeof(event->key_name), "ctrl-l");
+        return 1;
+    }
+    if (ch == 26) {
+        psi_tui_copy_truncated(event->key_name, sizeof(event->key_name), "ctrl-z");
+        return 1;
+    }
+    if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
+        psi_tui_copy_truncated(event->key_name, sizeof(event->key_name), "backspace");
+        return 1;
+    }
+    if (ch == KEY_DC) {
+        psi_tui_copy_truncated(event->key_name, sizeof(event->key_name), "delete");
+        return 1;
+    }
+    if (ch == 4) {
+        psi_tui_copy_truncated(event->key_name, sizeof(event->key_name), "ctrl-d");
+        return 1;
+    }
+    if (ch == 23) {
+        psi_tui_copy_truncated(event->key_name, sizeof(event->key_name), "ctrl-w");
+        return 1;
+    }
+    if (ch == 11) {
+        psi_tui_copy_truncated(event->key_name, sizeof(event->key_name), "ctrl-k");
+        return 1;
+    }
+    if (ch == 21) {
+        psi_tui_copy_truncated(event->key_name, sizeof(event->key_name), "ctrl-u");
+        return 1;
+    }
+    if (ch == KEY_LEFT || ch == 2) {
+        psi_tui_copy_truncated(event->key_name, sizeof(event->key_name), "left");
+        return 1;
+    }
+    if (ch == KEY_RIGHT || ch == 6) {
+        psi_tui_copy_truncated(event->key_name, sizeof(event->key_name), "right");
+        return 1;
+    }
+    if (ch == KEY_HOME || ch == 1) {
+        psi_tui_copy_truncated(event->key_name, sizeof(event->key_name), "home");
+        return 1;
+    }
+    if (ch == KEY_END || ch == 5) {
+        psi_tui_copy_truncated(event->key_name, sizeof(event->key_name), "end");
+        return 1;
+    }
+    if (ch == KEY_ENTER || ch == '\r') {
+        psi_tui_copy_truncated(event->key_name, sizeof(event->key_name), "enter");
+        return 1;
+    }
+    if (ch == '\n') {
+        psi_tui_copy_truncated(event->key_name, sizeof(event->key_name), "shift-enter");
+        return 1;
+    }
+    if (isprint(ch)) {
+        psi_tui_copy_truncated(event->key_name, sizeof(event->key_name), "text");
+        event->text[0] = (char)ch;
+        event->text[1] = '\0';
+        return 1;
+    }
+    return 0;
+}
+
+static void psi_tui_apply_key_action(
+    struct psi_tui_state *state,
+    const char *action_name,
+    const char *action_arg
+) {
+    size_t index;
 
     if (state == NULL) {
         return;
     }
 
-    psi_tui_collect_escape_sequence(sequence, sizeof(sequence), restore_timeout_ms);
-    action = psi_tui_escape_sequence_action(sequence);
-    switch (action) {
-        case PSI_TUI_ESC_BARE:
-            if (bare_escape_aborts) {
-                psi_tui_abort_current_turn(state);
-            }
-            return;
-        case PSI_TUI_ESC_WORD_BACKWARD:
-            psi_tui_move_word_backward(state);
-            state->transcript_dirty = 1;
-            return;
-        case PSI_TUI_ESC_WORD_FORWARD:
-            psi_tui_move_word_forward(state);
-            state->transcript_dirty = 1;
-            return;
-        case PSI_TUI_ESC_DELETE_WORD_FORWARD:
-            psi_tui_delete_word_forward(state);
-            state->transcript_dirty = 1;
-            return;
-        case PSI_TUI_ESC_DELETE_WORD_BACKWARD:
-            psi_tui_delete_word_backward(state);
-            state->transcript_dirty = 1;
-            return;
-        case PSI_TUI_ESC_NEWLINE:
-            psi_tui_insert_char(state, '\n');
-            state->transcript_dirty = 1;
-            return;
-        case PSI_TUI_ESC_NONE:
-        default:
-            return;
+    if (action_name == NULL || action_name[0] == '\0' || strcmp(action_name, "noop") == 0) {
+        return;
     }
+
+    if (strcmp(action_name, "insert") == 0) {
+        if (action_arg != NULL) {
+            for (index = 0u; action_arg[index] != '\0'; index++) {
+                psi_tui_insert_char(state, (unsigned char)action_arg[index]);
+            }
+            state->transcript_dirty = 1;
+        }
+        return;
+    }
+    if (strcmp(action_name, "submit") == 0) {
+        psi_tui_submit_if_idle(state);
+        return;
+    }
+    if (strcmp(action_name, "delete-backward") == 0) {
+        psi_tui_delete_backward(state);
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (strcmp(action_name, "delete-forward") == 0) {
+        psi_tui_delete_forward(state);
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (strcmp(action_name, "delete-word-backward") == 0) {
+        psi_tui_delete_word_backward(state);
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (strcmp(action_name, "delete-word-forward") == 0) {
+        psi_tui_delete_word_forward(state);
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (strcmp(action_name, "move-left") == 0) {
+        if (state->cursor > 0u) state->cursor--;
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (strcmp(action_name, "move-right") == 0) {
+        if (state->cursor < state->input_length) state->cursor++;
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (strcmp(action_name, "move-home") == 0) {
+        state->cursor = 0u;
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (strcmp(action_name, "move-end") == 0) {
+        state->cursor = state->input_length;
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (strcmp(action_name, "move-word-left") == 0) {
+        psi_tui_move_word_backward(state);
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (strcmp(action_name, "move-word-right") == 0) {
+        psi_tui_move_word_forward(state);
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (strcmp(action_name, "kill-end") == 0) {
+        psi_tui_kill_to_end(state);
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (strcmp(action_name, "kill-start") == 0) {
+        psi_tui_kill_to_start(state);
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (strcmp(action_name, "scroll") == 0) {
+        if (action_arg != NULL && strcmp(action_arg, "page-up") == 0) {
+            psi_tui_scroll_by(state, state->height > 8 ? state->height / 2 : 4);
+        } else if (action_arg != NULL && strcmp(action_arg, "page-down") == 0) {
+            psi_tui_scroll_by(state, -(state->height > 8 ? state->height / 2 : 4));
+        } else if (action_arg != NULL && strcmp(action_arg, "line-up") == 0) {
+            psi_tui_scroll_by(state, 1);
+        } else if (action_arg != NULL && strcmp(action_arg, "line-down") == 0) {
+            psi_tui_scroll_by(state, -1);
+        }
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (strcmp(action_name, "redraw") == 0) {
+        clearok(stdscr, TRUE);
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (strcmp(action_name, "abort") == 0) {
+        psi_tui_abort_current_turn(state);
+        return;
+    }
+    if (strcmp(action_name, "quit") == 0) {
+        state->running = 0;
+        return;
+    }
+    if (strcmp(action_name, "suspend") == 0) {
+        psi_tui_suspend(state);
+        state->transcript_dirty = 1;
+        return;
+    }
+}
+
+static void psi_tui_handle_input_key(struct psi_tui_state *state, int ch, int restore_timeout_ms) {
+    struct psi_tui_key_event event;
+    char *action_name;
+    char *action_arg;
+    int status;
+
+    if (state == NULL) {
+        return;
+    }
+
+    if (ch == KEY_RESIZE) {
+        clearok(stdscr, TRUE);
+        state->transcript_dirty = 1;
+        return;
+    }
+
+    if (!psi_tui_normalize_key(ch, restore_timeout_ms, &event)) {
+        return;
+    }
+
+    action_name = NULL;
+    action_arg = NULL;
+    status = psi_vm_tui_handle_key(
+        &state->runtime.vm,
+        event.key_name,
+        event.text,
+        state->busy,
+        state->input_length,
+        state->cursor,
+        state->scroll_offset,
+        &action_name,
+        &action_arg);
+    if (status != PSI_STATUS_OK) {
+        psi_tui_set_status(state, "Lua key handler failed", 1);
+        state->transcript_dirty = 1;
+        free(action_name);
+        free(action_arg);
+        return;
+    }
+
+    psi_tui_apply_key_action(state, action_name, action_arg);
+    free(action_name);
+    free(action_arg);
 }
 
 /* Dispatch a slash command. If the command expands to a prompt
@@ -2585,11 +2833,9 @@ static int psi_tui_handle_command(
  * input non-blockingly, then repaint if observers or input dispatch
  * marked the transcript dirty. Must be cheap: it fires every time
  * the agent coroutine yields (each SSE chunk, between tool calls,
- * during shell waits). The input branch is kept minimal — Esc,
- * scroll, resize, and Ctrl-L only; full keyboard editing is for
- * the idle main loop.
+ * during shell waits). The same normalized key path is used here and
+ * in the idle main loop; only the getch timeout differs.
  */
-static void psi_tui_input_once(struct psi_tui_state *state, int ch);
 
 static void psi_tui_tick(void *userdata) {
     struct psi_tui_state *state = (struct psi_tui_state *)userdata;
@@ -2605,95 +2851,12 @@ static void psi_tui_tick(void *userdata) {
     for (;;) {
         ch = getch();
         if (ch == ERR) break;
-        psi_tui_input_once(state, ch);
+        psi_tui_handle_input_key(state, ch, 0);
     }
 
     if (state->transcript_dirty) {
         state->transcript_dirty = 0;
         psi_tui_redraw(state);
-    }
-}
-
-/* Lightweight input dispatch used by the tick hook during a turn.
- * Supports abort (Esc), scroll, resize, full-redraw, and prompt
- * editing. Plain Enter submits; modified Enter inserts newlines. */
-
-static void psi_tui_input_once(struct psi_tui_state *state, int ch) {
-    if (state == NULL) return;
-
-    if (ch == KEY_RESIZE) {
-        clearok(stdscr, TRUE);
-        state->transcript_dirty = 1;
-        return;
-    }
-    if (ch == KEY_PPAGE) {
-        psi_tui_scroll_by(state, state->height > 8 ? state->height / 2 : 4);
-        state->transcript_dirty = 1;
-        return;
-    }
-    if (ch == KEY_NPAGE) {
-        psi_tui_scroll_by(state, -(state->height > 8 ? state->height / 2 : 4));
-        state->transcript_dirty = 1;
-        return;
-    }
-    if (ch == KEY_UP) {
-        psi_tui_scroll_by(state, 1);
-        state->transcript_dirty = 1;
-        return;
-    }
-    if (ch == KEY_DOWN) {
-        psi_tui_scroll_by(state, -1);
-        state->transcript_dirty = 1;
-        return;
-    }
-    if (ch == 27) {
-        psi_tui_handle_escape_input(state, 0, 1);
-        return;
-    }
-    if (ch == 12) { /* Ctrl-L */
-        clearok(stdscr, TRUE);
-        state->transcript_dirty = 1;
-        return;
-    }
-    /* Input editing — allowed while busy so the user can compose
-     * the next message. */
-    if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
-        psi_tui_delete_backward(state);
-        state->transcript_dirty = 1;
-        return;
-    }
-    if (ch == KEY_DC) {
-        psi_tui_delete_forward(state);
-        state->transcript_dirty = 1;
-        return;
-    }
-    if (ch == 4) { /* Ctrl-D forward-delete */
-        if (state->input_length > 0u) {
-            psi_tui_delete_forward(state);
-            state->transcript_dirty = 1;
-        }
-        return;
-    }
-    if (ch == 23) { psi_tui_delete_word_backward(state); state->transcript_dirty = 1; return; }
-    if (ch == 11) { psi_tui_kill_to_end(state); state->transcript_dirty = 1; return; }
-    if (ch == 21) { psi_tui_kill_to_start(state); state->transcript_dirty = 1; return; }
-    if (ch == KEY_LEFT || ch == 2)  { if (state->cursor > 0u) state->cursor--; state->transcript_dirty = 1; return; }
-    if (ch == KEY_RIGHT || ch == 6) { if (state->cursor < state->input_length) state->cursor++; state->transcript_dirty = 1; return; }
-    if (ch == KEY_HOME || ch == 1)  { state->cursor = 0u; state->transcript_dirty = 1; return; }
-    if (ch == KEY_END  || ch == 5)  { state->cursor = state->input_length; state->transcript_dirty = 1; return; }
-    if (ch == KEY_ENTER || ch == '\r') {
-        psi_tui_submit_if_idle(state);
-        state->transcript_dirty = 1;
-        return;
-    }
-    if (ch == '\n') {
-        psi_tui_insert_char(state, '\n');
-        state->transcript_dirty = 1;
-        return;
-    }
-    if (isprint(ch)) {
-        psi_tui_insert_char(state, ch);
-        state->transcript_dirty = 1;
     }
 }
 
@@ -3153,88 +3316,19 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
         /* No worker thread — the main loop is idle between turns.
          * Block indefinitely on getch; a submit kicks off
          * psi_tui_run_turn_sync which drives the coroutine to
-         * completion with the tick hook keeping the UI alive. */
+         * completion with the tick hook keeping the UI alive. Key
+         * policy comes from psi.tui.handle_key; this loop just blocks
+         * for input, normalizes terminal events, and redraws when the
+         * action executor marks the screen dirty. */
         wtimeout(stdscr, -1);
         ch = getch();
         if (ch == ERR) continue;
 
-        if (ch == KEY_RESIZE) { clearok(stdscr, TRUE); psi_tui_redraw(&state); continue; }
-        if (ch == KEY_PPAGE)  { psi_tui_scroll_by(&state, state.height > 8 ? state.height / 2 : 4); psi_tui_redraw(&state); continue; }
-        if (ch == KEY_NPAGE)  { psi_tui_scroll_by(&state, -(state.height > 8 ? state.height / 2 : 4)); psi_tui_redraw(&state); continue; }
-        if (ch == KEY_UP)     { psi_tui_scroll_by(&state, 1); psi_tui_redraw(&state); continue; }
-        if (ch == KEY_DOWN)   { psi_tui_scroll_by(&state, -1); psi_tui_redraw(&state); continue; }
-
-        /* Esc: Alt-word bindings and modified Enter sequences. A bare
-         * Esc in idle mode remains a no-op. */
-        if (ch == 27) {
-            psi_tui_handle_escape_input(&state, -1, 0);
+        psi_tui_handle_input_key(&state, ch, -1);
+        if (state.transcript_dirty) {
+            state.transcript_dirty = 0;
             psi_tui_redraw(&state);
-            continue;
         }
-
-        /* Readline-style control keys:
-         *   ^A home  ^B left  ^D delete-forward / EOF-exit
-         *   ^E end   ^F right ^H backspace
-         *   ^K kill-to-end  ^L redraw
-         *   ^U kill-to-start ^W delete-word-backward
-         *   Del delete-forward  ^Z suspend */
-        if (ch == 4 && state.input_length == 0u) {
-            state.running = 0;
-            continue;
-        } else if (ch == 4) {
-            psi_tui_delete_forward(&state);
-        } else if (ch == 26) {
-            /* Ctrl-Z: suspend. Leave ncurses mode, raise SIGTSTP with
-             * the default handler so the shell gets control, then
-             * re-enter ncurses when we resume. */
-            endwin();
-            {
-                struct sigaction dfl, prev;
-                sigset_t mask, prev_mask;
-                dfl.sa_handler = SIG_DFL;
-                sigemptyset(&dfl.sa_mask);
-                dfl.sa_flags = 0;
-                sigaction(SIGTSTP, &dfl, &prev);
-                sigemptyset(&mask);
-                sigaddset(&mask, SIGTSTP);
-                sigprocmask(SIG_UNBLOCK, &mask, &prev_mask);
-                kill(getpid(), SIGTSTP);
-                sigprocmask(SIG_SETMASK, &prev_mask, NULL);
-                sigaction(SIGTSTP, &prev, NULL);
-            }
-            refresh();
-            clearok(stdscr, TRUE);
-            psi_tui_redraw(&state);
-            continue;
-        } else if (ch == 11) {
-            psi_tui_kill_to_end(&state);
-        } else if (ch == 12) {
-            clearok(stdscr, TRUE);
-        } else if (ch == 21) {
-            psi_tui_kill_to_start(&state);
-        } else if (ch == 23) {
-            psi_tui_delete_word_backward(&state);
-        } else if (ch == KEY_DC) {
-            psi_tui_delete_forward(&state);
-        } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
-            psi_tui_delete_backward(&state);
-        } else if (ch == KEY_LEFT || ch == 2) {
-            if (state.cursor > 0u) state.cursor--;
-        } else if (ch == KEY_RIGHT || ch == 6) {
-            if (state.cursor < state.input_length) state.cursor++;
-        } else if (ch == KEY_HOME || ch == 1) {
-            state.cursor = 0u;
-        } else if (ch == KEY_END || ch == 5) {
-            state.cursor = state.input_length;
-        } else if (ch == KEY_ENTER || ch == '\r') {
-            (void)psi_tui_submit(&state);
-        } else if (ch == '\n') {
-            psi_tui_insert_char(&state, '\n');
-        } else if (isprint(ch)) {
-            psi_tui_insert_char(&state, ch);
-        }
-
-        psi_tui_redraw(&state);
     }
 
     endwin();

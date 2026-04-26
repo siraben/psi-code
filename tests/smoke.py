@@ -700,6 +700,30 @@ def t_tui_input_layout(psi: Psi):
     assert_equals(out, '5|"> "|"| "', "Lua-owned TUI input layout")
 
 
+@test("tui/key_policy")
+def t_tui_key_policy(psi: Psi):
+    out = psi.eval(
+        'local tui = require("psi.tui")\n'
+        + 'local function fmt(res)\n'
+        + '  if not res then return "nil" end\n'
+        + '  local arg = res.arg\n'
+        + '  if arg == "\\n" then arg = "\\\\n" end\n'
+        + '  return (res.action or "?") .. ":" .. (arg or "-")\n'
+        + 'end\n'
+        + 'return table.concat({\n'
+        + '  fmt(tui.handle_key({key="enter", busy=false, input_length=1})),\n'
+        + '  fmt(tui.handle_key({key="enter", busy=true, input_length=1})),\n'
+        + '  fmt(tui.handle_key({key="shift-enter", busy=false, input_length=0})),\n'
+        + '  fmt(tui.handle_key({key="ctrl-d", busy=false, input_length=0})),\n'
+        + '  fmt(tui.handle_key({key="ctrl-d", busy=true, input_length=0})),\n'
+        + '  fmt(tui.handle_key({key="escape", busy=true, input_length=0})),\n'
+        + '  fmt(tui.handle_key({key="text", text="x"}))\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "submit:-|nil|insert:\\n|quit:-|nil|abort:-|insert:x",
+                  "Lua TUI key policy")
+
+
 @test("render/replace_mode")
 def t_render_replace(psi: Psi):
     """A render hook returning {replace=true, text=...} must drop

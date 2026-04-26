@@ -454,6 +454,9 @@ TUI-specific rendering calls straight into Lua from the draw path:
   footer/status strings
 - `psi.tui_layout.input_layout` chooses prompt prefixes and the nominal
   visible-row cap for the multiline editor
+- `psi.tui.handle_key` maps normalized keys (`enter`, `shift-enter`,
+  `alt-b`, `ctrl-d`, `text`, ...) to editor actions such as submit,
+  insert newline, delete word, quit, or abort
 - `psi.markdown.render_line` styles each wrapped assistant line
 - a small C ANSI-escape FSM (`psi_tui_draw_ansi_line`) converts the
   resulting `\e[Nm` codes to ncurses attrs / color pairs
