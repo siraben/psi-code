@@ -51,7 +51,8 @@ This repository currently contains:
   session / token usage), unicode tool-call borders, live
   markdown rendering, mode-aware hints, readline-style editing
   (Alt-B/F/D/Backspace, Ctrl-W/K/U), Esc-abort while busy, and
-  Ctrl-Z suspend/resume. Single-threaded: the agent turn runs as
+  Ctrl-Z suspend/resume, plus a Lua-driven theme registry with a
+  bundled dark default. Single-threaded: the agent turn runs as
   a Lua coroutine on the ncurses thread, pumping input and
   redraws between every cooperative yield
 - manual session compaction through `--compact` and `/compact`
@@ -167,7 +168,7 @@ Current limitations of `--agent`:
 
 Lua files dropped into any of the following directories are
 loaded at startup and can register tools, subscribe to events, or
-add slash commands. See [docs/extensions.md](docs/extensions.md)
+add slash commands and themes. See [docs/extensions.md](docs/extensions.md)
 for the authoring guide.
 
 - `$PSI_EXTENSIONS_DIR` (colon-separated list, takes precedence)

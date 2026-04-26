@@ -2158,6 +2158,69 @@ static int lfn_set_usage(lua_State *L) {
     return 0;
 }
 
+/* psi.set_tui_theme(json)
+ *
+ * Stores a Lua-selected ncurses palette on the host context so TUI
+ * mode can reapply it on redraw. Payload shape:
+ *   { pairs = [ { fg = int, bg = int }, ... seven entries ... ] }
+ *
+ * The Lua theme layer owns semantic names and inheritance; C only
+ * receives the final ordered pair list. Safe to call outside TUI —
+ * it just updates the host-side cache for any later TUI startup. */
+static int lfn_set_tui_theme(lua_State *L) {
+    const char *payload;
+    cJSON *root;
+    cJSON *pairs;
+    int i;
+    struct psi_host_context *host;
+
+    host = PSI_VM_HOST(L);
+    payload = luaL_checkstring(L, 1);
+    if (host == NULL) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+
+    root = cJSON_Parse(payload);
+    if (root == NULL) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+
+    host->tui_theme.active = 0;
+    for (i = 0; i < PSI_HOST_TUI_THEME_PAIR_COUNT; i++) {
+        host->tui_theme.pairs[i].fg = -1;
+        host->tui_theme.pairs[i].bg = -1;
+        host->tui_theme.pairs[i].is_set = 0;
+    }
+
+    pairs = cJSON_GetObjectItemCaseSensitive(root, "pairs");
+    if (cJSON_IsArray(pairs)) {
+        int limit = cJSON_GetArraySize(pairs);
+        if (limit > PSI_HOST_TUI_THEME_PAIR_COUNT) {
+            limit = PSI_HOST_TUI_THEME_PAIR_COUNT;
+        }
+        for (i = 0; i < limit; i++) {
+            cJSON *entry = cJSON_GetArrayItem(pairs, i);
+            cJSON *fg;
+            cJSON *bg;
+            if (!cJSON_IsObject(entry)) {
+                continue;
+            }
+            fg = cJSON_GetObjectItemCaseSensitive(entry, "fg");
+            bg = cJSON_GetObjectItemCaseSensitive(entry, "bg");
+            host->tui_theme.pairs[i].fg = cJSON_IsNumber(fg) ? (int)fg->valuedouble : -1;
+            host->tui_theme.pairs[i].bg = cJSON_IsNumber(bg) ? (int)bg->valuedouble : -1;
+            host->tui_theme.pairs[i].is_set = 1;
+        }
+        host->tui_theme.active = 1;
+    }
+
+    cJSON_Delete(root);
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
 /* Inflate an embedded entry into a caller-provided buffer. Returns
  * PSI_STATUS_OK on success (buffer filled with entry->raw_len bytes).
  * The caller owns the buffer; on error the buffer contents are
@@ -2751,6 +2814,7 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("abort_trigger",         lfn_abort_trigger);
     PSI_REG("abort_reset",           lfn_abort_reset);
     PSI_REG("set_usage",             lfn_set_usage);
+    PSI_REG("set_tui_theme",         lfn_set_tui_theme);
     PSI_REG("embedded_doc",          lfn_embedded_doc);
     PSI_REG("embedded_doc_names",    lfn_embedded_doc_names);
     PSI_REG("embedded_source",       lfn_embedded_source);
