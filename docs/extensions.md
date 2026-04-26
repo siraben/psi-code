@@ -133,7 +133,11 @@ session state.
 | API | Notes |
 |---|---|
 | `psi.commands.register(name, handler)` | `handler(args_string, raw_line) -> CommandAction\|nil`. Overwrites on duplicate. |
+| `psi.commands.register(name, { handler = fn, description = "...", argument_hint = "..." })` | Metadata form. `/help` includes the description and argument hint. |
 | `psi.commands.unregister(name)` | Remove a previously registered command. |
+| `psi.commands.builtin_commands()` | Built-in command metadata used to generate `/help`. |
+| `psi.commands.registered_commands()` | Extension command metadata currently registered. |
+| `psi.commands.help_text()` | Generated help text for built-ins, extensions, and prompt templates. |
 
 Built-in commands take precedence over registered ones —
 extensions cannot shadow them. Full list:
@@ -141,12 +145,41 @@ extensions cannot shadow them. Full list:
 ```
 /help  /hotkeys  /quit (+ /q, :quit, :q)  /session  /system-prompt
 /new (alias: /clear)  /reload  /copy
-/resume <path>  /import <path>  (alias: /resume)
+/resume <path>  /import <path>
 /name <text>  /model <spec>
 /export [path]  /fork [N]  /clone [path]  /compact [N]
 ```
 
-Canonical source: `lua/psi/prompt.lua M.HELP_TEXT`.
+Canonical source: `lua/psi/commands.lua` (`BUILTIN_COMMANDS` plus the
+registered extension command table). `lua/psi/prompt.lua` delegates to
+the generated command help for compatibility.
+
+### Keybindings — `psi.keybindings`
+
+Keybinding metadata lives in `lua/psi/keybindings.lua`, mirroring pi's
+action-id approach. The TUI dispatch, footer hint, and `/hotkeys` all
+read from the same resolved key map.
+
+Users can override defaults in `~/.config/psi/keybindings.json` or
+`./.psi/keybindings.json`:
+
+```json
+{
+  "tui.input.submit": "enter",
+  "tui.input.newLine": ["shift-enter"],
+  "app.interrupt": "escape"
+}
+```
+
+| API | Notes |
+|---|---|
+| `psi.keybindings.keys(id)` | Resolved key ids for an action. |
+| `psi.keybindings.resolved()` | Copy of the full resolved keybinding map. |
+| `psi.keybindings.conflicts()` | User override conflicts, as `{ key, keybindings }` records. |
+| `psi.keybindings.matches(key, id)` | True when a normalized key event triggers an action. |
+| `psi.keybindings.display(id)` | Human-readable key string for UI text. |
+| `psi.keybindings.hotkeys_text()` | Generated `/hotkeys` text. |
+| `psi.keybindings.reload()` | Reload keybinding JSON files. `/reload` calls this. |
 
 **CommandAction** (from `psi.records.new_command_action(kind, payload)`):
 ```lua
