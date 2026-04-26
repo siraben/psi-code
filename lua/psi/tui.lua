@@ -3,6 +3,7 @@
 -- side-effect-free so the C layer can call them on every redraw.
 
 local context = require("psi.context")
+local keybindings = require("psi.keybindings")
 local prelude = require("psi.prelude")
 
 local M = {}
@@ -55,82 +56,78 @@ function M.handle_key(arg)
     return nil
   end
 
-  if key == "enter" then
+  if keybindings.matches(key, "tui.input.submit") then
     if not busy and input_length > 0 then
       return action("submit")
     end
     return nil
   end
 
-  if key == "shift-enter" then
+  if keybindings.matches(key, "tui.input.newLine") then
     return action("insert", "\n")
   end
-  if key == "backspace" then
+  if keybindings.matches(key, "tui.editor.deleteCharBackward") then
     return action("delete-backward")
   end
-  if key == "delete" then
-    return action("delete-forward")
-  end
-  if key == "ctrl-w" or key == "alt-backspace" then
-    return action("delete-word-backward")
-  end
-  if key == "alt-d" then
-    return action("delete-word-forward")
-  end
-  if key == "alt-b" then
-    return action("move-word-left")
-  end
-  if key == "alt-f" then
-    return action("move-word-right")
-  end
-  if key == "ctrl-k" then
-    return action("kill-end")
-  end
-  if key == "ctrl-u" then
-    return action("kill-start")
-  end
-  if key == "left" then
-    return action("move-left")
-  end
-  if key == "right" then
-    return action("move-right")
-  end
-  if key == "home" then
-    return action("move-home")
-  end
-  if key == "end" then
-    return action("move-end")
-  end
-  if key == "up" then
-    return action("scroll", "line-up")
-  end
-  if key == "down" then
-    return action("scroll", "line-down")
-  end
-  if key == "page-up" then
-    return action("scroll", "page-up")
-  end
-  if key == "page-down" then
-    return action("scroll", "page-down")
-  end
-  if key == "ctrl-l" then
-    return action("redraw")
-  end
-  if key == "ctrl-z" then
-    return action("suspend")
-  end
-
-  if key == "ctrl-d" then
-    if input_length > 0 then
-      return action("delete-forward")
-    end
+  if input_length == 0 and keybindings.matches(key, "app.exit") then
     if not busy then
       return action("quit")
     end
     return nil
   end
+  if keybindings.matches(key, "tui.editor.deleteCharForward") then
+    return action("delete-forward")
+  end
+  if keybindings.matches(key, "tui.editor.deleteWordBackward") then
+    return action("delete-word-backward")
+  end
+  if keybindings.matches(key, "tui.editor.deleteWordForward") then
+    return action("delete-word-forward")
+  end
+  if keybindings.matches(key, "tui.editor.cursorWordLeft") then
+    return action("move-word-left")
+  end
+  if keybindings.matches(key, "tui.editor.cursorWordRight") then
+    return action("move-word-right")
+  end
+  if keybindings.matches(key, "tui.editor.deleteToLineEnd") then
+    return action("kill-end")
+  end
+  if keybindings.matches(key, "tui.input.clear") then
+    return action("kill-start")
+  end
+  if keybindings.matches(key, "tui.editor.cursorLeft") then
+    return action("move-left")
+  end
+  if keybindings.matches(key, "tui.editor.cursorRight") then
+    return action("move-right")
+  end
+  if keybindings.matches(key, "tui.editor.cursorLineStart") then
+    return action("move-home")
+  end
+  if keybindings.matches(key, "tui.editor.cursorLineEnd") then
+    return action("move-end")
+  end
+  if keybindings.matches(key, "tui.transcript.lineUp") then
+    return action("scroll", "line-up")
+  end
+  if keybindings.matches(key, "tui.transcript.lineDown") then
+    return action("scroll", "line-down")
+  end
+  if keybindings.matches(key, "tui.transcript.pageUp") then
+    return action("scroll", "page-up")
+  end
+  if keybindings.matches(key, "tui.transcript.pageDown") then
+    return action("scroll", "page-down")
+  end
+  if keybindings.matches(key, "app.redraw") then
+    return action("redraw")
+  end
+  if keybindings.matches(key, "app.suspend") then
+    return action("suspend")
+  end
 
-  if key == "escape" then
+  if keybindings.matches(key, "app.interrupt") then
     if busy then
       return action("abort")
     end
@@ -194,14 +191,7 @@ end
 
 -- Short help line for the footer. Content depends on mode.
 function M.footer_hint(arg_json)
-  local arg = prelude.safe_json_decode(arg_json, {})
-  if arg.busy then
-    return "Esc abort current turn"
-  end
-  if (tonumber(arg.scroll) or 0) > 0 then
-    return "↑↓ scroll  PgUp/PgDn page  Enter=submit  Shift-Enter=newline  /help  /quit"
-  end
-  return "Enter submit  Shift-Enter newline  ↑↓ scroll  /help  /quit"
+  return keybindings.footer_hint(arg_json)
 end
 
 return M
