@@ -24,12 +24,17 @@ local M = {}
 --   2. $PSI_PROVIDER env ("ollama" | "anthropic" | "openrouter").
 --   3. Default: anthropic.
 local function pick_provider(model)
-  local spec, real_model = providers.resolve_route(model)
-  return providers.load_provider(spec), providers.resolve_model(spec.name, real_model)
+  local resolved = providers.resolve_descriptor(model)
+  return providers.load_provider(providers.provider(resolved.provider)), resolved
 end
 
 function M.provider_for(model)
-  return pick_provider(model)
+  local provider, resolved = pick_provider(model)
+  return provider, resolved.id
+end
+
+function M.model_descriptor(fallback)
+  return providers.resolve_descriptor(M.current_model(fallback))
 end
 
 -- Runtime model switch. Extensions (or a slash command) can call
@@ -58,6 +63,11 @@ function M.current_model(fallback)
   return fallback
 end
 
+function M.effective_model(fallback)
+  local resolved = M.model_descriptor(fallback)
+  return resolved and resolved.id
+end
+
 -- Append the user's turn, build the system prompt, and drive the
 -- streaming tool loop via the chosen provider's run_turn.
 --
@@ -71,12 +81,12 @@ function M.run_turn(opts)
   session.append_user(user_text)
   session.save()
 
-  local provider, real_model = pick_provider(M.current_model(opts.model))
+  local provider, resolved = pick_provider(M.current_model(opts.model))
   local system_prompt = prompt.system_prompt()
   return sched.run(function()
     return provider.run_turn({
       system_prompt = system_prompt,
-      model = real_model,
+      model = resolved.id,
       max_tokens = opts.max_tokens,
       observer = opts.observer,
       abort_check = opts.abort_check,
@@ -93,12 +103,12 @@ function M.run_compact(opts)
     return true, "session is already small enough"
   end
 
-  local provider, real_model = pick_provider(M.current_model(opts.model))
+  local provider, resolved = pick_provider(M.current_model(opts.model))
   local request = prompt.compaction_request(keep_recent)
   local ok, summary = provider.complete_text({
     system_prompt = request[1],
     user_text = request[2],
-    model = real_model,
+    model = resolved.id,
     max_tokens = context.compaction_budget(),
   })
   if not ok then

@@ -1,8 +1,8 @@
 /* HTTP primitives. The agent turn loop used to live here; it's now in
  * lua/psi/anthropic.lua. This file is intentionally minimal — just
- * libcurl plumbing for the two operations Lua needs: a streamed POST
- * (for SSE Messages endpoint) and a buffered POST (one-shot
- * completion). The abort_signal hook is wired via curl's transfer-info
+ * libcurl plumbing for the HTTP operations Lua needs: a streamed POST
+ * (for SSE Messages endpoint), buffered POST (one-shot completion),
+ * and buffered GET (metadata refresh). The abort_signal hook is wired via curl's transfer-info
  * callback so UI cancellation bypasses any network stall. */
 
 #include <stdlib.h>
@@ -78,9 +78,11 @@ static CURL *psi_http_build_handle(
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_POST, 1L);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
+    if (body != NULL) {
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
+    }
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, psi_http_xferinfo);
     /* curl stores an arbitrary opaque userdata; the const is safely
@@ -143,6 +145,50 @@ int psi_http_post(
 
     if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) return PSI_STATUS_ERROR;
     curl = psi_http_build_handle(url, header_lines, header_count, body, body_len, &headers, abort_signal);
+    if (curl == NULL) { curl_global_cleanup(); return PSI_STATUS_ERROR; }
+
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, psi_http_buffer_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&buffer);
+
+    code = curl_easy_perform(curl);
+    if (code == CURLE_OK && status_code != NULL) {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, status_code);
+    }
+
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    curl_global_cleanup();
+
+    if (code != CURLE_OK) {
+        free(buffer.data);
+        return PSI_STATUS_ERROR;
+    }
+    if (response_body != NULL) {
+        *response_body = buffer.data != NULL ? buffer.data : psi_strdup("");
+    } else {
+        free(buffer.data);
+    }
+    return PSI_STATUS_OK;
+}
+
+int psi_http_get(
+    const char *url,
+    const char *const *header_lines, size_t header_count,
+    const struct psi_abort_signal *abort_signal,
+    long *status_code, char **response_body
+) {
+    CURL *curl;
+    CURLcode code;
+    struct curl_slist *headers;
+    struct psi_http_buffer buffer;
+
+    if (status_code != NULL) *status_code = 0l;
+    if (response_body != NULL) *response_body = NULL;
+    buffer.data = NULL;
+    buffer.length = 0u;
+
+    if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) return PSI_STATUS_ERROR;
+    curl = psi_http_build_handle(url, header_lines, header_count, NULL, 0u, &headers, abort_signal);
     if (curl == NULL) { curl_global_cleanup(); return PSI_STATUS_ERROR; }
 
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, psi_http_buffer_callback);

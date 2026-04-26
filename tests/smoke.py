@@ -737,9 +737,12 @@ def t_agent_set_model(psi: Psi):
         + 'local got = a.current_model("anthropic/fallback")\n'
         + 'a.set_model(nil)\n'
         + 'local cleared = a.current_model("anthropic/fallback")\n'
-        + 'return got .. "|" .. cleared'
+        + 'local effective = a.effective_model(nil)\n'
+        + 'local desc = a.model_descriptor(nil)\n'
+        + 'local has_effective = effective ~= nil and effective ~= ""\n'
+        + 'return got .. "|" .. cleared .. "|" .. tostring(has_effective) .. "|" .. desc.provider'
     )
-    assert_contains(out, "openrouter/x/y|anthropic/fallback",
+    assert_contains(out, "openrouter/x/y|anthropic/fallback|true|anthropic",
                     "override then clear")
 
 
@@ -754,6 +757,88 @@ def t_tui_status_hook(psi: Psi):
         + 'return line'
     )
     assert_contains(out, "ext:foo", "status hook contribution shows")
+
+
+@test("tui/status_default_model")
+def t_tui_status_default_model(psi: Psi):
+    out = psi.eval(
+        'local tui = require("psi.tui")\n'
+        + 'return tui.status_line(psi.json_encode({busy=false, scroll=0}))'
+    )
+    assert "model:?" not in out, "status line should show effective default model"
+    assert_contains(out, "model:", "status line includes model")
+
+
+@test("providers/openrouter_metadata")
+def t_providers_openrouter_metadata(psi: Psi):
+    cache = psi.tmp / "openrouter_models.json"
+    cache.write_text(json.dumps({
+        "google/gemini-3-flash-preview": {
+            "context_window": 1048576,
+            "max_output_tokens": 65536,
+            "reasoning": True,
+            "supports_tool_use": True,
+            "input": ["text", "image"],
+        },
+        "openai/gpt-5.1-codex": {
+            "context_window": 400000,
+            "max_output_tokens": 128000,
+            "reasoning": True,
+            "supports_tool_use": True,
+            "input": ["text"],
+        },
+        "fake/provider-model": {
+            "context_window": 12345,
+            "max_output_tokens": 678,
+            "reasoning": False,
+            "supports_tool_use": True,
+            "input": ["text"],
+        },
+    }))
+    out = psi.run(
+        "--eval",
+        'local providers = require("psi.providers")\n'
+        + 'local full = providers.model("openrouter/google/gemini-3-flash-preview")\n'
+        + 'local slug = providers.model("google/gemini-3-flash-preview")\n'
+        + 'local codex = providers.model("openrouter/openai/gpt-5.1-codex")\n'
+        + 'local fake = providers.model("openrouter/fake/provider-model")\n'
+        + 'local resolved = providers.resolve_descriptor("openrouter/openai/gpt-5.1-codex")\n'
+        + 'return table.concat({\n'
+        + '  tostring(full.context_window),\n'
+        + '  tostring(slug.max_output_tokens),\n'
+        + '  tostring(codex.context_window),\n'
+        + '  tostring(fake.max_output_tokens),\n'
+        + '  tostring(resolved.id),\n'
+        + '  tostring(resolved.provider),\n'
+        + '}, "|")',
+        env_extra={"PSI_OPENROUTER_MODELS_CACHE": str(cache)},
+    ).stdout.strip()
+    assert_equals(out, "1048576|65536|400000|678|openai/gpt-5.1-codex|openrouter",
+                  "OpenRouter metadata resolves full and stripped model ids")
+
+
+@test("tui/status_context_window")
+def t_tui_status_context_window(psi: Psi):
+    cache = psi.tmp / "openrouter_models_status.json"
+    cache.write_text(json.dumps({
+        "google/gemini-3-flash-preview": {
+            "context_window": 1048576,
+            "max_output_tokens": 65536,
+            "reasoning": True,
+            "supports_tool_use": True,
+            "input": ["text", "image"],
+        },
+    }))
+    out = psi.run(
+        "--eval",
+        'local context = require("psi.context")\n'
+        + 'local tui = require("psi.tui")\n'
+        + 'context.record_usage(0, { input_tokens = 3000, output_tokens = 566 }, "google/gemini-3-flash-preview")\n'
+        + 'return tui.status_line(psi.json_encode({model="openrouter/google/gemini-3-flash-preview", busy=false, scroll=0}))',
+        env_extra={"PSI_OPENROUTER_MODELS_CACHE": str(cache)},
+    ).stdout.strip()
+    assert_contains(out, "ctx:0.3% (3566/1048576)",
+                    "status line uses OpenRouter metadata and one-decimal percentage")
 
 
 @test("tui/layout_geometry")

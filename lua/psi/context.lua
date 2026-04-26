@@ -13,10 +13,10 @@
 local M = {}
 
 local MODEL_CONTEXT_WINDOWS = {
-  ["claude-opus-4-7"] = 200000,
-  ["claude-opus-4-6"] = 200000,
+  ["claude-opus-4-7"] = 1000000,
+  ["claude-opus-4-6"] = 1000000,
   ["claude-opus-4-5"] = 200000,
-  ["claude-sonnet-4-6"] = 200000,
+  ["claude-sonnet-4-6"] = 1000000,
   ["claude-sonnet-4-5"] = 200000,
   ["claude-haiku-4-5"] = 200000,
 }
