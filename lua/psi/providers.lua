@@ -47,7 +47,31 @@ function M.provider(name)
 end
 
 function M.model(id)
-  return models[id]
+  local exact = models[id]
+  if exact then
+    return exact
+  end
+  if type(id) ~= "string" or id == "" then
+    return nil
+  end
+
+  local slug = id
+  local prefix = "openrouter/"
+  if slug:sub(1, #prefix) == prefix then
+    slug = slug:sub(#prefix + 1)
+  end
+
+  local ok, openrouter_models = pcall(require, "psi.openrouter_models")
+  local meta = ok and openrouter_models and openrouter_models.model(slug)
+  if type(meta) ~= "table" then
+    return nil
+  end
+
+  local out = copy_table(meta)
+  out.id = prefix .. slug
+  out.provider = "openrouter"
+  out.api = "openrouter-chat-completions"
+  return out
 end
 
 function M.all_providers()
@@ -63,10 +87,26 @@ end
 
 function M.all_models()
   local out = {}
+  local seen = {}
   for id, spec in pairs(models) do
     local item = copy_table(spec)
     item.id = id
+    seen[id] = true
     out[#out + 1] = item
+  end
+  local ok, openrouter_models = pcall(require, "psi.openrouter_models")
+  local openrouter_all = ok and openrouter_models and openrouter_models.all()
+  if type(openrouter_all) == "table" then
+    for slug, spec in pairs(openrouter_all) do
+      local id = "openrouter/" .. slug
+      if not seen[id] then
+        local item = copy_table(spec)
+        item.id = id
+        item.provider = "openrouter"
+        item.api = "openrouter-chat-completions"
+        out[#out + 1] = item
+      end
+    end
   end
   table.sort(out, function(a, b)
     return a.id < b.id
@@ -80,6 +120,16 @@ local function env(name, fallback)
     return v
   end
   return fallback
+end
+
+local function canonical_id(provider_name, model_id)
+  if type(provider_name) ~= "string" or provider_name == "" then
+    return model_id
+  end
+  if type(model_id) ~= "string" or model_id == "" then
+    return model_id
+  end
+  return provider_name .. "/" .. model_id
 end
 
 M.register_provider("anthropic", {
@@ -120,8 +170,8 @@ M.register_provider("openrouter", {
 M.register_model("anthropic/claude-opus-4-7", {
   provider = "anthropic",
   api = "anthropic-messages",
-  context_window = 200000,
-  max_output_tokens = 32000,
+  context_window = 1000000,
+  max_output_tokens = 128000,
   reasoning = true,
 })
 
@@ -134,6 +184,10 @@ M.register_model("ollama/llama3.1:latest", {
 M.register_model("openrouter/google/gemini-3-flash-preview", {
   provider = "openrouter",
   api = "openrouter-chat-completions",
+  context_window = 1048576,
+  max_output_tokens = 65536,
+  reasoning = true,
+  supports_tool_use = true,
 })
 
 function M.resolve_model(provider_name, requested)
@@ -186,6 +240,22 @@ function M.resolve_route(model)
   end
 
   return providers.anthropic, model
+end
+
+function M.resolve_descriptor(model)
+  local spec, requested = M.resolve_route(model)
+  if not spec then
+    return nil
+  end
+  local real_model = M.resolve_model(spec.name, requested)
+  local meta = M.model(canonical_id(spec.name, real_model)) or M.model(real_model) or {}
+  local out = copy_table(meta)
+  out.provider = spec.name
+  out.api = out.api or spec.api
+  out.id = real_model
+  out.model = real_model
+  out.ref = canonical_id(spec.name, real_model)
+  return out
 end
 
 function M.load_provider(spec)

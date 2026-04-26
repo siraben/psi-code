@@ -204,6 +204,7 @@ local function new_state(opts)
   local width, height = current_size()
   local state = {
     opts = opts,
+    model = agent.model_descriptor(opts.model),
     entries = {},
     input = "",
     cursor = 0,
@@ -689,7 +690,9 @@ local function redraw(state)
   end
 
   status_json = psi.json_encode({
-    model = state.opts.model,
+    model = state.model and state.model.id or state.opts.model,
+    provider = state.model and state.model.provider or nil,
+    context_window = state.model and state.model.context_window or nil,
     busy = state.busy,
     scroll = state.scroll_offset,
   })
@@ -1084,6 +1087,7 @@ local function handle_command(state, line)
   if action.kind == "set-model" then
     agent.set_model(action.payload)
     state.opts.model = action.payload
+    state.model = agent.model_descriptor(action.payload)
     add_entry(state, "info", "model set to " .. tostring(action.payload))
     set_status(state, "", false)
     return true

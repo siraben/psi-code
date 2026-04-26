@@ -158,7 +158,10 @@ function M.status_line(arg_json)
   -- restart. require() is resolved lazily to avoid a boot-time
   -- cycle (agent ↔ prompt ↔ tools ↔ tui).
   local ok, agent = pcall(require, "psi.agent")
-  local model = (ok and agent.current_model(arg.model)) or arg.model or "?"
+  local resolved = ok and agent.model_descriptor(arg.model)
+  local model = (resolved and resolved.id) or arg.model or "?"
+  local context_window = tonumber(arg.context_window)
+    or (resolved and tonumber(resolved.context_window))
   local busy = arg.busy
   local scroll = tonumber(arg.scroll) or 0
 
@@ -167,11 +170,11 @@ function M.status_line(arg_json)
   parts[#parts + 1] = "model:" .. model
   parts[#parts + 1] = "msg:" .. tostring(psi.session_message_count())
 
-  local last = context.last_usage()
-  if last and last.total and last.total > 0 then
-    local window = context.context_window(model)
-    local pct = math.floor((last.total / window) * 100)
-    parts[#parts + 1] = string.format("ctx:%d%% (%d/%d)", pct, last.total, window)
+  local estimate = context.estimate_context_tokens()
+  if estimate and estimate.tokens and estimate.tokens > 0 then
+    local window = context_window or context.context_window(model)
+    local pct = (estimate.tokens / window) * 100
+    parts[#parts + 1] = string.format("ctx:%.1f%% (%d/%d)", pct, estimate.tokens, window)
   end
 
   if scroll > 0 then

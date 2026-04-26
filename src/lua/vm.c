@@ -1721,6 +1721,44 @@ static int lfn_http_post(lua_State *L) {
     return 2;
 }
 
+static int lfn_http_get(lua_State *L) {
+    const char *url = luaL_checkstring(L, 1);
+    char **headers;
+    size_t header_count;
+    struct psi_host_context *host;
+    long status_code;
+    char *response;
+    int status;
+
+    luaL_checktype(L, 2, LUA_TTABLE);
+
+    if (psi_lua_collect_headers(L, 2, &headers, &header_count) != 0) {
+        return luaL_error(L, "failed to collect headers");
+    }
+
+    host = PSI_VM_HOST(L);
+    status_code = 0l;
+    response = NULL;
+    status = psi_http_get(
+        url,
+        (const char *const *)headers, header_count,
+        host ? host->abort_signal : NULL,
+        &status_code, &response);
+
+    psi_lua_free_headers(headers, header_count);
+
+    if (status != PSI_STATUS_OK) {
+        free(response);
+        lua_pushnil(L);
+        lua_pushstring(L, "http request failed");
+        return 2;
+    }
+    lua_pushinteger(L, status_code);
+    lua_pushstring(L, response != NULL ? response : "");
+    free(response);
+    return 2;
+}
+
 static int lfn_is_aborted(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
     lua_pushboolean(L,
@@ -1903,6 +1941,7 @@ static int lfn_runtime_info(lua_State *L) {
         "path_expand", "path_resolve", "file_exists", "file_type", "list_dir",
         "mkdir_p", "mkdir_parent", "runtime_info", "session_messages",
         "process_run", "session_append", "session_clear",
+        "http_get", "http_post",
         "tool_call",
         NULL
     };
@@ -2292,6 +2331,7 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("json_encode",           lfn_json_encode);
     PSI_REG("json_decode",           lfn_json_decode);
     PSI_REG("http_post",             lfn_http_post);
+    PSI_REG("http_get",              lfn_http_get);
     PSI_REG("http_post_stream",      lfn_http_post_stream);
     PSI_REG("http_stream_begin",     lfn_http_stream_begin);
     PSI_REG("http_stream_poll",      lfn_http_stream_poll);
