@@ -217,6 +217,23 @@ def t_eval_read_primitive(psi: Psi):
     assert_equals(out, "ok", "read primitive")
 
 
+@test("fs/portable_primitives")
+def t_fs_portable_primitives(psi: Psi):
+    root = psi.tmp / "portable-fs" / "a" / "b"
+    out = psi.eval(
+        f'local dir = {json.dumps(str(root))}\n'
+        + 'local ok = psi.mkdir_p(dir)\n'
+        + 'psi.file_write(dir .. "/b.lua", "")\n'
+        + 'psi.file_write(dir .. "/a.md", "")\n'
+        + 'local entries = psi.list_dir(dir)\n'
+        + 'table.sort(entries)\n'
+        + 'return tostring(ok) .. "|" .. tostring(psi.file_exists(dir)) .. "|"\n'
+        + '  .. table.concat(entries, ",") .. "|"\n'
+        + '  .. tostring(psi.mkdir_parent(dir .. "/c/d.txt"))'
+    )
+    assert_equals(out, "true|true|a.md,b.lua|true", "portable filesystem primitives")
+
+
 @test("eval/tool_registry")
 def t_eval_tool_registry(psi: Psi):
     # The registry's first registered tool is `read`.
