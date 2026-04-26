@@ -3,8 +3,8 @@
  * Every non-TUI mode (print, eval, repl, system-prompt, agent, compact)
  * is implemented in lua/psi/modes.lua. This file is now just a thin
  * bridge: init VM + session, push the CLI options as a Lua table, call
- * psi.modes.run(opts), return its boolean status. TUI mode still lives
- * in src/runtime/tui_mode.c. */
+ * psi.modes.run(opts), return its boolean status. TUI mode uses the same
+ * Lua dispatcher but bootstraps ncurses first in src/runtime/tui_mode.c. */
 
 #include <signal.h>
 #include <stdio.h>

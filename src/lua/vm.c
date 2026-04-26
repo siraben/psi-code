@@ -1,5 +1,7 @@
 /* psi Lua 5.4 VM and FFI bridge. */
 
+#include <ctype.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,6 +11,7 @@
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
+#include <ncurses.h>
 
 #include <time.h>
 #include <unistd.h>
@@ -86,6 +89,8 @@ static const long PSI_VM_READ_FILE_MAX_BYTES  = 262144l;
  * each Lua state owns exactly one host, and the worker thread is the
  * only one calling Lua while that host is active. */
 #define PSI_VM_HOST(L) (*(struct psi_host_context **)lua_getextraspace(L))
+
+#define PSI_VM_NOREF (-2)
 
 /* ------------------------------------------------------------------
  * cJSON <-> Lua table conversion
@@ -244,6 +249,406 @@ static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx) {
 }
 
 /* ------------------------------------------------------------------
+ * TUI host helpers
+ * ------------------------------------------------------------------ */
+
+#define PSI_VM_TUI_KEY_NAME_MAX 32
+#define PSI_VM_TUI_KEY_TEXT_MAX 8
+
+struct psi_vm_tui_key_event {
+    char key_name[PSI_VM_TUI_KEY_NAME_MAX];
+    char text[PSI_VM_TUI_KEY_TEXT_MAX];
+};
+
+static void psi_vm_copy_truncated(char *dest, size_t dest_size, const char *src) {
+    size_t length;
+
+    if (dest == NULL || dest_size == 0u) {
+        return;
+    }
+    if (src == NULL) {
+        dest[0] = '\0';
+        return;
+    }
+
+    length = strlen(src);
+    if (length >= dest_size) {
+        length = dest_size - 1u;
+    }
+    memcpy(dest, src, length);
+    dest[length] = '\0';
+}
+
+static void psi_vm_set_registry_callback(lua_State *L, int *ref_slot, int arg_index) {
+    if (ref_slot == NULL) {
+        lua_pop(L, 1);
+        return;
+    }
+    if (*ref_slot != PSI_VM_NOREF) {
+        luaL_unref(L, LUA_REGISTRYINDEX, *ref_slot);
+        *ref_slot = PSI_VM_NOREF;
+    }
+    if (lua_isnil(L, arg_index)) {
+        return;
+    }
+    luaL_checktype(L, arg_index, LUA_TFUNCTION);
+    lua_pushvalue(L, arg_index);
+    *ref_slot = luaL_ref(L, LUA_REGISTRYINDEX);
+}
+
+static void psi_vm_invoke_registry_callback0(lua_State *L, int ref, const char *label) {
+    if (ref == PSI_VM_NOREF) {
+        return;
+    }
+    lua_rawgeti(L, LUA_REGISTRYINDEX, ref);
+    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
+        fprintf(stderr, "Lua error in %s: %s\n", label, lua_tostring(L, -1));
+        lua_pop(L, 1);
+    }
+}
+
+static void psi_vm_invoke_registry_callback2(
+    lua_State *L,
+    int ref,
+    const char *label,
+    const char *a,
+    size_t a_len,
+    const char *b,
+    size_t b_len
+) {
+    if (ref == PSI_VM_NOREF) {
+        return;
+    }
+    lua_rawgeti(L, LUA_REGISTRYINDEX, ref);
+    lua_pushlstring(L, a != NULL ? a : "", a_len);
+    lua_pushlstring(L, b != NULL ? b : "", b_len);
+    if (lua_pcall(L, 2, 0, 0) != LUA_OK) {
+        fprintf(stderr, "Lua error in %s: %s\n", label, lua_tostring(L, -1));
+        lua_pop(L, 1);
+    }
+}
+
+static void psi_vm_tui_draw_plain_line(int row, const char *text) {
+    int max_width;
+
+    move(row, 0);
+    clrtoeol();
+    if (text == NULL) {
+        return;
+    }
+    max_width = COLS > 1 ? COLS - 1 : 0;
+    if (max_width > 0) {
+        mvaddnstr(row, 0, text, max_width);
+    }
+}
+
+struct psi_vm_tui_ansi_state {
+    attr_t attrs;
+    int color_pair;
+};
+
+static void psi_vm_tui_ansi_apply(struct psi_vm_tui_ansi_state *s, int code) {
+    switch (code) {
+        case 0:  s->attrs = 0; s->color_pair = 0; break;
+        case 1:  s->attrs |= A_BOLD; break;
+        case 2:  s->attrs |= A_DIM; break;
+        case 3:  s->attrs |= A_UNDERLINE; break;
+        case 4:  s->attrs |= A_UNDERLINE; break;
+        case 31: s->color_pair = 6; break;
+        case 32: s->color_pair = 5; break;
+        case 33: s->color_pair = 4; break;
+        case 34: s->color_pair = 1; break;
+        case 36: s->color_pair = 2; break;
+        case 37: s->color_pair = 3; break;
+        default: break;
+    }
+}
+
+static void psi_vm_tui_draw_ansi_line(int row, const char *text) {
+    int max_width;
+    int len;
+    int col;
+    int i;
+    struct psi_vm_tui_ansi_state st;
+
+    move(row, 0);
+    clrtoeol();
+    if (text == NULL) {
+        return;
+    }
+
+    max_width = COLS > 1 ? COLS - 1 : 0;
+    st.attrs = 0;
+    st.color_pair = 0;
+    len = (int)strlen(text);
+    col = 0;
+    i = 0;
+    while (i < len && col < max_width) {
+        if (text[i] == 0x1b && i + 1 < len && text[i + 1] == '[') {
+            int j = i + 2;
+            unsigned int code = 0u;
+            int has_digit = 0;
+            while (j < len && text[j] != 'm') {
+                if (text[j] >= '0' && text[j] <= '9') {
+                    if (code <= 999u) {
+                        code = code * 10u + (unsigned int)(text[j] - '0');
+                    }
+                    has_digit = 1;
+                } else if (text[j] == ';') {
+                    if (has_digit) {
+                        psi_vm_tui_ansi_apply(&st, (int)code);
+                    }
+                    code = 0u;
+                    has_digit = 0;
+                } else {
+                    break;
+                }
+                j++;
+            }
+            if (j < len && text[j] == 'm') {
+                if (has_digit) {
+                    psi_vm_tui_ansi_apply(&st, (int)code);
+                } else {
+                    psi_vm_tui_ansi_apply(&st, 0);
+                }
+                i = j + 1;
+                continue;
+            }
+            i = j < len ? j : len;
+            continue;
+        }
+
+        {
+            int span_start = i;
+            int take;
+            attr_t cur = st.attrs;
+
+            while (i < len && text[i] != 0x1b) {
+                i++;
+            }
+            take = i - span_start;
+            if (take > max_width - col) {
+                take = max_width - col;
+            }
+            if (take <= 0) {
+                continue;
+            }
+
+            if (st.color_pair > 0) {
+                cur |= COLOR_PAIR(st.color_pair);
+            }
+            if (cur != 0) {
+                attron(cur);
+            }
+            addnstr(text + span_start, take);
+            if (cur != 0) {
+                attroff(cur);
+            }
+            col += take;
+            i = span_start + take;
+        }
+    }
+}
+
+static void psi_vm_tui_suspend_terminal(void) {
+    struct sigaction dfl;
+    struct sigaction prev;
+    sigset_t mask;
+    sigset_t prev_mask;
+
+    endwin();
+    memset(&dfl, 0, sizeof(dfl));
+    dfl.sa_handler = SIG_DFL;
+    sigemptyset(&dfl.sa_mask);
+    sigaction(SIGTSTP, &dfl, &prev);
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGTSTP);
+    sigprocmask(SIG_UNBLOCK, &mask, &prev_mask);
+    raise(SIGTSTP);
+    sigprocmask(SIG_SETMASK, &prev_mask, NULL);
+    sigaction(SIGTSTP, &prev, NULL);
+    refresh();
+    clearok(stdscr, TRUE);
+}
+
+static int psi_vm_tui_collect_escape_sequence(char *buffer, size_t buffer_size, int restore_timeout_ms) {
+    size_t length;
+    int ch;
+    int timeout_ms;
+
+    if (buffer == NULL || buffer_size == 0u) {
+        return 0;
+    }
+
+    length = 0u;
+    buffer[0] = '\0';
+    timeout_ms = 25;
+    for (;;) {
+        wtimeout(stdscr, timeout_ms);
+        ch = getch();
+        if (ch == ERR) {
+            break;
+        }
+        if (ch < 0 || ch > 255) {
+            break;
+        }
+        if (length + 1u >= buffer_size) {
+            break;
+        }
+        buffer[length++] = (char)ch;
+        buffer[length] = '\0';
+        if (ch == '\r' || ch == '\n' || ch == '~' ||
+            (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
+            break;
+        }
+        timeout_ms = 5;
+    }
+
+    wtimeout(stdscr, restore_timeout_ms);
+    return (int)length;
+}
+
+static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
+    unsigned int first;
+    unsigned int second;
+    unsigned int third;
+    char final;
+
+    if (sequence == NULL || sequence[0] == '\0') {
+        return "escape";
+    }
+    if (strcmp(sequence, "b") == 0 || strcmp(sequence, "B") == 0) {
+        return "alt-b";
+    }
+    if (strcmp(sequence, "f") == 0 || strcmp(sequence, "F") == 0) {
+        return "alt-f";
+    }
+    if (strcmp(sequence, "d") == 0 || strcmp(sequence, "D") == 0) {
+        return "alt-d";
+    }
+    if (strcmp(sequence, "\b") == 0 || strcmp(sequence, "\177") == 0) {
+        return "alt-backspace";
+    }
+    if (strcmp(sequence, "\r") == 0 || strcmp(sequence, "\n") == 0) {
+        return "shift-enter";
+    }
+    if (sscanf(sequence, "[%u;%u;%u%c", &first, &second, &third, &final) == 4 &&
+        final == '~' && first == 27u && third == 13u && second >= 2u) {
+        return "shift-enter";
+    }
+    if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 &&
+        (final == 'u' || final == '~') &&
+        (first == 13u || first == 57414u) &&
+        second >= 2u) {
+        return "shift-enter";
+    }
+    return NULL;
+}
+
+static int psi_vm_tui_normalize_key(
+    int ch,
+    int restore_timeout_ms,
+    struct psi_vm_tui_key_event *event
+) {
+    char sequence[64];
+    const char *key_name;
+
+    if (event == NULL) {
+        return 0;
+    }
+    memset(event, 0, sizeof(*event));
+
+    if (ch == KEY_RESIZE) {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "resize");
+        return 1;
+    }
+    if (ch == KEY_PPAGE) {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "page-up");
+        return 1;
+    }
+    if (ch == KEY_NPAGE) {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "page-down");
+        return 1;
+    }
+    if (ch == KEY_UP) {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "up");
+        return 1;
+    }
+    if (ch == KEY_DOWN) {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "down");
+        return 1;
+    }
+    if (ch == 27) {
+        psi_vm_tui_collect_escape_sequence(sequence, sizeof(sequence), restore_timeout_ms);
+        key_name = psi_vm_tui_escape_sequence_key(sequence);
+        if (key_name == NULL) {
+            return 0;
+        }
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), key_name);
+        return 1;
+    }
+    if (ch == 12) {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "ctrl-l");
+        return 1;
+    }
+    if (ch == 26) {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "ctrl-z");
+        return 1;
+    }
+    if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "backspace");
+        return 1;
+    }
+    if (ch == KEY_DC) {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "delete");
+        return 1;
+    }
+    if (ch == 4) {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "ctrl-d");
+        return 1;
+    }
+    if (ch == 23) {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "ctrl-w");
+        return 1;
+    }
+    if (ch == 11) {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "ctrl-k");
+        return 1;
+    }
+    if (ch == 21) {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "ctrl-u");
+        return 1;
+    }
+    if (ch == KEY_LEFT || ch == 2) {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "left");
+        return 1;
+    }
+    if (ch == KEY_RIGHT || ch == 6) {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "right");
+        return 1;
+    }
+    if (ch == KEY_HOME || ch == 1) {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "home");
+        return 1;
+    }
+    if (ch == KEY_END || ch == 5) {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "end");
+        return 1;
+    }
+    if (ch == KEY_ENTER || ch == '\r' || ch == '\n') {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "enter");
+        return 1;
+    }
+    if (isprint(ch)) {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "text");
+        event->text[0] = (char)ch;
+        event->text[1] = '\0';
+        return 1;
+    }
+    return 0;
+}
+
+/* ------------------------------------------------------------------
  * FFI primitive procedures (registered on the `psi` global table)
  * ------------------------------------------------------------------ */
 
@@ -367,20 +772,36 @@ static int lfn_tool_progress(lua_State *L) {
     size_t chunk_len;
     const char *chunk;
     struct psi_host_context *host;
+    struct psi_vm *vm;
 
     tool_id = luaL_optstring(L, 1, NULL);
     chunk = lua_type(L, 2) == LUA_TSTRING ? lua_tolstring(L, 2, &chunk_len) : NULL;
     if (chunk == NULL || chunk_len == 0u) return 0;
 
     host = PSI_VM_HOST(L);
-    if (host == NULL || host->active_observer == NULL) return 0;
-    if (host->active_observer->on_tool_progress == NULL) return 0;
-    host->active_observer->on_tool_progress(
-        host->active_observer->userdata,
-        tool_id,
-        chunk,
-        chunk_len
-    );
+    if (host != NULL && host->active_observer != NULL &&
+        host->active_observer->on_tool_progress != NULL) {
+        host->active_observer->on_tool_progress(
+            host->active_observer->userdata,
+            tool_id,
+            chunk,
+            chunk_len
+        );
+        return 0;
+    }
+
+    vm = host != NULL ? host->vm : NULL;
+    if (vm != NULL) {
+        psi_vm_invoke_registry_callback2(
+            L,
+            vm->tui_tool_progress_callback_ref,
+            "psi.tui_set_tool_progress_handler",
+            tool_id != NULL ? tool_id : "",
+            tool_id != NULL ? strlen(tool_id) : 0u,
+            chunk,
+            chunk_len
+        );
+    }
     return 0;
 }
 
@@ -929,6 +1350,22 @@ static int lfn_is_aborted(lua_State *L) {
     return 1;
 }
 
+static int lfn_abort_trigger(lua_State *L) {
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    if (host != NULL) {
+        psi_abort_signal_trigger(host->abort_signal);
+    }
+    return 0;
+}
+
+static int lfn_abort_reset(lua_State *L) {
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    if (host != NULL) {
+        psi_abort_signal_reset(host->abort_signal);
+    }
+    return 0;
+}
+
 /* psi.set_usage(input, output, cache_read, cache_write, total, context_window)
  *
  * Publishes the most recent API-reported usage into the shared
@@ -1159,6 +1596,125 @@ static int lfn_add_history(lua_State *L) {
     return 0;
 }
 
+static int lfn_tui_size(lua_State *L) {
+    int height;
+    int width;
+    getmaxyx(stdscr, height, width);
+    lua_newtable(L);
+    lua_pushinteger(L, (lua_Integer)width);
+    lua_setfield(L, -2, "width");
+    lua_pushinteger(L, (lua_Integer)height);
+    lua_setfield(L, -2, "height");
+    return 1;
+}
+
+static int lfn_tui_poll_key(lua_State *L) {
+    lua_Integer timeout_ms;
+    int ch;
+    struct psi_vm_tui_key_event event;
+
+    timeout_ms = luaL_optinteger(L, 1, -1);
+    if (timeout_ms < -1) {
+        timeout_ms = -1;
+    }
+    if (timeout_ms > 3600000) {
+        timeout_ms = 3600000;
+    }
+    wtimeout(stdscr, (int)timeout_ms);
+    ch = getch();
+    if (ch == ERR) {
+        lua_pushnil(L);
+        return 1;
+    }
+    if (!psi_vm_tui_normalize_key(ch, (int)timeout_ms, &event)) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    lua_newtable(L);
+    lua_pushstring(L, event.key_name);
+    lua_setfield(L, -2, "key");
+    if (event.text[0] != '\0') {
+        lua_pushstring(L, event.text);
+        lua_setfield(L, -2, "text");
+    }
+    return 1;
+}
+
+static int lfn_tui_clear(lua_State *L) {
+    PSI_UNUSED(L);
+    erase();
+    return 0;
+}
+
+static int lfn_tui_draw_line(lua_State *L) {
+    lua_Integer row = luaL_checkinteger(L, 1);
+    size_t len = 0;
+    const char *text = lua_type(L, 2) == LUA_TSTRING ? lua_tolstring(L, 2, &len) : "";
+    if (row < 1) {
+        row = 1;
+    }
+    if (row > LINES) {
+        row = LINES;
+    }
+    if (memchr(text, 0x1b, len) != NULL) {
+        psi_vm_tui_draw_ansi_line((int)row - 1, text);
+    } else {
+        psi_vm_tui_draw_plain_line((int)row - 1, text);
+    }
+    return 0;
+}
+
+static int lfn_tui_set_cursor(lua_State *L) {
+    lua_Integer row = luaL_optinteger(L, 1, 1);
+    lua_Integer col = luaL_optinteger(L, 2, 1);
+    int visible = lua_toboolean(L, 3);
+
+    if (row < 1) row = 1;
+    if (col < 1) col = 1;
+    if (row > LINES) row = LINES;
+    if (col > COLS) col = COLS;
+    curs_set(visible ? 1 : 0);
+    move((int)row - 1, (int)col - 1);
+    return 0;
+}
+
+static int lfn_tui_refresh(lua_State *L) {
+    PSI_UNUSED(L);
+    refresh();
+    return 0;
+}
+
+static int lfn_tui_suspend(lua_State *L) {
+    PSI_UNUSED(L);
+    psi_vm_tui_suspend_terminal();
+    return 0;
+}
+
+static int lfn_tui_set_tick_handler(lua_State *L) {
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    struct psi_vm *vm = host != NULL ? host->vm : NULL;
+    if (vm == NULL) {
+        lua_pushnil(L);
+        return 1;
+    }
+    lua_settop(L, 1);
+    psi_vm_set_registry_callback(L, &vm->tui_tick_callback_ref, 1);
+    return 0;
+}
+
+static int lfn_tui_set_tool_progress_handler(lua_State *L) {
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    struct psi_vm *vm = host != NULL ? host->vm : NULL;
+    if (vm == NULL) {
+        lua_pushnil(L);
+        return 1;
+    }
+    lua_settop(L, 1);
+    psi_vm_set_registry_callback(L, &vm->tui_tool_progress_callback_ref, 1);
+    return 0;
+}
+
 /* psi.host_tick() -- run one iteration of the host's event loop.
  *
  * Called by psi.sched between coroutine resumes. Does nothing if no
@@ -1167,8 +1723,16 @@ static int lfn_add_history(lua_State *L) {
  * how the UI stays responsive during a streaming turn. */
 static int lfn_host_tick(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
+    struct psi_vm *vm = host != NULL ? host->vm : NULL;
     if (host != NULL && host->tick_hook != NULL) {
         host->tick_hook(host->tick_userdata);
+    }
+    if (vm != NULL) {
+        psi_vm_invoke_registry_callback0(
+            L,
+            vm->tui_tick_callback_ref,
+            "psi.tui_set_tick_handler"
+        );
     }
     return 0;
 }
@@ -1266,6 +1830,8 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("session_set_path",      lfn_session_set_path);
     PSI_REG("session_set_parent_id", lfn_session_set_parent_id);
     PSI_REG("is_aborted",            lfn_is_aborted);
+    PSI_REG("abort_trigger",         lfn_abort_trigger);
+    PSI_REG("abort_reset",           lfn_abort_reset);
     PSI_REG("set_usage",             lfn_set_usage);
     PSI_REG("embedded_doc",          lfn_embedded_doc);
     PSI_REG("embedded_doc_names",    lfn_embedded_doc_names);
@@ -1285,6 +1851,15 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("sleep_ms",              lfn_sleep_ms);
     PSI_REG("host_tick",             lfn_host_tick);
     PSI_REG("tool_progress",         lfn_tool_progress);
+    PSI_REG("tui_size",              lfn_tui_size);
+    PSI_REG("tui_poll_key",          lfn_tui_poll_key);
+    PSI_REG("tui_clear",             lfn_tui_clear);
+    PSI_REG("tui_draw_line",         lfn_tui_draw_line);
+    PSI_REG("tui_set_cursor",        lfn_tui_set_cursor);
+    PSI_REG("tui_refresh",           lfn_tui_refresh);
+    PSI_REG("tui_suspend",           lfn_tui_suspend);
+    PSI_REG("tui_set_tick_handler",  lfn_tui_set_tick_handler);
+    PSI_REG("tui_set_tool_progress_handler", lfn_tui_set_tool_progress_handler);
 
 #undef PSI_REG
 
@@ -1379,6 +1954,8 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
     memset(vm, 0, sizeof(*vm));
     vm->boot_file = boot_file;
     vm->host.vm = vm;
+    vm->tui_tick_callback_ref = PSI_VM_NOREF;
+    vm->tui_tool_progress_callback_ref = PSI_VM_NOREF;
 
     vm->L = luaL_newstate();
     if (!vm->L) return PSI_STATUS_ERROR;
@@ -1446,6 +2023,14 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
 
 void psi_vm_destroy(struct psi_vm *vm) {
     if (!vm || !vm->L) return;
+    if (vm->tui_tick_callback_ref != PSI_VM_NOREF) {
+        luaL_unref(vm->L, LUA_REGISTRYINDEX, vm->tui_tick_callback_ref);
+        vm->tui_tick_callback_ref = PSI_VM_NOREF;
+    }
+    if (vm->tui_tool_progress_callback_ref != PSI_VM_NOREF) {
+        luaL_unref(vm->L, LUA_REGISTRYINDEX, vm->tui_tool_progress_callback_ref);
+        vm->tui_tool_progress_callback_ref = PSI_VM_NOREF;
+    }
     PSI_VM_HOST(vm->L) = NULL;
     lua_close(vm->L);
     vm->L = NULL;
@@ -1583,102 +2168,6 @@ int psi_vm_call_string_procedure(struct psi_vm *vm, const char *procedure_name,
     return psi_vm_pop_string(vm->L, output_text);
 }
 
-int psi_vm_markdown_render_line(struct psi_vm *vm, const char *text, int in_code_fence, char **output_text) {
-    if (!vm || !vm->L || !output_text) return PSI_STATUS_ERROR;
-    *output_text = NULL;
-    if (psi_vm_begin_call(vm->L, "psi.markdown.render_line") != 0) return PSI_STATUS_ERROR;
-    lua_pushstring(vm->L, text ? text : "");
-    lua_pushboolean(vm->L, in_code_fence ? 1 : 0);
-    if (psi_vm_finish_call(vm->L, 2, 1, "psi.markdown.render_line") != PSI_STATUS_OK) return PSI_STATUS_ERROR;
-    return psi_vm_pop_string(vm->L, output_text);
-}
-
-int psi_vm_tui_status_line(struct psi_vm *vm, const char *arg_json, char **output_text) {
-    return psi_vm_call_string_procedure(vm, "psi.tui_layout.status_line", arg_json, output_text);
-}
-
-int psi_vm_tui_footer_hint(struct psi_vm *vm, const char *arg_json, char **output_text) {
-    return psi_vm_call_string_procedure(vm, "psi.tui_layout.footer_hint", arg_json, output_text);
-}
-
-int psi_vm_tui_handle_key(
-    struct psi_vm *vm,
-    const char *key_name,
-    const char *text,
-    int busy,
-    size_t input_length,
-    size_t cursor,
-    int scroll,
-    char **action_name,
-    char **action_arg
-) {
-    if (!vm || !vm->L || !key_name || !action_name || !action_arg) {
-        return PSI_STATUS_ERROR;
-    }
-
-    *action_name = NULL;
-    *action_arg = NULL;
-
-    if (psi_vm_begin_call(vm->L, "psi.tui.handle_key") != 0) {
-        return PSI_STATUS_ERROR;
-    }
-
-    lua_newtable(vm->L);
-    lua_pushstring(vm->L, key_name);
-    lua_setfield(vm->L, -2, "key");
-    if (text != NULL && text[0] != '\0') {
-        lua_pushstring(vm->L, text);
-        lua_setfield(vm->L, -2, "text");
-    }
-    lua_pushboolean(vm->L, busy ? 1 : 0);
-    lua_setfield(vm->L, -2, "busy");
-    lua_pushinteger(vm->L, (lua_Integer)input_length);
-    lua_setfield(vm->L, -2, "input_length");
-    lua_pushinteger(vm->L, (lua_Integer)cursor);
-    lua_setfield(vm->L, -2, "cursor");
-    lua_pushinteger(vm->L, (lua_Integer)scroll);
-    lua_setfield(vm->L, -2, "scroll");
-
-    if (psi_vm_finish_call(vm->L, 1, 1, "psi.tui.handle_key") != PSI_STATUS_OK) {
-        return PSI_STATUS_ERROR;
-    }
-
-    if (lua_isnil(vm->L, -1) || (lua_isboolean(vm->L, -1) && !lua_toboolean(vm->L, -1))) {
-        lua_pop(vm->L, 1);
-        return PSI_STATUS_OK;
-    }
-    if (!lua_istable(vm->L, -1)) {
-        fprintf(stderr, "invalid Lua TUI key result\n");
-        lua_pop(vm->L, 1);
-        return PSI_STATUS_ERROR;
-    }
-
-    lua_getfield(vm->L, -1, "action");
-    if (lua_type(vm->L, -1) == LUA_TSTRING) {
-        *action_name = psi_strdup(lua_tostring(vm->L, -1));
-        if (*action_name == NULL) {
-            lua_pop(vm->L, 2);
-            return PSI_STATUS_ERROR;
-        }
-    }
-    lua_pop(vm->L, 1);
-
-    lua_getfield(vm->L, -1, "arg");
-    if (lua_type(vm->L, -1) == LUA_TSTRING) {
-        *action_arg = psi_strdup(lua_tostring(vm->L, -1));
-        if (*action_arg == NULL) {
-            free(*action_name);
-            *action_name = NULL;
-            lua_pop(vm->L, 2);
-            return PSI_STATUS_ERROR;
-        }
-    }
-    lua_pop(vm->L, 1);
-
-    lua_pop(vm->L, 1);
-    return PSI_STATUS_OK;
-}
-
 int psi_vm_call_procedure0_to_string(struct psi_vm *vm, const char *procedure_name,
                                       char **output_text) {
     if (!vm || !vm->L || !procedure_name || !output_text) return PSI_STATUS_ERROR;
@@ -1686,79 +2175,6 @@ int psi_vm_call_procedure0_to_string(struct psi_vm *vm, const char *procedure_na
     if (psi_vm_begin_call(vm->L, procedure_name) != 0) return PSI_STATUS_ERROR;
     if (psi_vm_finish_call(vm->L, 0, 1, procedure_name) != PSI_STATUS_OK) return PSI_STATUS_ERROR;
     return psi_vm_pop_string(vm->L, output_text);
-}
-
-int psi_vm_render_event_json(struct psi_vm *vm, const char *event_name,
-                              const char *payload_json, char **output_text) {
-    if (!vm || !vm->L || !event_name || !output_text) return PSI_STATUS_ERROR;
-    *output_text = NULL;
-
-    if (psi_vm_begin_call(vm->L, "psi.render.handle_event") != 0) return PSI_STATUS_ERROR;
-    lua_pushstring(vm->L, event_name);
-    if (payload_json && payload_json[0] != '\0') {
-        cJSON *root = cJSON_Parse(payload_json);
-        if (!root) { lua_pop(vm->L, 2); return PSI_STATUS_ERROR; }
-        psi_vm_push_json_value(vm->L, root);
-        cJSON_Delete(root);
-    } else {
-        lua_newtable(vm->L);
-    }
-    if (psi_vm_finish_call(vm->L, 2, 1, "psi.render.handle_event") != PSI_STATUS_OK)
-        return PSI_STATUS_ERROR;
-    if (lua_type(vm->L, -1) != LUA_TSTRING) {
-        *output_text = psi_strdup("");
-        lua_pop(vm->L, 1);
-        return *output_text ? PSI_STATUS_OK : PSI_STATUS_ERROR;
-    }
-    *output_text = psi_strdup(lua_tostring(vm->L, -1));
-    lua_pop(vm->L, 1);
-    return *output_text ? PSI_STATUS_OK : PSI_STATUS_ERROR;
-}
-
-int psi_vm_parse_command(struct psi_vm *vm, const char *line,
-                          char **action_name, char **action_text, long *action_number) {
-    if (!vm || !vm->L || !line || !action_name || !action_text || !action_number)
-        return PSI_STATUS_ERROR;
-    *action_name = NULL;
-    *action_text = NULL;
-    *action_number = 0l;
-
-    if (psi_vm_begin_call(vm->L, "psi.commands.handle_command_list") != 0) return PSI_STATUS_ERROR;
-    lua_pushstring(vm->L, line);
-    if (psi_vm_finish_call(vm->L, 1, 1, "psi.commands.handle_command_list") != PSI_STATUS_OK)
-        return PSI_STATUS_ERROR;
-
-    if (lua_isnil(vm->L, -1) || (lua_isboolean(vm->L, -1) && !lua_toboolean(vm->L, -1))) {
-        lua_pop(vm->L, 1);
-        return PSI_STATUS_OK;
-    }
-    if (!lua_istable(vm->L, -1)) {
-        fprintf(stderr, "invalid Lua command result\n");
-        lua_pop(vm->L, 1);
-        return PSI_STATUS_ERROR;
-    }
-
-    lua_rawgeti(vm->L, -1, 1);
-    if (lua_type(vm->L, -1) != LUA_TSTRING) {
-        lua_pop(vm->L, 2);
-        return PSI_STATUS_ERROR;
-    }
-    *action_name = psi_strdup(lua_tostring(vm->L, -1));
-    lua_pop(vm->L, 1);
-    if (!*action_name) { lua_pop(vm->L, 1); return PSI_STATUS_ERROR; }
-
-    lua_rawgeti(vm->L, -1, 2);
-    if (strcmp(*action_name, "print") == 0) {
-        if (lua_type(vm->L, -1) == LUA_TSTRING) {
-            *action_text = psi_strdup(lua_tostring(vm->L, -1));
-        }
-    } else if (strcmp(*action_name, "compact") == 0) {
-        if (lua_type(vm->L, -1) == LUA_TNUMBER) {
-            *action_number = (long)lua_tointeger(vm->L, -1);
-        }
-    }
-    lua_pop(vm->L, 2);
-    return PSI_STATUS_OK;
 }
 
 int psi_vm_build_compaction_request(struct psi_vm *vm, long keep_recent,
