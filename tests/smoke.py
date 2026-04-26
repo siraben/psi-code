@@ -685,6 +685,21 @@ def t_tui_layout_geometry(psi: Psi):
     assert_equals(out, "psi coding agent|18|21", "shared TUI layout")
 
 
+@test("tui/input_layout")
+def t_tui_input_layout(psi: Psi):
+    out = psi.eval(
+        'local prelude = require("psi.prelude")\n'
+        + 'local raw = require("psi.tui_layout").input_layout(\n'
+        + '  psi.json_encode({width = 80, height = 24}))\n'
+        + 'local layout = prelude.safe_json_decode(raw, {})\n'
+        + 'return string.format("%d|%q|%q",\n'
+        + '  layout.max_rows or -1,\n'
+        + '  layout.prefix_first or "",\n'
+        + '  layout.prefix_rest or "")'
+    )
+    assert_equals(out, '5|"> "|"| "', "Lua-owned TUI input layout")
+
+
 @test("render/replace_mode")
 def t_render_replace(psi: Psi):
     """A render hook returning {replace=true, text=...} must drop
