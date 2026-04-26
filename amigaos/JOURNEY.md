@@ -545,6 +545,128 @@ binary on a userspace 68k emulator. The whole chain — embedder
 → vbcc → vlink → vamos → Musashi → Lua VM → embedded Lua module
 → stdout — is reproducible from `nix build`.
 
-Next: Phase 8 (process spawning) so tools like `bash` / `grep`
-can actually do something, then Phase 9 (vamos host-bridge for
-HTTP).
+## Phase 8 — process spawning (vamos)
+
+Quick partial result: AmigaDOS `Execute()` / `SystemTagList()` are
+already implemented in vamos's `dos.library` stub. Process spawn
+works as long as the target is itself an AmigaOS HUNK binary —
+vamos can't dispatch host commands through `Execute("ls")` because
+its DOS layer expects to LoadSeg() a real m68k binary.
+
+Demo: cross-compile `examples/echo.c`, drop it in a vamos volume,
+and call it from inside the m68k psi binary:
+
+```
+$ vc +aos68k -o examples/echo examples/echo.c
+$ mkdir -p /tmp/amigavols/c && cp examples/echo /tmp/amigavols/c/echo
+$ result-tools/bin/vamos -V "c:/tmp/amigavols/c" -- \
+      result/bin/psi --eval 'os.execute("echo hi")'
+hi
+0
+```
+
+That `0` is the exit code surfaced by `os.execute`; `hi` is real
+stdout from our m68k echo running as a child of the m68k psi.
+
+### Limitations under vamos
+
+- **Host commands (e.g. `bash`, `grep`, real `ls`) don't work.**
+  vamos's DOS layer uses LoadSeg, which only knows how to load
+  AmigaOS HUNK files. Spawning unix tools needs a host-bridge
+  (file under `Phase 9 host-bridge` — same plumbing as networking).
+- **`io.popen` is `'popen' not supported`** because we built Lua
+  with `LUA_USE_C89`. The AmigaOS NDK doesn't ship popen anyway;
+  the workaround is `Execute("cmd", null_in, file_out)` with a
+  temp file. Can wrap that in a thin `psi.tool_shell.run_capture`
+  helper later; not a blocker for this phase.
+
+### What this means for psi's tool layer
+
+For tool calls like `bash` / `grep` / `find` / `ls` to work on a
+real Amiga or under vamos:
+
+- **Real Amiga**: ship AmigaOS-native versions, or use SYSTEM-style
+  cross-shell tools that exist (Aminet has `grep`, `find`, etc. as
+  m68k binaries). Drop them in C: and the existing tool path works.
+- **Under vamos**: bundle the binaries (cross-compile in this same
+  flake) AND add a vols mount in our run wrapper.
+
+Either way, the C-side `src/core/process.c` (380 LOC) needs porting
+to `Execute()` / `SystemTagList()`. That's 1–2 days of focused work.
+Deferred to a future session — vamos already proves the spawn path
+end-to-end for HUNK targets, which is what we needed to know.
+
+## Phase 9 — networking host-bridge (sketch)
+
+Pre-work for the next session.
+
+### Architecture
+
+vamos already has a library plugin system: `amitools.vamos.libcore`
+hooks Python classes into the m68k library jump table by name. A
+custom `bsdsocket.library` class would:
+
+1. Implement the ~50 `socket.library` entry points (`socket()`,
+   `connect()`, `recv()`, `send()`, `close()`, `select()`,
+   `gethostbyname()`, etc.) as Python methods.
+2. Each method translates m68k register args to host Python args,
+   calls Python's `socket` module, translates results back.
+3. Expose `OpenLibrary("bsdsocket.library", 4)` from the m68k side
+   the standard way (vamos's ExecLibrary already routes this).
+
+Estimated scope: ~600 lines of Python in
+`amigaos/vamos-bsdsocket-bridge.py`, registered as a library hook
+when launching vamos.
+
+### TLS
+
+Three options:
+
+1. **Skip TLS** in the bridge — bsdsocket calls go to plain TCP,
+   and the bridge transparently upgrades to HTTPS when the URL
+   says so. The m68k binary thinks it's talking plain TCP.
+2. **Pretend AmiSSL exists** — register a fake `amissl.library`
+   that the bridge handles. Same socket I/O semantics, but the
+   m68k binary calls `AmiSSL_SSL_read` / `AmiSSL_SSL_write` and
+   thinks TLS is happening.
+3. **Real AmiSSL on disk** — we'd need to actually port it. Way
+   more work; only matters for the real-hardware path.
+
+For the vamos demo, **option 1** is cleanest. The m68k psi binary
+opens a TCP socket to api.anthropic.com:443, writes raw bytes; the
+Python bridge wraps that socket in TLS using the host's
+`ssl.SSLContext`. From the m68k side it looks identical to plain
+HTTP/1.1.
+
+### Files this phase will add
+
+- `amigaos/vamos-plugins/bsdsocket.py` — the host-bridge library.
+- `amigaos/run-psi.sh` — wrapper that launches vamos with the
+  bridge plugin loaded plus a vols mount for any AmigaOS-native
+  tool binaries.
+- C-side: replace `src/core/http_async.c` with a pthread-free
+  AmigaOS variant that just calls `socket()` / `recv()` from
+  bsdsocket.library. ~400 LOC. The Lua side stays the same since
+  it sees the same `psi.http_stream_*` primitives.
+
+End state: `psi --agent "hello"` running under vamos talks to the
+real Anthropic API. Lua code path identical to Linux/Haiku.
+
+## Roadmap status
+
+- ✅ Phase 1: toolchain (vbcc/vasm/vlink + target package)
+- ✅ Phase 2: hello world HUNK
+- ✅ Phase 3: vamos packaging + first execution
+- ✅ Phase 4: Lua 5.4 cross-compile
+- ✅ Phase 5: portability audit
+- ✅ Phase 6: psi --eval / --print shim (140 LOC)
+- ✅ Phase 7: embedded Lua modules (19 modules baked in)
+- ⏳ Phase 8: process spawning (HUNK targets work; host-bridge for
+  unix commands deferred)
+- 📋 Phase 9: networking host-bridge (sketched; ~3-5 days)
+- 📋 Phase 10: real AmiSSL + bsdsocket (~5-10 days)
+- 📋 Phase 11: TUI via console.device (~5-10 days)
+- 📋 Phase 12: agent + extension parity (~2-3 days)
+
+Total to reach full Linux/Haiku parity: **~3-4 more focused
+sessions** of work, each ending with a clear deliverable.
