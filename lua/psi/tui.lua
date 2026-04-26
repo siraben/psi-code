@@ -62,27 +62,63 @@ function M.handle_key(arg)
     return nil
   end
 
-  if key == "shift-enter" then return action("insert", "\n") end
-  if key == "backspace" then return action("delete-backward") end
-  if key == "delete" then return action("delete-forward") end
+  if key == "shift-enter" then
+    return action("insert", "\n")
+  end
+  if key == "backspace" then
+    return action("delete-backward")
+  end
+  if key == "delete" then
+    return action("delete-forward")
+  end
   if key == "ctrl-w" or key == "alt-backspace" then
     return action("delete-word-backward")
   end
-  if key == "alt-d" then return action("delete-word-forward") end
-  if key == "alt-b" then return action("move-word-left") end
-  if key == "alt-f" then return action("move-word-right") end
-  if key == "ctrl-k" then return action("kill-end") end
-  if key == "ctrl-u" then return action("kill-start") end
-  if key == "left" then return action("move-left") end
-  if key == "right" then return action("move-right") end
-  if key == "home" then return action("move-home") end
-  if key == "end" then return action("move-end") end
-  if key == "up" then return action("scroll", "line-up") end
-  if key == "down" then return action("scroll", "line-down") end
-  if key == "page-up" then return action("scroll", "page-up") end
-  if key == "page-down" then return action("scroll", "page-down") end
-  if key == "ctrl-l" then return action("redraw") end
-  if key == "ctrl-z" then return action("suspend") end
+  if key == "alt-d" then
+    return action("delete-word-forward")
+  end
+  if key == "alt-b" then
+    return action("move-word-left")
+  end
+  if key == "alt-f" then
+    return action("move-word-right")
+  end
+  if key == "ctrl-k" then
+    return action("kill-end")
+  end
+  if key == "ctrl-u" then
+    return action("kill-start")
+  end
+  if key == "left" then
+    return action("move-left")
+  end
+  if key == "right" then
+    return action("move-right")
+  end
+  if key == "home" then
+    return action("move-home")
+  end
+  if key == "end" then
+    return action("move-end")
+  end
+  if key == "up" then
+    return action("scroll", "line-up")
+  end
+  if key == "down" then
+    return action("scroll", "line-down")
+  end
+  if key == "page-up" then
+    return action("scroll", "page-up")
+  end
+  if key == "page-down" then
+    return action("scroll", "page-down")
+  end
+  if key == "ctrl-l" then
+    return action("redraw")
+  end
+  if key == "ctrl-z" then
+    return action("suspend")
+  end
 
   if key == "ctrl-d" then
     if input_length > 0 then

@@ -193,6 +193,20 @@ clean:
 # the dev shell; on bare systems install them or skip the target.
 
 CPPCHECK ?= cppcheck
+LUACHECK ?= luacheck
+STYLUA ?= stylua
+
+lint-lua:
+	$(STYLUA) --check lua
+	$(LUACHECK) lua
+
+format-lua:
+	$(STYLUA) lua
+
+lint-c: analyze
+
+lint: lint-lua lint-c
+
 analyze-cppcheck:
 	$(CPPCHECK) --enable=all --inconclusive --std=c89 \
 		--suppressions-list=.cppcheck-suppressions \
@@ -205,4 +219,4 @@ analyze-gcc:
 
 analyze: analyze-cppcheck analyze-gcc
 
-.PHONY: all clean install analyze analyze-cppcheck analyze-gcc
+.PHONY: all clean install lint lint-lua lint-c format-lua analyze analyze-cppcheck analyze-gcc
