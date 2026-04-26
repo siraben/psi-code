@@ -7,8 +7,8 @@
 --   - should_compact(model): base+tail > window - reserve
 --   - compaction_budget() / turn_prefix_budget(): 0.8 / 0.5 * reserve
 --
--- psi has no model registry, so this module ships a small built-in table
--- with a conservative fallback.
+-- Uses psi.providers model metadata when available, with a conservative
+-- fallback for unknown/custom models.
 
 local M = {}
 
@@ -40,7 +40,9 @@ function M.reset_usage()
   last_usage = nil
   -- Zero the C-side mirror too; the TUI status line reads from it
   -- without touching Lua so it must be kept in sync.
-  if psi.set_usage then psi.set_usage(0, 0, 0, 0, 0, 0) end
+  if psi.set_usage then
+    psi.set_usage(0, 0, 0, 0, 0, 0)
+  end
 end
 
 function M.last_usage()
@@ -54,11 +56,11 @@ function M.record_usage(message_index, usage, model)
   if type(usage) ~= "table" or type(message_index) ~= "number" then
     return
   end
-  local input  = usage.input_tokens or 0
+  local input = usage.input_tokens or 0
   local output = usage.output_tokens or 0
-  local cr     = usage.cache_read_input_tokens or 0
-  local cw     = usage.cache_creation_input_tokens or 0
-  local total  = input + output + cr + cw
+  local cr = usage.cache_read_input_tokens or 0
+  local cw = usage.cache_creation_input_tokens or 0
+  local total = input + output + cr + cw
   last_usage = { message_index = message_index, total = total }
   if psi.set_usage then
     psi.set_usage(input, output, cr, cw, total, M.context_window(model))
@@ -102,6 +104,13 @@ end
 function M.context_window(model)
   if not model or model == "" then
     return DEFAULT_CONTEXT_WINDOW
+  end
+  local ok, providers = pcall(require, "psi.providers")
+  if ok and providers then
+    local meta = providers.model(model)
+    if type(meta) == "table" and type(meta.context_window) == "number" then
+      return meta.context_window
+    end
   end
   return MODEL_CONTEXT_WINDOWS[model] or DEFAULT_CONTEXT_WINDOW
 end

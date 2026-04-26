@@ -32,13 +32,14 @@ This repository currently contains:
   static binaries carry their own Lua bootstrap and documentation
 - a Lua bootstrap layer under `lua/` that owns the tool registry,
   prompt assembly, session records, render/markdown/diff helpers,
-  provider loops, slash commands, and an extension loader
+  provider/model routing, settings/resource discovery, provider loops,
+  slash commands, and an extension loader
 - a default coding-agent system prompt assembled from tools, cwd,
-  date, and local `AGENTS.md` / `CLAUDE.md`
+  date, global/project `AGENTS.md` / `CLAUDE.md`, and active tool scope
 - a streamed Anthropic-backed `--agent` mode with host tool
   execution, prompt caching, dynamic token-accounting, and session
-  logging in a pi-compatible v2 JSONL format
-- an Ollama provider for local-first iteration (see
+  logging in a pi-compatible v3 JSONL format
+- Ollama and OpenRouter providers for local/open-router iteration (see
   [docs/providers.md](docs/providers.md))
 - a default interactive coding-agent shell backed by the same
   streamed agent loop, with slash commands (`/help`, `/hotkeys`,
@@ -60,9 +61,9 @@ This repository currently contains:
 - static analysis wired into the flake (`nix run .#analyze`) with
   cppcheck + `gcc -fanalyzer`
 
-It still does not contain the full `pi` session tree model, RPC
-protocol, or a rich skills/extensions ecosystem. Those are described
-in the architecture document and will be built incrementally.
+It still does not contain the full `pi` interactive session tree UI, RPC
+protocol, or a rich skills/extensions ecosystem. The session schema and Lua
+runtime boundaries are now shaped for those pieces to be built incrementally.
 
 ## Quick start
 
@@ -101,12 +102,11 @@ set -a && . ./.env.local && ./build/psi --session .psi/session.jsonl --compact 1
 ./build/psi --session .psi/session.jsonl --print 'hello again'
 ```
 
-Session files are explicit for now. When `--session FILE` is set, `psi` loads
-the JSONL file if it exists and rewrites it after each run. The on-disk
-format matches `pi`'s v2 schema (headers, typed entries, parent pointers,
-cache markers, file-op provenance); auto-save to a default path and
-session-picker UI are planned (see the comparison in
-[docs/port-status.md](docs/port-status.md)).
+When no `--session FILE` is set, psi assigns a default path under
+`$XDG_STATE_HOME/psi/sessions` or `~/.local/state/psi/sessions`. The on-disk
+format matches the pi-style v3 JSONL shape: a session header followed by typed
+entries with parent pointers, cache markers, file-op provenance, and custom
+extension entries. The session-picker/tree UI is still planned.
 
 Current structured host tools registered in `lua/psi/tools.lua`:
 
@@ -122,6 +122,9 @@ Current structured host tools registered in `lua/psi/tools.lua`:
 Tool inputs are plain Lua tables (or Lua alists when routed through the C
 glue). The bootstrap and extensions live in Lua and dispatch through
 `psi.tools.dispatch_alist` rather than a stringly JSON API.
+The `read` tool supports `offset` and `limit`; `write` and `edit` are
+serialized per path so concurrent tool calls cannot mutate the same file at
+the same time.
 
 `bash`, `grep`, `find`, and `ls` run through a small host process layer in
 `src/core/process.c` that captures output and exit status using `fork`/`exec`
@@ -130,7 +133,7 @@ on POSIX.
 `--system-prompt` is the current bridge from scaffold to usable harness
 behavior. It emits the default coding-agent prompt that `psi` would hand to a
 model, including discovered `AGENTS.md` / `CLAUDE.md` files from the current
-working directory upward.
+working directory upward plus global files from `~/.config/psi/`.
 
 `--agent` is the first real coding-agent loop. It targets Anthropic's Messages
 API, streams text to stdout as it arrives, executes built-in host tools, and
@@ -157,8 +160,8 @@ Current limitations of `--agent`:
   than a full branch tree walker
 - compaction is summary-based and now dynamically token-aware, but
   not branch-aware
-- two wired providers (Anthropic, Ollama); a general provider
-  abstraction is not yet formalised
+- three wired providers (Anthropic, Ollama, OpenRouter); extension-level
+  provider registration is not frozen yet
 
 ## Extensions
 
@@ -181,12 +184,9 @@ for the authoring guide.
   `anthropic`, `common`, `embedded_lua`, `host_ops`, `message`,
   `process`, `runtime`, `session`, `vm`)
 - `src/main.c`: entry point and CLI dispatch
-- `src/core/`: core host runtime (abort signal, agent loop,
-  Anthropic client, host ops, process spawning, session I/O)
+- `src/core/`: core host runtime (abort signal, host ops,
+  process spawning, HTTP helpers, in-memory session backing)
 - `src/runtime/`: CLI parsing and the print/TUI runtime modes
-  (including the TUI's C-side status + markdown drawers, which
-  bypass Lua on the redraw path — see
-  [docs/architecture.md §4.3](docs/architecture.md))
 - `src/lua/vm.c`: Lua VM initialization, C-to-Lua glue, and the
   embedded-asset searcher / inflate plumbing
 - `scripts/embed_lua.c`: build-time helper that deflate-compresses
@@ -195,9 +195,10 @@ for the authoring guide.
   together, bridges render hooks onto the events bus, and loads
   extensions
 - `lua/psi/`: Lua modules — tool registry, built-in tools, prompt
-  assembly, session records/format, provider loops (Anthropic,
-  Ollama), agent orchestration, slash commands, events bus,
-  context mirror, render/diff/ANSI/markdown helpers, prelude
+  assembly, session records/format, provider registry, provider loops
+  (Anthropic, Ollama, OpenRouter), settings/resources, agent orchestration,
+  slash commands, events bus, context mirror, render/diff/ANSI/markdown
+  helpers, prelude
 - `tests/`: stdlib-only Python test harnesses —
   `smoke.py` runs offline tests by default and live Anthropic
   tests when `ANTHROPIC_API_KEY` is set; `bench.py` runs hot-path

@@ -18,6 +18,10 @@ checkersReport
 # signatures; constifying the void* opaque-data parameter breaks the
 # function-pointer ABI.
 constParameterCallback:src/core/anthropic.c
+constParameterCallback:src/core/http_async.c
+
+# Windows fallback handles are intentionally opaque placeholders.
+unusedStructMember:src/core/process.c
 
 # ---- intentionally public C API ----
 # psi_strdup_n, psi_message_init_with_data, psi_message_free are part of
