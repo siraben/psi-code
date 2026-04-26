@@ -134,9 +134,10 @@ All the C-side duplicates that existed to work around the old
 worker-thread model — `psi_tui_footer_lines` (C status formatting),
 `psi_tui_draw_assistant_line` (C markdown parser), the event queue
 / mutex / condvar — have been deleted. The TUI redraws via
-`psi.tui.status_line` + `psi.tui.footer_hint` + `psi.markdown.render_line`,
-fed through a small ANSI-escape FSM that maps `\e[Nm` codes to
-ncurses attrs.
+`psi.tui_layout.status_line` + `psi.tui_layout.footer_hint` +
+`psi.tui_layout.input_layout` + `psi.markdown.render_line`, fed
+through a small ANSI-escape FSM that maps `\e[Nm` codes to ncurses
+attrs.
 
 Non-TUI modes (print, REPL, `--agent`, `--eval`, `--compact`) use
 the same coroutine driver but install no tick hook, so
@@ -449,7 +450,10 @@ streaming entry and set `transcript_dirty`; the next tick repaints.
 
 TUI-specific rendering calls straight into Lua from the draw path:
 
-- `psi.tui.status_line` / `psi.tui.footer_hint` build the status line
+- `psi.tui_layout.status_line` / `psi.tui_layout.footer_hint` build the
+  footer/status strings
+- `psi.tui_layout.input_layout` chooses prompt prefixes and the nominal
+  visible-row cap for the multiline editor
 - `psi.markdown.render_line` styles each wrapped assistant line
 - a small C ANSI-escape FSM (`psi_tui_draw_ansi_line`) converts the
   resulting `\e[Nm` codes to ncurses attrs / color pairs

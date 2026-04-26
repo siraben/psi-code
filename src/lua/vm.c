@@ -1594,11 +1594,11 @@ int psi_vm_markdown_render_line(struct psi_vm *vm, const char *text, int in_code
 }
 
 int psi_vm_tui_status_line(struct psi_vm *vm, const char *arg_json, char **output_text) {
-    return psi_vm_call_string_procedure(vm, "psi.tui.status_line", arg_json, output_text);
+    return psi_vm_call_string_procedure(vm, "psi.tui_layout.status_line", arg_json, output_text);
 }
 
 int psi_vm_tui_footer_hint(struct psi_vm *vm, const char *arg_json, char **output_text) {
-    return psi_vm_call_string_procedure(vm, "psi.tui.footer_hint", arg_json, output_text);
+    return psi_vm_call_string_procedure(vm, "psi.tui_layout.footer_hint", arg_json, output_text);
 }
 
 int psi_vm_call_procedure0_to_string(struct psi_vm *vm, const char *procedure_name,

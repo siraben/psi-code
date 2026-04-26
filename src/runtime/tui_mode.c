@@ -56,6 +56,11 @@ struct psi_tui_render_line {
     int in_code_fence;
 };
 
+#define PSI_TUI_DEFAULT_INPUT_PREFIX_FIRST "> "
+#define PSI_TUI_DEFAULT_INPUT_PREFIX_REST  "| "
+#define PSI_TUI_DEFAULT_MAX_INPUT_ROWS 5
+#define PSI_TUI_INPUT_PREFIX_MAX 32
+
 struct psi_tui_state {
     struct psi_agent_runtime runtime;
     const struct psi_cli_options *options;
@@ -84,6 +89,9 @@ struct psi_tui_state {
     int transcript_dirty;
     int width;
     int height;
+    int input_max_rows;
+    char input_prefix_first[PSI_TUI_INPUT_PREFIX_MAX];
+    char input_prefix_rest[PSI_TUI_INPUT_PREFIX_MAX];
 
     /* Cancellation token read by the HTTP helper thread (curl
      * transfer hook) and the async process poll loop. Main thread
@@ -98,9 +106,6 @@ struct psi_tui_stdio_guard {
 };
 
 static const long PSI_TUI_MAX_RENDER_TEXT = 8192l;
-#define PSI_TUI_INPUT_PREFIX_FIRST "> "
-#define PSI_TUI_INPUT_PREFIX_REST  "| "
-#define PSI_TUI_MAX_INPUT_ROWS 5
 
 struct psi_tui_input_line {
     size_t start;
@@ -142,6 +147,42 @@ static void psi_tui_kill_to_end(struct psi_tui_state *state);
 static void psi_tui_kill_to_start(struct psi_tui_state *state);
 static int psi_tui_start_compact(struct psi_tui_state *state, long keep_recent);
 static void psi_tui_submit_if_idle(struct psi_tui_state *state);
+static void psi_tui_refresh_input_layout(struct psi_tui_state *state);
+
+static void psi_tui_copy_truncated(char *dest, size_t dest_size, const char *src) {
+    size_t length;
+
+    if (dest == NULL || dest_size == 0u) {
+        return;
+    }
+    if (src == NULL) {
+        dest[0] = '\0';
+        return;
+    }
+
+    length = strlen(src);
+    if (length >= dest_size) {
+        length = dest_size - 1u;
+    }
+    memcpy(dest, src, length);
+    dest[length] = '\0';
+}
+
+static void psi_tui_set_default_input_layout(struct psi_tui_state *state) {
+    if (state == NULL) {
+        return;
+    }
+
+    state->input_max_rows = PSI_TUI_DEFAULT_MAX_INPUT_ROWS;
+    psi_tui_copy_truncated(
+        state->input_prefix_first,
+        sizeof(state->input_prefix_first),
+        PSI_TUI_DEFAULT_INPUT_PREFIX_FIRST);
+    psi_tui_copy_truncated(
+        state->input_prefix_rest,
+        sizeof(state->input_prefix_rest),
+        PSI_TUI_DEFAULT_INPUT_PREFIX_REST);
+}
 
 static int psi_tui_input_wrap_width(int width) {
     int available = width - 2;
@@ -157,12 +198,15 @@ static int psi_tui_input_max_rows(const struct psi_tui_state *state) {
     if (state == NULL) {
         return 1;
     }
-    max_rows = state->height - 5;
+    max_rows = state->input_max_rows;
+    if (max_rows < 1) {
+        max_rows = PSI_TUI_DEFAULT_MAX_INPUT_ROWS;
+    }
+    if (max_rows > state->height - 5) {
+        max_rows = state->height - 5;
+    }
     if (max_rows < 1) {
         max_rows = 1;
-    }
-    if (max_rows > PSI_TUI_MAX_INPUT_ROWS) {
-        max_rows = PSI_TUI_MAX_INPUT_ROWS;
     }
     return max_rows;
 }
@@ -1355,6 +1399,75 @@ static void psi_tui_footer_arg_json(
              state->scroll_offset);
 }
 
+/* Resolve input layout policy through Lua. The ncurses mechanics
+ * remain in C (raw key input, cursor placement, buffer mutation),
+ * but presentation policy such as prompt prefixes and the preferred
+ * visible-row cap lives in psi.tui_layout so ports/customisations
+ * can override it without patching the host. */
+static void psi_tui_refresh_input_layout(struct psi_tui_state *state) {
+    char arg_json[256];
+    char *layout_json;
+    cJSON *layout;
+    const char *prefix;
+    long max_rows;
+
+    if (state == NULL) {
+        return;
+    }
+
+    psi_tui_set_default_input_layout(state);
+    if (state->runtime.vm.L == NULL) {
+        return;
+    }
+
+    snprintf(arg_json, sizeof(arg_json),
+             "{\"width\":%d,\"height\":%d,\"busy\":%s,\"scroll\":%d}",
+             state->width,
+             state->height,
+             state->busy ? "true" : "false",
+             state->scroll_offset);
+
+    layout_json = NULL;
+    if (psi_vm_call_string_procedure(
+            &state->runtime.vm,
+            "psi.tui_layout.input_layout",
+            arg_json,
+            &layout_json) != PSI_STATUS_OK ||
+        layout_json == NULL) {
+        free(layout_json);
+        return;
+    }
+
+    layout = cJSON_Parse(layout_json);
+    free(layout_json);
+    if (layout == NULL) {
+        return;
+    }
+
+    max_rows = psi_tui_json_long(layout, "max_rows", state->input_max_rows);
+    if (max_rows > 0l) {
+        state->input_max_rows = (int)max_rows;
+    }
+
+    prefix = psi_tui_json_string(layout, "prefix_first");
+    if (prefix != NULL && prefix[0] != '\0') {
+        psi_tui_copy_truncated(
+            state->input_prefix_first,
+            sizeof(state->input_prefix_first),
+            prefix);
+    }
+
+    prefix = psi_tui_json_string(layout, "prefix_rest");
+    if (prefix != NULL && prefix[0] != '\0') {
+        psi_tui_copy_truncated(
+            state->input_prefix_rest,
+            sizeof(state->input_prefix_rest),
+            prefix);
+    }
+
+    cJSON_Delete(layout);
+}
+
 static void psi_tui_draw_line(int row, const char *text, int color_pair, int attrs) {
     attr_t attribute;
     int max_width;
@@ -1691,6 +1804,7 @@ static void psi_tui_redraw(struct psi_tui_state *state) {
     }
 
     getmaxyx(stdscr, state->height, state->width);
+    psi_tui_refresh_input_layout(state);
     erase();
 
     input_lines = NULL;
@@ -1832,8 +1946,8 @@ static void psi_tui_redraw(struct psi_tui_state *state) {
     for (index = 0u; index < (size_t)input_rows; index++) {
         size_t line_index = input_first_line + index;
         const char *prefix = line_index == 0u
-            ? PSI_TUI_INPUT_PREFIX_FIRST
-            : PSI_TUI_INPUT_PREFIX_REST;
+            ? state->input_prefix_first
+            : state->input_prefix_rest;
 
         if (input_lines != NULL && line_index < input_line_count) {
             psi_tui_draw_input_line(
@@ -1852,8 +1966,8 @@ static void psi_tui_redraw(struct psi_tui_state *state) {
 
         curs_set(1);
         prefix_length = input_cursor_line == 0u
-            ? strlen(PSI_TUI_INPUT_PREFIX_FIRST)
-            : strlen(PSI_TUI_INPUT_PREFIX_REST);
+            ? strlen(state->input_prefix_first)
+            : strlen(state->input_prefix_rest);
         cursor_row = input_start_row + (int)(input_cursor_line - input_first_line);
         cursor_col = (int)prefix_length + (int)input_cursor_col;
         if (cursor_col > state->width - 1) {
@@ -2971,6 +3085,7 @@ static void psi_tui_state_init(struct psi_tui_state *state, const struct psi_cli
     state->streaming_assistant_index = -1;
     state->streaming_thinking_index = -1;
     state->running = 1;
+    psi_tui_set_default_input_layout(state);
     psi_abort_signal_init(&state->abort_signal);
 }
 
