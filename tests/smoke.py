@@ -1101,10 +1101,7 @@ def t_tui_input_layout_settings(psi: Psi):
     )
     out = psi.run(
         "--eval",
-        'local prelude = require("psi.prelude")\n'
-        + 'local raw = require("psi.tui_layout").input_layout(\n'
-        + '  psi.json_encode({width = 80, height = 24}))\n'
-        + 'local layout = prelude.safe_json_decode(raw, {})\n'
+        'local layout = require("psi.tui_runtime")._debug_resolve_input_layout(80, 24)\n'
         + 'return tostring(layout.max_rows or -1)',
         cwd=ctx,
     ).stdout.strip()
