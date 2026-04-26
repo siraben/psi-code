@@ -91,5 +91,7 @@ PSI_OLLAMA_BASE_URL=http://workstation.local:11434 \
   but public extension APIs for adding providers are not frozen yet.
 - Bedrock, Gemini native, Mistral native, Azure responses, and OAuth
   flows from pi-mono.
-- Full pricing metadata. Context-window metadata is intentionally small
-  and lives in `lua/psi/providers.lua`; unknown models fall back to 128k.
+- Full pricing metadata. OpenRouter context-window and output-token
+  metadata is cached lazily as JSON under the user cache directory; the
+  first lookup for a missing OpenRouter model refreshes the cache from
+  OpenRouter's `/api/v1/models` endpoint.
