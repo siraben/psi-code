@@ -98,6 +98,24 @@ struct psi_tui_stdio_guard {
 };
 
 static const long PSI_TUI_MAX_RENDER_TEXT = 8192l;
+#define PSI_TUI_INPUT_PREFIX_FIRST "> "
+#define PSI_TUI_INPUT_PREFIX_REST  "| "
+#define PSI_TUI_MAX_INPUT_ROWS 5
+
+struct psi_tui_input_line {
+    size_t start;
+    size_t len;
+};
+
+enum psi_tui_escape_action {
+    PSI_TUI_ESC_NONE = 0,
+    PSI_TUI_ESC_BARE = 1,
+    PSI_TUI_ESC_WORD_BACKWARD = 2,
+    PSI_TUI_ESC_WORD_FORWARD = 3,
+    PSI_TUI_ESC_DELETE_WORD_FORWARD = 4,
+    PSI_TUI_ESC_DELETE_WORD_BACKWARD = 5,
+    PSI_TUI_ESC_NEWLINE = 6
+};
 
 static int psi_tui_add_entry(
     struct psi_tui_state *state,
@@ -123,6 +141,91 @@ static void psi_tui_move_word_forward(struct psi_tui_state *state);
 static void psi_tui_kill_to_end(struct psi_tui_state *state);
 static void psi_tui_kill_to_start(struct psi_tui_state *state);
 static int psi_tui_start_compact(struct psi_tui_state *state, long keep_recent);
+static void psi_tui_submit_if_idle(struct psi_tui_state *state);
+
+static int psi_tui_input_wrap_width(int width) {
+    int available = width - 2;
+    if (available < 1) {
+        available = 1;
+    }
+    return available;
+}
+
+static int psi_tui_input_max_rows(const struct psi_tui_state *state) {
+    int max_rows;
+
+    if (state == NULL) {
+        return 1;
+    }
+    max_rows = state->height - 5;
+    if (max_rows < 1) {
+        max_rows = 1;
+    }
+    if (max_rows > PSI_TUI_MAX_INPUT_ROWS) {
+        max_rows = PSI_TUI_MAX_INPUT_ROWS;
+    }
+    return max_rows;
+}
+
+static size_t psi_tui_count_input_lines(const struct psi_tui_state *state) {
+    size_t count;
+    size_t pos;
+    size_t input_length;
+    int wrap_width;
+    const char *input;
+
+    if (state == NULL) {
+        return 1u;
+    }
+
+    input = state->input != NULL ? state->input : "";
+    input_length = state->input_length;
+    wrap_width = psi_tui_input_wrap_width(state->width);
+    count = 0u;
+    pos = 0u;
+
+    while (1) {
+        size_t line_end;
+        size_t remaining;
+
+        line_end = pos;
+        while (line_end < input_length && input[line_end] != '\n') {
+            line_end++;
+        }
+
+        remaining = line_end - pos;
+        if (remaining == 0u) {
+            count++;
+        } else {
+            count += (remaining + (size_t)wrap_width - 1u) / (size_t)wrap_width;
+        }
+
+        if (line_end == input_length) {
+            break;
+        }
+        pos = line_end + 1u;
+    }
+
+    if (count == 0u) {
+        count = 1u;
+    }
+    return count;
+}
+
+static int psi_tui_input_visible_rows(const struct psi_tui_state *state) {
+    size_t total_lines;
+    int visible_rows;
+
+    total_lines = psi_tui_count_input_lines(state);
+    visible_rows = psi_tui_input_max_rows(state);
+    if ((size_t)visible_rows > total_lines) {
+        visible_rows = (int)total_lines;
+    }
+    if (visible_rows < 1) {
+        visible_rows = 1;
+    }
+    return visible_rows;
+}
 
 static int psi_tui_transcript_height(const struct psi_tui_state *state) {
     int height;
@@ -130,7 +233,7 @@ static int psi_tui_transcript_height(const struct psi_tui_state *state) {
     if (state == NULL) {
         return 1;
     }
-    height = state->height - 6;
+    height = state->height - (4 + psi_tui_input_visible_rows(state));
     if (height < 1) {
         height = 1;
     }
@@ -1397,23 +1500,191 @@ static void psi_tui_draw_ansi_line(int row, const char *text, int base_color_pai
     }
 }
 
+static int psi_tui_reserve_input_lines(
+    struct psi_tui_input_line **lines,
+    size_t count,
+    size_t *capacity,
+    size_t extra
+) {
+    struct psi_tui_input_line *next_lines;
+    size_t next_capacity;
+
+    if (count + extra <= *capacity) {
+        return PSI_STATUS_OK;
+    }
+
+    next_capacity = *capacity == 0u ? 8u : *capacity;
+    while (next_capacity < count + extra) {
+        next_capacity *= 2u;
+    }
+
+    next_lines = (struct psi_tui_input_line *)realloc(
+        *lines, next_capacity * sizeof(struct psi_tui_input_line));
+    if (next_lines == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    *lines = next_lines;
+    *capacity = next_capacity;
+    return PSI_STATUS_OK;
+}
+
+static int psi_tui_build_input_lines(
+    const struct psi_tui_state *state,
+    struct psi_tui_input_line **lines_out,
+    size_t *count_out,
+    size_t *cursor_line_out,
+    size_t *cursor_col_out
+) {
+    struct psi_tui_input_line *lines;
+    size_t count;
+    size_t capacity;
+    size_t pos;
+    size_t cursor_line;
+    size_t cursor_col;
+    int cursor_found;
+    size_t input_length;
+    int wrap_width;
+    const char *input;
+
+    if (state == NULL || lines_out == NULL || count_out == NULL ||
+        cursor_line_out == NULL || cursor_col_out == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    lines = NULL;
+    count = 0u;
+    capacity = 0u;
+    pos = 0u;
+    cursor_line = 0u;
+    cursor_col = 0u;
+    cursor_found = 0;
+    input = state->input != NULL ? state->input : "";
+    input_length = state->input_length;
+    wrap_width = psi_tui_input_wrap_width(state->width);
+
+    while (1) {
+        size_t line_end;
+
+        line_end = pos;
+        while (line_end < input_length && input[line_end] != '\n') {
+            line_end++;
+        }
+
+        if (line_end == pos) {
+            if (psi_tui_reserve_input_lines(&lines, count, &capacity, 1u) != PSI_STATUS_OK) {
+                free(lines);
+                return PSI_STATUS_ERROR;
+            }
+            lines[count].start = pos;
+            lines[count].len = 0u;
+            if (!cursor_found && state->cursor == pos) {
+                cursor_line = count;
+                cursor_col = 0u;
+                cursor_found = 1;
+            }
+            count++;
+        } else {
+            size_t chunk_start = pos;
+            while (chunk_start < line_end) {
+                size_t take = line_end - chunk_start;
+
+                if (take > (size_t)wrap_width) {
+                    take = (size_t)wrap_width;
+                }
+                if (psi_tui_reserve_input_lines(&lines, count, &capacity, 1u) != PSI_STATUS_OK) {
+                    free(lines);
+                    return PSI_STATUS_ERROR;
+                }
+                lines[count].start = chunk_start;
+                lines[count].len = take;
+                if (!cursor_found &&
+                    state->cursor >= chunk_start &&
+                    state->cursor <= chunk_start + take) {
+                    cursor_line = count;
+                    cursor_col = state->cursor - chunk_start;
+                    cursor_found = 1;
+                }
+                count++;
+                chunk_start += take;
+            }
+        }
+
+        if (line_end == input_length) {
+            break;
+        }
+        pos = line_end + 1u;
+    }
+
+    if (count == 0u) {
+        if (psi_tui_reserve_input_lines(&lines, count, &capacity, 1u) != PSI_STATUS_OK) {
+            free(lines);
+            return PSI_STATUS_ERROR;
+        }
+        lines[count].start = 0u;
+        lines[count].len = 0u;
+        count = 1u;
+    }
+
+    if (!cursor_found) {
+        cursor_line = count - 1u;
+        cursor_col = lines[count - 1u].len;
+    }
+
+    *lines_out = lines;
+    *count_out = count;
+    *cursor_line_out = cursor_line;
+    *cursor_col_out = cursor_col;
+    return PSI_STATUS_OK;
+}
+
+static void psi_tui_draw_input_line(
+    int row,
+    const char *prefix,
+    const char *text,
+    size_t len
+) {
+    size_t prefix_length;
+    char *line_text;
+
+    prefix_length = prefix != NULL ? strlen(prefix) : 0u;
+    line_text = (char *)malloc(prefix_length + len + 1u);
+    if (line_text == NULL) {
+        psi_tui_draw_line(row, prefix != NULL ? prefix : "", 2, A_BOLD);
+        return;
+    }
+
+    if (prefix_length > 0u) {
+        memcpy(line_text, prefix, prefix_length);
+    }
+    if (len > 0u && text != NULL) {
+        memcpy(line_text + prefix_length, text, len);
+    }
+    line_text[prefix_length + len] = '\0';
+    psi_tui_draw_line(row, line_text, 2, A_BOLD);
+    free(line_text);
+}
+
 static void psi_tui_redraw(struct psi_tui_state *state) {
     struct psi_tui_render_line *lines;
     size_t line_count;
+    struct psi_tui_input_line *input_lines;
+    size_t input_line_count;
+    size_t input_cursor_line;
+    size_t input_cursor_col;
     int header_row;
     int transcript_start;
     int transcript_height;
-    int status_row;
-    int footer_row1;
-    int footer_row2;
-    int input_row;
-    int bottom_row;
+    int hint_row;
+    int cwd_row;
+    int status_line_row;
+    int input_start_row;
+    int input_rows;
+    size_t input_first_line;
     int first_line;
     size_t index;
-    char prompt_buffer[4096];
-    int prompt_width;
-    int input_start;
-    size_t visible_cursor;
+    int cursor_row;
+    int cursor_col;
 
     if (state == NULL) {
         return;
@@ -1422,29 +1693,43 @@ static void psi_tui_redraw(struct psi_tui_state *state) {
     getmaxyx(stdscr, state->height, state->width);
     erase();
 
+    input_lines = NULL;
+    input_line_count = 0u;
+    input_cursor_line = 0u;
+    input_cursor_col = 0u;
+    if (psi_tui_build_input_lines(
+            state,
+            &input_lines,
+            &input_line_count,
+            &input_cursor_line,
+            &input_cursor_col
+        ) != PSI_STATUS_OK) {
+        input_line_count = 1u;
+        input_cursor_line = 0u;
+        input_cursor_col = 0u;
+    }
+    input_rows = psi_tui_input_visible_rows(state);
+    if ((size_t)input_rows > input_line_count) {
+        input_rows = (int)input_line_count;
+    }
+    if (input_rows < 1) {
+        input_rows = 1;
+    }
+    input_first_line = 0u;
+    if (input_cursor_line + 1u > (size_t)input_rows) {
+        input_first_line = input_cursor_line + 1u - (size_t)input_rows;
+    }
+    if (input_first_line + (size_t)input_rows > input_line_count) {
+        input_first_line = input_line_count - (size_t)input_rows;
+    }
+
     header_row = 0;
     transcript_start = 1;
-    status_row = state->height - 5;
-    footer_row1 = state->height - 4;
-    footer_row2 = state->height - 3;
-    input_row = state->height - 2;
-    bottom_row = state->height - 1;
-    if (status_row < transcript_start) {
-        status_row = transcript_start;
-    }
-    if (footer_row1 < status_row) {
-        footer_row1 = status_row;
-    }
-    if (footer_row2 < footer_row1) {
-        footer_row2 = footer_row1;
-    }
-    if (input_row < footer_row2) {
-        input_row = footer_row2;
-    }
-    if (bottom_row < input_row) {
-        bottom_row = input_row;
-    }
-    transcript_height = status_row - transcript_start;
+    hint_row = state->height - input_rows - 3;
+    cwd_row = hint_row + 1;
+    status_line_row = hint_row + 2;
+    input_start_row = hint_row + 3;
+    transcript_height = hint_row - transcript_start;
     if (transcript_height < 1) {
         transcript_height = 1;
     }
@@ -1518,14 +1803,14 @@ static void psi_tui_redraw(struct psi_tui_state *state) {
          * defer to psi.tui.footer_hint. */
         if (state->status_text != NULL) {
             psi_tui_draw_line(
-                status_row, state->status_text,
+                hint_row, state->status_text,
                 state->status_is_error ? 6 : 7,
                 state->status_is_error ? A_BOLD : A_DIM
             );
         } else {
             psi_vm_tui_footer_hint(&state->runtime.vm, arg_json, &hint);
             psi_tui_draw_line(
-                status_row, hint != NULL ? hint : "",
+                hint_row, hint != NULL ? hint : "",
                 7, A_DIM
             );
             free(hint);
@@ -1536,41 +1821,51 @@ static void psi_tui_redraw(struct psi_tui_state *state) {
             snprintf(cwd_buffer, sizeof(cwd_buffer),
                      "<cwd unavailable: %s>", strerror(errno));
         }
-        psi_tui_draw_line(footer_row1, cwd_buffer, 7, A_DIM);
+        psi_tui_draw_line(cwd_row, cwd_buffer, 7, A_DIM);
 
         psi_vm_tui_status_line(&state->runtime.vm, arg_json, &status_line);
-        psi_tui_draw_line(footer_row2, status_line != NULL ? status_line : "",
+        psi_tui_draw_line(status_line_row, status_line != NULL ? status_line : "",
                           7, A_DIM);
         free(status_line);
     }
 
-    prompt_width = state->width - 3;
-    if (prompt_width < 1) {
-        prompt_width = 1;
+    for (index = 0u; index < (size_t)input_rows; index++) {
+        size_t line_index = input_first_line + index;
+        const char *prefix = line_index == 0u
+            ? PSI_TUI_INPUT_PREFIX_FIRST
+            : PSI_TUI_INPUT_PREFIX_REST;
+
+        if (input_lines != NULL && line_index < input_line_count) {
+            psi_tui_draw_input_line(
+                input_start_row + (int)index,
+                prefix,
+                state->input != NULL ? state->input + input_lines[line_index].start : "",
+                input_lines[line_index].len
+            );
+        } else {
+            psi_tui_draw_input_line(input_start_row + (int)index, prefix, "", 0u);
+        }
     }
-    input_start = 0;
-    if ((int)state->cursor >= prompt_width) {
-        input_start = (int)state->cursor - prompt_width + 1;
-    }
-    snprintf(prompt_buffer, sizeof(prompt_buffer), "> %s", state->input != NULL ? state->input + input_start : "");
-    psi_tui_draw_line(input_row, prompt_buffer, 2, A_BOLD);
-    psi_tui_draw_line(bottom_row, "", 0, 0);
 
     {
-        int cursor_col;
+        size_t prefix_length;
 
         curs_set(1);
-        visible_cursor = state->cursor - (size_t)input_start;
-        cursor_col = 2 + (int)visible_cursor;
-        if (cursor_col > state->width - 2) {
-            cursor_col = state->width - 2;
+        prefix_length = input_cursor_line == 0u
+            ? strlen(PSI_TUI_INPUT_PREFIX_FIRST)
+            : strlen(PSI_TUI_INPUT_PREFIX_REST);
+        cursor_row = input_start_row + (int)(input_cursor_line - input_first_line);
+        cursor_col = (int)prefix_length + (int)input_cursor_col;
+        if (cursor_col > state->width - 1) {
+            cursor_col = state->width - 1;
         }
         if (cursor_col < 0) {
             cursor_col = 0;
         }
-        move(input_row, cursor_col);
+        move(cursor_row, cursor_col);
     }
 
+    free(input_lines);
     refresh();
 }
 
@@ -1976,6 +2271,139 @@ static void psi_tui_rebuild_from_session(struct psi_tui_state *state) {
     state->scroll_offset = 0;
 }
 
+static int psi_tui_collect_escape_sequence(char *buffer, size_t buffer_size, int restore_timeout_ms) {
+    size_t length;
+    int ch;
+    int timeout_ms;
+
+    if (buffer == NULL || buffer_size == 0u) {
+        return 0;
+    }
+
+    length = 0u;
+    buffer[0] = '\0';
+    timeout_ms = 25;
+    for (;;) {
+        wtimeout(stdscr, timeout_ms);
+        ch = getch();
+        if (ch == ERR) {
+            break;
+        }
+        if (ch < 0 || ch > 255) {
+            break;
+        }
+        if (length + 1u >= buffer_size) {
+            break;
+        }
+
+        buffer[length++] = (char)ch;
+        buffer[length] = '\0';
+
+        if (ch == '\r' || ch == '\n' || ch == '~' ||
+            (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
+            break;
+        }
+        timeout_ms = 5;
+    }
+
+    wtimeout(stdscr, restore_timeout_ms);
+    return (int)length;
+}
+
+static int psi_tui_escape_sequence_action(const char *sequence) {
+    unsigned int first;
+    unsigned int second;
+    unsigned int third;
+    char final;
+
+    if (sequence == NULL || sequence[0] == '\0') {
+        return PSI_TUI_ESC_BARE;
+    }
+    if (strcmp(sequence, "b") == 0 || strcmp(sequence, "B") == 0) {
+        return PSI_TUI_ESC_WORD_BACKWARD;
+    }
+    if (strcmp(sequence, "f") == 0 || strcmp(sequence, "F") == 0) {
+        return PSI_TUI_ESC_WORD_FORWARD;
+    }
+    if (strcmp(sequence, "d") == 0 || strcmp(sequence, "D") == 0) {
+        return PSI_TUI_ESC_DELETE_WORD_FORWARD;
+    }
+    if (strcmp(sequence, "\b") == 0 || strcmp(sequence, "\177") == 0) {
+        return PSI_TUI_ESC_DELETE_WORD_BACKWARD;
+    }
+    if (strcmp(sequence, "\r") == 0 || strcmp(sequence, "\n") == 0) {
+        return PSI_TUI_ESC_NEWLINE;
+    }
+
+    if (sscanf(sequence, "[%u;%u;%u%c", &first, &second, &third, &final) == 4 &&
+        final == '~' && first == 27u && third == 13u && second >= 2u) {
+        return PSI_TUI_ESC_NEWLINE;
+    }
+    if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 &&
+        (final == 'u' || final == '~') &&
+        (first == 13u || first == 57414u) &&
+        second >= 2u) {
+        return PSI_TUI_ESC_NEWLINE;
+    }
+
+    return PSI_TUI_ESC_NONE;
+}
+
+static void psi_tui_abort_current_turn(struct psi_tui_state *state) {
+    if (state == NULL || !state->busy) {
+        return;
+    }
+    psi_abort_signal_trigger(&state->abort_signal);
+    psi_tui_set_status(state, "aborting...", 0);
+    state->transcript_dirty = 1;
+}
+
+static void psi_tui_handle_escape_input(
+    struct psi_tui_state *state,
+    int restore_timeout_ms,
+    int bare_escape_aborts
+) {
+    char sequence[64];
+    int action;
+
+    if (state == NULL) {
+        return;
+    }
+
+    psi_tui_collect_escape_sequence(sequence, sizeof(sequence), restore_timeout_ms);
+    action = psi_tui_escape_sequence_action(sequence);
+    switch (action) {
+        case PSI_TUI_ESC_BARE:
+            if (bare_escape_aborts) {
+                psi_tui_abort_current_turn(state);
+            }
+            return;
+        case PSI_TUI_ESC_WORD_BACKWARD:
+            psi_tui_move_word_backward(state);
+            state->transcript_dirty = 1;
+            return;
+        case PSI_TUI_ESC_WORD_FORWARD:
+            psi_tui_move_word_forward(state);
+            state->transcript_dirty = 1;
+            return;
+        case PSI_TUI_ESC_DELETE_WORD_FORWARD:
+            psi_tui_delete_word_forward(state);
+            state->transcript_dirty = 1;
+            return;
+        case PSI_TUI_ESC_DELETE_WORD_BACKWARD:
+            psi_tui_delete_word_backward(state);
+            state->transcript_dirty = 1;
+            return;
+        case PSI_TUI_ESC_NEWLINE:
+            psi_tui_insert_char(state, '\n');
+            state->transcript_dirty = 1;
+            return;
+        case PSI_TUI_ESC_NONE:
+        default:
+            return;
+    }
+}
+
 /* Dispatch a slash command. If the command expands to a prompt
  * template body (action kind "expand"), the expanded text is copied
  * into *expanded_text so the caller can submit it as a turn; the
@@ -2073,9 +2501,8 @@ static void psi_tui_tick(void *userdata) {
 }
 
 /* Lightweight input dispatch used by the tick hook during a turn.
- * Supports abort (Esc), scroll, resize, full-redraw, Ctrl-Z, and
- * input editing. Enter submits are gated off while busy. */
-static void psi_tui_submit_if_idle(struct psi_tui_state *state); /* fwd */
+ * Supports abort (Esc), scroll, resize, full-redraw, and prompt
+ * editing. Plain Enter submits; modified Enter inserts newlines. */
 
 static void psi_tui_input_once(struct psi_tui_state *state, int ch) {
     if (state == NULL) return;
@@ -2105,12 +2532,8 @@ static void psi_tui_input_once(struct psi_tui_state *state, int ch) {
         state->transcript_dirty = 1;
         return;
     }
-    if (ch == 27) { /* Esc — aborts the turn while busy */
-        if (state->busy) {
-            psi_abort_signal_trigger(&state->abort_signal);
-            psi_tui_set_status(state, "aborting...", 0);
-            state->transcript_dirty = 1;
-        }
+    if (ch == 27) {
+        psi_tui_handle_escape_input(state, 0, 1);
         return;
     }
     if (ch == 12) { /* Ctrl-L */
@@ -2119,9 +2542,14 @@ static void psi_tui_input_once(struct psi_tui_state *state, int ch) {
         return;
     }
     /* Input editing — allowed while busy so the user can compose
-     * the next message. Enter submit is gated by busy inside submit. */
+     * the next message. */
     if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
         psi_tui_delete_backward(state);
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (ch == KEY_DC) {
+        psi_tui_delete_forward(state);
         state->transcript_dirty = 1;
         return;
     }
@@ -2139,9 +2567,13 @@ static void psi_tui_input_once(struct psi_tui_state *state, int ch) {
     if (ch == KEY_RIGHT || ch == 6) { if (state->cursor < state->input_length) state->cursor++; state->transcript_dirty = 1; return; }
     if (ch == KEY_HOME || ch == 1)  { state->cursor = 0u; state->transcript_dirty = 1; return; }
     if (ch == KEY_END  || ch == 5)  { state->cursor = state->input_length; state->transcript_dirty = 1; return; }
-    if (ch == '\n' || ch == '\r' || ch == KEY_ENTER) {
-        /* Gate inside submit_if_idle — while busy, just ignore. */
+    if (ch == KEY_ENTER || ch == '\r') {
         psi_tui_submit_if_idle(state);
+        state->transcript_dirty = 1;
+        return;
+    }
+    if (ch == '\n') {
+        psi_tui_insert_char(state, '\n');
         state->transcript_dirty = 1;
         return;
     }
@@ -2617,30 +3049,10 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
         if (ch == KEY_UP)     { psi_tui_scroll_by(&state, 1); psi_tui_redraw(&state); continue; }
         if (ch == KEY_DOWN)   { psi_tui_scroll_by(&state, -1); psi_tui_redraw(&state); continue; }
 
-        /* Esc: peek for Alt-<key> readline binding (b/f/d/Backspace).
-         * A bare Esc in idle mode is a no-op. */
+        /* Esc: Alt-word bindings and modified Enter sequences. A bare
+         * Esc in idle mode remains a no-op. */
         if (ch == 27) {
-            int next;
-            wtimeout(stdscr, 25);
-            next = getch();
-            wtimeout(stdscr, -1);
-            if (next == ERR) continue;
-            switch (next) {
-                case 'b': case 'B':
-                    psi_tui_move_word_backward(&state);
-                    break;
-                case 'f': case 'F':
-                    psi_tui_move_word_forward(&state);
-                    break;
-                case 'd': case 'D':
-                    psi_tui_delete_word_forward(&state);
-                    break;
-                case KEY_BACKSPACE: case 127: case 8:
-                    psi_tui_delete_word_backward(&state);
-                    break;
-                default:
-                    break;
-            }
+            psi_tui_handle_escape_input(&state, -1, 0);
             psi_tui_redraw(&state);
             continue;
         }
@@ -2650,7 +3062,7 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
          *   ^E end   ^F right ^H backspace
          *   ^K kill-to-end  ^L redraw
          *   ^U kill-to-start ^W delete-word-backward
-         *   ^Z suspend */
+         *   Del delete-forward  ^Z suspend */
         if (ch == 4 && state.input_length == 0u) {
             state.running = 0;
             continue;
@@ -2687,6 +3099,8 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
             psi_tui_kill_to_start(&state);
         } else if (ch == 23) {
             psi_tui_delete_word_backward(&state);
+        } else if (ch == KEY_DC) {
+            psi_tui_delete_forward(&state);
         } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
             psi_tui_delete_backward(&state);
         } else if (ch == KEY_LEFT || ch == 2) {
@@ -2697,8 +3111,10 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
             state.cursor = 0u;
         } else if (ch == KEY_END || ch == 5) {
             state.cursor = state.input_length;
-        } else if (ch == '\n' || ch == '\r' || ch == KEY_ENTER) {
+        } else if (ch == KEY_ENTER || ch == '\r') {
             (void)psi_tui_submit(&state);
+        } else if (ch == '\n') {
+            psi_tui_insert_char(&state, '\n');
         } else if (isprint(ch)) {
             psi_tui_insert_char(&state, ch);
         }

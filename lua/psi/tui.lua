@@ -87,9 +87,9 @@ function M.footer_hint(arg_json)
     return "Esc abort current turn"
   end
   if (tonumber(arg.scroll) or 0) > 0 then
-    return "↑↓ scroll  PgUp/PgDn page  Home/End jump  Enter=submit  /help  /quit"
+    return "↑↓ scroll  PgUp/PgDn page  Enter=submit  Shift-Enter=newline  /help  /quit"
   end
-  return "Enter submit  ↑↓ scroll  /help  /quit"
+  return "Enter submit  Shift-Enter newline  ↑↓ scroll  /help  /quit"
 end
 
 return M
