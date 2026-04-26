@@ -203,7 +203,10 @@ These are part of the stable surface:
 | API | Notes |
 |---|---|
 | `psi.cwd()` | Current working directory string. |
-| `psi.read_file(path)` / `psi.file_exists(path)` / `psi.file_write(path, content)` | Filesystem I/O. |
+| `psi.read_file(path)` / `psi.read_file_slice(path, offset, limit, max_bytes)` / `psi.file_write(path, content)` | File I/O. `read_file_slice` returns text plus line/truncation metadata without slurping the whole file into Lua. |
+| `psi.file_exists(path)` / `psi.file_type(path)` / `psi.list_dir(path)` | Filesystem inspection. `file_type` returns `file`, `directory`, `other`, or `nil`; `list_dir` returns names without `.` or `..`. |
+| `psi.path_join(base, name)` / `psi.path_expand(path)` / `psi.path_resolve(path)` / `psi.parent_directory(path)` | Portable path helpers. `path_expand` handles `~` and leading `@`; `path_resolve` anchors relative paths at the current working directory. |
+| `psi.mkdir_p(path)` / `psi.mkdir_parent(path)` | Recursive directory creation. |
 | `psi.current_date()` | `"YYYY-MM-DD"`. |
 | `psi.is_aborted()` | `true` when Ctrl-C / Esc requested. Poll during long work. |
 | `psi.json_encode(v)` / `psi.json_decode(s)` | JSON. |

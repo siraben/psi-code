@@ -234,6 +234,29 @@ def t_fs_portable_primitives(psi: Psi):
     assert_equals(out, "true|true|a.md,b.lua|true", "portable filesystem primitives")
 
 
+@test("fs/path_primitives")
+def t_fs_path_primitives(psi: Psi):
+    out = psi.eval(
+        'return psi.path_join("/tmp/", "x") .. "|"\n'
+        '  .. psi.path_join(".", "x") .. "|"\n'
+        '  .. psi.path_join("/tmp/a", "/b") .. "|"\n'
+        '  .. psi.parent_directory("/usr/") .. "|"\n'
+        '  .. tostring(psi.path_expand("@~/psi-test"):match("/psi%-test$") ~= nil)'
+    )
+    assert_equals(out, "/tmp/x|x|/b|/|true", "portable path primitives")
+
+
+@test("fs/read_file_slice")
+def t_fs_read_file_slice(psi: Psi):
+    target = psi.tmp / "slice.txt"
+    target.write_text("one\ntwo\nthree\nfour\n")
+    out = psi.eval(
+        f"local s = psi.read_file_slice({json.dumps(str(target))}, 1, 2)\n"
+        "return s.text .. '|' .. tostring(s.total_lines) .. '|' .. tostring(s.next_offset)"
+    )
+    assert_equals(out, "two\nthree|4|3", "read file slice")
+
+
 @test("eval/tool_registry")
 def t_eval_tool_registry(psi: Psi):
     # The registry's first registered tool is `read`.
@@ -260,6 +283,18 @@ def t_tool_write(psi: Psi):
     )
     assert_equals(out, "write true 10", "write tool result")
     assert_equals(target.read_text(), "alpha beta", "written file")
+
+
+@test("tool/write_creates_parent")
+def t_tool_write_creates_parent(psi: Psi):
+    target = psi.tmp / "nested" / "child" / "tool.txt"
+    out = psi.eval(
+        f"local r = require('psi.tools').dispatch('write', "
+        f"{{path={json.dumps(str(target))}, content='alpha'}})\n"
+        "return r.tool .. ' ' .. tostring(r.ok)"
+    )
+    assert_equals(out, "write true", "write created parent")
+    assert_equals(target.read_text(), "alpha", "nested file")
 
 
 @test("tool/edit")
@@ -307,11 +342,21 @@ def t_tool_find(psi: Psi):
 
 @test("tool/ls")
 def t_tool_ls(psi: Psi):
+    root = psi.tmp / "ls"
+    root.mkdir()
+    (root / ".dot").write_text("")
+    (root / "sub").mkdir()
+    (root / "a.txt").write_text("")
     out = psi.eval(
-        'local r = require("psi.tools").dispatch("ls", {path=".", limit=5})\n'
+        f'local r = require("psi.tools").dispatch("ls", {{path={json.dumps(str(root))}, limit=5}})\n'
         'return r.tool .. " " .. tostring(r.ok) .. " " .. tostring(#r.extras.output > 0)'
     )
     assert_equals(out, "ls true true", "ls tool result")
+    listing = psi.eval(
+        f'local r = require("psi.tools").dispatch("ls", {{path={json.dumps(str(root))}, limit=5}})\n'
+        "return r.extras.output"
+    )
+    assert_equals(listing, ".dot\na.txt\nsub/", "portable ls listing")
 
 
 @test("tool/lua_summary")

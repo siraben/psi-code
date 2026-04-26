@@ -240,6 +240,9 @@ function M.as_array(t)
 end
 
 function M.path_join(base, name)
+  if psi and psi.path_join then
+    return psi.path_join(base, name)
+  end
   if base == "/" then
     return "/" .. name
   end

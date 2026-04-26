@@ -88,10 +88,10 @@ function M.ensure_default_path()
     if home == "" then
       return nil
     end
-    base = home .. "/.local/state"
+    base = prelude.path_join(home, ".local/state")
   end
-  local dir = base .. "/psi/sessions"
-  local path = dir .. "/" .. id .. ".jsonl"
+  local dir = prelude.path_join(base, "psi/sessions")
+  local path = prelude.path_join(dir, id .. ".jsonl")
   psi.session_set_path(path)
   return path
 end

@@ -87,7 +87,7 @@ TARGET = $(BUILD_DIR)/psi
 # so a portable static binary can self-describe without a source tree.
 LUA_SOURCES = \
 	lua/boot.lua \
-	$(sort $(wildcard lua/psi/*.lua))
+	$(sort $(shell find lua/psi -type f -name '*.lua' 2>/dev/null))
 DOC_SOURCES = README.md $(sort $(wildcard docs/*.md))
 EMBED_TOOL  = $(BUILD_DIR)/embed_lua
 EMBED_OUT   = $(BUILD_DIR)/embedded_lua.c
@@ -199,7 +199,7 @@ install: $(TARGET)
 	cp $(TARGET) $(DESTDIR)$(BINDIR)/psi
 	cp include/psi/*.h $(DESTDIR)$(INCLUDEDIR)/psi/
 	cp lua/boot.lua $(DESTDIR)$(SHAREDIR)/boot.lua
-	cp lua/psi/*.lua $(DESTDIR)$(SHAREDIR)/psi/
+	cp -R lua/psi/. $(DESTDIR)$(SHAREDIR)/psi/
 
 clean:
 	rm -rf $(BUILD_DIR)
