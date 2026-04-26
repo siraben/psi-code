@@ -1,15 +1,14 @@
 /* Synchronous "async" HTTP stream for APE on 9front.
  *
- * APE has no pthreads. For the MVP we buffer the entire stream into a
- * linked list of chunks synchronously in psi_http_stream_begin, then
- * dispense them one at a time from psi_http_stream_poll. The caller
- * contract (poll returns 1 with owned chunk / 0 continue / 2 done) is
- * preserved.
+ * APE has no pthreads. We buffer the entire stream into a linked list
+ * of chunks synchronously in psi_http_stream_begin, then dispense them
+ * one at a time from psi_http_stream_poll. The caller contract (poll
+ * returns 1 with owned chunk / 0 continue / 2 done) is preserved.
  *
- * Downside: the UI loop is blocked for the duration of the request,
- * so abort during transfer is best-effort (the underlying webfs call
- * will observe the abort signal between chunks). Good enough for an
- * MVP; upgrade to libthread later if needed.
+ * Trade-off: the UI loop blocks for the duration of the request, so
+ * abort during transfer is best-effort — the underlying webfs call
+ * observes the abort signal only between chunks. Upgrade to libthread
+ * later if needed.
  */
 
 #include <stdlib.h>

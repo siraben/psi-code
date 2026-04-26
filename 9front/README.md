@@ -56,12 +56,30 @@ Lua position-capture bug that only surfaces on 32-bit-`size_t` /
 
 ## Host↔VM control
 
-After install, bootstrap the job-queue worker once via VNC, then
-drive everything through `tools/9ctl` (9P + TCP, no further
-keystroke injection):
+Two host-side channels, both over forwarded TCP:
 
-    ./tools/9ctl job -f path/to/cmd.rc       # submit+wait+read
-    ./tools/9ctl read work/psi-link.log      # read any file via 9P
-    ./tools/9ctl put build.rc psi9-build/build.rc
+- **`tools/9ctl`** — fast file ops (read/ls/put) over 9P/exportfs
+  on port 17019. Runs as user `glenda`. ~10ms round-trip.
+- **`tools/drawterm-cmd`** — TLS-authenticated remote shell via
+  `rcpu(1)` on port 17020, bootstrapped by `tools/fullup.rc` on the
+  guest (one-time, sets up `auth/keyfs` + `factotum` + `webfs -s web`
+  + the rcpu listener). The Plan-9-native equivalent of `ssh user@host
+  CMD`. ~1.5s startup but no keystroke-injection mistypes, no
+  shift-key gotchas, no listen1-as-`none` namespace wedges.
 
-See `JOURNEY.md` for every wall hit along the way.
+Examples:
+
+    ./tools/drawterm-cmd 'rc command'
+    ./tools/drawterm-cmd < script.rc
+    ./tools/9ctl read work/psi-link.log
+
+Setup once:
+
+    # Host: stash a dp9ik password where drawterm-cmd reads it
+    echo 'mypass' > ~/.config/psi9-pw && chmod 600 ~/.config/psi9-pw
+    cp ~/.config/psi9-pw /tmp/9host/_pw && chmod 644 /tmp/9host/_pw
+
+    # Guest (in rio term, after first boot):
+    hget http://10.0.2.2:8765/fullup.rc > /tmp/up.rc; rc /tmp/up.rc
+
+See `JOURNEY.md` Phase 7 for the protocol-upgrade story.

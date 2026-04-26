@@ -387,3 +387,73 @@ working under rc.
 └── tools/
     └── 9ctl                    — host↔VM control (Python CLI)
 ```
+
+---
+
+## Phase 7 — protocol upgrade: drawterm/rcpu over keystroke injection
+
+The hybrid port worked, but driving the VM was fragile:
+
+- **VNC keystroke injection** mistypes special chars: `!` → `1`, `&` → `?`,
+  `:` dropped, `>` → `.`, uppercase failures. Both vncdotool and QEMU
+  `sendkey` have this — different keymap layers but same root cause.
+- **TCP listen1 → rc as `none`** wedges after high-output commands
+  (linker errors, big builds) and silently accepts new connections
+  without echoing.
+- **9P/exportfs** is reliable for file moves but doesn't help with
+  command exec.
+
+The Plan-9-native answer is **rcpu(1)** — TLS-authenticated remote
+shell using dp9ik. Equivalent of `ssh user@host CMD` but namespace-
+aware. Set up once, then everything is a real TTY and the keymap
+gymnastics disappear.
+
+### Bootstrap
+
+`9front/tools/fullup.rc` does the one-time setup, fetched via `hget`:
+
+1. `aux/listen1 -t 'tcp!*!2222'  /bin/rc &` — keep the old shell
+   for backward compatibility while we transition.
+2. `aux/listen1 -t 'tcp!*!17019' /bin/exportfs -r /usr/glenda &` —
+   9P stays.
+3. `auth/keyfs -p $home/lib/keys` + `auth/changeuser -p glenda` —
+   set glenda's dp9ik password (fed via `hget` from a host-side
+   `_pw` file written once).
+4. `auth/factotum -n` + `key proto=dp9ik dom=9front user=glenda
+   !password=...` written to `/mnt/factotum/ctl`.
+5. `webfs -s web` — re-start webfs with `/srv/web` posted so sessions
+   spawned in fresh namespaces (rcpu sessions are one such) can
+   mount `/mnt/web`. Without this, psi from rcpu can't reach
+   Anthropic.
+6. `aux/listen1 -t 'tcp!*!17020' /rc/bin/service/tcp17019 &` —
+   the rcpu service. We use 17020 (not the canonical 17019) since
+   17019 already serves our exportfs.
+
+### Host side
+
+`9front/tools/drawterm-cmd` wraps `drawterm -G -h tcp!HOST!17020 -u
+glenda -c CMD` with `expect` to feed the dp9ik password from
+`$HOME/.config/psi9-pw` to drawterm's two prompts (its local-factotum
+prompt and the server-side dp9ik prompt). Ergonomics: `drawterm-cmd
+'rc command'` Just Works, no keystroke injection.
+
+### Two namespace gotchas
+
+1. **Default $PATH is sparse.** `drawterm -c CMD` doesn't source
+   profile, so glenda's `bin/rc` and `bin/$objtype` aren't in PATH.
+   Use absolute paths or prefix `. $home/lib/profile;`.
+2. **Each rcpu session gets a fresh namespace.** Anything mounted in
+   rio (webfs, networks, etc.) isn't visible. The fix is to post via
+   `/srv` so any namespace can `mount '#s/web' /mnt/web`. Done in
+   `fullup.rc` for webfs.
+
+### Tradeoffs
+
+drawterm-cmd has ~1.5s startup (TLS handshake + auth) per
+invocation, vs ~50ms for the 9P/listen1 path. For batch builds and
+for psi runs that already take a few seconds end-to-end, that's a
+non-issue. For tiny round-trips (read one file, list a dir) keep
+using `9ctl read` over 9P — faster, no auth.
+
+Both channels stay; `9ctl` remains the right tool for files,
+`drawterm-cmd` for commands.

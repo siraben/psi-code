@@ -55,74 +55,112 @@ ctl_setf(const char *connroot, const char *fmt, ...)
     return writestr_path(path, line, (size_t)n);
 }
 
+/* Allocate a webfs connection slot via /mnt/web/clone and fill connroot
+ * with "/mnt/web/N". The clone fd must stay open for the duration of
+ * the request — closing it tears down the slot. */
 static int
-webfs_clone(int *clonefd_out, char *numbuf, size_t numsz)
+webfs_clone(int *clonefd_out, char *connroot, size_t connroot_sz)
 {
-    int fd;
+    char numbuf[32];
     long n;
-    fd = open("/mnt/web/clone", O_RDWR);
+    int fd = open("/mnt/web/clone", O_RDWR);
     if (fd < 0) return -1;
-    n = read(fd, numbuf, numsz - 1);
+    n = read(fd, numbuf, sizeof numbuf - 1);
     if (n <= 0) { close(fd); return -1; }
     numbuf[n] = 0;
     while (n > 0 && (numbuf[n-1] == '\n' || numbuf[n-1] == ' '))
         numbuf[--n] = 0;
+    snprintf(connroot, connroot_sz, "/mnt/web/%s", numbuf);
     *clonefd_out = fd;
     return 0;
 }
 
+/* Configure ctl + postbody for a POST request. On failure the caller
+ * still owns clonefd and must close it. */
 static int
-webfs_prepare(
+webfs_configure_post(
+    const char *connroot,
     const char *url,
     const char *const *headers, size_t header_count,
-    const char *body, size_t body_len,
-    char *connroot, size_t connroot_sz, int *clonefd_out)
+    const char *body, size_t body_len)
 {
-    char numbuf[32], path[128];
+    char path[128];
     size_t i;
 
-    if (webfs_clone(clonefd_out, numbuf, sizeof numbuf) < 0) return -1;
-    snprintf(connroot, connroot_sz, "/mnt/web/%s", numbuf);
-
-    if (ctl_setf(connroot, "url %s", url) < 0) goto fail;
-    if (ctl_setf(connroot, "contenttype application/json") < 0) goto fail;
-    if (ctl_setf(connroot, "request POST") < 0) goto fail;
+    if (ctl_setf(connroot, "url %s", url) < 0) return -1;
+    if (ctl_setf(connroot, "contenttype application/json") < 0) return -1;
+    if (ctl_setf(connroot, "request POST") < 0) return -1;
     for (i = 0; i < header_count; i++) {
-        if (ctl_setf(connroot, "headers %s", headers[i]) < 0) goto fail;
+        if (ctl_setf(connroot, "headers %s", headers[i]) < 0) return -1;
     }
     if (body != NULL && body_len > 0) {
         snprintf(path, sizeof path, "%s/postbody", connroot);
-        if (writestr_path(path, body, body_len) < 0) goto fail;
+        if (writestr_path(path, body, body_len) < 0) return -1;
     }
     return 0;
-fail:
-    close(*clonefd_out);
-    *clonefd_out = -1;
-    return -1;
 }
 
 /* 9front webfs(4) signals HTTP status out-of-band: opening
- * /mnt/web/N/body succeeds on 2xx (status 200 assumed for our
- * purposes), and fails with the HTTP status line embedded in the
- * errno string on 4xx/5xx. This differs from Plan-9-from-Bell-Labs
- * webfs which had a /status file; 9front does not.
- *
- * If open succeeded, return 200. If it failed, the caller reads the
- * HTTP status out of the last error description via errstr() — see
- * webfs_parse_errno_status below. */
-
+ * /mnt/web/N/body succeeds on 2xx, and fails with the HTTP status line
+ * embedded in the errno string on 4xx/5xx. This differs from
+ * Plan-9-from-Bell-Labs webfs which had a /status file; 9front does
+ * not. strerror(errno) on 9front APE surfaces the Plan 9 errstr, which
+ * for a body-open failure looks like "500 Internal Server Error". */
 static long
 webfs_parse_errno_status(void)
 {
-    /* strerror(errno) on 9front APE surfaces the Plan 9 errstr, which
-     * for a webfs body-open failure looks like "500 Internal Server
-     * Error" or similar. Parse the leading integer. */
     const char *s = strerror(errno);
     char *end;
     long v;
     if (s == NULL) return 0;
     v = strtol(s, &end, 10);
     return (end > s) ? v : 0;
+}
+
+/* Open the body fd. On success returns 0 and *body_fd is the body fd;
+ * *status_code is set to 200. On failure returns -1; *status_code is
+ * set to the parsed HTTP status (or 0 if unparseable). The clone fd is
+ * left open for the caller in both cases. */
+static int
+webfs_open_body(const char *connroot, int *body_fd, long *status_code)
+{
+    char path[128];
+    int fd;
+    snprintf(path, sizeof path, "%s/body", connroot);
+    fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        if (status_code != NULL) *status_code = webfs_parse_errno_status();
+        return -1;
+    }
+    if (status_code != NULL) *status_code = 200;
+    *body_fd = fd;
+    return 0;
+}
+
+/* Run the POST and open body. Returns 0 on success with bodyfd_out/
+ * clonefd_out owned by caller. On failure returns PSI_STATUS_ERROR
+ * and *status_code may be set to a parsed HTTP status. */
+static int
+webfs_post_open(
+    const char *url,
+    const char *const *headers, size_t header_count,
+    const char *body, size_t body_len,
+    long *status_code,
+    char *connroot, size_t connroot_sz,
+    int *clonefd_out, int *bodyfd_out)
+{
+    if (webfs_clone(clonefd_out, connroot, connroot_sz) < 0)
+        return PSI_STATUS_ERROR;
+    if (webfs_configure_post(connroot, url, headers, header_count,
+                             body, body_len) < 0) {
+        close(*clonefd_out);
+        return PSI_STATUS_ERROR;
+    }
+    if (webfs_open_body(connroot, bodyfd_out, status_code) < 0) {
+        close(*clonefd_out);
+        return PSI_STATUS_ERROR;
+    }
+    return PSI_STATUS_OK;
 }
 
 int
@@ -133,28 +171,19 @@ psi_http_post(
     const struct psi_abort_signal *abort_signal,
     long *status_code, char **response_body)
 {
-    char connroot[64], path[128];
-    int clonefd, fd;
+    char connroot[64];
+    int clonefd, fd, rc;
     char *buf = NULL;
     size_t cap = 0, len = 0;
 
     if (status_code != NULL) *status_code = 0;
     if (response_body != NULL) *response_body = NULL;
 
-    if (webfs_prepare(url, header_lines, header_count, body, body_len,
-                      connroot, sizeof connroot, &clonefd) < 0)
-        return PSI_STATUS_ERROR;
+    rc = webfs_post_open(url, header_lines, header_count, body, body_len,
+                         status_code, connroot, sizeof connroot,
+                         &clonefd, &fd);
+    if (rc != PSI_STATUS_OK) return rc;
 
-    snprintf(path, sizeof path, "%s/body", connroot);
-    fd = open(path, O_RDONLY);
-    if (fd < 0) {
-        /* Body open failure — extract HTTP status from errno string. */
-        if (status_code != NULL) *status_code = webfs_parse_errno_status();
-        close(clonefd);
-        return PSI_STATUS_ERROR;
-    }
-    /* Body open succeeded — webfs only gets here on 2xx. */
-    if (status_code != NULL) *status_code = 200;
     for (;;) {
         long n;
         if (psi_abort_signal_is_triggered(abort_signal)) {
@@ -173,8 +202,8 @@ psi_http_post(
         len += (size_t)n;
     }
     close(fd);
-    if (buf != NULL) buf[len] = 0;
     close(clonefd);
+    if (buf != NULL) buf[len] = 0;
     if (response_body != NULL) {
         *response_body = buf != NULL ? buf : psi_strdup("");
     } else {
@@ -192,22 +221,16 @@ psi_http_post_stream(
     const struct psi_abort_signal *abort_signal,
     long *status_code)
 {
-    char connroot[64], path[128], buf[8192];
-    int clonefd, fd;
+    char connroot[64], buf[8192];
+    int clonefd, fd, rc;
 
     if (status_code != NULL) *status_code = 0;
-    if (webfs_prepare(url, header_lines, header_count, body, body_len,
-                      connroot, sizeof connroot, &clonefd) < 0)
-        return PSI_STATUS_ERROR;
 
-    snprintf(path, sizeof path, "%s/body", connroot);
-    fd = open(path, O_RDONLY);
-    if (fd < 0) {
-        if (status_code != NULL) *status_code = webfs_parse_errno_status();
-        close(clonefd);
-        return PSI_STATUS_ERROR;
-    }
-    if (status_code != NULL) *status_code = 200;
+    rc = webfs_post_open(url, header_lines, header_count, body, body_len,
+                         status_code, connroot, sizeof connroot,
+                         &clonefd, &fd);
+    if (rc != PSI_STATUS_OK) return rc;
+
     for (;;) {
         long n;
         if (psi_abort_signal_is_triggered(abort_signal)) {

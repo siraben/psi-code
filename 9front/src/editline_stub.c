@@ -1,10 +1,42 @@
-/* fgets-based readline fallback. No history, no line-editing —
- * plenty for scripted --agent runs and good enough for a basic REPL
- * inside rio. */
+/* Plan 9 readline replacement. libedit isn't available under APE, and
+ * on a rio/vt terminal we don't need it: rio already provides
+ * line-at-a-time editing (mouse select + snarf/paste via B2 menu,
+ * arrow keys for character motion, B3 menu for history of past
+ * terminal commands from scrollback). That makes the Plan-9-idiomatic
+ * readline a thin fgets wrapper.
+ *
+ * History:
+ *   libedit's C-p recall is a terminal-mode feature rio doesn't do.
+ *   As a consolation, every non-empty line is appended to
+ *   $home/lib/psi-history so `cat $home/lib/psi-history | grep foo`
+ *   still works. Path is overridable via $PSI_HISTORY_FILE.
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static void
+append_history(const char *line)
+{
+    const char *path;
+    FILE *f;
+    if (line == NULL || line[0] == '\0') return;
+    path = getenv("PSI_HISTORY_FILE");
+    if (path == NULL || path[0] == '\0') {
+        static char fallback[512];
+        const char *home = getenv("home");
+        if (home == NULL || home[0] == '\0') home = getenv("HOME");
+        if (home == NULL || home[0] == '\0') return;
+        snprintf(fallback, sizeof fallback, "%s/lib/psi-history", home);
+        path = fallback;
+    }
+    f = fopen(path, "a");
+    if (f == NULL) return;
+    fputs(line, f);
+    fputc('\n', f);
+    fclose(f);
+}
 
 char *
 readline(const char *prompt)
@@ -35,11 +67,14 @@ readline(const char *prompt)
     }
     if (buf == NULL) buf = (char *)malloc(1);
     if (buf != NULL) buf[len] = '\0';
+    append_history(buf);
     return buf;
 }
 
 void
 add_history(const char *line)
 {
+    /* Our readline() already appends every returned line to the
+     * history file; explicit calls are a no-op. */
     (void)line;
 }

@@ -64,29 +64,33 @@ def plan9_bin(name: str) -> str:
     """Find a plan9port binary (e.g. `9p`). Allows override via $PLAN9."""
     if name in _PLAN9_CACHE:
         return _PLAN9_CACHE[name]
+
     plan9 = os.environ.get("PLAN9", "")
     if plan9:
         cand = Path(plan9) / "bin" / name
         if cand.is_file() and os.access(cand, os.X_OK):
             _PLAN9_CACHE[name] = str(cand)
             return str(cand)
-    # Fall through: derive from nix-shell
+
+    # Fall through: derive PLAN9 from a nix-shell.
     out = subprocess.run(
-        ["nix-shell", "-p", "plan9port", "--run", f"echo $PLAN9"],
+        ["nix-shell", "-p", "plan9port", "--run", "echo $PLAN9"],
         capture_output=True, text=True, check=False,
     )
-    p9 = out.stdout.strip().splitlines()[-1] if out.stdout.strip() else ""
-    if p9:
-        cand = Path(p9) / "bin" / name
+    nix_p9 = out.stdout.strip().splitlines()[-1] if out.stdout.strip() else ""
+    if nix_p9:
+        cand = Path(nix_p9) / "bin" / name
         if cand.is_file():
+            os.environ["PLAN9"] = nix_p9
             _PLAN9_CACHE[name] = str(cand)
-            os.environ["PLAN9"] = p9
             return str(cand)
-    # As a last resort, hope it's on PATH
+
+    # Last resort: $PATH.
     path = shutil.which(name)
     if path:
         _PLAN9_CACHE[name] = path
         return path
+
     sys.exit(f"9ctl: can't find {name!r}; set PLAN9 or install plan9port")
 
 def p9(args: list[str], input_data: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
@@ -166,42 +170,36 @@ def mon_type(text: str, delay: float = 0.03) -> None:
 
 # ---- Subcommands ----------------------------------------------------------
 
-def cmd_read(args: argparse.Namespace) -> int:
-    r = p9(["read", args.remote])
+def _p9_passthrough(p9_args: list[str], input_data: bytes | None = None) -> int:
+    """Run `9p` and pipe stdout/stderr through, returning its exit code."""
+    r = p9(p9_args, input_data=input_data)
     sys.stdout.buffer.write(r.stdout)
     if r.returncode != 0:
         sys.stderr.buffer.write(r.stderr)
     return r.returncode
 
+def cmd_read(args: argparse.Namespace) -> int:
+    return _p9_passthrough(["read", args.remote])
+
 def cmd_ls(args: argparse.Namespace) -> int:
-    r = p9(["ls", args.remote])
-    sys.stdout.buffer.write(r.stdout)
-    if r.returncode != 0:
-        sys.stderr.buffer.write(r.stderr)
-    return r.returncode
+    return _p9_passthrough(["ls", args.remote])
 
 def _touch_remote(remote: str) -> None:
     """Ensure /usr/glenda/REMOTE exists so 9p write can target it.
-    Touch via VNC (glenda). For paths under work/, 'none' could create
-    directly but we want ownership=glenda so subsequent builds work."""
+    Touch via VNC (glenda) so ownership is glenda — `none` could create
+    directly under work/ but later builds want glenda-owned files."""
     mon_type(f"touch /usr/glenda/{remote}\n")
     time.sleep(0.5)
 
 def cmd_put(args: argparse.Namespace) -> int:
     data = Path(args.local).read_bytes()
     _touch_remote(args.remote)
-    r = p9(["write", args.remote], input_data=data)
-    if r.returncode != 0:
-        sys.stderr.buffer.write(r.stderr)
-    return r.returncode
+    return _p9_passthrough(["write", args.remote], input_data=data)
 
 def cmd_puts(args: argparse.Namespace) -> int:
     data = sys.stdin.buffer.read()
     _touch_remote(args.remote)
-    r = p9(["write", args.remote], input_data=data)
-    if r.returncode != 0:
-        sys.stderr.buffer.write(r.stderr)
-    return r.returncode
+    return _p9_passthrough(["write", args.remote], input_data=data)
 
 def cmd_exec(args: argparse.Namespace) -> int:
     out = rc_exec(args.cmd, timeout=args.timeout)
@@ -245,29 +243,21 @@ def cmd_job(args: argparse.Namespace) -> int:
     if not payload:
         sys.exit("9ctl job: empty rc payload")
 
-    # Find a free slot by reading _slot_next from the VM (a single
-    # integer). Simpler: scan for the lowest NNN.rc that's still
-    # zero-byte. (The worker renames NNN.rc -> NNN.done on completion,
-    # and slots never get recycled within a session, so this is just
-    # a linear probe.)
+    # Scan for the lowest NNN.rc that's still zero-byte. The worker
+    # renames NNN.rc -> NNN.done on completion and slots never get
+    # recycled within a session, so a linear probe suffices. 9p stat
+    # output is "... l LENGTH ..." — pull the integer after `l`.
     slot = None
     for i in range(1, 201):
         name = f"{i:03d}"
         stat = p9(["stat", f"work/q/{name}.rc"])
         if stat.returncode != 0:
             continue
-        # Stat output: "'NAME' 'UID' 'GID' 'MUID' ID MODE MTIME LEN ..."
-        # The length is the 8th tick-quoted field in plan9 stat format;
-        # just look for ' 0 ' after the name and before the mode letter.
-        out = stat.stdout.decode("utf-8", errors="replace")
-        parts = out.split()
-        # 9p stat format: ... m MODE at ATIME mt MTIME l LENGTH t TYPE d DEV
-        length = -1
+        parts = stat.stdout.decode("utf-8", errors="replace").split()
         try:
-            idx = parts.index("l")
-            length = int(parts[idx + 1])
+            length = int(parts[parts.index("l") + 1])
         except (ValueError, IndexError):
-            pass
+            continue
         if length == 0:
             slot = name
             break
@@ -280,15 +270,11 @@ def cmd_job(args: argparse.Namespace) -> int:
         sys.stderr.buffer.write(w.stderr)
         sys.exit(f"9ctl job: write {slot}.rc failed")
 
-    # Flip the .go flag to signal "run now". The slot's .go placeholder
-    # was deleted by mkslots; recreate via 9P by writing zero bytes —
-    # 9p write only works on existing files, so we keep a pool of
-    # placeholder .go stubs too.
-    # Workaround: write to the pre-touched placeholder instead.
+    # Flip .go to signal "run now". 9p write requires the file to
+    # exist, so we rely on mkslots having pre-touched .go placeholders.
+    # If the placeholder is missing, fall back to touching via VNC.
     g = p9(["write", f"work/q/{slot}.go"], input_data=b"go\n")
     if g.returncode != 0:
-        # Placeholder didn't exist — fall back to touching via VNC
-        # (unavoidable one-time create). Keep this out of the hot path.
         _touch_remote(f"work/q/{slot}.go")
         g = p9(["write", f"work/q/{slot}.go"], input_data=b"go\n")
         if g.returncode != 0:
@@ -305,12 +291,7 @@ def cmd_job(args: argparse.Namespace) -> int:
     else:
         sys.exit(f"9ctl job: slot {slot} timed out after {args.timeout}s")
 
-    out = p9(["read", f"work/q/{slot}.out"])
-    sys.stdout.buffer.write(out.stdout)
-    if out.returncode != 0:
-        sys.stderr.buffer.write(out.stderr)
-        return out.returncode
-    return 0
+    return _p9_passthrough(["read", f"work/q/{slot}.out"])
 
 def cmd_ask(args: argparse.Namespace) -> int:
     key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
@@ -327,14 +308,11 @@ def cmd_ask(args: argparse.Namespace) -> int:
         f"ANTHROPIC_API_KEY='{key}'\n"
         f"./6.psi9 -a '{esc_prompt}'{extra}\n"
     )
-    try:
-        mon_type(f"hget http://10.0.2.2:8765/{rc_name} > _ask.rc\n")
-        time.sleep(1)
-        mon_type("rc _ask.rc\n")
-    finally:
-        # Leave the file; user may want to inspect it.
-        pass
-    print(f"9ctl: launched psi9; inspect VNC or capture screenshot.")
+    # Leave HOST_HTTP_DIR/rc_name on disk; user may want to inspect it.
+    mon_type(f"hget http://10.0.2.2:8765/{rc_name} > _ask.rc\n")
+    time.sleep(1)
+    mon_type("rc _ask.rc\n")
+    print("9ctl: launched psi9; inspect VNC or capture screenshot.")
     return 0
 
 # ---- argparse -------------------------------------------------------------

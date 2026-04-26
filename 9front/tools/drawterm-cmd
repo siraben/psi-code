@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# drawterm-cmd — run a command on the 9front guest via drawterm/rcpu.
+#
+# TLS-authenticated remote shell via 9front's rcpu(1) protocol.
+# Plan-9-idiomatic equivalent of `ssh user@host CMD`.
+#
+# One-time guest setup (in the rio term):
+#   hget http://10.0.2.2:8765/fullup.rc > /tmp/up.rc; rc /tmp/up.rc
+# Then host-side:
+#   drawterm-cmd 'rc command'
+#   drawterm-cmd < script.rc
+#
+# Env:
+#   DT_HOST    127.0.0.1
+#   DT_USER    glenda
+#   DT_PORT    17020 (rcpu listener; exportfs stays on 17019)
+#   DT_PW_FILE $HOME/.config/psi9-pw  (dp9ik password)
+
+set -euo pipefail
+
+DT_HOST="${DT_HOST:-127.0.0.1}"
+DT_USER="${DT_USER:-glenda}"
+DT_PORT="${DT_PORT:-17020}"
+DT_PW_FILE="${DT_PW_FILE:-$HOME/.config/psi9-pw}"
+DT_TIMEOUT="${DT_TIMEOUT:-300}"
+
+if [ ! -r "$DT_PW_FILE" ]; then
+  echo "drawterm-cmd: missing $DT_PW_FILE" >&2
+  echo "  echo 'mypass' > $DT_PW_FILE && chmod 600 $DT_PW_FILE" >&2
+  exit 2
+fi
+
+PW="$(cat "$DT_PW_FILE")"
+ADDR="tcp!$DT_HOST!$DT_PORT"
+
+if [ $# -ge 1 ]; then
+  CMD="$*"
+else
+  CMD="$(cat)"
+fi
+
+# expect script: feed password to both prompts (drawterm's local auth +
+# server-side dp9ik), then drain output until EOF.
+SCRIPT="$(mktemp)"
+trap 'rm -f "$SCRIPT"' EXIT
+cat > "$SCRIPT" <<EXPECT
+log_user 1
+set timeout $DT_TIMEOUT
+spawn drawterm -G -h $ADDR -u $DT_USER -c {$CMD}
+expect -re {auth\[.*\]: }
+send -- "$PW\r"
+expect -re {password: }
+send -- "$PW\r"
+expect eof
+EXPECT
+
+exec nix-shell -p drawterm expect --run "expect '$SCRIPT'"

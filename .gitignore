@@ -22,3 +22,4 @@ haiku/guest/stage/
 # 9front VM artifacts — large and reproducible.
 9front/downloads/
 9front/disk.qcow2
+9front/tools/__pycache__/

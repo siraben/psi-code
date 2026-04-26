@@ -1,0 +1,52 @@
+#!/bin/rc
+# Full bootstrap: listen1 services + cpu/auth + rcpu listener.
+# Idempotent — re-running is fine.
+
+# 1. Pull the dp9ik password from the host.
+hget http://10.0.2.2:8765/_pw > /tmp/_pw
+PW=`{cat /tmp/_pw}
+if(~ $PW ''){
+	echo 'fullup: empty password from host — abort'
+	exit no-pw
+}
+
+# 2. Bring up our two basic listeners (no-op if address already in use).
+aux/listen1 -t 'tcp!*!2222'  /bin/rc &
+aux/listen1 -t 'tcp!*!17019' /bin/exportfs -r /usr/glenda &
+
+# 3. Auth: keyfs + change glenda password + factotum + dp9ik key.
+mkdir -p $home/lib
+touch $home/lib/keys
+chmod 600 $home/lib/keys
+auth/keyfs -p $home/lib/keys >[2]/dev/null
+
+# changeuser non-interactively. The prompts in 9front 11554:
+#   secret:               (new password)
+#   confirm:              (again)
+#   secret expiration:    (Y for never)
+#   post id:              (anything)
+#   group leader:         (blank)
+{
+	echo $PW
+	echo $PW
+	echo
+
+	echo
+} | auth/changeuser -p glenda >[2=1]
+
+auth/factotum -n >[2]/dev/null
+echo 'key proto=dp9ik dom=9front user=glenda !password='^$PW > /mnt/factotum/ctl
+
+# 4. webfs with /srv/web posted, so rcpu sessions in their own
+#    namespace can mount /mnt/web. Without this, drawterm-cmd
+#    sessions can't reach the network from psi.
+for(p in `{ps | grep webfs | awk '{print $2}'}){
+	echo kill > /proc/$p/ctl >[2]/dev/null
+}
+sleep 1
+webfs -s web
+
+# 5. rcpu listener on tcp!*!17020 (separate from our exportfs:17019).
+aux/listen1 -t 'tcp!*!17020' /rc/bin/service/tcp17019 &
+
+echo FULLUP-OK
