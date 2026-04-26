@@ -4,6 +4,8 @@
 -- ReactOS may render through a native console API. Keep geometry and
 -- labels here so those backends can converge on the same screen shape.
 
+local prelude = require("psi.prelude")
+
 local M = {}
 
 function M.geometry(width, height)
@@ -24,6 +26,22 @@ function M.geometry(width, height)
     input = { x = 1, y = input_y, w = width, h = input_h },
     footer = { x = 1, y = footer_y, w = width, h = 1 },
   }
+end
+
+-- Layout policy for the editable prompt area. C still owns the hard
+-- terminal constraints (minimum transcript space, actual cursor
+-- placement, ncurses repainting); Lua owns the presentation policy so
+-- ports and user customisations can override prefixes or the nominal
+-- visible-row cap without patching tui_mode.c.
+function M.input_layout(arg_json)
+  local arg = prelude.safe_json_decode(arg_json, {})
+  local height = math.max(12, tonumber(arg.height) or 24)
+  local max_rows = math.min(5, math.max(1, height - 5))
+  return psi.json_encode({
+    max_rows = max_rows,
+    prefix_first = "> ",
+    prefix_rest = "| ",
+  })
 end
 
 function M.footer_hint(arg_json)
