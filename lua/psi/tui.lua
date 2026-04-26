@@ -50,7 +50,7 @@ function M.status_line(arg_json)
   -- cycle (agent ↔ prompt ↔ tools ↔ tui).
   local ok, agent = pcall(require, "psi.agent")
   local model = (ok and agent.current_model(arg.model)) or arg.model or "?"
-  local busy   = arg.busy
+  local busy = arg.busy
   local scroll = tonumber(arg.scroll) or 0
 
   local parts = {}

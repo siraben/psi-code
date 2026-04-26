@@ -26,12 +26,16 @@ local safe_decode = prelude.safe_json_decode
 
 local function api_url(path)
   local base = os.getenv(BASE_URL_ENV) or BASE_URL_DEFAULT
-  if base:sub(-1) ~= "/" then base = base .. "/" end
+  if base:sub(-1) ~= "/" then
+    base = base .. "/"
+  end
   return base .. path
 end
 
 local function resolve_model(m)
-  if m and m ~= "" then return m end
+  if m and m ~= "" then
+    return m
+  end
   return os.getenv(MODEL_ENV) or MODEL_DEFAULT
 end
 
@@ -72,7 +76,7 @@ local function new_state()
   return {
     text = "",
     tool_calls_by_index = {}, -- [idx] = {id, name, arg_parts = {}}
-    tool_calls_order = {},    -- emission order
+    tool_calls_order = {}, -- emission order
     usage = nil,
     stop_reason = nil,
     response_id = nil,
@@ -81,9 +85,14 @@ local function new_state()
 end
 
 local function handle_event(data, state, observer)
-  if data == "[DONE]" then state.done = true; return end
+  if data == "[DONE]" then
+    state.done = true
+    return
+  end
   local obj = safe_decode(data)
-  if type(obj) ~= "table" then return end
+  if type(obj) ~= "table" then
+    return
+  end
   state.response_id = state.response_id or obj.id
 
   local choices = obj.choices
@@ -110,7 +119,9 @@ local function handle_event(data, state, observer)
               state.tool_calls_by_index[idx] = slot
               state.tool_calls_order[#state.tool_calls_order + 1] = idx
             end
-            if tc.id and tc.id ~= "" then slot.id = tc.id end
+            if tc.id and tc.id ~= "" then
+              slot.id = tc.id
+            end
             local fn = tc["function"]
             if type(fn) == "table" then
               if type(fn.name) == "string" and fn.name ~= "" then
@@ -124,7 +135,9 @@ local function handle_event(data, state, observer)
         end
       end
     end
-    if ch.finish_reason then state.stop_reason = ch.finish_reason end
+    if ch.finish_reason then
+      state.stop_reason = ch.finish_reason
+    end
   end
 
   -- Usage arrives on a trailing chunk when stream_options.include_usage
@@ -140,8 +153,7 @@ local function handle_event(data, state, observer)
     if type(ptd) == "table" then
       local cached = tonumber(ptd.cached_tokens) or 0
       state.usage.cache_read = cached
-      state.usage.input_tokens =
-        math.max(0, (state.usage.input_tokens or 0) - cached)
+      state.usage.input_tokens = math.max(0, (state.usage.input_tokens or 0) - cached)
     end
   end
 end
@@ -151,10 +163,14 @@ local function parser_new()
 end
 
 local function dispatch_sse_line(parser, line, state, observer)
-  if line:sub(-1) == "\r" then line = line:sub(1, -2) end
+  if line:sub(-1) == "\r" then
+    line = line:sub(1, -2)
+  end
   if line:sub(1, 5) == "data:" then
     local data = line:sub(6)
-    if data:sub(1, 1) == " " then data = data:sub(2) end
+    if data:sub(1, 1) == " " then
+      data = data:sub(2)
+    end
     parser.pending_data = data
   elseif line == "" then
     if parser.pending_data ~= nil then
@@ -189,7 +205,9 @@ local function finalize_tool_calls(state)
     if slot and slot.name then
       local arg_json = table.concat(slot.arg_parts)
       local args = safe_decode(arg_json)
-      if type(args) ~= "table" then args = {} end
+      if type(args) ~= "table" then
+        args = {}
+      end
       local id = slot.id
       if not id or id == "" then
         id = "call_" .. prelude.uuid_short():sub(1, 12)
@@ -218,7 +236,9 @@ local function make_config(model)
         stream = true,
         stream_options = { include_usage = true },
       }
-      if args.max_tokens then body.max_tokens = args.max_tokens end
+      if args.max_tokens then
+        body.max_tokens = args.max_tokens
+      end
       return body
     end,
 
@@ -260,24 +280,24 @@ end
 
 function M.run_turn(opts)
   local model = resolve_model(opts.model)
-  return compat.run_turn(
-    { model = model,
-      observer = opts.observer,
-      abort_check = opts.abort_check,
-      max_tokens = opts.max_tokens,
-      system_prompt = opts.system_prompt,
-      tool_specs = opts.tool_specs },
-    make_config(model))
+  return compat.run_turn({
+    model = model,
+    observer = opts.observer,
+    abort_check = opts.abort_check,
+    max_tokens = opts.max_tokens,
+    system_prompt = opts.system_prompt,
+    tool_specs = opts.tool_specs,
+  }, make_config(model))
 end
 
 function M.complete_text(opts)
   local model = resolve_model(opts.model)
-  return compat.complete_text(
-    { model = model,
-      system_prompt = opts.system_prompt,
-      user_text = opts.user_text,
-      max_tokens = opts.max_tokens },
-    make_config(model))
+  return compat.complete_text({
+    model = model,
+    system_prompt = opts.system_prompt,
+    user_text = opts.user_text,
+    max_tokens = opts.max_tokens,
+  }, make_config(model))
 end
 
 return M

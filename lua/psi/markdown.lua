@@ -106,7 +106,8 @@ local function render_line(line, state)
   end
 
   -- Horizontal rule
-  if line:match("^%s*%-%-%-+%s*$")
+  if
+    line:match("^%s*%-%-%-+%s*$")
     or line:match("^%s*%*%*%*+%s*$")
     or line:match("^%s*___+%s*$")
   then
@@ -165,7 +166,9 @@ function M.render_line(line, in_code_fence)
   line = line or ""
   local key = (in_code_fence and "1|" or "0|") .. line
   local hit = cache[key]
-  if hit ~= nil then return hit end
+  if hit ~= nil then
+    return hit
+  end
 
   local state = { in_code_fence = in_code_fence and true or false }
   local result = render_line(line, state)
@@ -204,11 +207,11 @@ end
 -- at turn end). The caller can discard the returned string if it
 -- wants to rely on redraw instead.
 function M.new_stream()
-  local self = {
+  local stream = {
     buffer = "",
     state = { in_code_fence = false },
   }
-  function self:feed(text)
+  function stream:feed(text)
     if type(text) ~= "string" or text == "" then
       return ""
     end
@@ -225,7 +228,7 @@ function M.new_stream()
     end
     return table.concat(out)
   end
-  function self:flush()
+  function stream:flush()
     if self.buffer == "" then
       return ""
     end
@@ -233,7 +236,7 @@ function M.new_stream()
     self.buffer = ""
     return render_line(line, self.state)
   end
-  return self
+  return stream
 end
 
 return M

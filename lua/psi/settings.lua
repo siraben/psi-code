@@ -25,9 +25,13 @@ local function merge(dst, src)
 end
 
 local function read_json(path)
-  if not psi.file_exists(path) then return nil end
+  if not psi.file_exists(path) then
+    return nil
+  end
   local parsed = prelude.safe_json_decode(psi.read_file(path), nil)
-  if type(parsed) == "table" then return parsed end
+  if type(parsed) == "table" then
+    return parsed
+  end
   return nil
 end
 
@@ -49,10 +53,14 @@ end
 function M.get(path, default)
   local cur = M.all()
   for part in tostring(path):gmatch("[^.]+") do
-    if type(cur) ~= "table" then return default end
+    if type(cur) ~= "table" then
+      return default
+    end
     cur = cur[part]
   end
-  if cur == nil then return default end
+  if cur == nil then
+    return default
+  end
   return cur
 end
 

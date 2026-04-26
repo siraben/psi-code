@@ -52,7 +52,9 @@ local function impl_read(input)
   if text then
     local sliced, meta = truncate.by_lines(text, offset, limit)
     local notice = truncate.notice(meta)
-    if notice then sliced = notice .. "\n" .. sliced end
+    if notice then
+      sliced = notice .. "\n" .. sliced
+    end
     return records.new_tool_result(true, "read", nil, {
       path = path,
       text = sliced,
@@ -64,8 +66,7 @@ local function impl_read(input)
       truncated = meta.truncated,
     })
   end
-  return records.tool_failure("read",
-    "no such file: " .. tostring(path))
+  return records.tool_failure("read", "no such file: " .. tostring(path))
 end
 
 -- ---------- write ----------
@@ -432,8 +433,7 @@ M.active = registry.active
 -- explain the failure. If `tool_name` is supplied it's recorded on
 -- the result; otherwise the tool name is filled in by the dispatcher.
 function M.cancel(reason, tool_name)
-  return records.tool_failure(tool_name or "tool",
-                              reason or "cancelled by before-hook")
+  return records.tool_failure(tool_name or "tool", reason or "cancelled by before-hook")
 end
 
 return M

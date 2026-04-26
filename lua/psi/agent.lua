@@ -28,7 +28,9 @@ local function pick_provider(model)
   return providers.load_provider(spec), providers.resolve_model(spec.name, real_model)
 end
 
-function M.provider_for(model) return pick_provider(model) end
+function M.provider_for(model)
+  return pick_provider(model)
+end
 
 -- Runtime model switch. Extensions (or a slash command) can call
 -- M.set_model("openrouter/google/gemini-3-flash-preview") at any
@@ -50,7 +52,9 @@ function M.set_model(name)
 end
 
 function M.current_model(fallback)
-  if override_model ~= nil then return override_model end
+  if override_model ~= nil then
+    return override_model
+  end
   return fallback
 end
 

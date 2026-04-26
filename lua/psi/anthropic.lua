@@ -34,7 +34,9 @@ local MAX_TOOL_ITERATIONS = 32
 
 local function api_url()
   local base = os.getenv(BASE_URL_ENV) or BASE_URL_DEFAULT
-  if base == "" then base = BASE_URL_DEFAULT end
+  if base == "" then
+    base = BASE_URL_DEFAULT
+  end
   if base:sub(-1) ~= "/" then
     base = base .. "/"
   end
@@ -57,7 +59,9 @@ local function resolve_model(m)
     return m
   end
   local env = os.getenv(MODEL_ENV)
-  if env and env ~= "" then return env end
+  if env and env ~= "" then
+    return env
+  end
   return MODEL_DEFAULT
 end
 
@@ -95,26 +99,26 @@ local safe_decode = prelude.safe_json_decode
 local function pi_content_to_anthropic(blocks)
   local out = prelude.as_array({})
   for _, b in ipairs(blocks or {}) do
-    if type(b) ~= "table" then
-      -- skip malformed block
-    elseif b.type == "text" then
-      local t = prelude.sanitize_surrogates(b.text or "")
-      if prelude.trim(t) ~= "" then
-        out[#out + 1] = { type = "text", text = t }
-      end
-    elseif b.type == "toolCall" then
-      out[#out + 1] = { type = "tool_use", id = b.id, name = b.name, input = b.arguments or {} }
-    elseif b.type == "thinking" then
-      if type(b.thinkingSignature) == "string" and b.thinkingSignature ~= "" then
-        out[#out + 1] = {
-          type = "thinking",
-          thinking = b.thinking or "",
-          signature = b.thinkingSignature,
-        }
-      else
-        local t = prelude.sanitize_surrogates(b.thinking or "")
+    if type(b) == "table" then
+      if b.type == "text" then
+        local t = prelude.sanitize_surrogates(b.text or "")
         if prelude.trim(t) ~= "" then
           out[#out + 1] = { type = "text", text = t }
+        end
+      elseif b.type == "toolCall" then
+        out[#out + 1] = { type = "tool_use", id = b.id, name = b.name, input = b.arguments or {} }
+      elseif b.type == "thinking" then
+        if type(b.thinkingSignature) == "string" and b.thinkingSignature ~= "" then
+          out[#out + 1] = {
+            type = "thinking",
+            thinking = b.thinking or "",
+            signature = b.thinkingSignature,
+          }
+        else
+          local t = prelude.sanitize_surrogates(b.thinking or "")
+          if prelude.trim(t) ~= "" then
+            out[#out + 1] = { type = "text", text = t }
+          end
         end
       end
     end
@@ -253,11 +257,13 @@ local function build_api_messages(session)
       local summary = (type(body) == "table" and body.summary) or m.text or ""
       out[#out + 1] = { role = "user", content = summary }
       i = i + 1
-    elseif role == "custom"
-        and type(body) == "table"
-        and body.__entry_type == "custom_message"
-        and type(body.message) == "table"
-        and not body.message.hidden then
+    elseif
+      role == "custom"
+      and type(body) == "table"
+      and body.__entry_type == "custom_message"
+      and type(body.message) == "table"
+      and not body.message.hidden
+    then
       flush_synthetic_results()
       out[#out + 1] = {
         role = body.message.role == "assistant" and "assistant" or "user",
@@ -413,21 +419,25 @@ local function on_content_block_delta(state, data, observer)
     if observer.on_assistant_text_delta then
       observer.on_assistant_text_delta(d.text)
     end
-    if psi.events then psi.events.emit("assistant-text-delta", {text = d.text}) end
+    if psi.events then
+      psi.events.emit("assistant-text-delta", { text = d.text })
+    end
   elseif d.type == "input_json_delta" and type(d.partial_json) == "string" then
     block.input_json = block.input_json .. d.partial_json
     if observer.on_tool_call_delta then
       observer.on_tool_call_delta(block.id, d.partial_json)
     end
     if psi.events then
-      psi.events.emit("tool-call-delta", {id = block.id, partial_json = d.partial_json})
+      psi.events.emit("tool-call-delta", { id = block.id, partial_json = d.partial_json })
     end
   elseif d.type == "thinking_delta" and type(d.thinking) == "string" then
     block.thinking = block.thinking .. d.thinking
     if observer.on_thinking_delta then
       observer.on_thinking_delta(d.thinking)
     end
-    if psi.events then psi.events.emit("thinking-delta", {text = d.thinking}) end
+    if psi.events then
+      psi.events.emit("thinking-delta", { text = d.thinking })
+    end
   elseif d.type == "signature_delta" and type(d.signature) == "string" then
     -- Anthropic streams the thinking-block signature in one or more
     -- signature_delta events; concatenate for cross-turn replay.
@@ -482,11 +492,16 @@ local function finalize_blocks(state)
           -- passing {} — otherwise the agent's next turn sees a
           -- "missing field" error from the tool and wastes a round
           -- trip retrying blindly.
-          io.stderr:write(string.format(
-            "psi: tool_use %s (%s) has malformed input_json (%d bytes, "
-              .. "starts with %q); dispatching with empty input\n",
-            block.name or "?", block.id or "?",
-            #block.input_json, block.input_json:sub(1, 48)))
+          io.stderr:write(
+            string.format(
+              "psi: tool_use %s (%s) has malformed input_json (%d bytes, "
+                .. "starts with %q); dispatching with empty input\n",
+              block.name or "?",
+              block.id or "?",
+              #block.input_json,
+              block.input_json:sub(1, 48)
+            )
+          )
           input = {}
         end
       else
@@ -816,7 +831,9 @@ function M.run_turn(opts)
     end
 
     while true do
-      if abort_check() then break end
+      if abort_check() then
+        break
+      end
       local chunk, done = sched.http_poll(handle, 50)
       if chunk ~= nil then
         if raw_body_len < RAW_BODY_MAX then
@@ -827,7 +844,9 @@ function M.run_turn(opts)
           dispatch_sse(state, event_type, data, observer)
         end)
       end
-      if done then break end
+      if done then
+        break
+      end
     end
     local status = psi.http_stream_finish(handle)
 
@@ -842,8 +861,7 @@ function M.run_turn(opts)
       return false, reason
     end
     if status < 200 or status >= 300 then
-      local emsg = compat.classify_http_error(
-        status, table.concat(raw_body), "anthropic")
+      local emsg = compat.classify_http_error(status, table.concat(raw_body), "anthropic")
       save_failed_partial(state, model, "error", emsg)
       io.stderr:write(emsg .. "\n")
       -- Surface the detailed message as the reply so TUI and
@@ -875,7 +893,7 @@ function M.run_turn(opts)
     if #tool_uses == 0 then
       maybe_auto_compact(model, opts)
       if psi.events then
-        psi.events.emit("turn-end", {text = state.assistant_text, model = model})
+        psi.events.emit("turn-end", { text = state.assistant_text, model = model })
       end
       return true, state.assistant_text
     end
@@ -915,8 +933,7 @@ function M.run_turn(opts)
         -- tool that produced them. Without this, two tools
         -- running under sched.run_all would stream into the same
         -- TUI panel.
-        return psi.tools.dispatch_alist(tu.name, tu.input,
-                                        { tool_call_id = tu.id })
+        return psi.tools.dispatch_alist(tu.name, tu.input, { tool_call_id = tu.id })
       end
     end
     local results = require("psi.sched").run_all(tasks)

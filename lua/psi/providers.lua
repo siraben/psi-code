@@ -55,7 +55,9 @@ function M.all_providers()
   for name, spec in pairs(providers) do
     out[#out + 1] = { name = name, api = spec.api, default_model = spec.default_model }
   end
-  table.sort(out, function(a, b) return a.name < b.name end)
+  table.sort(out, function(a, b)
+    return a.name < b.name
+  end)
   return out
 end
 
@@ -66,13 +68,17 @@ function M.all_models()
     item.id = id
     out[#out + 1] = item
   end
-  table.sort(out, function(a, b) return a.id < b.id end)
+  table.sort(out, function(a, b)
+    return a.id < b.id
+  end)
   return out
 end
 
 local function env(name, fallback)
   local v = os.getenv(name)
-  if v and v ~= "" then return v end
+  if v and v ~= "" then
+    return v
+  end
   return fallback
 end
 
@@ -132,8 +138,12 @@ M.register_model("openrouter/google/gemini-3-flash-preview", {
 
 function M.resolve_model(provider_name, requested)
   local p = providers[provider_name]
-  if not p then return requested end
-  if requested and requested ~= "" then return requested end
+  if not p then
+    return requested
+  end
+  if requested and requested ~= "" then
+    return requested
+  end
   local ok, settings = pcall(require, "psi.settings")
   if ok and settings then
     local configured = settings.get("defaults.model", nil)
@@ -179,7 +189,9 @@ function M.resolve_route(model)
 end
 
 function M.load_provider(spec)
-  if not spec or not spec.module then return nil end
+  if not spec or not spec.module then
+    return nil
+  end
   return require(spec.module)
 end
 

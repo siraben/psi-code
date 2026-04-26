@@ -17,7 +17,9 @@ end
 
 function M.diagnostics()
   local out = {}
-  for i, d in ipairs(diagnostics) do out[i] = d end
+  for i, d in ipairs(diagnostics) do
+    out[i] = d
+  end
   return out
 end
 
@@ -39,15 +41,23 @@ function M.context_files()
       add_context(local_matches, prelude.path_join(dir, name), "project")
     end
     local merged = {}
-    for _, f in ipairs(local_matches) do merged[#merged + 1] = f end
-    for _, f in ipairs(project) do merged[#merged + 1] = f end
+    for _, f in ipairs(local_matches) do
+      merged[#merged + 1] = f
+    end
+    for _, f in ipairs(project) do
+      merged[#merged + 1] = f
+    end
     project = merged
     local parent = psi.parent_directory(dir)
-    if parent == dir then break end
+    if parent == dir then
+      break
+    end
     dir = parent
   end
 
-  for _, f in ipairs(project) do found[#found + 1] = f end
+  for _, f in ipairs(project) do
+    found[#found + 1] = f
+  end
   if psi.events then
     psi.events.emit("resources_discover", { context_files = found, diagnostics = diagnostics })
   end

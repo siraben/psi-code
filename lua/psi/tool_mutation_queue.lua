@@ -10,7 +10,9 @@ local M = {}
 local locks = {}
 
 local function key(path)
-  if type(path) ~= "string" or path == "" then return nil end
+  if type(path) ~= "string" or path == "" then
+    return nil
+  end
   return path
 end
 
@@ -29,7 +31,9 @@ function M.with_path(path, fn)
   locks[k] = true
   local ok, a, b, c = pcall(fn)
   locks[k] = nil
-  if not ok then error(a, 0) end
+  if not ok then
+    error(a, 0)
+  end
   return a, b, c
 end
 

@@ -110,6 +110,7 @@
         in {
           type = "app";
           program = "${vgScript}/bin/psi-valgrind";
+          meta.description = "Run psi's valgrind harness";
         };
 
         # `nix run .#analyze` — run cppcheck + gcc -fanalyzer in the
@@ -142,6 +143,43 @@
         in {
           type = "app";
           program = "${script}/bin/psi-analyze";
+          meta.description = "Run psi C static analysis";
+        };
+
+        # `nix run .#lint` — run Lua formatting/lint checks and the C
+        # static-analysis target.
+        apps.lint = let
+          script = pkgs.writeShellApplication {
+            name = "psi-lint";
+            runtimeInputs = [
+              pkgs.gnumake
+              pkgs.pkg-config
+              pkgs.cppcheck
+              pkgs.gcc
+              pkgs.stylua
+              pkgs.lua54Packages.luacheck
+              pkgs.argtable
+              pkgs.cjson
+              pkgs.curl
+              pkgs.libedit
+              pkgs.lua5_4
+              pkgs.ncurses
+            ];
+            text = ''
+              set -eu
+              cd "''${PSI_SRC:-$PWD}"
+              echo "=== stylua ==="
+              stylua --check lua
+              echo "=== luacheck ==="
+              luacheck lua
+              echo "=== c analyze ==="
+              make analyze
+            '';
+          };
+        in {
+          type = "app";
+          program = "${script}/bin/psi-lint";
+          meta.description = "Run psi Lua and C lint checks";
         };
 
         devShells.default = pkgs.mkShell {

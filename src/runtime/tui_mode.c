@@ -953,15 +953,10 @@ static int psi_tui_md_is_fence_line(const char *text) {
  * Caller owns the return. */
 static char *psi_tui_trim_trailing_newlines(const char *text) {
     size_t len;
-    char *copy;
     if (text == NULL) return psi_strdup("");
     len = strlen(text);
     while (len > 0u && text[len - 1u] == '\n') len--;
-    copy = (char *)malloc(len + 1u);
-    if (copy == NULL) return NULL;
-    if (len > 0u) memcpy(copy, text, len);
-    copy[len] = '\0';
-    return copy;
+    return psi_strdup_n(text, len);
 }
 
 static int psi_tui_render_wrapped(
@@ -1605,14 +1600,16 @@ static size_t psi_tui_count_wrapped(
     const char *line_end;
     const char *prefix;
     size_t prefix_length;
+    size_t remaining;
     int available;
     int break_index;
+    char *trimmed;
 
     /* Mirror psi_tui_render_wrapped: trim trailing newlines so the
      * count matches the render path exactly. Dropping this sync
      * would make scroll anchors drift by one per entry that had a
      * trailing newline (most of them). */
-    char *trimmed = psi_tui_trim_trailing_newlines(text);
+    trimmed = psi_tui_trim_trailing_newlines(text);
     if (trimmed == NULL) return 0u;
 
     count = 0u;
@@ -1628,6 +1625,8 @@ static size_t psi_tui_count_wrapped(
             prefix_length = strlen(prefix);
             available = width - (int)prefix_length;
             if (available < 1) available = 1;
+            remaining = (size_t)(line_end - line_start);
+            if ((size_t)available > remaining) available = (int)remaining;
             break_index = psi_tui_find_break(line_start, available);
             count++;
             line_start += break_index;
@@ -2534,14 +2533,13 @@ static int psi_tui_setup_runtime(struct psi_tui_state *state, const struct psi_c
     return PSI_STATUS_OK;
 }
 
-static int psi_tui_state_init(struct psi_tui_state *state, const struct psi_cli_options *options) {
+static void psi_tui_state_init(struct psi_tui_state *state, const struct psi_cli_options *options) {
     memset(state, 0, sizeof(*state));
     state->options = options;
     state->streaming_assistant_index = -1;
     state->streaming_thinking_index = -1;
     state->running = 1;
     psi_abort_signal_init(&state->abort_signal);
-    return PSI_STATUS_OK;
 }
 
 static void psi_tui_state_free(struct psi_tui_state *state) {
@@ -2577,10 +2575,7 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
         return PSI_STATUS_ERROR;
     }
 
-    if (psi_tui_state_init(&state, options) != PSI_STATUS_OK) {
-        fprintf(stderr, "TUI state init failed\n");
-        return PSI_STATUS_ERROR;
-    }
+    psi_tui_state_init(&state, options);
     if (psi_tui_reserve_input(&state, 1u) != PSI_STATUS_OK) {
         return PSI_STATUS_ERROR;
     }
@@ -2676,7 +2671,7 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
                 sigemptyset(&mask);
                 sigaddset(&mask, SIGTSTP);
                 sigprocmask(SIG_UNBLOCK, &mask, &prev_mask);
-                raise(SIGTSTP);
+                kill(getpid(), SIGTSTP);
                 sigprocmask(SIG_SETMASK, &prev_mask, NULL);
                 sigaction(SIGTSTP, &prev, NULL);
             }

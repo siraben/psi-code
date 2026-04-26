@@ -37,16 +37,22 @@ local function list_for(event)
 end
 
 function M.on(event, fn)
-  if type(event) ~= "string" or type(fn) ~= "function" then return end
+  if type(event) ~= "string" or type(fn) ~= "function" then
+    return
+  end
   local list = list_for(event)
   list[#list + 1] = fn
 end
 
 function M.off(event, fn)
   local list = handlers[event]
-  if not list then return end
+  if not list then
+    return
+  end
   for i = #list, 1, -1 do
-    if list[i] == fn then table.remove(list, i) end
+    if list[i] == fn then
+      table.remove(list, i)
+    end
   end
 end
 
@@ -56,7 +62,9 @@ function M.emit(event, payload)
     M.emit(alias, payload)
   end
   local list = handlers[event]
-  if not list then return end
+  if not list then
+    return
+  end
   -- Snapshot the handler list before iterating. A handler that calls
   -- psi.events.on/off for the SAME event during emission would
   -- otherwise mutate the array ipairs is walking — registering a new
@@ -65,12 +73,15 @@ function M.emit(event, payload)
   -- handlers left and skip one.
   local snapshot = {}
   local n = #list
-  for i = 1, n do snapshot[i] = list[i] end
+  for i = 1, n do
+    snapshot[i] = list[i]
+  end
   for i = 1, n do
     local ok, err = pcall(snapshot[i], payload)
     if not ok then
-      io.stderr:write("psi.events: handler for '" .. tostring(event)
-        .. "' failed: " .. tostring(err) .. "\n")
+      io.stderr:write(
+        "psi.events: handler for '" .. tostring(event) .. "' failed: " .. tostring(err) .. "\n"
+      )
     end
   end
 end
@@ -79,7 +90,9 @@ end
 function M.handlers(event)
   local list = handlers[event] or {}
   local out = {}
-  for i, fn in ipairs(list) do out[i] = fn end
+  for i, fn in ipairs(list) do
+    out[i] = fn
+  end
   return out
 end
 

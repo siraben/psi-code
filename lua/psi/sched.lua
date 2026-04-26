@@ -37,21 +37,29 @@ end
 M.resolvers = {}
 
 M.resolvers["http"] = function(req)
-  if req.h == nil then return nil, true end
+  if req.h == nil then
+    return nil, true
+  end
   local chunk, done = psi.http_stream_poll(req.h, req.ms or 0)
   return chunk, done
 end
 
 M.resolvers["proc"] = function(req)
-  if req.h == nil then return nil, true, 0 end
+  if req.h == nil then
+    return nil, true, 0
+  end
   -- Wired in Stage 4; shim returns done for now.
-  if psi.process_poll == nil then return nil, true, 0 end
+  if psi.process_poll == nil then
+    return nil, true, 0
+  end
   local chunk, done, status = psi.process_poll(req.h, req.ms or 0)
   return chunk, done, status
 end
 
 M.resolvers["sleep"] = function(req)
-  if psi.sleep_ms ~= nil then psi.sleep_ms(req.ms or 0) end
+  if psi.sleep_ms ~= nil then
+    psi.sleep_ms(req.ms or 0)
+  end
   return nil
 end
 
@@ -81,7 +89,9 @@ function M.run(fn, ...)
     end
     -- Host tick first (C side: TUI input + redraw). Safe to call
     -- even when no host has installed a hook (no-op then).
-    if psi.host_tick ~= nil then psi.host_tick() end
+    if psi.host_tick ~= nil then
+      psi.host_tick()
+    end
     local ok_tick, tick_err = pcall(tick_hook, req)
     if not ok_tick then
       io.stderr:write("psi.sched tick hook error: " .. tostring(tick_err) .. "\n")
@@ -142,9 +152,13 @@ end
 -- 20 ms for K=1 (matches the previous constant) and shrink as K
 -- grows so the floor doesn't scale linearly with concurrency.
 local function short_wait(k)
-  if k <= 1 then return 20 end
+  if k <= 1 then
+    return 20
+  end
   local per = 20 // k
-  if per < 5 then per = 5 end
+  if per < 5 then
+    per = 5
+  end
   return per
 end
 
@@ -166,8 +180,7 @@ function M.run_all(fns)
   while remaining > 0 do
     for _, t in ipairs(tasks) do
       if not t.done then
-        local res = table.pack(coroutine.resume(t.co,
-          table.unpack(t.next_args, 1, t.next_n)))
+        local res = table.pack(coroutine.resume(t.co, table.unpack(t.next_args, 1, t.next_n)))
         if res[1] == false then
           t.done = true
           t.ok = false
@@ -175,7 +188,9 @@ function M.run_all(fns)
           remaining = remaining - 1
         elseif coroutine.status(t.co) == "dead" then
           local vals = { n = res.n - 1 }
-          for j = 2, res.n do vals[j - 1] = res[j] end
+          for j = 2, res.n do
+            vals[j - 1] = res[j]
+          end
           t.done = true
           t.ok = true
           t.values = vals
@@ -209,9 +224,13 @@ function M.run_all(fns)
         end
       end
     end
-    if remaining == 0 then break end
+    if remaining == 0 then
+      break
+    end
     -- Let the host loop keep pumping (TUI redraw, input, etc.).
-    if psi.host_tick ~= nil then psi.host_tick() end
+    if psi.host_tick ~= nil then
+      psi.host_tick()
+    end
   end
 
   local out = {}

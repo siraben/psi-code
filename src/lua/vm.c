@@ -1346,7 +1346,7 @@ static int psi_vm_embedded_searcher(lua_State *L) {
  * Lua's built-in preload search; inserting at 2 lets extensions on
  * disk (PSI_EXTENSIONS_DIR, ./.psi/extensions/) still be loaded via
  * the standard path-based searcher that remains at position 3+. */
-static int psi_vm_register_embedded(lua_State *L) {
+static void psi_vm_register_embedded(lua_State *L) {
     int n;
     int i;
     lua_getglobal(L, "package");
@@ -1360,7 +1360,6 @@ static int psi_vm_register_embedded(lua_State *L) {
     lua_pushcfunction(L, psi_vm_embedded_searcher);
     lua_rawseti(L, -2, 2);
     lua_pop(L, 2); /* searchers + package */
-    return PSI_STATUS_OK;
 }
 
 static const struct psi_embedded_lua *psi_vm_embedded_find(const char *name) {
@@ -1393,11 +1392,7 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
         return PSI_STATUS_ERROR;
     }
 
-    if (psi_vm_register_embedded(vm->L) != PSI_STATUS_OK) {
-        lua_close(vm->L);
-        vm->L = NULL;
-        return PSI_STATUS_ERROR;
-    }
+    psi_vm_register_embedded(vm->L);
 
     psi_vm_register_psi(vm->L);
 

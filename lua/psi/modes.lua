@@ -267,8 +267,12 @@ function M.run_repl(opts)
     end
     if line:sub(1, 1) == "/" then
       local ok, quit = handle_slash_command(opts, line)
-      if not ok then return false end
-      if quit then break end
+      if not ok then
+        return false
+      end
+      if quit then
+        break
+      end
     else
       if line ~= "" then
         psi.add_history(line)

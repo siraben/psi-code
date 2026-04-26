@@ -28,13 +28,14 @@ function M.by_lines(text, offset, limit)
   end
 
   local truncated = start > 1 or stop < total
-  return table.concat(out, "\n"), {
-    total_lines = total,
-    start_line = total == 0 and 0 or start,
-    end_line = stop,
-    truncated = truncated,
-    next_offset = stop < total and stop or nil,
-  }
+  return table.concat(out, "\n"),
+    {
+      total_lines = total,
+      start_line = total == 0 and 0 or start,
+      end_line = stop,
+      truncated = truncated,
+      next_offset = stop < total and stop or nil,
+    }
 end
 
 function M.bytes(text, max_bytes, mode)
@@ -50,7 +51,9 @@ function M.bytes(text, max_bytes, mode)
 end
 
 function M.notice(meta)
-  if not meta or not meta.truncated then return nil end
+  if not meta or not meta.truncated then
+    return nil
+  end
   local parts = {
     "[Showing lines ",
     tostring(meta.start_line),

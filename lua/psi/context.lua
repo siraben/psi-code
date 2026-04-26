@@ -40,7 +40,9 @@ function M.reset_usage()
   last_usage = nil
   -- Zero the C-side mirror too; the TUI status line reads from it
   -- without touching Lua so it must be kept in sync.
-  if psi.set_usage then psi.set_usage(0, 0, 0, 0, 0, 0) end
+  if psi.set_usage then
+    psi.set_usage(0, 0, 0, 0, 0, 0)
+  end
 end
 
 function M.last_usage()
@@ -54,11 +56,11 @@ function M.record_usage(message_index, usage, model)
   if type(usage) ~= "table" or type(message_index) ~= "number" then
     return
   end
-  local input  = usage.input_tokens or 0
+  local input = usage.input_tokens or 0
   local output = usage.output_tokens or 0
-  local cr     = usage.cache_read_input_tokens or 0
-  local cw     = usage.cache_creation_input_tokens or 0
-  local total  = input + output + cr + cw
+  local cr = usage.cache_read_input_tokens or 0
+  local cw = usage.cache_creation_input_tokens or 0
+  local total = input + output + cr + cw
   last_usage = { message_index = message_index, total = total }
   if psi.set_usage then
     psi.set_usage(input, output, cr, cw, total, M.context_window(model))

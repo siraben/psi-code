@@ -20,12 +20,16 @@ local safe_decode = prelude.safe_json_decode
 
 local function api_url(path)
   local base = os.getenv(BASE_URL_ENV) or BASE_URL_DEFAULT
-  if base:sub(-1) ~= "/" then base = base .. "/" end
+  if base:sub(-1) ~= "/" then
+    base = base .. "/"
+  end
   return base .. path
 end
 
 local function resolve_model(m)
-  if m and m ~= "" then return m end
+  if m and m ~= "" then
+    return m
+  end
   return os.getenv(MODEL_ENV) or MODEL_DEFAULT
 end
 
@@ -54,7 +58,9 @@ end
 
 local function handle_line(line, state, observer)
   local obj = safe_decode(line)
-  if type(obj) ~= "table" then return end
+  if type(obj) ~= "table" then
+    return
+  end
   local msg = obj.message
   if type(msg) == "table" then
     if type(msg.content) == "string" and msg.content ~= "" then
@@ -89,15 +95,16 @@ local function handle_line(line, state, observer)
           id = "call_" .. prelude.uuid_short():sub(1, 12)
         end
         state.tool_calls[#state.tool_calls + 1] = {
-          id = id, name = fn.name or "", arguments = args,
+          id = id,
+          name = fn.name or "",
+          arguments = args,
         }
       end
     end
   end
   if obj.done then
     state.done = true
-    if type(obj.prompt_eval_count) == "number"
-       or type(obj.eval_count) == "number" then
+    if type(obj.prompt_eval_count) == "number" or type(obj.eval_count) == "number" then
       state.usage = {
         input_tokens = obj.prompt_eval_count or 0,
         output_tokens = obj.eval_count or 0,
@@ -123,13 +130,19 @@ local function parser_push(parser, chunk, state, observer)
     parser.line[#parser.line + 1] = chunk:sub(start, nl - 1)
     local line = table.concat(parser.line)
     parser.line = {}
-    if line:sub(-1) == "\r" then line = line:sub(1, -2) end
-    if #line > 0 then handle_line(line, state, observer) end
+    if line:sub(-1) == "\r" then
+      line = line:sub(1, -2)
+    end
+    if #line > 0 then
+      handle_line(line, state, observer)
+    end
     start = nl + 1
   end
 end
 
-local function finalize_tool_calls(state) return state.tool_calls end
+local function finalize_tool_calls(state)
+  return state.tool_calls
+end
 
 -- ---------- Provider config ----------
 
@@ -188,7 +201,9 @@ local function make_config(model)
 
     extract_completion = function(parsed)
       local msg = parsed.message
-      if type(msg) ~= "table" then return "" end
+      if type(msg) ~= "table" then
+        return ""
+      end
       return msg.content or ""
     end,
   }
@@ -198,24 +213,24 @@ end
 
 function M.run_turn(opts)
   local model = resolve_model(opts.model)
-  return compat.run_turn(
-    { model = model,
-      observer = opts.observer,
-      abort_check = opts.abort_check,
-      max_tokens = opts.max_tokens,
-      system_prompt = opts.system_prompt,
-      tool_specs = opts.tool_specs },
-    make_config(model))
+  return compat.run_turn({
+    model = model,
+    observer = opts.observer,
+    abort_check = opts.abort_check,
+    max_tokens = opts.max_tokens,
+    system_prompt = opts.system_prompt,
+    tool_specs = opts.tool_specs,
+  }, make_config(model))
 end
 
 function M.complete_text(opts)
   local model = resolve_model(opts.model)
-  return compat.complete_text(
-    { model = model,
-      system_prompt = opts.system_prompt,
-      user_text = opts.user_text,
-      max_tokens = opts.max_tokens },
-    make_config(model))
+  return compat.complete_text({
+    model = model,
+    system_prompt = opts.system_prompt,
+    user_text = opts.user_text,
+    max_tokens = opts.max_tokens,
+  }, make_config(model))
 end
 
 return M
