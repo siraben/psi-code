@@ -714,8 +714,8 @@ def t_session_native_token_ranges(psi: Psi):
         + 'return tostring(full) .. "," .. tostring(tail) .. "," .. tostring(keep)'
     )
     full, tail, keep = [int(x) for x in out.strip().split(",")]
-    assert full == 6 and tail == 3, \
-        f"native token ranges should match pi-style chars/4 semantics: {out!r}"
+    assert full == 9 and tail == 4, \
+        f"native token ranges should match calibrated pi-style semantics: {out!r}"
     assert keep == 1, f"expected one recent message for tail budget: {out!r}"
 
 
@@ -732,13 +732,13 @@ def t_session_native_token_estimate_matches_pi_shapes(psi: Psi):
         + 'local tool_body = { message = { role = "toolResult", content = {\n'
         + '  { type = "text", text = "abcd" }, { type = "image" },\n'
         + '} } }\n'
-        + 'psi.session_append("tool-result", "abcd", psi.json_encode(tool_body))\n'
+        + 's.append_message({ role = "tool-result", text = "abcd", data = psi.json_encode(tool_body) })\n'
         + 'return tostring(psi.session_token_estimate_from(1)) .. ","\n'
         + '  .. tostring(psi.session_token_estimate_from(2))'
     )
     total, tool_tail = [int(x) for x in out.strip().split(",")]
-    assert total == 1209 and tool_tail == 1201, \
-        f"native estimator should mirror pi role/content rules: {out!r}"
+    assert total == 1337 and tool_tail == 1328, \
+        f"native estimator should mirror calibrated pi role/content rules: {out!r}"
 
 
 @test("anthropic/drops_orphan_tool_result")

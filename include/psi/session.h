@@ -27,6 +27,13 @@ int psi_session_append_with_data(
     const char *text,
     const char *data_json
 );
+int psi_session_append_with_data_and_estimate(
+    struct psi_session *session,
+    enum psi_message_role role,
+    const char *text,
+    const char *data_json,
+    size_t token_estimate
+);
 int psi_session_set_id(struct psi_session *session, const char *id);
 int psi_session_set_path(struct psi_session *session, const char *path);
 int psi_session_set_parent_id(struct psi_session *session, const char *parent_id);

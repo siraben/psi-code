@@ -1538,16 +1538,23 @@ static int lfn_session_append(lua_State *L) {
     const char *role = luaL_checkstring(L, 1);
     const char *text = luaL_checkstring(L, 2);
     const char *data = NULL;
+    lua_Integer estimate_arg = -1;
     struct psi_host_context *host;
     struct psi_session *s;
     int status;
 
     if (lua_type(L, 3) == LUA_TSTRING) data = lua_tostring(L, 3);
+    if (lua_type(L, 4) == LUA_TNUMBER) estimate_arg = lua_tointeger(L, 4);
 
     host = PSI_VM_HOST(L);
     s = host ? host->session : NULL;
     if (!s) { lua_pushboolean(L, 0); return 1; }
-    status = psi_session_append_with_data(s, psi_session_role_from_name(role), text, data);
+    if (estimate_arg >= 0) {
+        status = psi_session_append_with_data_and_estimate(
+            s, psi_session_role_from_name(role), text, data, (size_t)estimate_arg);
+    } else {
+        status = psi_session_append_with_data(s, psi_session_role_from_name(role), text, data);
+    }
     lua_pushboolean(L, status == PSI_STATUS_OK ? 1 : 0);
     return 1;
 }
