@@ -52,6 +52,8 @@ psi.prompt_templates = require("psi.prompt_templates")
 psi.tui = require("psi.tui")
 psi.tui_layout = require("psi.tui_layout")
 psi.extensions = psi.extensions or {}
+psi.extensions.osc52_clipboard = require("psi.extensions.osc52_clipboard")
+psi.extensions.osc52_clipboard.register(psi)
 psi.extensions.vim_keybindings = require("psi.extensions.vim_keybindings")
 psi.extensions.vim_keybindings.register(psi)
 psi.modes = require("psi.modes")
