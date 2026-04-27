@@ -14,7 +14,7 @@ architecture it is porting.
 | Project context discovery | `packages/coding-agent/src/core/resource-loader.ts` | Ported for global/project `AGENTS.md` / `CLAUDE.md` discovery. Prompt templates and Lua-native theme loading are ported; skills are still not ported. |
 | System prompt assembly | `packages/coding-agent/src/core/system-prompt.ts` | Ported via `psi.prompt`. Assembled from tool metadata, guidelines, cwd, date, and project context files; prompt caching applied per `pi`. |
 | Interactive shell | `packages/coding-agent/src/modes/interactive/` | Ported. `libedit`-backed coding-agent shell over the streamed loop, slash commands include `/help`, `/session`, `/fork`, `/compact`, `/new`, `/clear`, `/reload`, `/system-prompt`, `/quit`, tier-1/2/3 additions. |
-| Full-screen TUI | `packages/tui/` | Ported core. `--tui` runs the streamed agent loop in raw terminal mode with Lua-owned ANSI rendering on a single thread — the agent turn is a Lua coroutine driven by `psi.sched`, yielding cooperatively on HTTP / process poll so the redraw loop keeps up. Rich status line (cwd / model / session / token usage), unicode tool-call borders, live markdown, readline editing (Alt-B/F/D/Backspace, Ctrl-W/K/U), Ctrl-G abort, Ctrl-Z suspend, and a Lua-driven theme registry with a bundled dark default. Smaller than `pi`'s TUI: no session tree view, no modals, no interactive theme picker. |
+| Full-screen TUI | `packages/tui/` | Ported core. `--tui` runs the streamed agent loop in raw terminal mode with Lua-owned ANSI rendering on a single thread — the agent turn is a Lua coroutine driven by `psi.sched`, yielding cooperatively on HTTP / process poll so the redraw loop keeps up. Rich status line (cwd / model / session / token usage), unicode tool-call borders, live markdown, readline editing (Alt-B/F/D/Backspace, Ctrl-W/K/U), Lua-extension Vim modal editing (normal/insert/visual/block visual), Ctrl-G abort, Ctrl-Z suspend, and a Lua-driven theme registry with a bundled dark default. Smaller than `pi`'s TUI: no session tree view, no modals, no interactive theme picker. |
 | RPC mode | `packages/coding-agent/src/modes/rpc/` | Not started. |
 | Compaction and summaries | `packages/coding-agent/src/core/compaction/` | Ported. Manual and dynamic token-aware auto-compaction; file-op provenance from `psi.session` feeds the compaction prompt. Not yet branch-aware. |
 | Hooks and extensions | `packages/coding-agent/src/core/skills.ts`, `src/core/extensions/` | Early-to-partial. `psi.tool_registry` exposes before/after tool-call hooks; `psi.events` is a neutral pub/sub bus; `psi.commands.register` opens slash commands to extensions; boot loads Lua files from `$PSI_EXTENSIONS_DIR`, `~/.config/psi/extensions/`, and `./.psi/extensions/`. No npm/git package manager, no TS transpile, no sandboxing. |
@@ -35,6 +35,8 @@ architecture it is porting.
   rest, but the portability tradeoff is worth it here.
 - ANSI terminal control: used by `--tui` for full-screen rendering. A UTF-8
   locale is set before entering raw mode so unicode glyphs render correctly.
+  The Lua TUI has no non-ANSI renderer, so `ANSI=0` disables TUI support at
+  compile time.
 - `argtable3`: CLI option parsing.
 - `pthread`: used only by the `src/core/http_async.c` helper thread
   that runs `curl_easy_perform` behind a chunk queue. The TUI no

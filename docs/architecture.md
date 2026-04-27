@@ -195,9 +195,8 @@ Rendering policy:
 
 - Use raw ANSI line drawing when ANSI is compiled in, the terminal is not
   `dumb`, and `psi.tui_draw_raw_line` is available.
-- Fall back to `psi.tui_draw_line`, where the ncurses bridge interprets ANSI
-  SGR when `ANSI=1`.
-- Fall back to plain text when ANSI or color is disabled.
+- Fall back to plain-text frames when ANSI or color is disabled by the
+  runtime policy.
 
 C owns only the low-level terminal effects. The Lua TUI is ANSI-terminal
 backed, so a no-ANSI build disables TUI support rather than exposing a
@@ -226,6 +225,18 @@ The TUI is an optional host capability.
 
 Lua-owned TUI code should treat the host terminal as a capability, not as a
 global assumption.
+
+### TUI extension hooks
+
+Built-in Vim-style modal editing is installed as a Lua extension through the
+same `psi.tui.register_key_handler` and `psi.tui.register_status_hook` APIs
+available to user extensions. C normalizes terminal input to semantic key ids;
+Lua chooses whether a key edits text, switches editor mode, scrolls the
+transcript, updates the status bar, or falls through to the default policy.
+
+`/reload` clears TUI key and status hooks, reinstalls built-in extensions, and
+then reloads user extensions. That keeps repeated reloads idempotent instead
+of stacking duplicate modal key handlers or status snippets.
 
 ### ANSI and color
 
