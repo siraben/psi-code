@@ -71,33 +71,26 @@ end
 --   usage_tokens  — measured from last API response
 --   trailing      — char/4 estimate for messages appended after that point
 function M.estimate_context_tokens()
-  local messages = psi.session_messages()
   local base_index = (last_usage and last_usage.message_index) or 0
   local base_total = (last_usage and last_usage.total) or 0
+  local count = psi.session_message_count()
+  local messages = base_total == 0 and psi.session_messages()
+    or psi.session_messages_from(base_index + 1)
   local trailing = 0
-  for i = base_index + 1, #messages do
+  for i = 1, #messages do
     local m = messages[i]
     trailing = trailing + M.estimate_tokens(m.text)
     if m.data then
       trailing = trailing + M.estimate_tokens(m.data)
     end
   end
-  if base_total == 0 then
-    -- No measured baseline yet: estimate the whole transcript.
-    for i = 1, base_index do
-      local m = messages[i]
-      trailing = trailing + M.estimate_tokens(m.text)
-      if m.data then
-        trailing = trailing + M.estimate_tokens(m.data)
-      end
-    end
-  end
+  -- With no measured baseline, `messages` is the whole transcript.
   return {
     tokens = base_total + trailing,
     usage_tokens = base_total,
     trailing_tokens = trailing,
     last_usage_index = base_index,
-    message_count = #messages,
+    message_count = count,
   }
 end
 

@@ -380,7 +380,7 @@ function M.hotkeys_text()
 end
 
 function M.footer_hint(arg_json)
-  local arg = prelude.safe_json_decode(arg_json, {})
+  local arg = type(arg_json) == "table" and arg_json or prelude.safe_json_decode(arg_json, {})
   if arg.busy then
     return M.display("app.interrupt") .. " abort current turn"
   end

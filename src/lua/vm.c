@@ -914,7 +914,8 @@ static int lfn_read_file_slice(lua_State *L) {
     size_t len;
     long line;
     long total_lines;
-    int ch;
+    unsigned char read_buffer[8192];
+    size_t read_count;
     int saw_any;
     int last_was_nl;
     int truncated;
@@ -939,32 +940,36 @@ static int lfn_read_file_slice(lua_State *L) {
     saw_any = 0;
     last_was_nl = 0;
     truncated = 0;
-    while ((ch = fgetc(f)) != EOF) {
-        saw_any = 1;
-        last_was_nl = 0;
-        if (line >= offset && line < offset + limit && !truncated) {
-            if ((long)len >= max_bytes) {
-                truncated = 1;
-            } else {
-                if (len + 2u > cap) {
-                    next_cap = cap * 2u;
-                    if ((long)next_cap > max_bytes + 1l) next_cap = (size_t)max_bytes + 1u;
-                    next = (char *)realloc(buffer, next_cap);
-                    if (!next) {
-                        free(buffer);
-                        fclose(f);
-                        return luaL_error(L, "out of memory");
+    while ((read_count = fread(read_buffer, 1u, sizeof(read_buffer), f)) > 0u) {
+        size_t pos;
+        for (pos = 0u; pos < read_count; pos++) {
+            int ch = read_buffer[pos];
+            saw_any = 1;
+            last_was_nl = 0;
+            if (line >= offset && line < offset + limit && !truncated) {
+                if ((long)len >= max_bytes) {
+                    truncated = 1;
+                } else {
+                    if (len + 2u > cap) {
+                        next_cap = cap * 2u;
+                        if ((long)next_cap > max_bytes + 1l) next_cap = (size_t)max_bytes + 1u;
+                        next = (char *)realloc(buffer, next_cap);
+                        if (!next) {
+                            free(buffer);
+                            fclose(f);
+                            return luaL_error(L, "out of memory");
+                        }
+                        buffer = next;
+                        cap = next_cap;
                     }
-                    buffer = next;
-                    cap = next_cap;
+                    buffer[len++] = (char)ch;
                 }
-                buffer[len++] = (char)ch;
             }
-        }
-        if (ch == '\n') {
-            total_lines++;
-            line++;
-            last_was_nl = 1;
+            if (ch == '\n') {
+                total_lines++;
+                line++;
+                last_was_nl = 1;
+            }
         }
     }
     fclose(f);
@@ -1110,6 +1115,61 @@ static int lfn_list_dir(lua_State *L) {
     return 1;
 }
 
+static const char *psi_vm_dirent_type_name(const struct dirent *entry) {
+#ifdef DT_DIR
+    if (entry->d_type == DT_DIR) return "directory";
+    if (entry->d_type == DT_REG) return "file";
+#else
+    PSI_UNUSED(entry);
+#endif
+    return NULL;
+}
+
+static int lfn_list_dir_typed(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    DIR *dir;
+    struct dirent *entry;
+    int i;
+
+    dir = opendir(path);
+    if (dir == NULL) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    lua_newtable(L);
+    i = 1;
+    while ((entry = readdir(dir)) != NULL) {
+        const char *kind;
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+#ifdef DT_DIR
+        kind = psi_vm_dirent_type_name(entry);
+        if (kind == NULL)
+#else
+        kind = NULL;
+#endif
+        {
+            char *full = psi_vm_path_join(path, entry->d_name);
+            kind = full != NULL ? psi_vm_file_type_name(full) : NULL;
+            free(full);
+        }
+
+        lua_newtable(L);
+        lua_pushstring(L, entry->d_name);
+        lua_setfield(L, -2, "name");
+        if (kind != NULL) {
+            lua_pushstring(L, kind);
+            lua_setfield(L, -2, "type");
+        }
+        lua_rawseti(L, -2, i++);
+    }
+    closedir(dir);
+    psi_vm_mark_array(L);
+    return 1;
+}
+
 static int lfn_mkdir_p(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
     lua_pushboolean(L, psi_vm_mkdir_p(path) == PSI_STATUS_OK ? 1 : 0);
@@ -1183,6 +1243,9 @@ static int lfn_tool_progress(lua_State *L) {
     return 0;
 }
 
+static char **psi_vm_argv_from_table(lua_State *L, int idx, int *argc_out);
+static void psi_vm_argv_free(char **argv);
+
 static int lfn_process_run(lua_State *L) {
     const char *command = luaL_checkstring(L, 1);
     char *output = NULL;
@@ -1242,7 +1305,12 @@ static int lfn_process_run_argv(lua_State *L) {
         return 1;
     }
 
-    status = psi_process_run_argv(argv, &output, &exit_status, &truncated, host ? host->abort_signal : NULL);
+    status = psi_process_run_argv(
+        argv,
+        &output,
+        &exit_status,
+        &truncated,
+        host ? host->abort_signal : NULL);
     psi_vm_argv_free(argv);
 
     lua_newtable(L);
@@ -1370,7 +1438,10 @@ static int lfn_process_begin_argv(lua_State *L) {
     }
 
     h = NULL;
-    status = psi_process_begin_argv(argv, host ? host->abort_signal : NULL, &h);
+    status = psi_process_begin_argv(
+        argv,
+        host ? host->abort_signal : NULL,
+        &h);
     psi_vm_argv_free(argv);
     if (status != PSI_STATUS_OK || h == NULL) {
         lua_pushnil(L);
@@ -2046,13 +2117,45 @@ static int lfn_session_messages(lua_State *L) {
     return 1;
 }
 
+static int lfn_session_messages_from(lua_State *L) {
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    struct psi_session *s = host ? host->session : NULL;
+    lua_Integer start_arg = luaL_optinteger(L, 1, 1);
+    size_t start;
+    size_t i;
+    int out_index;
+
+    lua_newtable(L);
+    psi_vm_mark_array(L);
+    if (!s) return 1;
+    if (start_arg < 1) start_arg = 1;
+    start = (size_t)(start_arg - 1);
+    if (start >= s->count) return 1;
+
+    out_index = 1;
+    for (i = start; i < s->count; i++) {
+        lua_newtable(L);
+        lua_pushstring(L, psi_message_role_name(s->messages[i].role));
+        lua_setfield(L, -2, "role");
+        lua_pushstring(L, s->messages[i].text ? s->messages[i].text : "");
+        lua_setfield(L, -2, "text");
+        if (s->messages[i].data_json) {
+            lua_pushstring(L, s->messages[i].data_json);
+            lua_setfield(L, -2, "data");
+        }
+        lua_rawseti(L, -2, out_index++);
+    }
+    return 1;
+}
+
 static int lfn_runtime_info(lua_State *L) {
     static const char *PRIMITIVES[] = {
         "version", "log", "session_message_count", "read_file", "read_file_slice",
         "file_write", "current_date", "cwd", "parent_directory", "path_join",
         "path_expand", "path_resolve", "file_exists", "file_type", "list_dir",
+        "list_dir_typed",
         "mkdir_p", "mkdir_parent", "runtime_info", "session_messages",
-        "process_run", "process_run_argv", "process_begin_argv",
+        "session_messages_from", "process_run", "process_run_argv", "process_begin_argv",
         "session_append", "session_clear",
         "http_get", "http_post",
         "tool_call",
@@ -2417,10 +2520,12 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("file_exists",           lfn_file_exists);
     PSI_REG("file_type",             lfn_file_type);
     PSI_REG("list_dir",              lfn_list_dir);
+    PSI_REG("list_dir_typed",        lfn_list_dir_typed);
     PSI_REG("mkdir_p",               lfn_mkdir_p);
     PSI_REG("mkdir_parent",          lfn_mkdir_parent);
     PSI_REG("runtime_info",          lfn_runtime_info);
     PSI_REG("session_messages",      lfn_session_messages);
+    PSI_REG("session_messages_from", lfn_session_messages_from);
     PSI_REG("process_run",           lfn_process_run);
     PSI_REG("process_run_argv",      lfn_process_run_argv);
     PSI_REG("process_begin",         lfn_process_begin);

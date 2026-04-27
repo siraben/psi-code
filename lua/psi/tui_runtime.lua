@@ -69,14 +69,14 @@ local function default_input_layout(height)
 end
 
 local function refresh_input_layout(state)
-  local arg = psi.json_encode({
+  local arg = {
     width = state.width,
     height = state.height,
     busy = state.busy,
     scroll = state.scroll_offset,
-  })
-  local raw = tui_layout.input_layout(arg)
-  local layout = safe_decode(raw, {})
+  }
+  local layout = tui_layout.input_layout_table and tui_layout.input_layout_table(arg)
+    or safe_decode(tui_layout.input_layout(psi.json_encode(arg)), {})
   local fallback = default_input_layout(state.height)
   state.input_layout = {
     max_rows = tonumber(layout.max_rows) or fallback.max_rows,
@@ -218,10 +218,21 @@ local function new_state(opts)
     input_layout = default_input_layout(height),
     streaming_assistant_index = nil,
     streaming_thinking_index = nil,
+    entries_version = 0,
+    total_cache_width = nil,
+    total_cache_version = nil,
+    total_cache_lines = nil,
     dirty = true,
   }
   refresh_input_layout(state)
   return state
+end
+
+local function invalidate_render_totals(state)
+  state.entries_version = (state.entries_version or 0) + 1
+  state.total_cache_width = nil
+  state.total_cache_version = nil
+  state.total_cache_lines = nil
 end
 
 local function set_status(state, text, is_error)
@@ -244,6 +255,7 @@ local function add_entry(state, kind, text, title, is_error, tool_call_id)
     tool_call_id = tool_call_id,
   }
   state.entries[#state.entries + 1] = entry
+  invalidate_render_totals(state)
   state.dirty = true
   return #state.entries
 end
@@ -256,6 +268,7 @@ local function append_entry_text(state, index, text)
   entry.text = (entry.text or "") .. text
   entry.render_cache_width = nil
   entry.render_cache_lines = nil
+  invalidate_render_totals(state)
   state.dirty = true
 end
 
@@ -264,6 +277,7 @@ local function remove_entry(state, index)
     return
   end
   table.remove(state.entries, index)
+  invalidate_render_totals(state)
   if state.streaming_assistant_index and state.streaming_assistant_index > index then
     state.streaming_assistant_index = state.streaming_assistant_index - 1
   elseif state.streaming_assistant_index == index then
@@ -450,6 +464,13 @@ local function count_entry_lines(state, entry)
 end
 
 local function total_rendered_lines(state)
+  if
+    state.total_cache_width == state.width
+    and state.total_cache_version == state.entries_version
+    and state.total_cache_lines ~= nil
+  then
+    return state.total_cache_lines
+  end
   local total = 0
   for i, entry in ipairs(state.entries) do
     local prev = state.entries[i - 1]
@@ -464,6 +485,9 @@ local function total_rendered_lines(state)
       total = total + 1
     end
   end
+  state.total_cache_width = state.width
+  state.total_cache_version = state.entries_version
+  state.total_cache_lines = total
   return total
 end
 
@@ -551,6 +575,7 @@ local function rebuild_from_session(state)
   state.entries = {}
   state.streaming_assistant_index = nil
   state.streaming_thinking_index = nil
+  invalidate_render_totals(state)
   for _, msg in ipairs(session.messages()) do
     add_session_entry(state, msg)
   end
@@ -595,11 +620,17 @@ local function style_line(line)
   return ansi.dim(line.text)
 end
 
-local function build_render_lines(state)
+local function build_render_window(state, first_line, count)
   local lines = {}
+  local pos = 0
+  local last_line = first_line + count - 1
 
   local function push(line)
-    lines[#lines + 1] = line
+    pos = pos + 1
+    if pos >= first_line and pos <= last_line then
+      lines[pos - first_line + 1] = line
+    end
+    return pos >= last_line
   end
 
   for i, entry in ipairs(state.entries) do
@@ -608,16 +639,22 @@ local function build_render_lines(state)
     local same_panel_as_prev = (prev and prev.kind == "tool_call" and entry.kind == "tool_result")
       or (prev and prev.kind == "tool_result" and entry.kind == "tool_result")
 
-    if #lines > 0 and not same_panel_as_prev then
-      push({ kind = "blank", text = "" })
+    if pos > 0 and not same_panel_as_prev then
+      if push({ kind = "blank", text = "" }) then
+        return lines
+      end
     end
 
     for _, line in ipairs(entry_render_lines(state, entry)) do
-      push(line)
+      if push(line) then
+        return lines
+      end
     end
 
     if entry.kind == "tool_result" and (not next_entry or next_entry.kind ~= "tool_result") then
-      push({ kind = "panel_close", text = "╰─" })
+      if push({ kind = "panel_close", text = "╰─" }) then
+        return lines
+      end
     end
   end
 
@@ -668,9 +705,9 @@ end
 local function redraw(state)
   state.width, state.height = current_size()
   local rows = layout_rows(state)
-  local transcript_lines = build_render_lines(state)
-  local max_scroll = math.max(0, #transcript_lines - rows.transcript_height)
-  local status_json
+  local total_lines = total_rendered_lines(state)
+  local max_scroll = math.max(0, total_lines - rows.transcript_height)
+  local status_arg
   local hint_text
   local status_text
   local cwd
@@ -680,35 +717,36 @@ local function redraw(state)
   psi.tui_clear()
   psi.tui_draw_line(1, ansi.bold(ansi.cyan("psi coding agent")))
 
-  local first_line = #transcript_lines - rows.transcript_height - state.scroll_offset + 1
+  local first_line = total_lines - rows.transcript_height - state.scroll_offset + 1
   if first_line < 1 then
     first_line = 1
   end
+  local transcript_lines = build_render_window(state, first_line, rows.transcript_height)
   for i = 0, rows.transcript_height - 1 do
-    local line = transcript_lines[first_line + i]
+    local line = transcript_lines[i + 1]
     psi.tui_draw_line(rows.transcript_start + i, line and style_line(line) or "")
   end
 
-  status_json = psi.json_encode({
+  status_arg = {
     model = state.model and state.model.id or state.opts.model,
     provider = state.model and state.model.provider or nil,
     context_window = state.model and state.model.context_window or nil,
     busy = state.busy,
     scroll = state.scroll_offset,
-  })
+  }
 
   if state.status_text ~= nil then
     hint_text = state.status_is_error and ansi.bold(ansi.red(state.status_text))
       or ansi.dim(state.status_text)
   else
-    hint_text = ansi.dim(tui.footer_hint(status_json) or "")
+    hint_text = ansi.dim(tui.footer_hint(status_arg) or "")
   end
   psi.tui_draw_line(rows.hint_row, hint_text)
 
   cwd = psi.cwd() or "."
   psi.tui_draw_line(rows.cwd_row, ansi.dim(cwd))
 
-  status_text = tui.status_line(status_json) or ""
+  status_text = tui.status_line(status_arg) or ""
   psi.tui_draw_line(rows.status_row, ansi.dim(status_text))
 
   for i = 0, rows.input_rows - 1 do

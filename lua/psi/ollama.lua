@@ -41,14 +41,14 @@ end
 -- simpler than OpenRouter's — no per-index accumulator.
 local function new_state()
   return {
-    text = "",
+    text_parts = {},
     -- Ollama emits reasoning-model output in a separate `thinking`
     -- field (Qwen3, DeepSeek-R1, …) distinct from `content`. Keep
     -- its running accumulator here so openai_compat.persist_assistant
     -- can materialise a thinking content block in the session, and
     -- so the on_thinking_delta observer / thinking-delta event see
     -- parity with the Anthropic provider.
-    thinking = "",
+    thinking_parts = {},
     tool_calls = {}, -- [i] = {id, name, arguments}
     usage = nil,
     stop_reason = nil,
@@ -64,7 +64,8 @@ local function handle_line(line, state, observer)
   local msg = obj.message
   if type(msg) == "table" then
     if type(msg.content) == "string" and msg.content ~= "" then
-      state.text = state.text .. msg.content
+      state.text_parts[#state.text_parts + 1] = msg.content
+      state.text = nil
       if observer.on_assistant_text_delta then
         observer.on_assistant_text_delta(msg.content)
       end
@@ -73,7 +74,8 @@ local function handle_line(line, state, observer)
       end
     end
     if type(msg.thinking) == "string" and msg.thinking ~= "" then
-      state.thinking = state.thinking .. msg.thinking
+      state.thinking_parts[#state.thinking_parts + 1] = msg.thinking
+      state.thinking = nil
       if observer.on_thinking_delta then
         observer.on_thinking_delta(msg.thinking)
       end

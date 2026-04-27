@@ -160,6 +160,70 @@ BENCHES: list[tuple[str, str]] = [
         """,
     ),
     (
+        "session_append_delta",
+        r"""
+        local s = require('psi.session')
+        local path = '/tmp/psi-bench-delta.jsonl'
+        os.remove(path)
+        psi.session_set_path(path)
+        for i = 1, 1000 do
+          s.append_user(string.rep('m', 120) .. ' ' .. i)
+        end
+        s.save()
+        local N = 40
+        local start = os.clock()
+        for i = 1, N do
+          s.append_user('delta ' .. i)
+          s.save()
+        end
+        local dt = (os.clock() - start) * 1000
+        os.remove(path)
+        io.write(string.format('ms: %.1f  deltas: %d  messages: %d\n',
+                               dt, N, psi.session_message_count()))
+        """,
+    ),
+    (
+        "read_file_slice_large",
+        r"""
+        local path = '/tmp/psi-bench-read-large.txt'
+        local f = assert(io.open(path, 'w'))
+        for i = 1, 50000 do f:write('line ', i, ' abcdefghijklmnopqrstuvwxyz\n') end
+        f:close()
+        local N = 80
+        local bytes = 0
+        local start = os.clock()
+        for i = 1, N do
+          local slice = psi.read_file_slice(path, 25000, 200)
+          bytes = bytes + #(slice and slice.text or '')
+        end
+        local dt = (os.clock() - start) * 1000
+        os.remove(path)
+        io.write(string.format('ms: %.1f  reads: %d  bytes: %d\n', dt, N, bytes))
+        """,
+    ),
+    (
+        "ls_typed_many_entries",
+        r"""
+        local dir = '/tmp/psi-bench-ls'
+        os.execute('rm -rf ' .. dir .. ' && mkdir -p ' .. dir)
+        for i = 1, 600 do psi.file_write(dir .. '/f' .. i, 'x') end
+        for i = 1, 60 do psi.mkdir_p(dir .. '/d' .. i) end
+        local ls = require('psi.tools.ls')
+        ls()
+        local registry = require('psi.tool_registry')
+        local N = 30
+        local total = 0
+        local start = os.clock()
+        for _ = 1, N do
+          local r = registry.dispatch('ls', { path = dir, limit = 1000 })
+          total = total + #(r.extras and r.extras.output or '')
+        end
+        local dt = (os.clock() - start) * 1000
+        os.execute('rm -rf ' .. dir)
+        io.write(string.format('ms: %.1f  lists: %d  bytes: %d\n', dt, N, total))
+        """,
+    ),
+    (
         "sse_feed_fragmented",
         r"""
         -- Realistic adversarial workload: several large SSE events,
@@ -194,6 +258,33 @@ BENCHES: list[tuple[str, str]] = [
         local dt = (os.clock() - start) * 1000
         io.write(string.format('ms: %.1f  iterations: %d  chunks: %d  events: %d\n',
                                dt, N, #body_chunks, events_seen))
+        """,
+    ),
+    (
+        "anthropic_text_delta_accum",
+        r"""
+        local t = require('psi.anthropic')._test
+        local N = 200
+        local CHUNKS = 2000
+        local start = os.clock()
+        local bytes = 0
+        for _ = 1, N do
+          local state = t.new_state()
+          t.dispatch_sse(state, 'content_block_start', {
+            index = 0,
+            content_block = { type = 'text', text = '' },
+          }, {})
+          for i = 1, CHUNKS do
+            t.dispatch_sse(state, 'content_block_delta', {
+              index = 0,
+              delta = { type = 'text_delta', text = 'abcd' },
+            }, {})
+          end
+          bytes = bytes + #t.state_assistant_text(state)
+        end
+        local dt = (os.clock() - start) * 1000
+        io.write(string.format('ms: %.1f  streams: %d  chunks: %d  bytes: %d\n',
+                               dt, N, CHUNKS, bytes))
         """,
     ),
     (
