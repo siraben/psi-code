@@ -34,6 +34,9 @@ static int psi_tui_init_colors(void) {
     init_pair(5, COLOR_GREEN, -1);
     init_pair(6, COLOR_RED, -1);
     init_pair(7, -1, -1);
+    if (COLOR_PAIRS > 8) {
+        init_pair(8, COLORS > 242 ? 242 : COLOR_BLACK, -1);
+    }
 #endif
     return PSI_STATUS_OK;
 }

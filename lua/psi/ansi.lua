@@ -19,6 +19,7 @@ local function is_color_code(code)
   code = tostring(code or "")
   return code:match("^3[0-7]$") ~= nil
     or code:match("^9[0-7]$") ~= nil
+    or code:match("^38;5;%d+$") ~= nil
     or code:match("^%d+;3[0-7]$") ~= nil
     or code:match("^%d+;9[0-7]$") ~= nil
 end
@@ -50,8 +51,11 @@ end
 function M.yellow(text)
   return M.color("33", text)
 end
+function M.gray(text)
+  return M.color("38;5;242", text)
+end
 function M.italic(text)
-  return M.color("3", text)
+  return M.color("3", M.gray(text))
 end
 
 -- Autodetect environments that can't render ANSI. Called from

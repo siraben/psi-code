@@ -551,6 +551,8 @@ static void psi_vm_tui_ansi_apply(struct psi_vm_tui_ansi_state *s, int code) {
         case 3:
 #ifdef A_ITALIC
             s->attrs |= A_ITALIC;
+#else
+            s->attrs |= A_DIM;
 #endif
             break;
         case 4:  s->attrs |= A_UNDERLINE; break;
@@ -561,6 +563,13 @@ static void psi_vm_tui_ansi_apply(struct psi_vm_tui_ansi_state *s, int code) {
         case 34: s->color_pair = 1; break;
         case 36: s->color_pair = 2; break;
         case 37: s->color_pair = 3; break;
+        case 242:
+            if (COLOR_PAIRS > 8) {
+                s->color_pair = 8;
+            } else {
+                s->attrs |= A_DIM;
+            }
+            break;
 #endif
         default: break;
     }
