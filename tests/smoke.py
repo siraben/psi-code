@@ -1383,9 +1383,9 @@ def t_tui_input_box_background(psi: Psi):
         env_extra={"NO_COLOR": "1", "TERM": "xterm-256color"},
         idle_drain=1.0,
     )
-    assert b"\x1b[0;7m" in raw or b"\x1b[7m" in raw, "input box reverse-video fallback did not render"
-    assert b"\x1b[38;5;253m" in raw, "input box background color did not reach rendered output"
-    assert b"\x1b[38;5;255m" in raw, "input prompt chip color did not reach rendered output"
+    assert b"\x1b[0;7m" not in raw and b"\x1b[7m" not in raw, "input box should not use reverse-video"
+    assert b"\x1b[48;5;240m" in raw, "input box background color did not reach rendered output"
+    assert b"\x1b[48;5;248m" in raw, "input prompt chip color did not reach rendered output"
 
 
 @test("mode/tui_lf_submit")
