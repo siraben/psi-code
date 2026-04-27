@@ -24,6 +24,7 @@ struct psi_cli_options {
     const char *thinking_level;
     long max_tokens;
     long keep_recent;
+    int resume;
 };
 
 int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv);

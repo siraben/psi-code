@@ -22,10 +22,13 @@
 
 local records = require("psi.records")
 local prelude = require("psi.prelude")
+local path_util = require("psi.path")
 
 local M = {}
 
 local SESSION_VERSION = 3
+local MAX_SESSION_SCAN_BYTES = 262144
+local MAX_SESSION_DIR_COMPONENT_BYTES = 180
 
 -- Optional display name set via /name; persisted into the session header
 -- so it survives reloads.
@@ -68,9 +71,73 @@ function M.ensure_id()
   end
 end
 
+local function state_home()
+  local base = os.getenv("XDG_STATE_HOME")
+  if base and base ~= "" then
+    return base
+  end
+  local home = os.getenv("HOME") or ""
+  if home == "" then
+    return nil
+  end
+  return prelude.path_join(home, ".local/state")
+end
+
+function M.sessions_root()
+  local base = state_home()
+  if not base then
+    return nil
+  end
+  return prelude.path_join(base, "psi/sessions")
+end
+
+local function current_cwd()
+  return (psi.cwd and psi.cwd()) or os.getenv("PWD") or "."
+end
+
+function M.encode_session_dir(cwd)
+  cwd = path_util.resolve(cwd or current_cwd()) or cwd or "."
+  local encoded = cwd:gsub(".", function(ch)
+    if ch:match("[A-Za-z0-9._-]") then
+      return ch
+    end
+    return string.format("%%%02X", ch:byte())
+  end)
+  if encoded == "" then
+    encoded = "root"
+  end
+  if #encoded > MAX_SESSION_DIR_COMPONENT_BYTES then
+    local suffix = "-" .. prelude.hash_hex(cwd)
+    encoded = encoded:sub(1, MAX_SESSION_DIR_COMPONENT_BYTES - #suffix) .. suffix
+  end
+  return "--" .. encoded .. "--"
+end
+
+local function legacy_encode_session_dir(cwd)
+  cwd = path_util.resolve(cwd or current_cwd()) or cwd or "."
+  local encoded = cwd:gsub("^[/\\]", ""):gsub("[/\\:]", "-")
+  if encoded == "" then
+    encoded = "root"
+  end
+  return "--" .. encoded .. "--"
+end
+
+function M.session_dir_for_cwd(cwd)
+  local root = M.sessions_root()
+  if not root then
+    return nil
+  end
+  return prelude.path_join(root, M.encode_session_dir(cwd or current_cwd()))
+end
+
+local function session_file_timestamp()
+  return (prelude.iso_timestamp():gsub(":", "-"):gsub("%.", "-"))
+end
+
 -- Pick a default on-disk location for the session JSONL. Follows the
--- XDG Base Directory spec: $XDG_STATE_HOME/psi/sessions/<id>.jsonl,
--- falling back to $HOME/.local/state/psi/sessions/<id>.jsonl. Called
+-- XDG Base Directory spec:
+-- $XDG_STATE_HOME/psi/sessions/<encoded-cwd>/<timestamp>_<id>.jsonl,
+-- falling back to $HOME/.local/state/psi/sessions/... Called
 -- when the host (TUI) starts a session without --session, so every
 -- turn's autosave has somewhere to land instead of returning
 -- "no session path set" and surfacing "failed to save session file"
@@ -82,16 +149,11 @@ function M.ensure_default_path()
   end
   M.ensure_id()
   local id = psi.session_id()
-  local base = os.getenv("XDG_STATE_HOME")
-  if not base or base == "" then
-    local home = os.getenv("HOME") or ""
-    if home == "" then
-      return nil
-    end
-    base = prelude.path_join(home, ".local/state")
+  local dir = M.session_dir_for_cwd(current_cwd())
+  if not dir then
+    return nil
   end
-  local dir = prelude.path_join(base, "psi/sessions")
-  local path = prelude.path_join(dir, id .. ".jsonl")
+  local path = prelude.path_join(dir, session_file_timestamp() .. "_" .. id .. ".jsonl")
   psi.session_set_path(path)
   return path
 end
@@ -442,7 +504,7 @@ local function session_header()
     version = SESSION_VERSION,
     id = psi.session_id() or "",
     timestamp = prelude.iso_timestamp(),
-    cwd = os.getenv("PWD") or ".",
+    cwd = current_cwd(),
   }
   local parent = psi.session_parent_id()
   if parent and parent ~= "" then
@@ -452,6 +514,265 @@ local function session_header()
     hdr.name = display_name
   end
   return hdr
+end
+
+-- ---------- Session discovery / resume helpers ----------
+
+local function basename(path)
+  path = tostring(path or "")
+  return path:match("([^/\\]+)$") or path
+end
+
+local function read_first_json_line(path)
+  local f = io.open(path, "r")
+  if not f then
+    return nil
+  end
+  local line = f:read("*l")
+  f:close()
+  return prelude.safe_json_decode(line, nil)
+end
+
+local function entry_text(entry)
+  if type(entry) ~= "table" or entry.type ~= "message" or type(entry.message) ~= "table" then
+    return nil
+  end
+  local msg = entry.message
+  if msg.role ~= "user" and msg.role ~= "assistant" then
+    return nil
+  end
+  local content = msg.content
+  if type(content) == "string" then
+    return content
+  end
+  if type(content) ~= "table" then
+    return nil
+  end
+  local parts = {}
+  for _, block in ipairs(content) do
+    if type(block) == "table" and block.type == "text" and type(block.text) == "string" then
+      parts[#parts + 1] = block.text
+    end
+  end
+  if #parts == 0 then
+    return nil
+  end
+  return table.concat(parts, " ")
+end
+
+local function parse_time_key(text)
+  text = tostring(text or "")
+  local y, mo, d, h, mi, s = text:match("(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d)[:-](%d%d)[:-](%d%d)")
+  if not y then
+    return 0
+  end
+  return tonumber(y .. mo .. d .. h .. mi .. s) or 0
+end
+
+local function preview_label(role)
+  if role == "user" then
+    return "You"
+  elseif role == "assistant" then
+    return "Assistant"
+  end
+  return tostring(role or "Message")
+end
+
+local function add_preview_line(preview, role, text)
+  if #preview >= 6 or type(text) ~= "string" or text == "" then
+    return
+  end
+  local line = preview_label(role) .. ": " .. text:gsub("%s+", " ")
+  if #line > 160 then
+    line = line:sub(1, 157) .. "..."
+  end
+  preview[#preview + 1] = line
+end
+
+local function build_session_info(path)
+  local f = io.open(path, "r")
+  if not f then
+    return nil
+  end
+
+  local header
+  local message_count = 0
+  local first_message = nil
+  local preview = {}
+  local modified_key = 0
+  local name = nil
+  local bytes = 0
+
+  for line in f:lines() do
+    bytes = bytes + #line + 1
+    local parsed = prelude.safe_json_decode(line, nil)
+    if type(parsed) == "table" then
+      if not header then
+        if parsed.type ~= "session" then
+          f:close()
+          return nil
+        end
+        header = parsed
+        modified_key = math.max(modified_key, parse_time_key(parsed.timestamp))
+      elseif parsed.type == "message" then
+        message_count = message_count + 1
+        modified_key = math.max(modified_key, parse_time_key(parsed.timestamp))
+        local text = entry_text(parsed)
+        if text and text ~= "" and not first_message and parsed.message.role == "user" then
+          first_message = text
+        end
+        if text and text ~= "" then
+          add_preview_line(preview, parsed.message.role, text)
+        end
+      elseif parsed.type == "session_info" and type(parsed.name) == "string" then
+        name = prelude.trim(parsed.name)
+      else
+        modified_key = math.max(modified_key, parse_time_key(parsed.timestamp))
+      end
+    end
+    if bytes > MAX_SESSION_SCAN_BYTES and first_message then
+      break
+    end
+  end
+  f:close()
+
+  if not header then
+    return nil
+  end
+
+  local file_key = parse_time_key(basename(path))
+  return {
+    path = path,
+    id = header.id or "",
+    cwd = header.cwd or "",
+    name = name or header.name,
+    created = header.timestamp or "",
+    modified_key = math.max(modified_key, file_key),
+    message_count = message_count,
+    first_message = first_message or "(no messages)",
+    preview = preview,
+  }
+end
+
+local function collect_jsonl_files(dir, out)
+  local entries = dir and psi.list_dir_typed(dir) or nil
+  if type(entries) ~= "table" then
+    return
+  end
+  for _, entry in ipairs(entries) do
+    if type(entry) == "table" and type(entry.name) == "string" then
+      local full = prelude.path_join(dir, entry.name)
+      if entry.type == "file" and entry.name:match("%.jsonl$") then
+        out[#out + 1] = full
+      end
+    elseif type(entry) == "string" and entry:match("%.jsonl$") then
+      out[#out + 1] = prelude.path_join(dir, entry)
+    end
+  end
+end
+
+local function sort_infos(infos)
+  table.sort(infos, function(a, b)
+    if a.modified_key == b.modified_key then
+      return tostring(a.path) > tostring(b.path)
+    end
+    return a.modified_key > b.modified_key
+  end)
+  return infos
+end
+
+function M.list_sessions(cwd)
+  cwd = path_util.resolve(cwd or current_cwd()) or cwd or current_cwd()
+  local files = {}
+  collect_jsonl_files(M.session_dir_for_cwd(cwd), files)
+  local root = M.sessions_root()
+  local legacy_dir = root and prelude.path_join(root, legacy_encode_session_dir(cwd)) or nil
+  if legacy_dir ~= M.session_dir_for_cwd(cwd) then
+    collect_jsonl_files(legacy_dir, files)
+  end
+
+  -- Backward compatibility with the previous flat
+  -- $STATE/psi/sessions/<id>.jsonl layout: include files whose header
+  -- cwd matches the requested directory.
+  local root_entries = root and psi.list_dir_typed(root) or nil
+  if type(root_entries) == "table" then
+    for _, entry in ipairs(root_entries) do
+      if type(entry) == "table" and entry.type == "file" and entry.name:match("%.jsonl$") then
+        local full = prelude.path_join(root, entry.name)
+        local header = read_first_json_line(full)
+        local header_cwd = header and header.cwd
+        if
+          type(header_cwd) == "string"
+          and header_cwd ~= ""
+          and path_util.resolve(header_cwd) == cwd
+        then
+          files[#files + 1] = full
+        end
+      end
+    end
+  end
+
+  local infos = {}
+  local seen = {}
+  for _, file in ipairs(files) do
+    if not seen[file] then
+      seen[file] = true
+      local info = build_session_info(file)
+      local info_cwd = info and info.cwd
+      if type(info_cwd) == "string" and info_cwd ~= "" and path_util.resolve(info_cwd) == cwd then
+        infos[#infos + 1] = info
+      end
+    end
+  end
+  return sort_infos(infos)
+end
+
+function M.most_recent_session(cwd)
+  local infos = M.list_sessions(cwd)
+  return infos[1] and infos[1].path or nil
+end
+
+function M.describe_session(info)
+  if type(info) ~= "table" then
+    return ""
+  end
+  local label = info.name and info.name ~= "" and info.name or info.first_message or "(no messages)"
+  label = tostring(label):gsub("%s+", " ")
+  if #label > 72 then
+    label = label:sub(1, 69) .. "..."
+  end
+  return string.format(
+    "%s  %s  msg:%d",
+    tostring(info.created or basename(info.path)),
+    label,
+    tonumber(info.message_count) or 0
+  )
+end
+
+function M.resolve_resume_path(cwd, choose)
+  local infos = M.list_sessions(cwd)
+  if #infos == 0 then
+    return nil, "no sessions found for " .. tostring(cwd or current_cwd())
+  end
+  if #infos == 1 then
+    return infos[1].path, nil, infos
+  end
+  if type(choose) ~= "function" then
+    return nil, "multiple sessions found", infos
+  end
+  local selected = choose(infos)
+  if not selected then
+    return nil, "no session selected", infos
+  end
+  if type(selected) == "number" then
+    selected = infos[selected] and infos[selected].path or nil
+  elseif type(selected) == "table" then
+    selected = selected.path
+  end
+  if type(selected) ~= "string" or selected == "" then
+    return nil, "no session selected", infos
+  end
+  return selected, nil, infos
 end
 
 -- Convert an in-memory (role, text, data) record into a v2 disk entry.
@@ -944,7 +1265,7 @@ function M.fork(at_count, out_path)
     version = SESSION_VERSION,
     id = prelude.uuid_short(),
     timestamp = prelude.iso_timestamp(),
-    cwd = os.getenv("PWD") or ".",
+    cwd = current_cwd(),
     parentSession = psi.session_id(),
   }
   return write_session_file(out_path, header, messages, at_count)

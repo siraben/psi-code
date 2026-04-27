@@ -174,6 +174,18 @@ function M.uuid_short()
     .. table.concat(t, "", 21, 32)
 end
 
+function M.hash_hex(text)
+  text = tostring(text or "")
+  local h1 = 5381
+  local h2 = 2166136261
+  for i = 1, #text do
+    local b = text:byte(i) or 0
+    h1 = ((h1 * 33) + b) % 4294967296
+    h2 = ((h2 * 131) + b) % 4294967296
+  end
+  return string.format("%08x%08x", h1, h2)
+end
+
 function M.iso_timestamp()
   if not (psi and psi.amiga_bridge) then
     return os.date("!%Y-%m-%dT%H:%M:%SZ")

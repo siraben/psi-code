@@ -24,6 +24,51 @@ end
 
 local json_parse_or = prelude.safe_json_decode
 
+local function choose_session_cli(infos)
+  io.stderr:write("Select a session to resume:\n")
+  for i, info in ipairs(infos) do
+    io.stderr:write(string.format("  %d. %s\n", i, session.describe_session(info)))
+    for _, line in ipairs(info.preview or {}) do
+      io.stderr:write("     " .. line .. "\n")
+    end
+  end
+  local line = psi.readline("session> ")
+  local choice = tonumber(line or "")
+  if choice and infos[choice] then
+    return choice
+  end
+  return nil
+end
+
+local function bootstrap_session(opts)
+  if opts.session_file and opts.session_file ~= "" then
+    return session.load(opts.session_file)
+  end
+  if opts.resume then
+    local selected, err = session.resolve_resume_path(psi.cwd(), choose_session_cli)
+    if not selected then
+      return false, err
+    end
+    opts.session_file = selected
+    return session.load(selected)
+  end
+  local path = session.ensure_default_path()
+  if not path then
+    return false, "could not determine default session path"
+  end
+  session.announce_start()
+  return true
+end
+
+local function save_current_session()
+  local ok, err = session.save()
+  if not ok then
+    io.stderr:write("failed to save session file: " .. tostring(err) .. "\n")
+    return false
+  end
+  return true
+end
+
 -- Build an observer whose callbacks stream rendered events to stdout.
 local function print_observer()
   local state = { assistant_wrote_text = false }
@@ -89,19 +134,19 @@ end
 -- ---------- mode handlers ----------
 
 function M.run_print(opts)
-  if opts.session_file and opts.session_file ~= "" then
-    session.load(opts.session_file)
+  local loaded, load_err = bootstrap_session(opts)
+  if not loaded then
+    io.stderr:write("failed to load session file: " .. tostring(load_err) .. "\n")
+    return false
   end
   session.append_user(opts.payload or "")
   local reply = prompt.handle_print(opts.payload or "")
   session.append_assistant(reply, { { type = "text", text = reply } }, {})
-  if opts.session_file and opts.session_file ~= "" then
-    local ok, err = session.save()
-    if not ok then
-      io.stderr:write("failed to save session file: " .. tostring(err) .. "\n")
-      return false
-    end
+  if not save_current_session() then
+    session.announce_shutdown()
+    return false
   end
+  session.announce_shutdown()
   print(reply)
   return true
 end
@@ -129,27 +174,36 @@ end
 
 function M.run_agent(opts)
   agent.configure(opts)
-  if opts.session_file and opts.session_file ~= "" then
-    session.load(opts.session_file)
+  local loaded, load_err = bootstrap_session(opts)
+  if not loaded then
+    io.stderr:write("failed to load session file: " .. tostring(load_err) .. "\n")
+    return false
   end
   local ok = run_agent_turn(opts, opts.payload or "")
   if not ok then
+    session.announce_shutdown()
     return false
   end
-  if opts.session_file and opts.session_file ~= "" then
-    local saved, err = session.save()
-    if not saved then
-      io.stderr:write("failed to save session file: " .. tostring(err) .. "\n")
-      return false
-    end
+  if not save_current_session() then
+    session.announce_shutdown()
+    return false
   end
+  session.announce_shutdown()
   return true
 end
 
 function M.run_compact(opts)
   agent.configure(opts)
+  if opts.resume and (not opts.session_file or opts.session_file == "") then
+    local selected, err = session.resolve_resume_path(psi.cwd(), choose_session_cli)
+    if not selected then
+      io.stderr:write("--compact resume failed: " .. tostring(err) .. "\n")
+      return false
+    end
+    opts.session_file = selected
+  end
   if not opts.session_file or opts.session_file == "" then
-    io.stderr:write("--compact requires --session FILE\n")
+    io.stderr:write("--compact requires --session FILE or --resume\n")
     return false
   end
   session.load(opts.session_file)
@@ -223,12 +277,8 @@ local function handle_slash_command(opts, line)
       io.stderr:write("failed to compact session\n")
       return false, false
     end
-    if opts.session_file and opts.session_file ~= "" then
-      local saved, err = session.save()
-      if not saved then
-        io.stderr:write("failed to save session file: " .. tostring(err) .. "\n")
-        return false, false
-      end
+    if not save_current_session() then
+      return false, false
     end
     print("compaction summary:\n" .. (summary or ""))
     return true, false
@@ -273,9 +323,7 @@ local function handle_slash_command(opts, line)
   end
   if kind == "name" then
     session.set_display_name(action.payload)
-    if opts.session_file and opts.session_file ~= "" then
-      session.save()
-    end
+    session.save()
     print("name set to '" .. tostring(action.payload) .. "'")
     return true, false
   end
@@ -285,12 +333,8 @@ local function handle_slash_command(opts, line)
     -- actually sent (templates can be opaque for new users).
     print("> " .. (action.payload or ""))
     local ok = run_agent_turn(opts, action.payload or "")
-    if ok and opts.session_file and opts.session_file ~= "" then
-      local saved, err = session.save()
-      if not saved then
-        io.stderr:write("failed to save session file: " .. tostring(err) .. "\n")
-        return false, false
-      end
+    if ok and not save_current_session() then
+      return false, false
     end
     return true, false
   end
@@ -300,10 +344,10 @@ end
 
 function M.run_repl(opts)
   agent.configure(opts)
-  if opts.session_file and opts.session_file ~= "" then
-    session.load(opts.session_file)
-  else
-    session.announce_start()
+  local loaded, load_err = bootstrap_session(opts)
+  if not loaded then
+    io.stderr:write("failed to load session file: " .. tostring(load_err) .. "\n")
+    return false
   end
   print("psi coding agent")
   while true do
@@ -324,10 +368,8 @@ function M.run_repl(opts)
         psi.add_history(line)
       end
       local ok = run_agent_turn(opts, line)
-      if ok and opts.session_file and opts.session_file ~= "" then
-        local saved, err = session.save()
-        if not saved then
-          io.stderr:write("failed to save session file: " .. tostring(err) .. "\n")
+      if ok then
+        if not save_current_session() then
           session.announce_shutdown()
           return false
         end

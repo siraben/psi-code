@@ -40,6 +40,7 @@ local ANSI_SLOT_CODES = {
   ["33"] = "warning",
   ["34"] = "header",
   ["36"] = "accent",
+  ["1;36"] = "accent",
   ["37"] = "text",
   ["38;5;242"] = "chrome",
 }

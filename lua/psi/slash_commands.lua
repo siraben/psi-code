@@ -324,6 +324,8 @@ local function cmd_new_session()
   if psi.context and psi.context.reset_usage then
     psi.context.reset_usage()
   end
+  psi.session_set_path(nil)
+  session.ensure_default_path()
   return records.new_command_action("print", "new session id=" .. tostring(psi.session_id() or "-"))
 end
 

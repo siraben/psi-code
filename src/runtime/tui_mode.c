@@ -35,6 +35,30 @@ static void psi_tui_apply_raw_mode(struct termios *attrs) {
     attrs->c_cc[VTIME] = 0;
 }
 
+static void psi_tui_fprint_shell_quoted(FILE *out, const char *text) {
+    const char *p;
+
+    fputc('\'', out);
+    for (p = text != NULL ? text : ""; *p != '\0'; p++) {
+        if (*p == '\'') {
+            fputs("'\\''", out);
+        } else {
+            fputc(*p, out);
+        }
+    }
+    fputc('\'', out);
+}
+
+static void psi_tui_print_resume_command(const struct psi_session *session) {
+    if (session == NULL || session->path == NULL || session->path[0] == '\0') {
+        return;
+    }
+    fputs("\nResume with: psi --tui --session ", stdout);
+    psi_tui_fprint_shell_quoted(stdout, session->path);
+    fputc('\n', stdout);
+    fflush(stdout);
+}
+
 static int psi_tui_enter_terminal(void) {
     struct termios raw_attrs;
 
@@ -143,6 +167,7 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
 
     psi_tui_leave_terminal();
     psi_tui_has_original_termios = 0;
+    psi_tui_print_resume_command(&session);
     psi_vm_destroy(&vm);
     psi_session_free(&session);
     return status;

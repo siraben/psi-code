@@ -781,10 +781,11 @@ def t_commands_rainbow(psi: Psi):
 
 @test("mode/tui_rainbow_renders_ansi")
 def t_tui_rainbow_renders_ansi(psi: Psi):
+    state = psi.tmp / "state-tui-rainbow"
     raw = run_pty(
         [psi.binary, "--tui"],
         [(b"", 0.8), (b"/rainbow\r", 1.5), (b"/quit\r", 1.0)],
-        env_extra={"NO_COLOR": "", "TERM": "xterm-256color"},
+        env_extra={"NO_COLOR": "", "TERM": "xterm-256color", "XDG_STATE_HOME": str(state)},
         idle_drain=1.5,
     )
     raw.assert_clean_exit()
@@ -810,6 +811,7 @@ def t_tui_default(psi: Psi):
 
 @test("mode/tui_rainbow_after_normal_insert")
 def t_tui_rainbow_after_normal_insert(psi: Psi):
+    state = psi.tmp / "state-tui-rainbow-normal"
     raw = run_pty(
         [psi.binary, "--tui"],
         [
@@ -819,7 +821,7 @@ def t_tui_rainbow_after_normal_insert(psi: Psi):
             (b"i/rainbow\r", 1.5),
             (b"/quit\r", 1.0),
         ],
-        env_extra={"NO_COLOR": "", "TERM": "xterm-256color"},
+        env_extra={"NO_COLOR": "", "TERM": "xterm-256color", "XDG_STATE_HOME": str(state)},
         idle_drain=1.5,
     )
     raw.assert_clean_exit()
@@ -1111,6 +1113,148 @@ def t_session_default_path(psi: Psi):
     assert_equals(ok_set, "true", f"session_path not set: {out!r}")
     assert_contains(path, "/psi/sessions/", f"unexpected path shape: {path!r}")
     assert_true(path.endswith(".jsonl"), f"missing .jsonl: {path!r}")
+
+
+@test("session/default_path_is_cwd_scoped")
+def t_session_default_path_cwd_scoped(psi: Psi):
+    project = psi.tmp / "project path"
+    project.mkdir()
+    state = psi.tmp / "state"
+    out = psi.run(
+        "--eval",
+        'local s = require("psi.session")\n'
+        + 'local path = s.ensure_default_path()\n'
+        + 'return s.encode_session_dir(psi.cwd()) .. "|" .. path',
+        cwd=project,
+        env_extra={"XDG_STATE_HOME": str(state)},
+    ).stdout.strip()
+    encoded, sess_path = out.split("|", 1)
+    assert encoded.startswith("--") and encoded.endswith("--"), f"bad encoded dir: {encoded!r}"
+    assert str(state / "psi" / "sessions") in sess_path, f"bad state root: {sess_path!r}"
+    assert f"/{encoded}/" in sess_path, f"default path not cwd scoped: {sess_path!r}"
+    assert sess_path.endswith(".jsonl"), f"missing .jsonl: {sess_path!r}"
+
+
+@test("session/default_path_bounds_long_cwd_component")
+def t_session_default_path_bounds_long_cwd_component(psi: Psi):
+    project = psi.tmp / "long-cwd"
+    for i in range(36):
+        project = project / f"segment-{i:02d}"
+    project.mkdir(parents=True)
+    state = psi.tmp / "state-long-cwd"
+    out = psi.run(
+        "--eval",
+        'local s = require("psi.session")\n'
+        + 'local path = s.ensure_default_path()\n'
+        + 's.append_user("long path save")\n'
+        + 'local ok, err = s.save()\n'
+        + 'return tostring(ok) .. "|" .. (err or "") .. "|"\n'
+        + "  .. s.encode_session_dir(psi.cwd()) .. '|' .. path",
+        cwd=project,
+        env_extra={"XDG_STATE_HOME": str(state)},
+    ).stdout.strip()
+    ok, err, encoded, sess_path = out.split("|", 3)
+    assert_equals(ok, "true", f"long cwd session save failed: {err}")
+    assert len(encoded) <= 184, f"encoded cwd component too long: {len(encoded)}"
+    assert f"/{encoded}/" in sess_path, f"default path not cwd scoped: {sess_path!r}"
+
+
+@test("session/list_sessions_for_cwd")
+def t_session_list_sessions_for_cwd(psi: Psi):
+    project = psi.tmp / "project-list"
+    other = psi.tmp / "other-project"
+    project.mkdir()
+    other.mkdir()
+    state = psi.tmp / "state-list"
+    env = {"XDG_STATE_HOME": str(state)}
+    psi.run("--print", "one", cwd=project, env_extra=env)
+    psi.run("--resume", "--print", "followup", cwd=project, env_extra=env)
+    psi.run("--print", "two", cwd=other, env_extra=env)
+    out = psi.run(
+        "--eval",
+        'local s = require("psi.session")\n'
+        + 'local xs = s.list_sessions(psi.cwd())\n'
+        + 'return tostring(#xs) .. "|" .. (xs[1] and xs[1].cwd or "") .. "|"\n'
+        + '  .. (xs[1] and xs[1].first_message or "")',
+        cwd=project,
+        env_extra=env,
+    ).stdout.strip()
+    count, cwd_seen, first = out.split("|", 2)
+    assert_equals(count, "1", "directory-scoped session count")
+    assert_equals(cwd_seen, str(project), "session cwd")
+    assert_contains(first, "one", "first message")
+
+
+@test("session/list_sessions_includes_preview")
+def t_session_list_sessions_includes_preview(psi: Psi):
+    project = psi.tmp / "project-preview"
+    project.mkdir()
+    state = psi.tmp / "state-preview"
+    env = {"XDG_STATE_HOME": str(state)}
+    psi.run("--print", "preview user prompt", cwd=project, env_extra=env)
+    out = psi.run(
+        "--eval",
+        'local s = require("psi.session")\n'
+        + "local xs = s.list_sessions(psi.cwd())\n"
+        + "return table.concat(xs[1] and xs[1].preview or {}, '\\n')",
+        cwd=project,
+        env_extra=env,
+    ).stdout.strip()
+    assert_contains(out, "You: preview user prompt", "session preview")
+
+
+@test("session/cwd_scoped_dirs_do_not_collide")
+def t_session_cwd_scoped_dirs_do_not_collide(psi: Psi):
+    root = psi.tmp / "collision"
+    hyphen = root / "a-b"
+    nested = root / "a" / "b"
+    hyphen.mkdir(parents=True)
+    nested.mkdir(parents=True)
+    state = psi.tmp / "state-collision"
+    env = {"XDG_STATE_HOME": str(state)}
+    psi.run("--print", "from hyphen", cwd=hyphen, env_extra=env)
+    psi.run("--print", "from nested", cwd=nested, env_extra=env)
+    out = psi.run(
+        "--eval",
+        'local s = require("psi.session")\n'
+        + f"local a = {json.dumps(str(hyphen))}\n"
+        + f"local b = {json.dumps(str(nested))}\n"
+        + "local xs = s.list_sessions(a)\n"
+        + "local ys = s.list_sessions(b)\n"
+        + "return s.encode_session_dir(a) .. '|' .. s.encode_session_dir(b) .. '|'\n"
+        + "  .. tostring(#xs) .. '|' .. (xs[1] and xs[1].first_message or '') .. '|'\n"
+        + "  .. tostring(#ys) .. '|' .. (ys[1] and ys[1].first_message or '')",
+        cwd=root,
+        env_extra=env,
+    ).stdout.strip()
+    encoded_a, encoded_b, count_a, first_a, count_b, first_b = out.split("|", 5)
+    assert encoded_a != encoded_b, f"cwd encodings collide: {encoded_a!r}"
+    assert_equals(count_a, "1", "hyphen cwd session count")
+    assert_contains(first_a, "from hyphen", "hyphen cwd first message")
+    assert_equals(count_b, "1", "nested cwd session count")
+    assert_contains(first_b, "from nested", "nested cwd first message")
+
+
+@test("tui/prompt_history_navigation")
+def t_tui_prompt_history_navigation(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local empty = rt._debug_history_sequence({"first", "second"}, {"line-up"}, "")\n'
+        + 'local draft = rt._debug_history_sequence({"first", "second"}, {"line-up", "line-down"}, "sec")\n'
+        + 'return tostring(empty.scrolled) .. "|" .. empty.input .. "|"\n'
+        + "  .. draft.input .. '|' .. tostring(draft.cursor)"
+    )
+    assert_equals(out, "true||sec|3", "history only intercepts editable prompt navigation")
+
+
+@test("tui/prompt_history_reverse_search")
+def t_tui_prompt_history_reverse_search(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local r = rt._debug_history_sequence({"alpha", "beta", "alphabet"}, {"ctrl-r", "text:a", "text:l", "ctrl-r"})\n'
+        + "return r.input .. '|' .. r.history_search_query .. '|' .. tostring(r.history_search_active)"
+    )
+    assert_equals(out, "alpha|al|true", "ctrl-r reverse searches prompt history")
 
 
 @test("prompt/transformer")
@@ -2400,6 +2544,7 @@ def t_help(psi: Psi):
     assert_contains(out, "--tui", "--tui in help")
     assert_contains(out, "--repl", "--repl in help")
     assert_contains(out, "--thinking", "--thinking in help")
+    assert_contains(out, "--resume", "--resume in help")
 
 
 @test("cli/thinking_validation")
@@ -2425,7 +2570,11 @@ def t_repl_quit(psi: Psi):
 @test("mode/tui_quits")
 def t_tui_quits(psi: Psi):
     # Drive the TUI through a pty, send /quit, expect a clean exit.
-    raw = run_pty([psi.binary, "--tui"], [(b"", 0.5), (b"/quit\r", 1.0)])
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [(b"", 0.5), (b"/quit\r", 1.0)],
+        env_extra={"XDG_STATE_HOME": str(psi.tmp / "state-tui-quits")},
+    )
     raw.assert_clean_exit()
     text = strip_ansi(raw)
     # We don't require exact chrome; just confirm the Lua-rendered top
@@ -2434,6 +2583,27 @@ def t_tui_quits(psi: Psi):
         ("repo" in text and "worktree" in text) or "cwd" in text,
         "TUI header should show workspace context",
     )
+    assert_contains(text, "Resume with: psi --tui --session", "TUI quit resume command")
+
+
+@test("mode/tui_resume_picker_previews_session")
+def t_tui_resume_picker_previews_session(psi: Psi):
+    project = psi.tmp / "resume-picker-preview"
+    project.mkdir()
+    state = psi.tmp / "state-resume-picker-preview"
+    env = {"XDG_STATE_HOME": str(state)}
+    psi.run("--print", "older preview prompt", cwd=project, env_extra=env)
+    psi.run("--print", "newer preview prompt", cwd=project, env_extra=env)
+    raw = run_pty(
+        [psi.binary, "--tui", "--resume"],
+        [(b"", 0.8), (b"\x1b", 0.3)],
+        env_extra=env,
+        cwd=project,
+    )
+    text = strip_ansi(raw)
+    assert_contains(text, "Resume session", "resume picker")
+    assert_contains(text, "Preview", "resume picker preview heading")
+    assert_contains(text, "preview prompt", "resume picker conversation preview")
 
 
 @test("mode/tui_theme_applies_to_rendered_colors")
@@ -2459,6 +2629,7 @@ def t_tui_theme_applies_to_rendered_colors(psi: Psi):
             "NO_COLOR": "",
             "PSI_EXTENSIONS_DIR": str(extdir),
             "TERM": "xterm-256color",
+            "XDG_STATE_HOME": str(psi.tmp / "state-tui-theme"),
         },
         idle_drain=1.0,
         cwd=project,
@@ -2469,10 +2640,11 @@ def t_tui_theme_applies_to_rendered_colors(psi: Psi):
 
 @test("mode/tui_input_box_background")
 def t_tui_input_box_background(psi: Psi):
+    state = psi.tmp / "state-tui-input-box"
     raw = run_pty(
         [psi.binary, "--tui"],
         [(b"", 0.5), (b"/quit\r", 1.0)],
-        env_extra={"NO_COLOR": "", "TERM": "xterm-256color"},
+        env_extra={"NO_COLOR": "", "TERM": "xterm-256color", "XDG_STATE_HOME": str(state)},
         idle_drain=1.0,
     )
     raw.assert_clean_exit()
@@ -2496,6 +2668,7 @@ def t_tui_lf_submit(psi: Psi):
             (b"", 0.5),
             (b"/quit\n", 1.0),
         ],
+        env_extra={"XDG_STATE_HOME": str(psi.tmp / "state-tui-lf-submit")},
     )
     raw.assert_clean_exit()
     text = strip_ansi(raw)
@@ -2514,6 +2687,7 @@ def t_tui_multiline_prompt(psi: Psi):
             (b"alpha\x1b[27;2;13~bravo\r", 1.0),
             (b"/quit\r", 1.0),
         ],
+        env_extra={"XDG_STATE_HOME": str(psi.tmp / "state-tui-multiline")},
     )
     raw.assert_clean_exit()
     text = strip_ansi(raw)
