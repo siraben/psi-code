@@ -30,7 +30,10 @@ else
 PKG_CONFIG_FLAGS =
 endif
 
-STRICT_CFLAGS ?= -std=c89 -pedantic -Wall -Wextra -Werror
+# -Wno-long-long: Lua 5.4 mandates `long long` for lua_Integer (see
+# luaconf.h), which trips ISO C90 -pedantic. Suppress the warning
+# rather than dropping -std=c89 so our own code stays C89-clean.
+STRICT_CFLAGS ?= -std=c89 -pedantic -Wall -Wextra -Werror -Wno-long-long
 BASE_CFLAGS = $(STRICT_CFLAGS)
 
 # Per-dependency CFLAGS/LIBS. Each is sourced from pkg-config by

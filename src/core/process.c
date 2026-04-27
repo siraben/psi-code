@@ -111,7 +111,9 @@ static int psi_process_begin_exec(
     if (child_pid == 0) {
         /* Child: see psi_process_run_shell for the same logic and
          * the gcc -fanalyzer fd-leak suppression rationale. */
-#if defined(__GNUC__) && !defined(__clang__) && !defined(__TINYC__)
+/* -Wanalyzer-fd-leak was added in gcc 13; older gccs (e.g. Alpine 3.14's
+ * gcc 10) reject the pragma under -Werror=pragmas. */
+#if defined(__GNUC__) && !defined(__clang__) && !defined(__TINYC__) && __GNUC__ >= 13
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wanalyzer-fd-leak"
 #endif
@@ -121,7 +123,7 @@ static int psi_process_begin_exec(
         if (close(pipe_fds[1]) != 0) _exit(127);
         execvp(argv[0], argv);
         _exit(127);
-#if defined(__GNUC__) && !defined(__clang__) && !defined(__TINYC__)
+#if defined(__GNUC__) && !defined(__clang__) && !defined(__TINYC__) && __GNUC__ >= 13
 #pragma GCC diagnostic pop
 #endif
     }
