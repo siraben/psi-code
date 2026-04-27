@@ -599,7 +599,13 @@ def t_tui_rainbow_renders_ansi(psi: Psi):
 def t_tui_rainbow_after_normal_insert(psi: Psi):
     raw = run_pty(
         [psi.binary, "--tui"],
-        [(b"", 0.8), (b"\x1b", 0.4), (b"i/rainbow\r", 1.5), (b"/quit\r", 1.0)],
+        [
+            (b"", 0.8),
+            (b"/vim\r", 0.4),
+            (b"\x1b", 0.4),
+            (b"i/rainbow\r", 1.5),
+            (b"/quit\r", 1.0),
+        ],
         env_extra={"NO_COLOR": "", "TERM": "xterm-256color"},
         idle_drain=1.5,
     )
@@ -1427,7 +1433,7 @@ def t_tui_key_policy(psi: Psi):
         + '  fmt(tui.handle_key({key="text", text="x"}))\n'
         + '}, "|")'
     )
-    assert_equals(out, "submit:-|nil|insert:\\n|quit:-|nil|vim-mode:normal|abort:-|insert:x",
+    assert_equals(out, "submit:-|nil|insert:\\n|quit:-|nil|nil|abort:-|insert:x",
                   "Lua TUI key policy")
 
 
@@ -1435,6 +1441,7 @@ def t_tui_key_policy(psi: Psi):
 def t_tui_vim_modal_keys(psi: Psi):
     out = psi.eval(
         'local rt = require("psi.tui_runtime")\n'
+        + 'require("psi.extensions.vim_keybindings").enable(psi)\n'
         + 'local function text(c) return {key="text", text=c} end\n'
         + 'local s = rt._debug_edit_keys("alpha beta gamma", 0, {\n'
         + '  {key="escape"}, text("w"), text("v"), text("l"), text("l"), text("l"), text("l"), text("y"), text("p")\n'
@@ -1490,6 +1497,44 @@ def t_tui_vim_modal_keys(psi: Psi):
     )
     assert_equals(out, "normal|14|beta|alpha betabeta gamma|-|a\nb|0|normal|  aa!\nbb|  xaa|aa\nx\nbb|aa\nx\nbb|0||insert|true|line|true|xaa\nxbb\ncc|aax\nbbx\ncc",
                   "Vim modal TUI keys")
+
+
+@test("tui/vim_toggle")
+def t_tui_vim_toggle(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local function run(input, events)\n'
+        + '  local s = rt._debug_edit_keys(input, #input, events)\n'
+        + '  return table.concat({s.status_text or "-", s.editor_mode, s.input}, "|")\n'
+        + 'end\n'
+        + 'return table.concat({\n'
+        + '  run("", {{key="escape"}}),\n'
+        + '  run("/vim", {{key="enter"}, {key="escape"}}),\n'
+        + '  run("/vim off", {{key="enter"}, {key="escape"}})\n'
+        + '}, "||")'
+    )
+    assert_equals(
+        out,
+        "-|insert|||Vim keybindings enabled|normal|||Vim keybindings disabled|insert|",
+        "Vim extension is off by default and /vim toggles it",
+    )
+
+
+@test("tui/vim_config_enable")
+def t_tui_vim_config_enable(psi: Psi):
+    cwd = psi.tmp / "vim-config"
+    (cwd / ".psi").mkdir(parents=True, exist_ok=True)
+    (cwd / ".psi" / "settings.json").write_text(
+        json.dumps({"extensions": {"vim_keybindings": {"enabled": True}}})
+    )
+    out = psi.run(
+        "--eval",
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local s = rt._debug_edit_keys("abc", 0, {{key="escape"}}, true)\n'
+        + 'return s.editor_mode',
+        cwd=cwd,
+    ).stdout.strip()
+    assert_equals(out, "normal", "config enables bundled Vim extension")
 
 
 @test("render/replace_mode")

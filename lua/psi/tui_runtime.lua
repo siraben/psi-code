@@ -302,6 +302,9 @@ local function find_break(text, width)
   return width
 end
 
+local clear_selection
+local set_status
+
 local function new_state(opts)
   local width, height = current_size()
   local caps = detect_tui_capabilities()
@@ -343,6 +346,9 @@ local function new_state(opts)
     dirty = true,
   }
   refresh_input_layout(state)
+  if tui.run_startup_hooks then
+    tui.run_startup_hooks({ opts = opts, state = state })
+  end
   return state
 end
 
@@ -353,7 +359,7 @@ local function invalidate_render_totals(state)
   state.total_cache_lines = nil
 end
 
-local function set_status(state, text, is_error)
+function set_status(state, text, is_error)
   if type(text) ~= "string" or text == "" then
     state.status_text = nil
     state.status_is_error = false
@@ -1104,8 +1110,6 @@ local function line_count(text)
   return count
 end
 
-local clear_selection
-
 local function move_line(state, delta)
   local line, col = line_col_at(state.input, state.cursor)
   local target_line = clamp(line + delta, 1, line_count(state.input))
@@ -1823,6 +1827,24 @@ local function handle_command(state, line)
     return true
   end
 
+  if
+    tui.handle_command_action
+    and tui.handle_command_action(action, {
+      set_status = function(text, is_error)
+        set_status(state, text, is_error)
+      end,
+      reset_editor = function()
+        state.editor_mode = "insert"
+        clear_selection(state)
+        state.block_edit = nil
+        state.pending_key = nil
+        state.dirty = true
+      end,
+    })
+  then
+    return true
+  end
+
   if action.kind == "set-model" then
     agent.set_model(action.payload)
     state.opts.model = action.payload
@@ -2271,7 +2293,7 @@ function M._debug_tui_capabilities()
   return detect_tui_capabilities()
 end
 
-function M._debug_edit_keys(input, cursor, events)
+function M._debug_edit_keys(input, cursor, events, apply_startup_hooks)
   local state = {
     opts = {},
     model = {},
@@ -2295,6 +2317,9 @@ function M._debug_edit_keys(input, cursor, events)
     input_layout = default_input_layout(24),
     dirty = false,
   }
+  if apply_startup_hooks and tui.run_startup_hooks then
+    tui.run_startup_hooks({ opts = {}, state = state })
+  end
   for _, event in ipairs(events or {}) do
     handle_key_event(state, event)
   end
