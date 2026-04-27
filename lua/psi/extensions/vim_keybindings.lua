@@ -92,6 +92,10 @@ local function settings()
   return require("psi.settings")
 end
 
+local function keybindings()
+  return require("psi.keybindings")
+end
+
 local function action(name, arg)
   return { action = name, arg = arg }
 end
@@ -244,6 +248,9 @@ end
 
 local function key_handler(arg)
   arg = type(arg) == "table" and arg or {}
+  if arg.busy and keybindings().matches(arg.key, "app.interrupt") then
+    return nil
+  end
   if is_mode(arg, MODE_INSERT) then
     return dispatch(INSERT_KEY_BINDINGS, arg.key, arg)
   end

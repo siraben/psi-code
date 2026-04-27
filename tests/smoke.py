@@ -1479,6 +1479,7 @@ def t_tui_key_policy(psi: Psi):
 def t_tui_vim_modal_keys(psi: Psi):
     out = psi.eval(
         'local rt = require("psi.tui_runtime")\n'
+        + 'local tui = require("psi.tui")\n'
         + 'require("psi.extensions.vim_keybindings").enable(psi)\n'
         + 'local function text(c) return {key="text", text=c} end\n'
         + 'local s = rt._debug_edit_keys("alpha beta gamma", 0, {\n'
@@ -1520,6 +1521,7 @@ def t_tui_vim_modal_keys(psi: Psi):
         + 'local block_append = rt._debug_edit_keys("aa\\nbb\\ncc", 0, {\n'
         + '  {key="escape"}, {key="ctrl-v"}, text("l"), text("j"), text("A"), text("x"), {key="escape"}\n'
         + '})\n'
+        + 'local interrupt = tui.handle_key({key="ctrl-g", busy=true, editor_mode="normal", input_length=1})\n'
         + 'return table.concat({\n'
         + '  s.editor_mode, tostring(s.cursor), s.clipboard, s.input,\n'
         + '  b.selection_kind or "-", b.clipboard,\n'
@@ -1530,10 +1532,11 @@ def t_tui_vim_modal_keys(psi: Psi):
         + '  line_visual.selection_kind or "-",\n'
         + '  tostring((line_visual.rendered[2] or ""):find("\\27%[7m") ~= nil),\n'
         + '  block_insert.input,\n'
-        + '  block_append.input\n'
+        + '  block_append.input,\n'
+        + '  interrupt and interrupt.action or "-"\n'
         + '}, "|")'
     )
-    assert_equals(out, "normal|14|beta|alpha betabeta gamma|-|a\nb|0|normal|  aa!\nbb|  xaa|aa\nx\nbb|aa\nx\nbb|0||insert|true|line|true|xaa\nxbb\ncc|aax\nbbx\ncc",
+    assert_equals(out, "normal|14|beta|alpha betabeta gamma|-|a\nb|0|normal|  aa!\nbb|  xaa|aa\nx\nbb|aa\nx\nbb|0||insert|true|line|true|xaa\nxbb\ncc|aax\nbbx\ncc|abort",
                   "Vim modal TUI keys")
 
 

@@ -16,11 +16,13 @@
 
 #include <time.h>
 #include <errno.h>
+#if PSI_ENABLE_TUI
 #include <poll.h>
 #include <termios.h>
 #include <unistd.h>
-#include <dirent.h>
 #include <sys/ioctl.h>
+#endif
+#include <dirent.h>
 #include <sys/stat.h>
 
 #include "psi/abort.h"
