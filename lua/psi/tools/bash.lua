@@ -17,12 +17,10 @@ local function impl(input, meta)
   local stream = shell.run_streaming(command, tool_call_id, {
     max_bytes = DEFAULT_BYTES,
     max_lines = DEFAULT_LINES,
-  })
-
-  local raw = stream.output or ""
-  local result = truncate.truncate_tail(raw, {
-    max_bytes = DEFAULT_BYTES,
-    max_lines = DEFAULT_LINES,
+    mode = "tail",
+    progress = "truncated",
+    truncate_final = true,
+    notice = "tail",
   })
 
   -- If tail-truncation kicked in (or the underlying C buffer dropped
@@ -35,34 +33,13 @@ local function impl(input, meta)
     total_bytes = stream.total_bytes,
   }
 
-  local output_text
-  if result.truncated then
+  local output_text = stream.output or ""
+  if stream.truncated then
     extras.truncated = true
     extras.temp_file_path = stream.temp_file_path
-    extras.truncation = {
-      truncated_by = result.truncated_by,
-      total_lines = result.total_lines,
-      output_lines = result.output_lines,
-      total_bytes = result.total_bytes,
-      output_bytes = result.output_bytes,
-      max_lines = result.max_lines,
-      max_bytes = result.max_bytes,
-      last_line_partial = result.last_line_partial,
-    }
-    local notice = truncate.tail_notice(result, {
-      full_output_path = stream.temp_file_path,
-    })
-    output_text = result.content
-    if notice and notice ~= "" then
-      if #output_text > 0 then
-        output_text = output_text .. "\n\n" .. notice
-      else
-        output_text = notice
-      end
-    end
+    extras.truncation = stream.truncation_meta
   else
     extras.truncated = false
-    output_text = result.content
   end
 
   extras.output = output_text

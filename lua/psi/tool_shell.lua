@@ -42,6 +42,10 @@ end
 --   mode           : "tail" or "head" (default "tail" for bash-style commands)
 --   spill_to_disk  : write the full output to a temp file once the soft
 --                    cap is exceeded (default true)
+--   progress       : "raw" or "truncated" (default "raw")
+--   truncate_final : apply the selected truncator before returning
+--   notice         : "tail" or "head"; append the corresponding notice
+--                    when truncate_final truncates output
 --
 -- Outside a coroutine (scripts, tests) we fall back to a blocking
 -- psi.process_run / psi.process_run_argv. We then mimic the same
@@ -52,6 +56,62 @@ local function blocking_poll(handle, ms)
   -- Outside a coroutine we can't yield. Just call the C primitive
   -- directly; it blocks for up to `ms` ms waiting for output.
   return psi.process_poll(handle, ms or 50)
+end
+
+local function truncate_for_mode(text, opts)
+  opts = opts or {}
+  local limits = {
+    max_bytes = opts.max_bytes or truncate.DEFAULT_MAX_BYTES,
+    max_lines = opts.max_lines or truncate.DEFAULT_MAX_LINES,
+  }
+  if opts.mode == "head" then
+    return truncate.truncate_head(text, limits)
+  end
+  return truncate.truncate_tail(text, limits)
+end
+
+local function truncation_meta(result)
+  if not result then return nil end
+  return {
+    truncated_by = result.truncated_by,
+    total_lines = result.total_lines,
+    output_lines = result.output_lines,
+    total_bytes = result.total_bytes,
+    output_bytes = result.output_bytes,
+    max_lines = result.max_lines,
+    max_bytes = result.max_bytes,
+    last_line_partial = result.last_line_partial,
+    first_line_exceeds_limit = result.first_line_exceeds_limit,
+  }
+end
+
+local function append_notice(content, result, opts, temp_file_path)
+  if not result or not result.truncated then
+    return content
+  end
+  local notice
+  if opts.notice == "head" then
+    notice = truncate.head_notice(result, { full_output_path = temp_file_path })
+  else
+    notice = truncate.tail_notice(result, { full_output_path = temp_file_path })
+  end
+  if not notice or notice == "" then
+    return content
+  end
+  if #content > 0 then
+    return content .. "\n\n" .. notice
+  end
+  return notice
+end
+
+local function progress_replace_payload(text)
+  if psi.json_encode == nil then
+    return text
+  end
+  return psi.json_encode({
+    psi_progress_replace = true,
+    text = text or "",
+  })
 end
 
 local function stream(handle, tool_call_id, opts, poll_fn)
@@ -71,6 +131,7 @@ local function stream(handle, tool_call_id, opts, poll_fn)
   local total_bytes = 0
   local temp_path = nil
   local temp_open_failed = false
+  local last_progress_text = nil
 
   local function buffered_text()
     if buf_first > #buf then return "" end
@@ -131,8 +192,17 @@ local function stream(handle, tool_call_id, opts, poll_fn)
           end
         end
       end
-      if psi.tool_progress ~= nil then
-        psi.tool_progress(tool_call_id, chunk)
+      if psi.tool_progress ~= nil and tool_call_id ~= nil then
+        if opts.progress == "truncated" then
+          local preview = truncate_for_mode(buffered_text(), opts)
+          local preview_text = preview.content or ""
+          if preview_text ~= last_progress_text then
+            psi.tool_progress(tool_call_id, progress_replace_payload(preview_text))
+            last_progress_text = preview_text
+          end
+        else
+          psi.tool_progress(tool_call_id, chunk)
+        end
       end
     end
     if done then break end
@@ -229,11 +299,22 @@ local function run_streaming_with(handle, err, tool_call_id, opts, kind)
   -- 256 KiB C-side buffer.
   local poll_fn = sched.in_coroutine() and sched.proc_poll or blocking_poll
   local s = stream(handle, tool_call_id, opts, poll_fn)
+  local output = s.rolling
+  local truncation = nil
+  local truncated = false
+  if opts and opts.truncate_final then
+    truncation = truncate_for_mode(output, opts)
+    truncated = not not truncation.truncated
+    output = append_notice(truncation.content or "", truncation, opts, s.temp_file_path)
+  end
   return {
-    output = s.rolling,
+    output = output,
     status = s.status,
     total_bytes = s.total_bytes,
     temp_file_path = s.temp_file_path,
+    truncated = truncated,
+    truncation = truncation,
+    truncation_meta = truncation_meta(truncation),
   }
 end
 
