@@ -1315,7 +1315,7 @@ def t_tui_full_redraw_uses_single_ansi_pass(psi: Psi):
         + '  tostring(d.refreshes)\n'
         + '}, "|")'
     )
-    assert_equals(out, "true|0|true|0|1|1", "full redraw uses one ANSI render pass")
+    assert_equals(out, "true|0|true|0|2|1", "full redraw uses one hidden-cursor ANSI render pass")
 
 
 @test("tui/show_thinking_config")
@@ -1620,6 +1620,8 @@ def t_tui_input_box_background(psi: Psi):
         idle_drain=1.0,
     )
     assert b"\x1b[0;7m" not in raw and b"\x1b[7m" not in raw, "input box should not use reverse-video"
+    assert b"\x1b[?25l" in raw and b"\x1b[?25h" in raw, "redraw should hide cursor until final placement"
+    assert b"\x1b[?2026h" in raw and b"\x1b[?2026l" in raw, "redraw should use synchronized terminal output"
     assert b"\x1b[48;5;238m" in raw, "input box background color did not reach rendered output"
 
 
