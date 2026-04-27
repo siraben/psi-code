@@ -26,7 +26,7 @@ local function clamp_prompt_max_rows(rows, height)
 end
 
 local function default_prompt_max_rows(height)
-  return math.min(5, math.max(1, height - 6))
+  return math.max(1, height - 6)
 end
 
 local function resolve_prompt_max_rows(configured, height)

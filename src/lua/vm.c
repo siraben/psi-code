@@ -2643,6 +2643,28 @@ static int lfn_tui_draw_line(lua_State *L) {
     return 0;
 }
 
+static int lfn_tui_draw_raw_line(lua_State *L) {
+    lua_Integer row = luaL_checkinteger(L, 1);
+    const char *text = lua_type(L, 2) == LUA_TSTRING ? lua_tostring(L, 2) : "";
+
+    psi_vm_require_tui(L);
+    if (row < 1) {
+        row = 1;
+    }
+    if (row > LINES) {
+        row = LINES;
+    }
+
+    /*
+     * Bypass ncurses color-pair translation for diagnostic / raw ANSI
+     * output. Save and restore the hardware cursor so Lua-owned cursor
+     * placement remains stable after direct terminal writes.
+     */
+    printf("\0337\033[%ld;1H\033[2K%s\033[0m\0338", (long)row, text);
+    fflush(stdout);
+    return 0;
+}
+
 static int lfn_tui_set_cursor(lua_State *L) {
     lua_Integer row = luaL_optinteger(L, 1, 1);
     lua_Integer col = luaL_optinteger(L, 2, 1);
@@ -2706,6 +2728,7 @@ static int lfn_tui_size(lua_State *L) { return lfn_tui_unavailable(L); }
 static int lfn_tui_poll_key(lua_State *L) { return lfn_tui_unavailable(L); }
 static int lfn_tui_clear(lua_State *L) { return lfn_tui_unavailable(L); }
 static int lfn_tui_draw_line(lua_State *L) { return lfn_tui_unavailable(L); }
+static int lfn_tui_draw_raw_line(lua_State *L) { return lfn_tui_unavailable(L); }
 static int lfn_tui_set_cursor(lua_State *L) { return lfn_tui_unavailable(L); }
 static int lfn_tui_refresh(lua_State *L) { return lfn_tui_unavailable(L); }
 static int lfn_tui_suspend(lua_State *L) { return lfn_tui_unavailable(L); }
@@ -2870,6 +2893,7 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("tui_poll_key",          lfn_tui_poll_key);
     PSI_REG("tui_clear",             lfn_tui_clear);
     PSI_REG("tui_draw_line",         lfn_tui_draw_line);
+    PSI_REG("tui_draw_raw_line",     lfn_tui_draw_raw_line);
     PSI_REG("tui_set_cursor",        lfn_tui_set_cursor);
     PSI_REG("tui_refresh",           lfn_tui_refresh);
     PSI_REG("tui_suspend",           lfn_tui_suspend);
