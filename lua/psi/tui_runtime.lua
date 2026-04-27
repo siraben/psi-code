@@ -226,6 +226,11 @@ end
 
 local function new_state(opts)
   local width, height = current_size()
+  -- The TUI owns ANSI interpretation through ncurses. Do not let a
+  -- non-TTY stdout or inherited NO_COLOR strip theme sequences before
+  -- they reach psi.tui_draw_line.
+  ansi.enabled = true
+  ansi.color_enabled = true
   local state = {
     opts = opts,
     model = agent.model_descriptor(opts.model),
@@ -761,7 +766,7 @@ local function scroll_by(state, delta)
 end
 
 local function style_input_prefix(prefix, is_first)
-  local bg = tonumber(settings.get("tui.input.background", 238)) or 238
+  local bg = tonumber(settings.get("tui.input.background", 244)) or 244
   if is_first then
     local chip_bg = tonumber(settings.get("tui.input.prefix_background", 250)) or 250
     return ansi.color("1;30;48;5;" .. tostring(chip_bg), prefix)
@@ -770,13 +775,13 @@ local function style_input_prefix(prefix, is_first)
 end
 
 local function style_input_text(text)
-  local bg = tonumber(settings.get("tui.input.background", 238)) or 238
+  local bg = tonumber(settings.get("tui.input.background", 244)) or 244
   local fg = tonumber(settings.get("tui.input.foreground", 253)) or 253
   return ansi.color("38;5;" .. tostring(fg) .. ";48;5;" .. tostring(bg), text)
 end
 
 local function style_input_fill(width)
-  local bg = tonumber(settings.get("tui.input.background", 238)) or 238
+  local bg = tonumber(settings.get("tui.input.background", 244)) or 244
   return ansi.color("48;5;" .. tostring(bg), string.rep(" ", math.max(0, width)))
 end
 
