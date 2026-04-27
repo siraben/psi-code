@@ -112,7 +112,7 @@ end
 
 function M.use(theme_or_name)
   local name = theme_or_name
-  local theme = theme_or_name
+  local theme
   if type(theme_or_name) == "string" then
     theme = registry[theme_or_name]
     if not theme then

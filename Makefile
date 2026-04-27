@@ -23,6 +23,11 @@ TUI ?= 1
 ANSI ?= 1
 COLOR ?= 1
 REPL_EDITLINE ?= 1
+ifeq ($(ANSI),0)
+# The Lua TUI backend is ANSI-terminal based. A no-ANSI build should keep
+# --tui unavailable instead of compiling a TUI that still emits escapes.
+TUI := 0
+endif
 ifeq ($(STATIC),1)
 PKG_CONFIG_FLAGS = --static
 LDFLAGS += -static
