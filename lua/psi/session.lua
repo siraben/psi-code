@@ -118,6 +118,10 @@ function M.messages()
   return records.messages_from_alists(psi.session_messages())
 end
 
+function M.messages_from(start_index)
+  return records.messages_from_alists(psi.session_messages_from(start_index or 1))
+end
+
 -- Internal: append an in-memory message record verbatim (used when
 -- reconstructing state during compaction). Does not re-stamp metadata.
 function M.append_message(msg)
@@ -465,14 +469,13 @@ end
 -- rewriting the header or earlier entries. A 100-entry session
 -- with a 5-entry delta drops from 105-line rewrite to 5-line
 -- append; on iSH this turns a ~50ms save into a ~2ms append.
-local function append_session_file(path, messages, from_idx, count)
+local function append_session_file(path, messages)
   local f, err = io.open(path, "a")
   if not f then
     return false, err
   end
-  local n = count or #messages
   local ok, werr = pcall(function()
-    for i = from_idx, n do
+    for i = 1, #messages do
       write_line(f, to_disk_entry(messages[i]))
     end
   end)
@@ -521,8 +524,7 @@ function M.save(path)
   if not path or path == "" then
     return false, "no session path set"
   end
-  local messages = psi.session_messages()
-  local count = #messages
+  local count = psi.session_message_count()
 
   local force_full = (path ~= last_saved_path)
     or (count < last_saved_count)
@@ -530,6 +532,7 @@ function M.save(path)
     or (not psi.file_exists(path))
 
   if force_full then
+    local messages = psi.session_messages()
     local ok, err = write_session_file(path, session_header(), messages, count)
     if ok then
       last_saved_path = path
@@ -547,7 +550,8 @@ function M.save(path)
     return true
   end
 
-  local ok, err = append_session_file(path, messages, last_saved_count + 1, count)
+  local messages = psi.session_messages_from(last_saved_count + 1)
+  local ok, err = append_session_file(path, messages)
   if ok then
     last_saved_count = count
   else

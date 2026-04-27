@@ -352,10 +352,18 @@ local function new_state()
   return {
     blocks = {}, -- 1-indexed, mirrors Anthropic's 0-based index+1
     stop_reason = nil,
-    assistant_text = "",
+    assistant_text_parts = {},
     usage = nil, -- merged usage object from message_start + message_delta
     response_id = nil, -- Anthropic server-side message id (from message_start)
   }
+end
+
+local function state_assistant_text(state)
+  if state.assistant_text ~= nil then
+    return state.assistant_text
+  end
+  state.assistant_text = table.concat(state.assistant_text_parts or {})
+  return state.assistant_text
 end
 
 local function merge_usage(state, u)
@@ -394,12 +402,12 @@ local function on_content_block_start(state, data)
   local cb = data.content_block or {}
   state.blocks[idx + 1] = {
     type = cb.type or "text",
-    text = cb.text or "",
+    text_parts = cb.text and { cb.text } or {},
     id = cb.id,
     name = cb.name,
-    input_json = "",
-    thinking = cb.thinking or "",
-    signature = cb.signature or "",
+    input_json_parts = {},
+    thinking_parts = cb.thinking and { cb.thinking } or {},
+    signature_parts = cb.signature and { cb.signature } or {},
   }
 end
 
@@ -414,8 +422,9 @@ local function on_content_block_delta(state, data, observer)
   end
   local d = data.delta or {}
   if d.type == "text_delta" and type(d.text) == "string" then
-    block.text = block.text .. d.text
-    state.assistant_text = state.assistant_text .. d.text
+    block.text_parts[#block.text_parts + 1] = d.text
+    state.assistant_text_parts[#state.assistant_text_parts + 1] = d.text
+    state.assistant_text = nil
     if observer.on_assistant_text_delta then
       observer.on_assistant_text_delta(d.text)
     end
@@ -423,7 +432,7 @@ local function on_content_block_delta(state, data, observer)
       psi.events.emit("assistant-text-delta", { text = d.text })
     end
   elseif d.type == "input_json_delta" and type(d.partial_json) == "string" then
-    block.input_json = block.input_json .. d.partial_json
+    block.input_json_parts[#block.input_json_parts + 1] = d.partial_json
     if observer.on_tool_call_delta then
       observer.on_tool_call_delta(block.id, d.partial_json)
     end
@@ -431,7 +440,7 @@ local function on_content_block_delta(state, data, observer)
       psi.events.emit("tool-call-delta", { id = block.id, partial_json = d.partial_json })
     end
   elseif d.type == "thinking_delta" and type(d.thinking) == "string" then
-    block.thinking = block.thinking .. d.thinking
+    block.thinking_parts[#block.thinking_parts + 1] = d.thinking
     if observer.on_thinking_delta then
       observer.on_thinking_delta(d.thinking)
     end
@@ -441,7 +450,7 @@ local function on_content_block_delta(state, data, observer)
   elseif d.type == "signature_delta" and type(d.signature) == "string" then
     -- Anthropic streams the thinking-block signature in one or more
     -- signature_delta events; concatenate for cross-turn replay.
-    block.signature = (block.signature or "") .. d.signature
+    block.signature_parts[#block.signature_parts + 1] = d.signature
   end
 end
 
@@ -480,11 +489,13 @@ local function finalize_blocks(state)
   for _, k in ipairs(keys) do
     local block = state.blocks[k]
     if block.type == "text" then
-      content[#content + 1] = { type = "text", text = block.text }
+      local text = table.concat(block.text_parts or {})
+      content[#content + 1] = { type = "text", text = text }
     elseif block.type == "tool_use" then
       local input
-      if #block.input_json > 0 then
-        input = safe_decode(block.input_json)
+      local input_json = table.concat(block.input_json_parts or {})
+      if #input_json > 0 then
+        input = safe_decode(input_json)
         if type(input) ~= "table" then
           -- Truncated or malformed input_json means stream events
           -- were dropped (SSE chunk-boundary bug, network glitch, or
@@ -498,8 +509,8 @@ local function finalize_blocks(state)
                 .. "starts with %q); dispatching with empty input\n",
               block.name or "?",
               block.id or "?",
-              #block.input_json,
-              block.input_json:sub(1, 48)
+              #input_json,
+              input_json:sub(1, 48)
             )
           )
           input = {}
@@ -517,9 +528,11 @@ local function finalize_blocks(state)
         id = block.id,
         name = block.name,
         input = input,
-        input_json = block.input_json,
+        input_json = input_json,
       }
     elseif block.type == "thinking" then
+      local thinking = table.concat(block.thinking_parts or {})
+      local signature = table.concat(block.signature_parts or {})
       -- Preserve thinking blocks with the streamed signature so the
       -- session JSONL can round-trip through pi's transform-messages
       -- flow. Outgoing-request emission is decided at replay time
@@ -527,8 +540,8 @@ local function finalize_blocks(state)
       -- content falls back to a text block there.
       content[#content + 1] = {
         type = "thinking",
-        thinking = block.thinking or "",
-        signature = block.signature or "",
+        thinking = thinking,
+        signature = signature,
       }
     end
   end
@@ -548,13 +561,14 @@ local function save_failed_partial(state, model, stop_reason, error_message)
   if not state then
     return
   end
-  local has_text = state.assistant_text and state.assistant_text ~= ""
+  local assistant_text = state_assistant_text(state)
+  local has_text = assistant_text ~= ""
   local has_blocks = next(state.blocks) ~= nil
   if not has_text and not has_blocks then
     return
   end
   local content = finalize_blocks(state)
-  session_mod.append_assistant(state.assistant_text or "", content, {
+  session_mod.append_assistant(assistant_text, content, {
     usage = state.usage,
     stop_reason = stop_reason,
     error_message = error_message,
@@ -870,7 +884,8 @@ function M.run_turn(opts)
     end
 
     local content, tool_uses = finalize_blocks(state)
-    session_mod.append_assistant(state.assistant_text, content, {
+    local assistant_text = state_assistant_text(state)
+    session_mod.append_assistant(assistant_text, content, {
       usage = state.usage,
       stop_reason = state.stop_reason,
       model = model,
@@ -893,9 +908,9 @@ function M.run_turn(opts)
     if #tool_uses == 0 then
       maybe_auto_compact(model, opts)
       if psi.events then
-        psi.events.emit("turn-end", { text = state.assistant_text, model = model })
+        psi.events.emit("turn-end", { text = state_assistant_text(state), model = model })
       end
-      return true, state.assistant_text
+      return true, state_assistant_text(state)
     end
 
     -- Run every tool_use block in this turn concurrently. When
@@ -974,6 +989,10 @@ end
 M._test = {
   new_sse_parser = new_sse_parser,
   sse_push = sse_push,
+  new_state = new_state,
+  dispatch_sse = dispatch_sse,
+  finalize_blocks = finalize_blocks,
+  state_assistant_text = state_assistant_text,
   build_api_messages = build_api_messages,
 }
 

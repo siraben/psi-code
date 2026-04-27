@@ -33,15 +33,19 @@ end
 -- placement, ncurses repainting); Lua owns the presentation policy so
 -- ports and user customisations can override prefixes or the nominal
 -- visible-row cap without patching tui_mode.c.
-function M.input_layout(arg_json)
-  local arg = prelude.safe_json_decode(arg_json, {})
+function M.input_layout_table(arg)
+  arg = type(arg) == "table" and arg or {}
   local height = math.max(12, tonumber(arg.height) or 24)
   local max_rows = math.min(5, math.max(1, height - 5))
-  return psi.json_encode({
+  return {
     max_rows = max_rows,
     prefix_first = "> ",
     prefix_rest = "| ",
-  })
+  }
+end
+
+function M.input_layout(arg_json)
+  return psi.json_encode(M.input_layout_table(prelude.safe_json_decode(arg_json, {})))
 end
 
 function M.footer_hint(arg_json)
