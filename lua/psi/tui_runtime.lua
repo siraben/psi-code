@@ -85,7 +85,7 @@ end
 local function default_input_layout(height)
   height = math.max(12, tonumber(height) or 24)
   return {
-    max_rows = math.min(5, math.max(1, height - 5)),
+    max_rows = math.min(5, math.max(1, height - 6)),
     prefix_first = "> ",
     prefix_rest = "| ",
   }
@@ -114,7 +114,7 @@ end
 local function input_max_rows(state)
   local max_rows = tonumber(state.input_layout.max_rows) or 5
   max_rows = math.max(1, max_rows)
-  max_rows = math.min(max_rows, math.max(1, state.height - 5))
+  max_rows = math.min(max_rows, math.max(1, state.height - 6))
   return max_rows
 end
 
@@ -727,7 +727,8 @@ local function layout_rows(state)
     input_first_line = #input_lines - input_rows + 1
   end
   local footer_row = state.height
-  local input_start_row = footer_row - input_rows
+  local input_box_rows = input_rows + 2
+  local input_start_row = footer_row - input_box_rows
   local status_row = input_start_row - 1
   local transcript_start = 2
   local transcript_height = math.max(1, status_row - transcript_start)
@@ -738,6 +739,7 @@ local function layout_rows(state)
     cursor_line = cursor_line,
     cursor_col = cursor_col,
     input_rows = input_rows,
+    input_box_rows = input_box_rows,
     input_first_line = input_first_line,
     transcript_start = transcript_start,
     transcript_height = transcript_height,
@@ -759,14 +761,29 @@ local function scroll_by(state, delta)
 end
 
 local function style_input_prefix(prefix, is_first)
+  local bg = tonumber(settings.get("tui.input.background", 238)) or 238
   if is_first then
-    return ansi.color("1;30;46", prefix)
+    local chip_bg = tonumber(settings.get("tui.input.prefix_background", 250)) or 250
+    return ansi.color("1;30;48;5;" .. tostring(chip_bg), prefix)
   end
-  return ansi.dim(prefix)
+  return ansi.color("38;5;245;48;5;" .. tostring(bg), prefix)
 end
 
 local function style_input_text(text)
-  return ansi.color("37", text)
+  local bg = tonumber(settings.get("tui.input.background", 238)) or 238
+  local fg = tonumber(settings.get("tui.input.foreground", 253)) or 253
+  return ansi.color("38;5;" .. tostring(fg) .. ";48;5;" .. tostring(bg), text)
+end
+
+local function style_input_fill(width)
+  local bg = tonumber(settings.get("tui.input.background", 238)) or 238
+  return ansi.color("48;5;" .. tostring(bg), string.rep(" ", math.max(0, width)))
+end
+
+local function input_box_line(content, width)
+  content = content or ""
+  width = math.max(1, tonumber(width) or 1)
+  return content .. style_input_fill(width - display_width(content))
 end
 
 local function redraw(state)
@@ -817,6 +834,8 @@ local function redraw(state)
   end
   psi.tui_draw_line(rows.status_row, status_text)
 
+  local input_width = math.max(1, state.width - 1)
+  psi.tui_draw_line(rows.input_start_row, style_input_fill(input_width))
   for i = 0, rows.input_rows - 1 do
     local line_index = rows.input_first_line + i
     local line = rows.input_lines[line_index]
@@ -827,19 +846,20 @@ local function redraw(state)
       text = state.input:sub(line.start + 1, line.start + line.len)
     end
     psi.tui_draw_line(
-      rows.input_start_row + i,
-      style_input_prefix(prefix, line_index == 1) .. style_input_text(text)
+      rows.input_start_row + 1 + i,
+      input_box_line(style_input_prefix(prefix, line_index == 1) .. style_input_text(text), input_width)
     )
   end
+  psi.tui_draw_line(rows.input_start_row + rows.input_rows + 1, style_input_fill(input_width))
 
   psi.tui_draw_line(rows.footer_row, tui.compose_bar(tui.status_bar(status_arg) or "", state.width - 1))
 
   local visible_cursor_line = rows.cursor_line - rows.input_first_line + 1
   local cursor_prefix = rows.cursor_line == 1 and state.input_layout.prefix_first
     or state.input_layout.prefix_rest
-  local cursor_row = rows.input_start_row + visible_cursor_line - 1
+  local cursor_row = rows.input_start_row + visible_cursor_line
   local cursor_col = display_width(cursor_prefix) + rows.cursor_col + 1
-  cursor_row = clamp(cursor_row, rows.input_start_row, state.height)
+  cursor_row = clamp(cursor_row, rows.input_start_row + 1, rows.input_start_row + rows.input_rows)
   cursor_col = clamp(cursor_col, 1, math.max(1, state.width - 1))
   psi.tui_set_cursor(cursor_row, cursor_col, true)
   psi.tui_refresh()
