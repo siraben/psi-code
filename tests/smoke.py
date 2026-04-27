@@ -1499,6 +1499,45 @@ def t_tui_vim_modal_keys(psi: Psi):
                   "Vim modal TUI keys")
 
 
+@test("tui/osc52_clipboard")
+def t_tui_osc52_clipboard(psi: Psi):
+    out = psi.eval(
+        'local tui = require("psi.tui")\n'
+        + 'local osc52 = require("psi.extensions.osc52_clipboard")\n'
+        + 'local writes = {}\n'
+        + 'psi.stdout_write = function(text) writes[#writes + 1] = text end\n'
+        + 'osc52.disable(psi)\n'
+        + 'tui.clear_clipboard_writers()\n'
+        + 'osc52.enable(psi)\n'
+        + 'local wrote = tui.write_clipboard("hi", {source="test", force=true})\n'
+        + 'local direct = osc52._debug_osc52_sequence("hi", {TMUX=""})\n'
+        + 'local tmux = osc52._debug_osc52_sequence("hi", {TMUX="/tmp/tmux"})\n'
+        + 'return table.concat({\n'
+        + '  osc52._debug_base64_encode("hello"),\n'
+        + '  tostring(wrote),\n'
+        + '  tostring((writes[1] or ""):find("52;", 1, true) ~= nil and (writes[1] or ""):find(";aGk=", 1, true) ~= nil),\n'
+        + '  tostring(direct:sub(1, 2) == "\\27]"),\n'
+        + '  tostring(tmux:sub(1, 7) == "\\27Ptmux;")\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "aGVsbG8=|true|true|true|true", "OSC 52 clipboard writer")
+
+
+@test("tui/vim_yank_writes_clipboard")
+def t_tui_vim_yank_writes_clipboard(psi: Psi):
+    out = psi.eval(
+        'local tui = require("psi.tui")\n'
+        + 'local rt = require("psi.tui_runtime")\n'
+        + 'require("psi.extensions.vim_keybindings").enable(psi)\n'
+        + 'local copied = "-"\n'
+        + 'tui.clear_clipboard_writers()\n'
+        + 'tui.register_clipboard_writer(function(text) copied = text return true end)\n'
+        + 'rt._debug_edit_keys("abc", 0, {{key="escape"}, {key="text", text="y"}}, false, {clipboard_writers=true})\n'
+        + 'return copied'
+    )
+    assert_equals(out, "abc", "Vim yank writes through TUI clipboard hook")
+
+
 @test("tui/vim_toggle")
 def t_tui_vim_toggle(psi: Psi):
     out = psi.eval(

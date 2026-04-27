@@ -55,7 +55,7 @@ This repository currently contains:
   (normal/insert/visual/block visual, `w`/`b`, `I`/`A`/`o`/`O`,
   `^`/`$`, `gg`/`G`, `Ctrl-U`/`Ctrl-D`, `y`/`p`,
   `Ctrl-A`/`Ctrl-E`), `Ctrl-G` abort while busy, `Ctrl-C`
-  clear-buffer, and Ctrl-Z suspend/resume, plus a Lua-driven theme registry with a bundled
+  clear-buffer, OSC 52 terminal clipboard yanks, and Ctrl-Z suspend/resume, plus a Lua-driven theme registry with a bundled
   dark default. Single-threaded: the agent turn runs as
   a Lua coroutine on the TUI thread, pumping input and
   ANSI redraws between every cooperative yield
