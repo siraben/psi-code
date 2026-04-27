@@ -880,8 +880,17 @@ local function input_box_line(content, width)
   return content .. style_input_fill(width - display_width(content), "body")
 end
 
-local function frame_line(row, text)
-  return "\27[" .. tostring(row) .. ";1H\27[2K" .. (text or "")
+local function style_screen_fill(width)
+  return string.rep(" ", math.max(0, width))
+end
+
+local function padded_frame_text(text, width)
+  text = text or ""
+  return text .. style_screen_fill(width - display_width(text))
+end
+
+local function frame_line(row, text, width)
+  return "\27[" .. tostring(row) .. ";1H" .. padded_frame_text(text, width)
 end
 
 local render_input_text
@@ -897,6 +906,7 @@ local function redraw(state)
   local status_text = ""
   local cwd
   local frame = {}
+  local frame_width
 
   state.scroll_offset = clamp(state.scroll_offset, 0, max_scroll)
 
@@ -904,9 +914,10 @@ local function redraw(state)
     psi.tui_clear(true)
   end
   state.force_physical_clear = false
+  frame_width = math.max(1, state.width - 1)
   cwd = psi.cwd() or "."
   frame[#frame + 1] =
-    frame_line(rows.header_row, tui.compose_bar(tui.workspace_bar(cwd), state.width - 1))
+    frame_line(rows.header_row, tui.compose_bar(tui.workspace_bar(cwd), frame_width), frame_width)
 
   local first_line = total_lines - rows.transcript_height - state.scroll_offset + 1
   if first_line < 1 then
@@ -916,7 +927,7 @@ local function redraw(state)
   for i = 0, rows.transcript_height - 1 do
     local line = transcript_lines[i + 1]
     local row = rows.transcript_start + i
-    frame[#frame + 1] = frame_line(row, line and style_line(line) or "")
+    frame[#frame + 1] = frame_line(row, line and style_line(line) or "", frame_width)
   end
 
   status_arg = {
@@ -943,10 +954,11 @@ local function redraw(state)
       state.busy_tick
     )
   end
-  frame[#frame + 1] = frame_line(rows.status_row, status_text)
+  frame[#frame + 1] = frame_line(rows.status_row, status_text, frame_width)
 
-  local input_width = math.max(1, state.width - 1)
-  frame[#frame + 1] = frame_line(rows.input_start_row, style_input_fill(input_width, "rail"))
+  local input_width = frame_width
+  frame[#frame + 1] =
+    frame_line(rows.input_start_row, style_input_fill(input_width, "rail"), frame_width)
   for i = 0, rows.input_rows - 1 do
     local line_index = rows.input_first_line + i
     local line = rows.input_lines[line_index]
@@ -969,13 +981,19 @@ local function redraw(state)
         input_width
       )
     end
-    frame[#frame + 1] = frame_line(rows.input_start_row + 1 + i, input_text)
+    frame[#frame + 1] = frame_line(rows.input_start_row + 1 + i, input_text, frame_width)
   end
-  frame[#frame + 1] =
-    frame_line(rows.input_start_row + rows.input_rows + 1, style_input_fill(input_width, "rail"))
+  frame[#frame + 1] = frame_line(
+    rows.input_start_row + rows.input_rows + 1,
+    style_input_fill(input_width, "rail"),
+    frame_width
+  )
 
-  frame[#frame + 1] =
-    frame_line(rows.footer_row, tui.compose_bar(tui.status_bar(status_arg) or "", state.width - 1))
+  frame[#frame + 1] = frame_line(
+    rows.footer_row,
+    tui.compose_bar(tui.status_bar(status_arg) or "", frame_width),
+    frame_width
+  )
   local visible_cursor_line = rows.cursor_line - rows.input_first_line + 1
   local cursor_prefix = rows.cursor_line == 1 and state.input_layout.prefix_first
     or state.input_layout.prefix_rest
@@ -2414,10 +2432,10 @@ function M._debug_redraw_counts(input)
     redraw(state)
     local stale_clears = 0
     local stale_frame = calls.frames[1] and calls.frames[1].frame or ""
+    local line_clears = stale_frame:find("\27%[2K", 1, false) ~= nil and 1 or 0
     for row = rows.transcript_start, rows.input_start_row - 1 do
-      if stale_frame:find("\27%[" .. tostring(row) .. ";1H\27%[2K", 1, false) ~= nil then
-        stale_clears = stale_clears + 1
-      end
+      stale_clears = stale_clears
+        + (stale_frame:find("\27%[" .. tostring(row) .. ";1H", 1, false) ~= nil and 1 or 0)
     end
     return {
       first_frames = first_frames,
@@ -2425,6 +2443,7 @@ function M._debug_redraw_counts(input)
       second_input_draws = second_input_draws,
       second_clears = calls.clears,
       stale_clears = stale_clears,
+      line_clears = line_clears,
       raw_draws = #calls.raw_rows,
       draw_rows = #calls.draw_rows,
       cursor_sets = calls.cursor_sets,
