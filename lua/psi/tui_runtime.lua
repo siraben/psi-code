@@ -209,6 +209,8 @@ local function new_state(opts)
     input = "",
     cursor = 0,
     busy = false,
+    busy_label = nil,
+    busy_started_at = nil,
     running = true,
     scroll_offset = 0,
     status_text = nil,
@@ -755,6 +757,9 @@ local function redraw(state)
     provider = state.model and state.model.provider or nil,
     context_window = state.model and state.model.context_window or nil,
     busy = state.busy,
+    busy_label = state.busy_label,
+    elapsed_seconds = state.busy_started_at and (os.time() - state.busy_started_at) or 0,
+    busy_phase = state.busy_started_at and (((os.time() - state.busy_started_at) % 3) + 1) or 0,
     scroll = state.scroll_offset,
   }
 
@@ -1102,8 +1107,10 @@ end
 
 local function run_compact(state, keep_recent)
   state.busy = true
+  state.busy_label = "Compacting"
+  state.busy_started_at = os.time()
   psi.abort_reset()
-  set_status(state, "Compacting...", false)
+  set_status(state, "", false)
   redraw(state)
 
   local ran, ok, summary = xpcall(function()
@@ -1130,6 +1137,8 @@ local function run_compact(state, keep_recent)
   end
 
   state.busy = false
+  state.busy_label = nil
+  state.busy_started_at = nil
   state.dirty = true
   redraw(state)
 end
@@ -1235,11 +1244,15 @@ local function submit(state)
   state.streaming_assistant_index = add_entry(state, "assistant", "")
   state.scroll_offset = 0
   state.busy = true
+  state.busy_label = "Working"
+  state.busy_started_at = os.time()
   psi.abort_reset()
-  set_status(state, "Working...", false)
+  set_status(state, "", false)
   redraw(state)
   run_turn(state, line)
   state.busy = false
+  state.busy_label = nil
+  state.busy_started_at = nil
   state.dirty = true
 end
 
@@ -1371,6 +1384,9 @@ local function tick(state)
       break
     end
     handle_key_event(state, event)
+  end
+  if state.busy then
+    state.dirty = true
   end
   if state.dirty then
     redraw(state)

@@ -144,6 +144,22 @@ local function short_id(id)
   return id:sub(1, 8)
 end
 
+local function format_elapsed(total_seconds)
+  local hours
+  local minutes
+  local seconds
+
+  total_seconds = math.max(0, tonumber(total_seconds) or 0)
+  hours = math.floor(total_seconds / 3600)
+  minutes = math.floor((total_seconds % 3600) / 60)
+  seconds = total_seconds % 60
+
+  if hours > 0 then
+    return string.format("%d:%02d:%02d", hours, minutes, seconds)
+  end
+  return string.format("%d:%02d", minutes, seconds)
+end
+
 -- Format a pi-ish status line. `arg_json` is a JSON object emitted by
 -- the C TUI: {model=string, busy=bool, scroll=int}.
 -- Returns a single string with fields separated by two spaces.
@@ -191,7 +207,18 @@ end
 
 -- Short help line for the footer. Content depends on mode.
 function M.footer_hint(arg_json)
-  return keybindings.footer_hint(arg_json)
+  local arg = type(arg_json) == "table" and arg_json or prelude.safe_json_decode(arg_json, {})
+  if arg.busy then
+    local label = (type(arg.busy_label) == "string" and arg.busy_label ~= "") and arg.busy_label or "Working"
+    local dots = string.rep(".", math.max(1, tonumber(arg.busy_phase) or 1))
+    return string.format(
+      "%s (%s  • esc to interrupt) %s",
+      label,
+      format_elapsed(arg.elapsed_seconds),
+      dots
+    )
+  end
+  return ""
 end
 
 return M
