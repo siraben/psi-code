@@ -15,6 +15,7 @@ local records = require("psi.records")
 local prelude = require("psi.prelude")
 local keybindings = require("psi.keybindings")
 local session = require("psi.session")
+local ansi = require("psi.ansi")
 
 local M = {}
 
@@ -307,6 +308,53 @@ local function cmd_reload()
   return records.new_command_action("print", "extensions reloaded")
 end
 
+local function rainbow_fg(bg)
+  bg = tonumber(bg) or 0
+  if bg < 16 then
+    return (bg == 0 or bg == 1 or bg == 2 or bg == 4 or bg == 5 or bg == 8) and 15 or 16
+  end
+  if bg >= 232 then
+    return bg < 244 and 15 or 16
+  end
+  local n = bg - 16
+  local b = n % 6
+  local g = math.floor(n / 6) % 6
+  local r = math.floor(n / 36) % 6
+  local function level(v)
+    return v == 0 and 0 or (55 + (v * 40))
+  end
+  local luminance = (0.2126 * level(r)) + (0.7152 * level(g)) + (0.0722 * level(b))
+  return luminance < 140 and 15 or 16
+end
+
+local function rainbow_line(start_code, end_code, cols)
+  local cells = {}
+  for code = start_code, end_code do
+    cells[#cells + 1] = ansi.color(
+      "38;5;" .. tostring(rainbow_fg(code)) .. ";48;5;" .. tostring(code),
+      string.format(" %03d ", code)
+    )
+    if #cells == cols then
+      break
+    end
+  end
+  return table.concat(cells)
+end
+
+local function cmd_rainbow()
+  local lines = {
+    "xterm 256 background swatches",
+    "pick a bg code that actually renders well in your terminal",
+    "",
+  }
+  local code = 0
+  while code <= 255 do
+    lines[#lines + 1] = rainbow_line(code, math.min(255, code + 7), 8)
+    code = code + 8
+  end
+  return records.new_command_action("ansi-print", table.concat(lines, "\n"))
+end
+
 -- ---------- dispatcher + registry ----------
 
 local BUILTIN_COMMANDS = {
@@ -380,6 +428,10 @@ local BUILTIN_COMMANDS = {
   {
     name = "reload",
     description = "Reload extensions, prompt templates, and keybindings",
+  },
+  {
+    name = "rainbow",
+    description = "Show all 256 terminal background colors",
   },
   {
     name = "system-prompt",
@@ -539,6 +591,9 @@ function M.handle(line)
   end
   if line == "/reload" then
     return cmd_reload()
+  end
+  if line == "/rainbow" then
+    return cmd_rainbow()
   end
   if starts_word(line, "/model") then
     local spec = arg_after(line, "/model")
