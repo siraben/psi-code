@@ -1392,6 +1392,149 @@ def t_session_round_trip(psi: Psi):
 
 
 # ---------------------------------------------------------------------------
+# Truncation tests — port of pi-mono's truncate.ts behaviour.
+# ---------------------------------------------------------------------------
+
+
+@test("truncate/format_size")
+def t_truncate_format_size(psi: Psi):
+    out = psi.eval(
+        'local t = require("psi.truncate")\n'
+        + 'return t.format_size(0) .. "|" .. t.format_size(2048) .. "|"\n'
+        + '       .. t.format_size(1024 * 1024 * 3)'
+    )
+    assert_equals(out, "0B|2.0KB|3.0MB", "format_size human-readable")
+
+
+@test("truncate/head_lines")
+def t_truncate_head_lines(psi: Psi):
+    out = psi.eval(
+        'local t = require("psi.truncate")\n'
+        + 'local lines = {}\n'
+        + 'for i = 1, 10 do lines[#lines + 1] = "line " .. i end\n'
+        + 'local r = t.truncate_head(table.concat(lines, "\\n"), { max_lines = 3 })\n'
+        + 'return r.content .. "|" .. tostring(r.truncated) .. "|"\n'
+        + '       .. r.truncated_by .. "|" .. tostring(r.output_lines)\n'
+        + '       .. "|" .. tostring(r.total_lines)'
+    )
+    assert_equals(out, "line 1\nline 2\nline 3|true|lines|3|10",
+                  "head truncation by line count")
+
+
+@test("truncate/head_bytes")
+def t_truncate_head_bytes(psi: Psi):
+    out = psi.eval(
+        'local t = require("psi.truncate")\n'
+        + 'local body = "alpha\\nbravo\\ncharlie\\ndelta"\n'
+        + 'local r = t.truncate_head(body, { max_bytes = 12 })\n'
+        + 'return r.content .. "|" .. tostring(r.truncated) .. "|" .. r.truncated_by'
+    )
+    assert_equals(out, "alpha\nbravo|true|bytes", "head truncation by byte cap")
+
+
+@test("truncate/head_first_line_too_big")
+def t_truncate_head_first_line(psi: Psi):
+    out = psi.eval(
+        'local t = require("psi.truncate")\n'
+        + 'local body = string.rep("x", 200) .. "\\nshort"\n'
+        + 'local r = t.truncate_head(body, { max_bytes = 50 })\n'
+        + 'return tostring(r.first_line_exceeds_limit) .. "|"\n'
+        + '       .. (r.content or "<nil>")'
+    )
+    assert_equals(out, "true|", "first-line-too-big returns empty content")
+
+
+@test("truncate/tail_lines")
+def t_truncate_tail_lines(psi: Psi):
+    out = psi.eval(
+        'local t = require("psi.truncate")\n'
+        + 'local lines = {}\n'
+        + 'for i = 1, 10 do lines[#lines + 1] = "line " .. i end\n'
+        + 'local r = t.truncate_tail(table.concat(lines, "\\n"), { max_lines = 3 })\n'
+        + 'return r.content .. "|" .. r.truncated_by .. "|" .. tostring(r.output_lines)'
+    )
+    assert_equals(out, "line 8\nline 9\nline 10|lines|3",
+                  "tail truncation keeps last N lines")
+
+
+@test("truncate/tail_partial_last_line")
+def t_truncate_tail_partial(psi: Psi):
+    out = psi.eval(
+        'local t = require("psi.truncate")\n'
+        + 'local body = "head\\n" .. string.rep("y", 200)\n'
+        + 'local r = t.truncate_tail(body, { max_bytes = 50, max_lines = 100 })\n'
+        + 'return tostring(r.last_line_partial) .. "|" .. tostring(#r.content)'
+    )
+    parts = out.strip().split("|")
+    assert_equals(parts[0], "true", "single huge last line marked partial")
+    assert int(parts[1]) <= 50, f"partial tail exceeds byte cap: {out!r}"
+
+
+@test("truncate/line_clip")
+def t_truncate_line_clip(psi: Psi):
+    out = psi.eval(
+        'local t = require("psi.truncate")\n'
+        + 'local clipped, was = t.truncate_line(string.rep("a", 600), 100)\n'
+        + 'return tostring(was) .. "|" .. clipped:sub(101, 116)'
+    )
+    assert_equals(out, "true|... [truncated]", "long line clipped with marker")
+
+
+@test("tool/bash_truncates_long_output")
+def t_tool_bash_truncate(psi: Psi):
+    """Bash tool tail-truncates output past 50 KB and writes the full
+    output to a temp file whose path is returned in extras."""
+    out = psi.eval(
+        'local r = require("psi.tools").dispatch("bash", {\n'
+        + '  command = "yes hello | head -c 200000"\n'
+        + '})\n'
+        + 'return tostring(r.extras.truncated) .. "|"\n'
+        + '       .. tostring(r.extras.total_bytes >= 200000) .. "|"\n'
+        + '       .. tostring(r.extras.output:find("Showing", 1, true) ~= nil) .. "|"\n'
+        + '       .. tostring(#r.extras.output < 200000)'
+    )
+    assert_contains(out, "true|true|true|true",
+                    f"bash truncation shape wrong: {out!r}")
+
+
+@test("tool/bash_short_output_no_truncation")
+def t_tool_bash_no_truncate(psi: Psi):
+    out = psi.eval(
+        'local r = require("psi.tools").dispatch("bash", {command="printf short"})\n'
+        + 'return tostring(r.extras.truncated) .. "|" .. r.extras.output'
+    )
+    assert_equals(out, "false|short", "short output not truncated")
+
+
+@test("tool/bash_writes_temp_file_when_truncated")
+def t_tool_bash_temp_file(psi: Psi):
+    out = psi.eval(
+        'local r = require("psi.tools").dispatch("bash", {\n'
+        + '  command = "yes spillover | head -c 200000"\n'
+        + '})\n'
+        + 'local tp = r.extras.temp_file_path\n'
+        + 'if not tp then return "no-path" end\n'
+        + 'local body = psi.read_file(tp)\n'
+        + 'return tostring(tp:find("^/")) .. "|" .. tostring(body and #body >= 200000)'
+    )
+    assert_contains(out, "1|true",
+                    f"bash temp-file spillover wrong: {out!r}")
+
+
+@test("tool/grep_clips_long_lines")
+def t_tool_grep_clips_lines(psi: Psi):
+    target = psi.tmp / "long.txt"
+    target.write_text("a" * 1000 + " needle " + "b" * 1000 + "\n")
+    out = psi.eval(
+        f"local r = require('psi.tools').dispatch('grep', "
+        f"{{pattern='needle', path='{target}'}})\n"
+        "return r.extras.output"
+    )
+    assert_contains(out, "... [truncated]",
+                    f"long grep match line should be clipped: {out!r}")
+
+
+# ---------------------------------------------------------------------------
 # Live-agent tests — gated on ANTHROPIC_API_KEY.
 # ---------------------------------------------------------------------------
 
