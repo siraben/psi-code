@@ -2,230 +2,249 @@
 
 local M = {}
 
+local KEY_TEXT = "text"
+local KEY_ESCAPE = "escape"
+local KEY_CTRL_A = "ctrl-a"
+local KEY_CTRL_C = "ctrl-c"
+local KEY_CTRL_D = "ctrl-d"
+local KEY_CTRL_E = "ctrl-e"
+local KEY_CTRL_U = "ctrl-u"
+local KEY_CTRL_V = "ctrl-v"
+
+local MODE_INSERT = "insert"
+local MODE_NORMAL = "normal"
+local MODE_VISUAL = "visual"
+
+local SELECTION_CHAR = "char"
+local SELECTION_LINE = "line"
+local SELECTION_BLOCK = "block"
+
+local ACTION_CLEAR_BUFFER = "clear-buffer"
+local ACTION_MOVE_LEFT = "move-left"
+local ACTION_MOVE_LINE_DOWN = "move-line-down"
+local ACTION_MOVE_LINE_END = "move-line-end"
+local ACTION_MOVE_LINE_FIRST_NONBLANK = "move-line-first-nonblank"
+local ACTION_MOVE_LINE_START = "move-line-start"
+local ACTION_MOVE_LINE_UP = "move-line-up"
+local ACTION_MOVE_RIGHT = "move-right"
+local ACTION_MOVE_WORD_LEFT = "move-word-left"
+local ACTION_MOVE_WORD_START_RIGHT = "move-word-start-right"
+local ACTION_NOOP = "noop"
+local ACTION_SCROLL = "scroll"
+local ACTION_VIM_APPEND = "vim-append"
+local ACTION_VIM_APPEND_LINE = "vim-append-line"
+local ACTION_VIM_BLOCK_APPEND = "vim-block-append"
+local ACTION_VIM_BLOCK_INSERT = "vim-block-insert"
+local ACTION_VIM_INSERT_LINE = "vim-insert-line"
+local ACTION_VIM_MODE = "vim-mode"
+local ACTION_VIM_OPEN_LINE_ABOVE = "vim-open-line-above"
+local ACTION_VIM_OPEN_LINE_BELOW = "vim-open-line-below"
+local ACTION_VIM_PENDING = "vim-pending"
+local ACTION_VIM_PASTE = "vim-paste"
+local ACTION_VIM_YANK = "vim-yank"
+
+local SCROLL_BOTTOM = "bottom"
+local SCROLL_PAGE_DOWN = "page-down"
+local SCROLL_PAGE_UP = "page-up"
+local SCROLL_TOP = "top"
+
+local CHAR_APPEND = "a"
+local CHAR_APPEND_LINE = "A"
+local CHAR_BLOCK_APPEND = "A"
+local CHAR_BLOCK_INSERT = "I"
+local CHAR_GOTO_BOTTOM = "G"
+local CHAR_GOTO_PENDING = "g"
+local CHAR_INSERT = "i"
+local CHAR_INSERT_LINE = "I"
+local CHAR_OPEN_LINE_ABOVE = "O"
+local CHAR_OPEN_LINE_BELOW = "o"
+local CHAR_PASTE = "p"
+local CHAR_VISUAL = "v"
+local CHAR_VISUAL_LINE = "V"
+local CHAR_YANK = "y"
+
+local STATUS_BY_MODE = {
+  [MODE_INSERT] = "mode:INSERT",
+  [MODE_NORMAL] = "mode:NORMAL",
+}
+
+local STATUS_BY_SELECTION = {
+  [SELECTION_CHAR] = "mode:VISUAL",
+  [SELECTION_LINE] = "mode:VISUAL LINE",
+  [SELECTION_BLOCK] = "mode:VISUAL BLOCK",
+}
+
 local function action(name, arg)
   return { action = name, arg = arg }
 end
 
+local function binding(name, arg)
+  return { name = name, arg = arg }
+end
+
 local function char(arg)
-  return arg.key == "text" and arg.text or nil
+  return arg.key == KEY_TEXT and arg.text or nil
 end
 
 local function is_mode(arg, mode)
-  return (arg.editor_mode or "insert") == mode
+  return (arg.editor_mode or MODE_INSERT) == mode
 end
 
 local function visual_mode_arg(kind)
-  return { mode = "visual", kind = kind }
+  return { mode = MODE_VISUAL, kind = kind }
 end
 
 local function normal_mode_arg()
-  return { mode = "normal" }
+  return { mode = MODE_NORMAL }
 end
 
 local function insert_mode_arg()
-  return { mode = "insert" }
+  return { mode = MODE_INSERT }
+end
+
+local function resolve_arg(arg)
+  if type(arg) == "function" then
+    return arg()
+  end
+  return arg
+end
+
+local function resolve_binding(spec, arg)
+  if spec == nil then
+    return nil
+  end
+  if type(spec) == "function" then
+    return spec(arg)
+  end
+  return action(spec.name, resolve_arg(spec.arg))
+end
+
+local function pending_g_action(arg)
+  if arg.pending_key == CHAR_GOTO_PENDING then
+    return action(ACTION_SCROLL, SCROLL_TOP)
+  end
+  return action(ACTION_VIM_PENDING, CHAR_GOTO_PENDING)
+end
+
+local NORMAL_KEY_BINDINGS = {
+  [KEY_ESCAPE] = binding(ACTION_NOOP),
+  [KEY_CTRL_C] = binding(ACTION_CLEAR_BUFFER),
+  [KEY_CTRL_U] = binding(ACTION_SCROLL, SCROLL_PAGE_UP),
+  [KEY_CTRL_D] = binding(ACTION_SCROLL, SCROLL_PAGE_DOWN),
+  [KEY_CTRL_A] = binding(ACTION_MOVE_LINE_START),
+  [KEY_CTRL_E] = binding(ACTION_MOVE_LINE_END),
+  [KEY_CTRL_V] = binding(ACTION_VIM_MODE, function()
+    return visual_mode_arg(SELECTION_BLOCK)
+  end),
+}
+
+local NORMAL_CHAR_BINDINGS = {
+  h = binding(ACTION_MOVE_LEFT),
+  l = binding(ACTION_MOVE_RIGHT),
+  w = binding(ACTION_MOVE_WORD_START_RIGHT),
+  b = binding(ACTION_MOVE_WORD_LEFT),
+  ["^"] = binding(ACTION_MOVE_LINE_FIRST_NONBLANK),
+  ["$"] = binding(ACTION_MOVE_LINE_END),
+  j = binding(ACTION_MOVE_LINE_DOWN),
+  k = binding(ACTION_MOVE_LINE_UP),
+  [CHAR_GOTO_BOTTOM] = binding(ACTION_SCROLL, SCROLL_BOTTOM),
+  [CHAR_GOTO_PENDING] = pending_g_action,
+  [CHAR_INSERT] = binding(ACTION_VIM_MODE, insert_mode_arg),
+  [CHAR_APPEND] = binding(ACTION_VIM_APPEND),
+  [CHAR_APPEND_LINE] = binding(ACTION_VIM_APPEND_LINE),
+  [CHAR_INSERT_LINE] = binding(ACTION_VIM_INSERT_LINE),
+  [CHAR_OPEN_LINE_BELOW] = binding(ACTION_VIM_OPEN_LINE_BELOW),
+  [CHAR_OPEN_LINE_ABOVE] = binding(ACTION_VIM_OPEN_LINE_ABOVE),
+  [CHAR_VISUAL] = binding(ACTION_VIM_MODE, function()
+    return visual_mode_arg(SELECTION_CHAR)
+  end),
+  [CHAR_VISUAL_LINE] = binding(ACTION_VIM_MODE, function()
+    return visual_mode_arg(SELECTION_LINE)
+  end),
+  [CHAR_PASTE] = binding(ACTION_VIM_PASTE),
+  [CHAR_YANK] = binding(ACTION_VIM_YANK),
+}
+
+local VISUAL_KEY_BINDINGS = {
+  [KEY_ESCAPE] = binding(ACTION_VIM_MODE, normal_mode_arg),
+  [KEY_CTRL_C] = binding(ACTION_CLEAR_BUFFER),
+  [KEY_CTRL_U] = binding(ACTION_SCROLL, SCROLL_PAGE_UP),
+  [KEY_CTRL_D] = binding(ACTION_SCROLL, SCROLL_PAGE_DOWN),
+  [KEY_CTRL_A] = binding(ACTION_MOVE_LINE_START),
+  [KEY_CTRL_E] = binding(ACTION_MOVE_LINE_END),
+  [KEY_CTRL_V] = binding(ACTION_VIM_MODE, function()
+    return visual_mode_arg(SELECTION_BLOCK)
+  end),
+}
+
+local VISUAL_CHAR_BINDINGS = {
+  h = binding(ACTION_MOVE_LEFT),
+  l = binding(ACTION_MOVE_RIGHT),
+  w = binding(ACTION_MOVE_WORD_START_RIGHT),
+  b = binding(ACTION_MOVE_WORD_LEFT),
+  ["^"] = binding(ACTION_MOVE_LINE_FIRST_NONBLANK),
+  ["$"] = binding(ACTION_MOVE_LINE_END),
+  j = binding(ACTION_MOVE_LINE_DOWN),
+  k = binding(ACTION_MOVE_LINE_UP),
+  [CHAR_GOTO_BOTTOM] = binding(ACTION_SCROLL, SCROLL_BOTTOM),
+  [CHAR_GOTO_PENDING] = pending_g_action,
+  [CHAR_VISUAL] = binding(ACTION_VIM_MODE, normal_mode_arg),
+  [CHAR_VISUAL_LINE] = binding(ACTION_VIM_MODE, function()
+    return visual_mode_arg(SELECTION_LINE)
+  end),
+  [CHAR_PASTE] = binding(ACTION_VIM_PASTE),
+  [CHAR_YANK] = binding(ACTION_VIM_YANK),
+}
+
+local VISUAL_BLOCK_CHAR_BINDINGS = {
+  [CHAR_BLOCK_INSERT] = binding(ACTION_VIM_BLOCK_INSERT),
+  [CHAR_BLOCK_APPEND] = binding(ACTION_VIM_BLOCK_APPEND),
+}
+
+local INSERT_KEY_BINDINGS = {
+  [KEY_CTRL_C] = binding(ACTION_CLEAR_BUFFER),
+  [KEY_ESCAPE] = binding(ACTION_VIM_MODE, normal_mode_arg),
+}
+
+local function dispatch(bindings, key, arg)
+  return resolve_binding(bindings[key], arg)
 end
 
 local function handle_normal(arg)
-  local c = char(arg)
-  if arg.key == "escape" then
-    return action("noop")
-  end
-  if arg.key == "ctrl-c" then
-    return action("clear-buffer")
-  end
-  if arg.key == "ctrl-u" then
-    return action("scroll", "page-up")
-  end
-  if arg.key == "ctrl-d" then
-    return action("scroll", "page-down")
-  end
-  if arg.key == "ctrl-a" then
-    return action("move-line-start")
-  end
-  if arg.key == "ctrl-e" then
-    return action("move-line-end")
-  end
-  if c == "h" then
-    return action("move-left")
-  end
-  if c == "l" then
-    return action("move-right")
-  end
-  if c == "w" then
-    return action("move-word-start-right")
-  end
-  if c == "b" then
-    return action("move-word-left")
-  end
-  if c == "^" then
-    return action("move-line-first-nonblank")
-  end
-  if c == "$" then
-    return action("move-line-end")
-  end
-  if c == "j" then
-    return action("move-line-down")
-  end
-  if c == "k" then
-    return action("move-line-up")
-  end
-  if c == "G" then
-    return action("scroll", "bottom")
-  end
-  if c == "g" then
-    if arg.pending_key == "g" then
-      return action("scroll", "top")
-    end
-    return action("vim-pending", "g")
-  end
-  if c == "i" then
-    return action("vim-mode", insert_mode_arg())
-  end
-  if c == "a" then
-    return action("vim-append")
-  end
-  if c == "A" then
-    return action("vim-append-line")
-  end
-  if c == "I" then
-    return action("vim-insert-line")
-  end
-  if c == "o" then
-    return action("vim-open-line-below")
-  end
-  if c == "O" then
-    return action("vim-open-line-above")
-  end
-  if c == "v" then
-    return action("vim-mode", visual_mode_arg("char"))
-  end
-  if c == "V" then
-    return action("vim-mode", visual_mode_arg("line"))
-  end
-  if arg.key == "ctrl-v" then
-    return action("vim-mode", visual_mode_arg("block"))
-  end
-  if c == "p" then
-    return action("vim-paste")
-  end
-  if c == "y" then
-    return action("vim-yank")
-  end
-  return action("noop")
+  return dispatch(NORMAL_KEY_BINDINGS, arg.key, arg)
+    or dispatch(NORMAL_CHAR_BINDINGS, char(arg), arg)
+    or action(ACTION_NOOP)
 end
 
 local function handle_visual(arg)
   local c = char(arg)
-  if arg.key == "escape" then
-    return action("vim-mode", normal_mode_arg())
-  end
-  if arg.key == "ctrl-c" then
-    return action("clear-buffer")
-  end
-  if arg.key == "ctrl-u" then
-    return action("scroll", "page-up")
-  end
-  if arg.key == "ctrl-d" then
-    return action("scroll", "page-down")
-  end
-  if arg.key == "ctrl-a" then
-    return action("move-line-start")
-  end
-  if arg.key == "ctrl-e" then
-    return action("move-line-end")
-  end
-  if c == "h" then
-    return action("move-left")
-  end
-  if c == "l" then
-    return action("move-right")
-  end
-  if c == "w" then
-    return action("move-word-start-right")
-  end
-  if c == "b" then
-    return action("move-word-left")
-  end
-  if c == "^" then
-    return action("move-line-first-nonblank")
-  end
-  if c == "$" then
-    return action("move-line-end")
-  end
-  if c == "j" then
-    return action("move-line-down")
-  end
-  if c == "k" then
-    return action("move-line-up")
-  end
-  if c == "G" then
-    return action("scroll", "bottom")
-  end
-  if c == "g" then
-    if arg.pending_key == "g" then
-      return action("scroll", "top")
-    end
-    return action("vim-pending", "g")
-  end
-  if c == "v" then
-    return action("vim-mode", normal_mode_arg())
-  end
-  if c == "V" then
-    return action("vim-mode", visual_mode_arg("line"))
-  end
-  if arg.key == "ctrl-v" then
-    return action("vim-mode", visual_mode_arg("block"))
-  end
-  if arg.selection_kind == "block" and c == "I" then
-    return action("vim-block-insert")
-  end
-  if arg.selection_kind == "block" and c == "A" then
-    return action("vim-block-append")
-  end
-  if c == "y" then
-    return action("vim-yank")
-  end
-  if c == "p" then
-    return action("vim-paste")
-  end
-  return action("noop")
+  return dispatch(VISUAL_KEY_BINDINGS, arg.key, arg)
+    or (
+      arg.selection_kind == SELECTION_BLOCK
+      and dispatch(VISUAL_BLOCK_CHAR_BINDINGS, c, arg)
+    )
+    or dispatch(VISUAL_CHAR_BINDINGS, c, arg)
+    or action(ACTION_NOOP)
 end
 
 function M.install(psi)
   local tui = psi.tui or require("psi.tui")
   tui.register_key_handler(function(arg)
     arg = type(arg) == "table" and arg or {}
-    if is_mode(arg, "insert") then
-      if arg.key == "ctrl-c" then
-        return action("clear-buffer")
-      end
-      if arg.key == "escape" then
-        return action("vim-mode", normal_mode_arg())
-      end
-      return nil
+    if is_mode(arg, MODE_INSERT) then
+      return dispatch(INSERT_KEY_BINDINGS, arg.key, arg)
     end
-    if is_mode(arg, "visual") then
+    if is_mode(arg, MODE_VISUAL) then
       return handle_visual(arg)
     end
     return handle_normal(arg)
   end)
   tui.register_status_hook(function(arg)
     local mode = type(arg) == "table" and arg.editor_mode or nil
-    if mode == "normal" then
-      return "mode:NORMAL"
+    if mode == MODE_VISUAL then
+      return STATUS_BY_SELECTION[arg.selection_kind or SELECTION_CHAR]
     end
-    if mode == "visual" then
-      local kind = arg.selection_kind or "char"
-      if kind == "line" then
-        return "mode:VISUAL LINE"
-      end
-      if kind == "block" then
-        return "mode:VISUAL BLOCK"
-      end
-      return "mode:VISUAL"
-    end
-    return "mode:INSERT"
+    return STATUS_BY_MODE[mode] or STATUS_BY_MODE[MODE_INSERT]
   end)
   return true
 end
