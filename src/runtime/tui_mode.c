@@ -47,7 +47,7 @@ static int psi_tui_enter_terminal(void) {
 }
 
 static void psi_tui_leave_terminal(void) {
-    fputs("\033[0m\033[?25h\033[?1049l", stdout);
+    fputs("\033[?2026l\033[0m\033[?25h\033[?1049l", stdout);
     fflush(stdout);
     if (psi_tui_has_original_termios) {
         tcsetattr(STDIN_FILENO, TCSAFLUSH, &psi_tui_original_termios);
@@ -58,7 +58,7 @@ void psi_tui_suspend_terminal(void) {
     if (psi_tui_has_original_termios) {
         tcsetattr(STDIN_FILENO, TCSAFLUSH, &psi_tui_original_termios);
     }
-    fputs("\033[0m\033[?25h", stdout);
+    fputs("\033[?2026l\033[0m\033[?25h", stdout);
     fflush(stdout);
 }
 
