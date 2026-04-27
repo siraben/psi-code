@@ -25,7 +25,7 @@ This repository currently contains:
 - `cJSON` for JSON session records and structured tool payloads
 - `libcurl` for HTTPS provider integration
 - `libedit` for interactive line editing without the GPL constraint of GNU Readline
-- `ncursesw` (with UTF-8 locale) for the full-screen TUI
+- ANSI terminal control for the full-screen TUI
 - `zlib` to gzip-compress embedded Lua sources and docs inside the binary
 - an embedded Lua 5.4 runtime with host glue in `src/lua/vm.c` and a
   compressed embed-table (`include/psi/embedded_lua.h`) so portable
@@ -56,8 +56,8 @@ This repository currently contains:
   to normal mode, `Ctrl-G` abort while busy, `Ctrl-C` clear-buffer, and Ctrl-Z
   suspend/resume, plus a Lua-driven theme registry with a bundled
   dark default. Single-threaded: the agent turn runs as
-  a Lua coroutine on the ncurses thread, pumping input and
-  redraws between every cooperative yield
+  a Lua coroutine on the TUI thread, pumping input and
+  ANSI redraws between every cooperative yield
 - manual session compaction through `--compact` and `/compact`
 - cooperative abort plumbing (Ctrl-C for non-TUI, Ctrl-G in TUI)
   that cancels the current curl transfer, kills any child
@@ -144,7 +144,7 @@ API, streams text to stdout as it arrives, executes built-in host tools, and
 persists user/tool/assistant events in the session log. Starting `psi` with no
 explicit mode opens the same agent loop in an interactive shell with `/help`,
 `/session`, `/system-prompt`, `/compact`, and `/quit`. `--tui` opens a
-full-screen ncurses view over the same runtime and uses the same Lua hook
+full-screen ANSI view over the same runtime and uses the same Lua hook
 renderers for tool execution blocks and diffs. The default model is
 `claude-opus-4-7`, overridable via `--model` or `PSI_ANTHROPIC_MODEL`.
 

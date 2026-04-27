@@ -56,9 +56,6 @@ LOCAL_CPPFLAGS += $(call pkg_cflags,EDIT,libedit)
 endif
 LOCAL_CPPFLAGS += $(call pkg_cflags,CURL,libcurl)
 LOCAL_CPPFLAGS += $(call pkg_cflags,ZLIB,zlib)
-ifeq ($(TUI),1)
-LOCAL_CPPFLAGS += $(call pkg_cflags,NCURSES,ncursesw ncurses)
-endif
 LOCAL_CPPFLAGS += $(call pkg_cflags,ARGTABLE,argtable3)
 
 LOCAL_LDFLAGS  = $(call pkg_libs,LUA,lua5.4)
@@ -68,9 +65,6 @@ LOCAL_LDFLAGS += $(call pkg_libs,EDIT,libedit)
 endif
 LOCAL_LDFLAGS += $(call pkg_libs,CURL,libcurl)
 LOCAL_LDFLAGS += $(call pkg_libs,ZLIB,zlib)
-ifeq ($(TUI),1)
-LOCAL_LDFLAGS += $(call pkg_libs,NCURSES,ncursesw ncurses)
-endif
 LOCAL_LDFLAGS += $(if $(PSI_LIBS_ARGTABLE),$(PSI_LIBS_ARGTABLE),$(or $(call pkg_libs,ARGTABLE,argtable3),-largtable3))
 LOCAL_LDFLAGS += $(if $(PSI_LIBS_PTHREAD),$(PSI_LIBS_PTHREAD),-lpthread)
 LOCAL_RPATH_LDFLAGS = $(patsubst -L%,-Wl$(comma)-rpath$(comma)%,$(filter -L%,$(LOCAL_LDFLAGS)))
