@@ -109,7 +109,8 @@ set -a && . ./.env.local && ./build/psi --session .psi/session.jsonl --compact 1
 Optional build flags are plain Make variables. They default to `1` and can be
 disabled per build:
 
-- `TUI=0`: build without the ncurses full-screen frontend.
+- `TUI=0`: build without the full-screen frontend. The Lua TUI requires ANSI;
+  `ANSI=0` disables TUI support at compile time.
 - `ANSI=0`: build without ANSI SGR emission/parsing.
 - `COLOR=0`: build ANSI text styles without color handling.
 - `REPL_EDITLINE=0`: build the REPL without libedit/history support.

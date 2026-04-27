@@ -15,7 +15,6 @@ local records = require("psi.records")
 local prelude = require("psi.prelude")
 local keybindings = require("psi.keybindings")
 local session = require("psi.session")
-local ansi = require("psi.ansi")
 
 local M = {}
 
@@ -286,6 +285,17 @@ end
 local function cmd_reload()
   if psi.settings and psi.settings.reload then
     pcall(psi.settings.reload)
+  end
+  if psi.tui then
+    if psi.tui.clear_key_handlers then
+      pcall(psi.tui.clear_key_handlers)
+    end
+    if psi.tui.clear_status_hooks then
+      pcall(psi.tui.clear_status_hooks)
+    end
+  end
+  if type(psi.install_builtin_extensions) == "function" then
+    pcall(psi.install_builtin_extensions)
   end
   if type(psi.load_extensions) == "function" then
     local ok, err = pcall(psi.load_extensions)

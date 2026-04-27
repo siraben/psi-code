@@ -1101,6 +1101,20 @@ def t_tui_status_hook(psi: Psi):
     assert_contains(out, "ext:visual", "status hook receives context in status bar")
 
 
+@test("tui/reload_deduplicates_builtin_hooks")
+def t_tui_reload_deduplicates_builtin_hooks(psi: Psi):
+    out = psi.eval(
+        'local commands = require("psi.commands")\n'
+        + 'local tui = require("psi.tui")\n'
+        + 'commands.handle("/reload")\n'
+        + 'commands.handle("/reload")\n'
+        + 'local bar = tui.status_bar({model="m", busy=false, scroll=0, editor_mode="normal"})\n'
+        + 'local _, count = bar:gsub("mode:NORMAL", "")\n'
+        + 'return tostring(count)'
+    )
+    assert_equals(out, "1", "/reload should not duplicate built-in TUI hooks")
+
+
 @test("tui/status_default_model")
 def t_tui_status_default_model(psi: Psi):
     out = psi.eval(
