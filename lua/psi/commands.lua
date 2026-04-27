@@ -332,7 +332,7 @@ local function rainbow_line(start_code, end_code, cols)
   for code = start_code, end_code do
     cells[#cells + 1] = ansi.color(
       "38;5;" .. tostring(rainbow_fg(code)) .. ";48;5;" .. tostring(code),
-      string.format(" %03d ", code)
+      string.format("%03d ", code)
     )
     if #cells == cols then
       break
@@ -343,14 +343,12 @@ end
 
 local function cmd_rainbow()
   local lines = {
-    "xterm 256 background swatches",
-    "pick a bg code that actually renders well in your terminal",
-    "",
+    "xterm 256 background swatches (/rainbow)",
   }
   local code = 0
   while code <= 255 do
-    lines[#lines + 1] = rainbow_line(code, math.min(255, code + 7), 8)
-    code = code + 8
+    lines[#lines + 1] = rainbow_line(code, math.min(255, code + 15), 16)
+    code = code + 16
   end
   return records.new_command_action("ansi-print", table.concat(lines, "\n"))
 end
