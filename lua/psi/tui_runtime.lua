@@ -975,11 +975,24 @@ local function observer_tool_progress(state, tool_call_id, chunk)
     return
   end
   local before = scroll_anchor_before(state)
+  local payload = nil
+  if chunk:sub(1, 1) == "{" and chunk:find('"psi_progress_replace"', 1, true) then
+    payload = safe_decode(chunk, nil)
+  end
   local index = find_entry_by_tool_id(state, "tool_result", tool_call_id)
   if index == nil then
     index = add_entry(state, "tool_result", "", nil, false, tool_call_id)
   end
-  append_entry_text(state, index, chunk)
+  if type(payload) == "table" and payload.psi_progress_replace == true then
+    local entry = state.entries[index]
+    if entry then
+      entry.text = tostring(payload.text or "")
+      entry.render_cache_width = nil
+      entry.render_cache_lines = nil
+    end
+  else
+    append_entry_text(state, index, chunk)
+  end
   scroll_anchor_after(state, before)
 end
 
