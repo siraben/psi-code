@@ -212,11 +212,14 @@ local function new_state(opts)
     cursor = 0,
     busy = false,
     busy_label = nil,
+    busy_phase = 0,
+    busy_tick = 0,
     busy_started_at = nil,
     running = true,
     scroll_offset = 0,
     status_text = nil,
     status_is_error = false,
+    show_thinking = tui.show_thinking() == "1",
     width = width,
     height = height,
     input_layout = default_input_layout(height),
@@ -534,7 +537,8 @@ local function add_session_entry(state, msg)
       for _, block in ipairs(content) do
         if type(block) == "table" then
           if
-            block.type == "thinking"
+            state.show_thinking
+            and block.type == "thinking"
             and type(block.thinking) == "string"
             and block.thinking ~= ""
           then
@@ -599,6 +603,7 @@ local function rebuild_from_session(state)
   state.entries = {}
   state.streaming_assistant_index = nil
   state.streaming_thinking_index = nil
+  state.show_thinking = tui.show_thinking() == "1"
   invalidate_render_totals(state)
   for _, msg in ipairs(session.messages()) do
     add_session_entry(state, msg)
@@ -612,7 +617,7 @@ local function style_line(line)
     return markdown.render_line(line.text, line.in_code_fence)
   end
   if line.kind == "thinking" then
-    return ansi.italic(line.text)
+    return ansi.dim(line.text)
   end
   if line.kind == "user" then
     return ansi.bold(ansi.cyan(line.text))
@@ -699,11 +704,14 @@ local function layout_rows(state)
   if input_first_line + input_rows - 1 > #input_lines then
     input_first_line = #input_lines - input_rows + 1
   end
-  local hint_row = state.height - input_rows - 2
+  local footer_row = state.height
+  local input_start_row = footer_row - input_rows
+  local status_row = input_start_row - 1
   local transcript_start = 2
-  local transcript_height = math.max(1, hint_row - transcript_start)
+  local transcript_height = math.max(1, status_row - transcript_start)
 
   return {
+    header_row = 1,
     input_lines = input_lines,
     cursor_line = cursor_line,
     cursor_col = cursor_col,
@@ -711,10 +719,9 @@ local function layout_rows(state)
     input_first_line = input_first_line,
     transcript_start = transcript_start,
     transcript_height = transcript_height,
-    hint_row = hint_row,
-    cwd_row = hint_row + 1,
-    status_row = hint_row + 2,
-    input_start_row = hint_row + 3,
+    status_row = status_row,
+    footer_row = footer_row,
+    input_start_row = input_start_row,
   }
 end
 
@@ -729,20 +736,27 @@ local function scroll_by(state, delta)
   state.dirty = true
 end
 
+local function style_input_prefix(prefix, is_first)
+  if is_first then
+    return ansi.color("1;30;46", prefix)
+  end
+  return ansi.dim(prefix)
+end
+
 local function redraw(state)
   state.width, state.height = current_size()
   local rows = layout_rows(state)
   local total_lines = total_rendered_lines(state)
   local max_scroll = math.max(0, total_lines - rows.transcript_height)
   local status_arg
-  local hint_text
-  local status_text
+  local status_text = ""
   local cwd
 
   state.scroll_offset = clamp(state.scroll_offset, 0, max_scroll)
 
   psi.tui_clear()
-  psi.tui_draw_line(1, ansi.bold(ansi.cyan("psi coding agent")))
+  cwd = psi.cwd() or "."
+  psi.tui_draw_line(rows.header_row, tui.compose_bar(tui.workspace_bar(cwd), state.width - 1))
 
   local first_line = total_lines - rows.transcript_height - state.scroll_offset + 1
   if first_line < 1 then
@@ -761,35 +775,38 @@ local function redraw(state)
     busy = state.busy,
     busy_label = state.busy_label,
     elapsed_seconds = state.busy_started_at and (os.time() - state.busy_started_at) or 0,
-    busy_phase = state.busy_started_at and (((os.time() - state.busy_started_at) % 3) + 1) or 0,
+    busy_phase = state.busy_phase,
     scroll = state.scroll_offset,
   }
 
   if state.status_text ~= nil then
-    hint_text = state.status_is_error and ansi.bold(ansi.red(state.status_text))
+    status_text = state.status_is_error and ansi.bold(ansi.red(state.status_text))
       or ansi.dim(state.status_text)
-  else
-    hint_text = ansi.dim(tui.footer_hint(status_arg) or "")
+  elseif state.busy then
+    status_text = tui.render_busy_status(
+      state.busy_label or "working",
+      state.busy_phase,
+      status_arg.elapsed_seconds
+    )
   end
-  psi.tui_draw_line(rows.hint_row, hint_text)
-
-  cwd = psi.cwd() or "."
-  psi.tui_draw_line(rows.cwd_row, ansi.dim(cwd))
-
-  status_text = tui.status_line(status_arg) or ""
-  psi.tui_draw_line(rows.status_row, ansi.dim(status_text))
+  psi.tui_draw_line(rows.status_row, status_text)
 
   for i = 0, rows.input_rows - 1 do
     local line_index = rows.input_first_line + i
     local line = rows.input_lines[line_index]
     local prefix = line_index == 1 and state.input_layout.prefix_first
       or state.input_layout.prefix_rest
-    local text = prefix
+    local text = ""
     if line ~= nil then
-      text = text .. state.input:sub(line.start + 1, line.start + line.len)
+      text = state.input:sub(line.start + 1, line.start + line.len)
     end
-    psi.tui_draw_line(rows.input_start_row + i, ansi.bold(ansi.cyan(text)))
+    psi.tui_draw_line(
+      rows.input_start_row + i,
+      style_input_prefix(prefix, line_index == 1) .. ansi.bold(ansi.cyan(text))
+    )
   end
+
+  psi.tui_draw_line(rows.footer_row, tui.compose_bar(tui.status_bar(status_arg) or "", state.width - 1))
 
   local visible_cursor_line = rows.cursor_line - rows.input_first_line + 1
   local cursor_prefix = rows.cursor_line == 1 and state.input_layout.prefix_first
@@ -948,6 +965,9 @@ local function observer_text_delta(state, text)
 end
 
 local function observer_thinking_delta(state, text)
+  if not state.show_thinking then
+    return
+  end
   if type(text) ~= "string" or text == "" then
     return
   end
@@ -1109,7 +1129,9 @@ end
 
 local function run_compact(state, keep_recent)
   state.busy = true
-  state.busy_label = "Compacting"
+  state.busy_label = "compacting"
+  state.busy_phase = 0
+  state.busy_tick = 0
   state.busy_started_at = os.time()
   psi.abort_reset()
   set_status(state, "", false)
@@ -1140,6 +1162,8 @@ local function run_compact(state, keep_recent)
 
   state.busy = false
   state.busy_label = nil
+  state.busy_phase = 0
+  state.busy_tick = 0
   state.busy_started_at = nil
   state.dirty = true
   redraw(state)
@@ -1244,9 +1268,12 @@ local function submit(state)
 
   add_entry(state, "user", line)
   state.streaming_assistant_index = add_entry(state, "assistant", "")
+  state.show_thinking = tui.show_thinking() == "1"
   state.scroll_offset = 0
   state.busy = true
-  state.busy_label = "Working"
+  state.busy_label = tui.pick_busy_status() or "working"
+  state.busy_phase = 0
+  state.busy_tick = 0
   state.busy_started_at = os.time()
   psi.abort_reset()
   set_status(state, "", false)
@@ -1254,6 +1281,8 @@ local function submit(state)
   run_turn(state, line)
   state.busy = false
   state.busy_label = nil
+  state.busy_phase = 0
+  state.busy_tick = 0
   state.busy_started_at = nil
   state.dirty = true
 end
@@ -1388,7 +1417,11 @@ local function tick(state)
     handle_key_event(state, event)
   end
   if state.busy then
-    state.dirty = true
+    state.busy_tick = (state.busy_tick or 0) + 1
+    if state.busy_tick % 4 == 0 then
+      state.busy_phase = ((state.busy_phase or 0) % 3) + 1
+      state.dirty = true
+    end
   end
   if state.dirty then
     redraw(state)

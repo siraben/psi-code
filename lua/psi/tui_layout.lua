@@ -77,8 +77,8 @@ function M.input_layout_table(arg)
   local height = math.max(12, tonumber(arg.height) or 24)
   return {
     max_rows = resolve_prompt_max_rows(arg.max_rows, height),
-    prefix_first = "> ",
-    prefix_rest = "| ",
+    prefix_first = " › ",
+    prefix_rest = "   ",
   }
 end
 
