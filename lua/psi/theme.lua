@@ -19,14 +19,7 @@ local TUI_SLOTS = {
 }
 
 local DEFAULT_THEME = {
-  ansi = {
-    ["31"] = "31",
-    ["32"] = "32",
-    ["33"] = "33",
-    ["34"] = "34",
-    ["36"] = "36",
-    ["37"] = "37",
-  },
+  ansi = {},
   tui = {
     header = { fg = 111, bg = 234 },
     accent = { fg = 81, bg = 234 },
@@ -36,6 +29,16 @@ local DEFAULT_THEME = {
     error = { fg = 210, bg = 234 },
     chrome = { fg = 245, bg = 234 },
   },
+}
+
+local ANSI_SLOT_CODES = {
+  ["31"] = "error",
+  ["32"] = "success",
+  ["33"] = "warning",
+  ["34"] = "header",
+  ["36"] = "accent",
+  ["37"] = "text",
+  ["38;5;242"] = "chrome",
 }
 
 local function deep_copy(value)
@@ -68,6 +71,16 @@ local function normalize(theme)
       fg = tonumber(spec.fg) or -1,
       bg = tonumber(spec.bg) or -1,
     }
+  end
+  for code, slot in pairs(ANSI_SLOT_CODES) do
+    if merged.ansi[code] == nil then
+      local fg = merged.tui[slot] and merged.tui[slot].fg or -1
+      if fg >= 0 then
+        merged.ansi[code] = "38;5;" .. tostring(fg)
+      else
+        merged.ansi[code] = code
+      end
+    end
   end
   return merged
 end
