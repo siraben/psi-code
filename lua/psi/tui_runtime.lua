@@ -766,23 +766,23 @@ local function scroll_by(state, delta)
 end
 
 local function style_input_prefix(prefix, is_first)
-  local bg = tonumber(settings.get("tui.input.background", 253)) or 253
+  local bg = tonumber(settings.get("tui.input.background", 240)) or 240
   if is_first then
-    local chip_bg = tonumber(settings.get("tui.input.prefix_background", 255)) or 255
-    return ansi.color("1;7;38;5;" .. tostring(chip_bg) .. ";48;5;16", prefix)
+    local chip_bg = tonumber(settings.get("tui.input.prefix_background", 248)) or 248
+    return ansi.color("1;38;5;16;48;5;" .. tostring(chip_bg), prefix)
   end
-  return ansi.color("7;38;5;" .. tostring(bg) .. ";48;5;240", prefix)
+  return ansi.color("38;5;245;48;5;" .. tostring(bg), prefix)
 end
 
 local function style_input_text(text)
-  local bg = tonumber(settings.get("tui.input.background", 253)) or 253
-  local fg = tonumber(settings.get("tui.input.foreground", 16)) or 16
-  return ansi.color("7;38;5;" .. tostring(bg) .. ";48;5;" .. tostring(fg), text)
+  local bg = tonumber(settings.get("tui.input.background", 240)) or 240
+  local fg = tonumber(settings.get("tui.input.foreground", 253)) or 253
+  return ansi.color("38;5;" .. tostring(fg) .. ";48;5;" .. tostring(bg), text)
 end
 
 local function style_input_fill(width)
-  local bg = tonumber(settings.get("tui.input.background", 253)) or 253
-  return ansi.color("7;38;5;" .. tostring(bg) .. ";48;5;16", string.rep(" ", math.max(0, width)))
+  local bg = tonumber(settings.get("tui.input.background", 240)) or 240
+  return ansi.color("48;5;" .. tostring(bg), string.rep(" ", math.max(0, width)))
 end
 
 local function input_box_line(content, width)
