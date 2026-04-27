@@ -74,14 +74,18 @@ function M.estimate_context_tokens()
   local base_index = (last_usage and last_usage.message_index) or 0
   local base_total = (last_usage and last_usage.total) or 0
   local count = psi.session_message_count()
-  local messages = base_total == 0 and psi.session_messages()
-    or psi.session_messages_from(base_index + 1)
   local trailing = 0
-  for i = 1, #messages do
-    local m = messages[i]
-    trailing = trailing + M.estimate_tokens(m.text)
-    if m.data then
-      trailing = trailing + M.estimate_tokens(m.data)
+  if psi.session_token_estimate_from then
+    trailing = psi.session_token_estimate_from(base_total == 0 and 1 or (base_index + 1))
+  else
+    local messages = base_total == 0 and psi.session_messages()
+      or psi.session_messages_from(base_index + 1)
+    for i = 1, #messages do
+      local m = messages[i]
+      trailing = trailing + M.estimate_tokens(m.text)
+      if m.data then
+        trailing = trailing + M.estimate_tokens(m.data)
+      end
     end
   end
   -- With no measured baseline, `messages` is the whole transcript.
@@ -135,6 +139,9 @@ end
 -- compaction API expects.
 function M.keep_recent_messages(target_tokens)
   target_tokens = target_tokens or DEFAULT_KEEP_RECENT_TOKENS
+  if psi.session_keep_recent_by_tokens then
+    return psi.session_keep_recent_by_tokens(target_tokens)
+  end
   local messages = psi.session_messages()
   local total, count = 0, 0
   for i = #messages, 1, -1 do

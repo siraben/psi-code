@@ -11,6 +11,17 @@
 
 /* ---------- message primitives (formerly message.c) ---------- */
 
+static size_t psi_estimate_tokens(const char *text) {
+    size_t len;
+    if (text == NULL || text[0] == '\0') return 0u;
+    len = strlen(text);
+    return (len + 3u) / 4u;
+}
+
+static size_t psi_estimate_message_tokens(const char *text, const char *data_json) {
+    return psi_estimate_tokens(text) + psi_estimate_tokens(data_json);
+}
+
 void psi_message_init(struct psi_message *message, enum psi_message_role role, const char *text) {
     psi_message_init_with_data(message, role, text, NULL);
 }
@@ -25,6 +36,7 @@ void psi_message_init_with_data(
     message->role = role;
     message->text = text != NULL ? psi_strdup(text) : NULL;
     message->data_json = data_json != NULL ? psi_strdup(data_json) : NULL;
+    message->token_estimate = psi_estimate_message_tokens(text, data_json);
 }
 
 void psi_message_free(struct psi_message *message) {
@@ -33,6 +45,7 @@ void psi_message_free(struct psi_message *message) {
     free(message->data_json);
     message->text = NULL;
     message->data_json = NULL;
+    message->token_estimate = 0u;
 }
 
 const char *psi_message_role_name(enum psi_message_role role) {
@@ -58,7 +71,9 @@ static int psi_session_clear_messages(struct psi_session *session) {
     }
 
     free(session->messages);
+    free(session->token_prefix);
     session->messages = NULL;
+    session->token_prefix = NULL;
     session->count = 0u;
     session->capacity = 0u;
     return PSI_STATUS_OK;
@@ -82,6 +97,7 @@ static int psi_session_set_string(char **dst, const char *value) {
 void psi_session_init(struct psi_session *session) {
     if (session == NULL) return;
     session->messages = NULL;
+    session->token_prefix = NULL;
     session->count = 0u;
     session->capacity = 0u;
     session->id = NULL;
@@ -116,8 +132,13 @@ int psi_session_append_with_data(
         size_t new_capacity = session->capacity == 0u ? 8u : session->capacity * 2u;
         struct psi_message *new_messages = (struct psi_message *)realloc(
             session->messages, new_capacity * sizeof(struct psi_message));
+        size_t *new_prefix;
         if (new_messages == NULL) return PSI_STATUS_ERROR;
         session->messages = new_messages;
+        new_prefix = (size_t *)realloc(session->token_prefix, (new_capacity + 1u) * sizeof(size_t));
+        if (new_prefix == NULL) return PSI_STATUS_ERROR;
+        session->token_prefix = new_prefix;
+        if (session->count == 0u) session->token_prefix[0] = 0u;
         session->capacity = new_capacity;
     }
 
@@ -128,6 +149,8 @@ int psi_session_append_with_data(
         return PSI_STATUS_ERROR;
     }
 
+    session->token_prefix[session->count + 1u] =
+        session->token_prefix[session->count] + session->messages[session->count].token_estimate;
     session->count++;
     return PSI_STATUS_OK;
 }
@@ -161,4 +184,36 @@ enum psi_message_role psi_session_role_from_name(const char *role_name) {
     if (strcmp(role_name, "branch-summary") == 0) return PSI_MESSAGE_BRANCH_SUMMARY;
     if (strcmp(role_name, "compaction-summary") == 0) return PSI_MESSAGE_COMPACTION_SUMMARY;
     return PSI_MESSAGE_CUSTOM;
+}
+
+size_t psi_session_token_estimate_from(const struct psi_session *session, size_t start_index) {
+    if (session == NULL || session->count == 0u || session->token_prefix == NULL) return 0u;
+    if (start_index < 1u) start_index = 1u;
+    if (start_index > session->count) return 0u;
+    return session->token_prefix[session->count] - session->token_prefix[start_index - 1u];
+}
+
+size_t psi_session_keep_recent_by_tokens(const struct psi_session *session, size_t target_tokens) {
+    size_t total;
+    size_t threshold;
+    size_t lo;
+    size_t hi;
+    size_t start;
+
+    if (session == NULL || session->count == 0u || session->token_prefix == NULL) return 0u;
+    total = session->token_prefix[session->count];
+    if (target_tokens >= total) return session->count;
+
+    threshold = total - target_tokens;
+    lo = 0u;
+    hi = session->count;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2u;
+        if (session->token_prefix[mid] < threshold) lo = mid + 1u;
+        else hi = mid;
+    }
+
+    start = lo + 1u;
+    if (start > session->count) start = session->count;
+    return session->count - start + 1u;
 }

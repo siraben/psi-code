@@ -183,6 +183,26 @@ BENCHES: list[tuple[str, str]] = [
         """,
     ),
     (
+        "context_range_queries",
+        r"""
+        local s = require('psi.session')
+        local c = require('psi.context')
+        for i = 1, 1000 do
+          s.append_user(string.rep('range-query-message-', 8) .. i)
+        end
+        local N = 100
+        local total = 0
+        local start = os.clock()
+        for _ = 1, N do
+          total = total + c.estimate_context_tokens().tokens
+          total = total + c.keep_recent_messages(20000)
+        end
+        local dt = (os.clock() - start) * 1000
+        io.write(string.format('ms: %.3f  queries: %d  checksum: %d\n',
+                               dt, N * 2, total))
+        """,
+    ),
+    (
         "read_file_slice_large",
         r"""
         local path = '/tmp/psi-bench-read-large.txt'
@@ -397,6 +417,8 @@ def main() -> int:
     ap.add_argument("--filter", default=None, help="only run benches matching substring")
     ap.add_argument("--repeats", type=int, default=3,
                     help="runs per bench (print best time)")
+    ap.add_argument("--timeout", type=float, default=60.0,
+                    help="seconds allowed for each individual bench run")
     ap.add_argument("--remote", nargs="?", const="", default=None,
                     help="run on a remote target from tests/bench.targets.json "
                          "(pass a name or leave blank for the first defined)")
@@ -434,7 +456,7 @@ def main() -> int:
         best = None
         best_line = None
         for _ in range(args.repeats):
-            line = run_bench(psi_cmd, name, lua, ssh_prefix)
+            line = run_bench(psi_cmd, name, lua, ssh_prefix, timeout=args.timeout)
             # parse ms value
             if line.startswith("ms:"):
                 try:
