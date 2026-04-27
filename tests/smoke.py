@@ -1558,8 +1558,9 @@ def t_tui_input_box_background(psi: Psi):
         idle_drain=1.0,
     )
     assert b"\x1b[0;7m" not in raw and b"\x1b[7m" not in raw, "input box should not use reverse-video"
-    assert b"\x1b[?25l" in raw and b"\x1b[?25h" in raw, "redraw should hide cursor until final placement"
+    assert b"\x1b[?25l" in raw, "redraw should keep the hardware cursor hidden"
     assert b"\x1b[?2026h" in raw and b"\x1b[?2026l" in raw, "redraw should use synchronized terminal output"
+    assert b"\x1b[1;38;5;16;48;5;253m" in raw, "input box should render a Lua-owned cursor cell"
     assert b"\x1b[48;5;238m" in raw, "input box background color did not reach rendered output"
 
 
