@@ -199,11 +199,9 @@ Rendering policy:
   SGR when `ANSI=1`.
 - Fall back to plain text when ANSI or color is disabled.
 
-C owns only the low-level terminal effects. The raw ANSI primitive is a host
-escape hatch for terminals that can render 256-color backgrounds better than
-the ncurses color-pair path; Lua decides when to use it. The primitive must
-not emit escape bytes when ANSI support is compiled out or the terminal is
-known not to support them.
+C owns only the low-level terminal effects. The Lua TUI is ANSI-terminal
+backed, so a no-ANSI build disables TUI support rather than exposing a
+frontend that still writes escape bytes.
 
 Runtime overrides:
 
@@ -221,6 +219,8 @@ The TUI is an optional host capability.
   `psi.tui_*` primitives
 - `TUI=0` keeps the rest of the runtime buildable without terminal raw-mode support; `--tui`
   exits with a clear error
+- `ANSI=0` implies `TUI=0`, because the Lua TUI backend has no non-ANSI
+  renderer
 - even when compiled in, `psi.tui_*` primitives are guarded so non-TUI modes
   cannot accidentally call terminal operations before the TUI is active
 
@@ -232,7 +232,8 @@ global assumption.
 ANSI styling is also capability-driven.
 
 - `ANSI=1` allows Lua renderers to emit SGR styling
-- `ANSI=0` makes `psi.ansi` return plain text for styled content
+- `ANSI=0` makes `psi.ansi` return plain text for styled content and disables
+  the ANSI-backed TUI
 - `COLOR=1` enables color SGR emission
 - `COLOR=0` disables color while still allowing non-color styles such as bold
   or dim when ANSI support is present
