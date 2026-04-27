@@ -117,7 +117,19 @@ static int psi_process_begin_exec(
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wanalyzer-fd-leak"
 #endif
+        int devnull;
         if (close(pipe_fds[0]) != 0) _exit(127);
+        /* Detach the child from the controlling TTY's input so that
+         * keypresses (notably ESC, used in TUI mode to interrupt the
+         * current turn) reach ncurses in the parent rather than
+         * being consumed by the child. Without this redirect the
+         * child inherits stdin = the parent's tty, which is in raw
+         * mode under TUI and races with the parent's getch() for
+         * each byte the user types. */
+        devnull = open("/dev/null", O_RDONLY);
+        if (devnull < 0) _exit(127);
+        if (dup2(devnull, 0) < 0) _exit(127);
+        if (devnull > 2 && close(devnull) != 0) _exit(127);
         if (dup2(pipe_fds[1], 1) < 0) _exit(127);
         if (dup2(pipe_fds[1], 2) < 0) _exit(127);
         if (close(pipe_fds[1]) != 0) _exit(127);
