@@ -148,13 +148,18 @@ function M.names()
   return names
 end
 
-function M.apply_configured()
+function M.apply_configured(opts)
+  opts = type(opts) == "table" and opts or {}
   local name = configured_name()
   if name then
     local ok = M.use(name)
     if ok then
       return true
     end
+  end
+  if opts.preserve_current and current_theme ~= nil then
+    apply(current_theme)
+    return true
   end
   return M.use(DEFAULT_THEME_NAME)
 end
