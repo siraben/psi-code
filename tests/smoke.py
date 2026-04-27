@@ -1082,11 +1082,11 @@ def t_tui_footer_hint_hidden(psi: Psi):
         'local tui = require("psi.tui")\n'
         + 'local idle = tui.footer_hint(psi.json_encode({busy=false, scroll=0}))\n'
         + 'local busy = tui.footer_hint(psi.json_encode({\n'
-        + '  busy=true, busy_label="Working", elapsed_seconds=4, busy_phase=2, scroll=0\n'
+        + '  busy=true, busy_label="gooning", elapsed_seconds=4, busy_phase=2, scroll=0\n'
         + '}))\n'
         + 'return tostring(idle) .. "|" .. tostring(busy)'
     )
-    assert_equals(out, "|Working (0:04  • esc to interrupt) ..", "footer hint hidden when idle")
+    assert_equals(out, "|gooning (0:04  • esc to interrupt) ..", "footer hint hidden when idle")
 
 
 @test("tui/layout_geometry")
@@ -1163,10 +1163,11 @@ def t_tui_busy_status_config(psi: Psi):
 def t_tui_busy_status_render(psi: Psi):
     out = psi.eval('return require("psi.tui").render_busy_status("gooning", 2, 4)')
     plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
-    assert_contains(plain, "working", "working chip rendered")
-    assert_contains(plain, "gooning", "busy label rendered")
-    assert_contains(plain, "esc to interrupt", "busy hint rendered")
-    assert_contains(plain, "...", "animated dots rendered")
+    assert_equals(
+        plain,
+        " gooning  (0:04  • esc to interrupt) ...",
+        "busy status renders selected label, hint, and animated dots",
+    )
 
 
 @test("tui/show_thinking_config")
@@ -1201,6 +1202,16 @@ def t_tui_input_wrap_width(psi: Psi):
         + '}, "|")'
     )
     assert_equals(out, "2|79|3|2|1", "input wraps to drawable width")
+
+
+@test("tui/input_cursor_prefix_width")
+def t_tui_input_cursor_prefix_width(psi: Psi):
+    out = psi.eval(
+        'local d = require("psi.tui_runtime")._debug_input_lines(\n'
+        + '  "abc", 0, 80, " › ", "   ")\n'
+        + 'return tostring(d.cursor_screen_col)'
+    )
+    assert_equals(out, "4", "cursor column uses display width for unicode prompt prefix")
 
 
 @test("tui/key_policy")
