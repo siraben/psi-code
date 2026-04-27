@@ -236,4 +236,7 @@ analyze-gcc:
 
 analyze: analyze-cppcheck analyze-gcc
 
-.PHONY: all clean install lint lint-lua lint-c format-lua analyze analyze-cppcheck analyze-gcc
+check-build-configs:
+	sh tests/build_configs.sh
+
+.PHONY: all clean install lint lint-lua lint-c format-lua analyze analyze-cppcheck analyze-gcc check-build-configs

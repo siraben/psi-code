@@ -184,6 +184,35 @@ C owns only the terminal boundary:
 The intended rule is simple: C reports terminal facts and performs terminal
 drawing; Lua decides what the interface means and what the screen should say.
 
+### TUI rendering path
+
+The TUI renderer is selected by Lua at startup from host/runtime capabilities.
+`lua/psi/tui_runtime.lua` derives `ansi`, `color`, and `raw_ansi` from
+`psi.runtime_info()`, `TERM`, `NO_COLOR`, and explicit override environment
+variables.
+
+Rendering policy:
+
+- Use raw ANSI line drawing when ANSI is compiled in, the terminal is not
+  `dumb`, and `psi.tui_draw_raw_line` is available.
+- Fall back to `psi.tui_draw_line`, where the ncurses bridge interprets ANSI
+  SGR when `ANSI=1`.
+- Fall back to plain text when ANSI or color is disabled.
+
+C owns only the low-level terminal effects. The raw ANSI primitive is a host
+escape hatch for terminals that can render 256-color backgrounds better than
+the ncurses color-pair path; Lua decides when to use it. The primitive must
+not emit escape bytes when ANSI support is compiled out or the terminal is
+known not to support them.
+
+Runtime overrides:
+
+- `PSI_ANSI=0|1` forces Lua's ANSI rendering policy within compiled support.
+- `PSI_COLOR=0|1` forces Lua's color rendering policy within compiled support.
+- `PSI_TUI_RAW_ANSI=0|1` forces raw ANSI TUI line drawing within compiled and
+  terminal support.
+- `NO_COLOR=1` disables color rendering.
+
 ### TUI availability
 
 The TUI is an optional host capability.
@@ -227,6 +256,11 @@ Current gates:
 - `COLOR`: color SGR handling and ncurses color-pair setup
 - `REPL_EDITLINE`: libedit-backed REPL input/history; falls back to plain
   `fgets` input when disabled
+
+Every feature-gate combination must compile. `make check-build-configs`
+builds the complete `TUI` / `ANSI` / `COLOR` / `REPL_EDITLINE` matrix into
+isolated build directories and should be run whenever C preprocessor guards
+or optional dependencies change.
 
 The architectural rule for new gates:
 

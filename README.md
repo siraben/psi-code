@@ -103,6 +103,26 @@ set -a && . ./.env.local && ./build/psi --session .psi/session.jsonl --compact 1
 ./build/psi --session .psi/session.jsonl --print 'hello again'
 ```
 
+Optional build flags are plain Make variables. They default to `1` and can be
+disabled per build:
+
+- `TUI=0`: build without the ncurses full-screen frontend.
+- `ANSI=0`: build without ANSI SGR emission/parsing.
+- `COLOR=0`: build ANSI text styles without color handling.
+- `REPL_EDITLINE=0`: build the REPL without libedit/history support.
+
+Use a separate `BUILD_DIR` when checking variants so object files do not mix:
+
+```bash
+make BUILD_DIR=build-color0 COLOR=0
+make BUILD_DIR=build-no-tui TUI=0
+make check-build-configs
+```
+
+`make check-build-configs` builds the full `TUI` / `ANSI` / `COLOR` /
+`REPL_EDITLINE` toggle matrix and is the expected regression check for
+compile-time feature gates.
+
 When no `--session FILE` is set, psi assigns a default path under
 `$XDG_STATE_HOME/psi/sessions` or `~/.local/state/psi/sessions`. The on-disk
 format matches the pi-style v3 JSONL shape: a session header followed by typed
