@@ -327,10 +327,14 @@ local function rainbow_fg(bg)
   return luminance < 140 and 15 or 16
 end
 
+local function rainbow_color(code, text)
+  return string.char(27) .. "[" .. code .. "m" .. text .. string.char(27) .. "[0m"
+end
+
 local function rainbow_line(start_code, end_code, cols)
   local cells = {}
   for code = start_code, end_code do
-    cells[#cells + 1] = ansi.color(
+    cells[#cells + 1] = rainbow_color(
       "38;5;" .. tostring(rainbow_fg(code)) .. ";48;5;" .. tostring(code),
       string.format("%03d ", code)
     )

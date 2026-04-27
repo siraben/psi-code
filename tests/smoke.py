@@ -576,7 +576,7 @@ def t_commands_rainbow(psi: Psi):
         + '  tostring(payload:find("48;5;0", 1, true) ~= nil),\n'
         + '  tostring(payload:find("48;5;255", 1, true) ~= nil)\n'
         + '}, "|")',
-        env_extra={"NO_COLOR": "", "PSI_COLOR": "1"},
+        env_extra={"NO_COLOR": "1", "PSI_COLOR": "0"},
     ).stdout.strip()
     assert_equals(out, "ansi-print|true|true", "rainbow command emits ANSI bg swatches")
 
@@ -590,7 +590,24 @@ def t_tui_rainbow_uses_raw_ansi(psi: Psi):
         idle_drain=1.5,
     )
     assert b"xterm 256 background swatches" in raw, "rainbow header did not render in TUI"
+    assert b"\x1b[38;5;15;48;5;0m000" in raw, "rainbow background colors did not render in TUI"
+    assert b"\x1b[38;5;16;48;5;255m255" in raw, "rainbow high background colors did not render in TUI"
     assert b"016" in raw and b"231" in raw, "rainbow swatches did not render in TUI"
+
+
+@test("mode/tui_rainbow_after_normal_insert")
+def t_tui_rainbow_after_normal_insert(psi: Psi):
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [(b"", 0.8), (b"\x1b", 0.4), (b"i/rainbow\r", 1.5), (b"/quit\r", 1.0)],
+        env_extra={"NO_COLOR": "", "TERM": "xterm-256color"},
+        idle_drain=1.5,
+    )
+    assert b"xterm 256 background swatches" in raw, "normal-mode i/rainbow did not render in TUI"
+    assert b"\x1b[38;5;15;48;5;0m000" in raw, "normal-mode i/rainbow background colors did not render in TUI"
+    assert b"\x1b[38;5;16;48;5;255m255" in raw, "normal-mode i/rainbow high background colors did not render in TUI"
+    assert b"016" in raw and b"231" in raw, "normal-mode i/rainbow swatches did not render in TUI"
+    assert b"i/rainbow" not in raw, "normal-mode i leaked into the submitted command"
 
 
 @test("commands/help_includes_prompt_templates")
@@ -1540,7 +1557,7 @@ def t_tui_input_box_background(psi: Psi):
     raw = run_pty(
         [psi.binary, "--tui"],
         [(b"", 0.5), (b"/quit\r", 1.0)],
-        env_extra={"NO_COLOR": "", "TERM": "xterm-256color"},
+        env_extra={"NO_COLOR": "1", "TERM": "xterm-256color"},
         idle_drain=1.0,
     )
     assert b"\x1b[0;7m" not in raw and b"\x1b[7m" not in raw, "input box should not use reverse-video"
