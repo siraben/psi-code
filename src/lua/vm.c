@@ -1552,6 +1552,158 @@ static int lfn_session_append(lua_State *L) {
     return 1;
 }
 
+static void psi_vm_json_copy_field(cJSON *dst, const cJSON *src, const char *name) {
+    cJSON *item;
+    cJSON *copy;
+
+    item = cJSON_GetObjectItemCaseSensitive((cJSON *)src, name);
+    if (item == NULL) return;
+    copy = cJSON_Duplicate(item, 1);
+    if (copy == NULL) return;
+    cJSON_AddItemToObject(dst, name, copy);
+}
+
+static cJSON *psi_vm_session_disk_entry(const struct psi_message *message) {
+    cJSON *body;
+    cJSON *entry;
+    cJSON *entry_type;
+    const char *type_name;
+    int is_compaction;
+    static const char *CUSTOM_FIELDS[] = {
+        "id", "parentId", "timestamp", "name", "data", NULL
+    };
+    static const char *CUSTOM_MESSAGE_FIELDS[] = {
+        "id", "parentId", "timestamp", "message", NULL
+    };
+    static const char *MODEL_CHANGE_FIELDS[] = {
+        "id", "parentId", "timestamp", "model", NULL
+    };
+    static const char *THINKING_LEVEL_FIELDS[] = {
+        "id", "parentId", "timestamp", "thinkingLevel", NULL
+    };
+    static const char *COMPACTION_FIELDS[] = {
+        "id", "parentId", "timestamp", "summary", "firstKeptEntryId",
+        "tokensBefore", "readFiles", "modifiedFiles", "compactedCount", NULL
+    };
+    static const char *MESSAGE_FIELDS[] = {
+        "id", "parentId", "timestamp", "message", NULL
+    };
+    const char **fields;
+    size_t i;
+
+    if (message == NULL || message->data_json == NULL) return NULL;
+    body = cJSON_Parse(message->data_json);
+    if (body == NULL || !cJSON_IsObject(body)) {
+        cJSON_Delete(body);
+        return NULL;
+    }
+
+    entry = cJSON_CreateObject();
+    if (entry == NULL) {
+        cJSON_Delete(body);
+        return NULL;
+    }
+
+    entry_type = cJSON_GetObjectItemCaseSensitive(body, "__entry_type");
+    type_name = cJSON_IsString(entry_type) ? entry_type->valuestring : NULL;
+    is_compaction = (message->role == PSI_MESSAGE_COMPACTION_SUMMARY);
+
+    if (type_name != NULL && strcmp(type_name, "custom") == 0) {
+        cJSON_AddStringToObject(entry, "type", "custom");
+        fields = CUSTOM_FIELDS;
+    } else if (type_name != NULL && strcmp(type_name, "custom_message") == 0) {
+        cJSON_AddStringToObject(entry, "type", "custom_message");
+        fields = CUSTOM_MESSAGE_FIELDS;
+    } else if (type_name != NULL && strcmp(type_name, "model_change") == 0) {
+        cJSON_AddStringToObject(entry, "type", "model_change");
+        fields = MODEL_CHANGE_FIELDS;
+    } else if (type_name != NULL && strcmp(type_name, "thinking_level_change") == 0) {
+        cJSON_AddStringToObject(entry, "type", "thinking_level_change");
+        fields = THINKING_LEVEL_FIELDS;
+    } else if (is_compaction) {
+        cJSON_AddStringToObject(entry, "type", "compaction");
+        fields = COMPACTION_FIELDS;
+    } else {
+        cJSON_AddStringToObject(entry, "type", "message");
+        fields = MESSAGE_FIELDS;
+    }
+
+    for (i = 0u; fields[i] != NULL; i++) {
+        psi_vm_json_copy_field(entry, body, fields[i]);
+    }
+    if (is_compaction && cJSON_GetObjectItemCaseSensitive(entry, "summary") == NULL) {
+        cJSON_AddStringToObject(entry, "summary", message->text ? message->text : "");
+    }
+    cJSON_Delete(body);
+    return entry;
+}
+
+static int lfn_session_append_jsonl(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    lua_Integer start_arg = luaL_optinteger(L, 2, 1);
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    struct psi_session *s = host ? host->session : NULL;
+    FILE *file;
+    size_t start;
+    size_t i;
+
+    if (!s) {
+        lua_pushboolean(L, 0);
+        lua_pushstring(L, "no session");
+        return 2;
+    }
+    if (start_arg < 1) start_arg = 1;
+    start = (size_t)(start_arg - 1);
+    if (start >= s->count) {
+        lua_pushboolean(L, 1);
+        return 1;
+    }
+
+    file = fopen(path, "a");
+    if (file == NULL) {
+        lua_pushboolean(L, 0);
+        lua_pushstring(L, strerror(errno));
+        return 2;
+    }
+
+    for (i = start; i < s->count; i++) {
+        cJSON *entry;
+        char *json;
+        size_t len;
+        entry = psi_vm_session_disk_entry(&s->messages[i]);
+        if (entry == NULL) {
+            fclose(file);
+            lua_pushboolean(L, 0);
+            lua_pushstring(L, "message has no structured data");
+            return 2;
+        }
+        json = cJSON_PrintUnformatted(entry);
+        cJSON_Delete(entry);
+        if (json == NULL) {
+            fclose(file);
+            lua_pushboolean(L, 0);
+            lua_pushstring(L, "failed to encode session entry");
+            return 2;
+        }
+        len = strlen(json);
+        if ((len > 0u && fwrite(json, 1u, len, file) != len) || fputc('\n', file) == EOF) {
+            free(json);
+            fclose(file);
+            lua_pushboolean(L, 0);
+            lua_pushstring(L, "write failed");
+            return 2;
+        }
+        free(json);
+    }
+    if (fclose(file) != 0) {
+        lua_pushboolean(L, 0);
+        lua_pushstring(L, "close failed");
+        return 2;
+    }
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
 static int lfn_json_encode(lua_State *L) {
     cJSON *value;
     char *encoded;
@@ -2148,6 +2300,37 @@ static int lfn_session_messages_from(lua_State *L) {
     return 1;
 }
 
+static int lfn_session_token_estimate_from(lua_State *L) {
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    const struct psi_session *s = host ? host->session : NULL;
+    lua_Integer start_arg = luaL_optinteger(L, 1, 1);
+    size_t start;
+
+    if (!s) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+    if (start_arg < 1) start_arg = 1;
+    start = (size_t)start_arg;
+    lua_pushinteger(L, (lua_Integer)psi_session_token_estimate_from(s, start));
+    return 1;
+}
+
+static int lfn_session_keep_recent_by_tokens(lua_State *L) {
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    const struct psi_session *s = host ? host->session : NULL;
+    lua_Integer target_arg = luaL_optinteger(L, 1, 0);
+    size_t target;
+
+    if (!s) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+    target = target_arg < 0 ? 0u : (size_t)target_arg;
+    lua_pushinteger(L, (lua_Integer)psi_session_keep_recent_by_tokens(s, target));
+    return 1;
+}
+
 static int lfn_runtime_info(lua_State *L) {
     static const char *PRIMITIVES[] = {
         "version", "log", "session_message_count", "read_file", "read_file_slice",
@@ -2155,8 +2338,9 @@ static int lfn_runtime_info(lua_State *L) {
         "path_expand", "path_resolve", "file_exists", "file_type", "list_dir",
         "list_dir_typed",
         "mkdir_p", "mkdir_parent", "runtime_info", "session_messages",
-        "session_messages_from", "process_run", "process_run_argv", "process_begin_argv",
-        "session_append", "session_clear",
+        "session_messages_from", "session_token_estimate_from",
+        "session_keep_recent_by_tokens", "process_run", "process_run_argv", "process_begin_argv",
+        "session_append", "session_append_jsonl", "session_clear",
         "http_get", "http_post",
         "tool_call",
         NULL
@@ -2526,6 +2710,8 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("runtime_info",          lfn_runtime_info);
     PSI_REG("session_messages",      lfn_session_messages);
     PSI_REG("session_messages_from", lfn_session_messages_from);
+    PSI_REG("session_token_estimate_from", lfn_session_token_estimate_from);
+    PSI_REG("session_keep_recent_by_tokens", lfn_session_keep_recent_by_tokens);
     PSI_REG("process_run",           lfn_process_run);
     PSI_REG("process_run_argv",      lfn_process_run_argv);
     PSI_REG("process_begin",         lfn_process_begin);
@@ -2533,6 +2719,7 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("process_poll",          lfn_process_poll);
     PSI_REG("process_finish",        lfn_process_finish);
     PSI_REG("session_append",        lfn_session_append);
+    PSI_REG("session_append_jsonl",  lfn_session_append_jsonl);
     PSI_REG("session_clear",         lfn_session_clear);
     PSI_REG("session_id",            lfn_session_id);
     PSI_REG("session_parent_id",     lfn_session_parent_id);

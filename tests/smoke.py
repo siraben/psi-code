@@ -700,6 +700,24 @@ def t_compact_snap(psi: Psi):
         f"orphan tool-result kept after compaction: {out!r}"
 
 
+@test("session/native_token_ranges")
+def t_session_native_token_ranges(psi: Psi):
+    out = psi.eval(
+        'local s = require("psi.session")\n'
+        + 'local c = require("psi.context")\n'
+        + 's.append_user("12345678")\n'
+        + 's.append_user("1234")\n'
+        + 's.append_user("123456789")\n'
+        + 'local full = psi.session_token_estimate_from(1)\n'
+        + 'local tail = psi.session_token_estimate_from(3)\n'
+        + 'local keep = c.keep_recent_messages(tail)\n'
+        + 'return tostring(full) .. "," .. tostring(tail) .. "," .. tostring(keep)'
+    )
+    full, tail, keep = [int(x) for x in out.strip().split(",")]
+    assert full >= tail > 0, f"bad native token range totals: {out!r}"
+    assert keep == 1, f"expected one recent message for tail budget: {out!r}"
+
+
 @test("anthropic/drops_orphan_tool_result")
 def t_anthropic_orphan_drop(psi: Psi):
     """build_api_messages must skip tool-result entries whose
