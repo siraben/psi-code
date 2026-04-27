@@ -67,6 +67,33 @@ function M.process_result(command, tool_call_id)
   return records.process_result_from_alist(psi.process_finish(handle))
 end
 
+function M.process_result_argv(argv, tool_call_id)
+  if not sched.in_coroutine() then
+    return records.process_result_from_alist(psi.process_run_argv(argv))
+  end
+
+  local handle, err = psi.process_begin_argv(argv)
+  if handle == nil then
+    return records.process_result_from_alist({
+      output = tostring(err or "process_begin_argv failed"),
+      status = -1,
+      truncated = false,
+    })
+  end
+
+  while true do
+    local chunk, done = sched.proc_poll(handle, 50)
+    if chunk ~= nil and #chunk > 0 and psi.tool_progress ~= nil then
+      psi.tool_progress(tool_call_id, chunk)
+    end
+    if done then
+      break
+    end
+  end
+
+  return records.process_result_from_alist(psi.process_finish(handle))
+end
+
 -- Run a shell command and wrap as a ToolResult.
 -- `meta.tool_call_id`, if present, is threaded through so live
 -- progress events carry the right id for multi-tool turns.
@@ -79,6 +106,23 @@ function M.run_tool(tool_name, command, path, keep_output_on_error, meta)
     extras.path = path
   end
   extras.command = command
+  extras.status = proc.status
+  extras.truncated = proc.truncated
+  if include_output then
+    extras.output = proc.output or ""
+  end
+  return records.new_tool_result(ok, tool_name, nil, extras)
+end
+
+function M.run_tool_argv(tool_name, argv, path, keep_output_on_error, meta)
+  local proc = M.process_result_argv(argv, meta and meta.tool_call_id or nil)
+  local ok = proc:ok()
+  local include_output = keep_output_on_error or ok or (proc.output and #proc.output > 0)
+  local extras = {}
+  if path then
+    extras.path = path
+  end
+  extras.argv = argv
   extras.status = proc.status
   extras.truncated = proc.truncated
   if include_output then

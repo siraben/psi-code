@@ -23,6 +23,14 @@ int psi_process_run_shell(
     const struct psi_abort_signal *abort_signal
 );
 
+int psi_process_run_argv(
+    char *const argv[],
+    char **output_text,
+    int *exit_status,
+    int *truncated,
+    const struct psi_abort_signal *abort_signal
+);
+
 /* ------------------------------------------------------------------
  * Async shell execution.
  *
@@ -51,6 +59,12 @@ struct psi_process_handle;
  * handle is still returned and finish will reap with status=130. */
 int psi_process_begin(
     const char *command,
+    const struct psi_abort_signal *abort_signal,
+    struct psi_process_handle **out
+);
+
+int psi_process_begin_argv(
+    char *const argv[],
     const struct psi_abort_signal *abort_signal,
     struct psi_process_handle **out
 );
