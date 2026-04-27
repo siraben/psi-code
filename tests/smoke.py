@@ -1109,16 +1109,24 @@ def t_tui_status_hook(psi: Psi):
 
 @test("tui/reload_deduplicates_builtin_hooks")
 def t_tui_reload_deduplicates_builtin_hooks(psi: Psi):
-    out = psi.eval(
+    cwd = psi.tmp / "reload-vim-config"
+    (cwd / ".psi").mkdir(parents=True, exist_ok=True)
+    (cwd / ".psi" / "settings.json").write_text(
+        json.dumps({"extensions": {"vim_keybindings": {"enabled": True}}})
+    )
+    out = psi.run(
+        "--eval",
         'local commands = require("psi.commands")\n'
         + 'local tui = require("psi.tui")\n'
         + 'commands.handle("/reload")\n'
         + 'commands.handle("/reload")\n'
         + 'local bar = tui.status_bar({model="m", busy=false, scroll=0, editor_mode="normal"})\n'
         + 'local _, count = bar:gsub("mode:NORMAL", "")\n'
-        + 'return tostring(count)'
-    )
-    assert_equals(out, "1", "/reload should not duplicate built-in TUI hooks")
+        + 'local action = tui.handle_key({key="escape", busy=false, input_length=1, editor_mode="insert"})\n'
+        + 'return tostring(count) .. "|" .. tostring(action and action.action or "nil")',
+        cwd=cwd,
+    ).stdout.strip()
+    assert_equals(out, "1|vim-mode", "/reload should reinstall Vim hooks once")
 
 
 @test("tui/status_default_model")

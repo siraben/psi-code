@@ -234,9 +234,11 @@ available to user extensions. C normalizes terminal input to semantic key ids;
 Lua chooses whether a key edits text, switches editor mode, scrolls the
 transcript, updates the status bar, or falls through to the default policy.
 
-`/reload` clears TUI key and status hooks, reinstalls built-in extensions, and
-then reloads user extensions. That keeps repeated reloads idempotent instead
-of stacking duplicate modal key handlers or status snippets.
+`/reload` resets bundled TUI extension state, clears TUI key, status, and
+clipboard hooks, reloads user extensions, and then runs TUI startup hooks. That
+keeps repeated reloads idempotent while letting settings-gated extensions, such
+as bundled Vim modal editing and OSC 52 clipboard yanks, reinstall exactly the
+hooks their current configuration requires.
 
 ### ANSI and color
 
