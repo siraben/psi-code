@@ -1,8 +1,8 @@
 local records = require("psi.records")
 local registry = require("psi.tool_registry")
-local shell = require("psi.tool_shell")
 local path_util = require("psi.path")
 local helpers = require("psi.tool_helpers")
+local shell = require("psi.tool_shell")
 
 local function build_argv(pattern, path, glob, limit, context, ignore_case, literal)
   local argv = {

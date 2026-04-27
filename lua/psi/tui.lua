@@ -148,7 +148,7 @@ end
 -- the C TUI: {model=string, busy=bool, scroll=int}.
 -- Returns a single string with fields separated by two spaces.
 function M.status_line(arg_json)
-  local arg = prelude.safe_json_decode(arg_json, {})
+  local arg = type(arg_json) == "table" and arg_json or prelude.safe_json_decode(arg_json, {})
   -- Prefer the runtime model override (set via psi.agent.set_model)
   -- over whatever C passed in, so a live `/model` swap or an
   -- extension-driven change is reflected in the footer without a

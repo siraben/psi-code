@@ -44,6 +44,22 @@ local session_mod = require("psi.session")
 
 local M = {}
 
+local function state_text(state)
+  if type(state.text) == "string" then
+    return state.text
+  end
+  state.text = table.concat(state.text_parts or {})
+  return state.text
+end
+
+local function state_thinking(state)
+  if type(state.thinking) == "string" then
+    return state.thinking
+  end
+  state.thinking = table.concat(state.thinking_parts or {})
+  return state.thinking
+end
+
 local MAX_TOOL_ITERATIONS = 32
 
 local safe_decode = prelude.safe_json_decode
@@ -280,11 +296,13 @@ function M.persist_assistant(state, model, tool_calls, cfg, stop_override, error
   -- parser into state.thinking. Persist it as a thinking block so
   -- the session keeps a full record — the Lua-side assistant text
   -- column still tracks only visible content.
-  if type(state.thinking) == "string" and state.thinking ~= "" then
-    blocks[#blocks + 1] = { type = "thinking", thinking = state.thinking }
+  local thinking = state_thinking(state)
+  local text = state_text(state)
+  if thinking ~= "" then
+    blocks[#blocks + 1] = { type = "thinking", thinking = thinking }
   end
-  if state.text ~= "" then
-    blocks[#blocks + 1] = { type = "text", text = state.text }
+  if text ~= "" then
+    blocks[#blocks + 1] = { type = "text", text = text }
   end
   for _, tc in ipairs(tool_calls) do
     blocks[#blocks + 1] = {
@@ -305,7 +323,7 @@ function M.persist_assistant(state, model, tool_calls, cfg, stop_override, error
   if cfg.include_response_id then
     meta.response_id = state.response_id
   end
-  session_mod.append_assistant(state.text, blocks, meta)
+  session_mod.append_assistant(text, blocks, meta)
 end
 
 -- ---------- Streaming agent turn ----------
@@ -408,7 +426,7 @@ function M.run_turn(opts, cfg)
       local aborted = abort_check()
       local reason = aborted and "aborted" or "error"
       local emsg = aborted and "Request was aborted" or "http transport error"
-      if state.text ~= "" or #tool_calls > 0 then
+      if state_text(state) ~= "" or #tool_calls > 0 then
         M.persist_assistant(state, model, tool_calls, cfg, reason, emsg)
         context.record_usage(psi.session_message_count(), state.usage, model)
         session_mod.save()
@@ -420,7 +438,7 @@ function M.run_turn(opts, cfg)
     end
     if status < 200 or status >= 300 then
       local emsg = M.classify_http_error(status, table.concat(raw_body), cfg.provider_name)
-      if state.text ~= "" or #tool_calls > 0 then
+      if state_text(state) ~= "" or #tool_calls > 0 then
         M.persist_assistant(state, model, tool_calls, cfg, "error", emsg)
       end
       io.stderr:write(emsg .. "\n")
@@ -450,9 +468,9 @@ function M.run_turn(opts, cfg)
 
     if #tool_calls == 0 then
       if psi.events then
-        psi.events.emit("turn-end", { text = state.text, model = model })
+        psi.events.emit("turn-end", { text = state_text(state), model = model })
       end
-      return true, state.text
+      return true, state_text(state)
     end
 
     -- Concurrent tool dispatch (sched.run_all) — shared across

@@ -74,7 +74,7 @@ end
 -- `index`; accumulate per-index then JSON-decode at finalize time.
 local function new_state()
   return {
-    text = "",
+    text_parts = {},
     tool_calls_by_index = {}, -- [idx] = {id, name, arg_parts = {}}
     tool_calls_order = {}, -- emission order
     usage = nil,
@@ -101,7 +101,8 @@ local function handle_event(data, state, observer)
     local delta = ch.delta
     if type(delta) == "table" then
       if type(delta.content) == "string" and delta.content ~= "" then
-        state.text = state.text .. delta.content
+        state.text_parts[#state.text_parts + 1] = delta.content
+        state.text = nil
         if observer.on_assistant_text_delta then
           observer.on_assistant_text_delta(delta.content)
         end
