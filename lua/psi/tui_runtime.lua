@@ -1367,6 +1367,13 @@ local function yank_selection(state)
     text = state.input
   end
   state.clipboard = text
+  if text ~= "" and tui.write_clipboard then
+    tui.write_clipboard(text, {
+      source = "tui-yank",
+      state = state,
+      disabled = state.clipboard_writers_disabled,
+    })
+  end
   set_status(state, text ~= "" and "yanked" or "nothing to yank", text == "")
   state.block_edit = nil
   set_editor_mode(state, "normal")
@@ -1374,6 +1381,13 @@ end
 
 local function yank_input(state)
   state.clipboard = state.input or ""
+  if state.clipboard ~= "" and tui.write_clipboard then
+    tui.write_clipboard(state.clipboard, {
+      source = "tui-yank",
+      state = state,
+      disabled = state.clipboard_writers_disabled,
+    })
+  end
   set_status(
     state,
     state.clipboard ~= "" and "yanked prompt" or "nothing to yank",
@@ -2293,7 +2307,8 @@ function M._debug_tui_capabilities()
   return detect_tui_capabilities()
 end
 
-function M._debug_edit_keys(input, cursor, events, apply_startup_hooks)
+function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_options)
+  debug_options = type(debug_options) == "table" and debug_options or {}
   local state = {
     opts = {},
     model = {},
@@ -2304,6 +2319,7 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks)
     selection_anchor = nil,
     selection_kind = nil,
     clipboard = "",
+    clipboard_writers_disabled = debug_options.clipboard_writers ~= true,
     pending_key = nil,
     block_edit = nil,
     force_physical_clear = false,

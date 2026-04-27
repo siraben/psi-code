@@ -328,6 +328,12 @@ slash command, startup config hook, and TUI key/status hooks; the C side
 only performs generic terminal normalization, such as mapping ASCII
 control bytes to `ctrl-a` through `ctrl-z`.
 
+The built-in OSC 52 clipboard layer
+(`lua/psi/extensions/osc52_clipboard.lua`) registers a TUI clipboard writer.
+It is enabled by default so yanks update terminal clipboards, including tmux
+via DCS passthrough. Disable it with
+`"extensions": { "osc52_clipboard": { "enabled": false } }`.
+
 ### Prompt templates
 
 Drop a `.md` file in any of:

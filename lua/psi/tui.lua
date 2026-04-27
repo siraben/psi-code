@@ -150,6 +150,49 @@ function M.run_startup_hooks(startup_context)
   end
 end
 
+local clipboard_writers = {}
+local next_clipboard_writer_id = 0
+
+function M.register_clipboard_writer(fn)
+  if type(fn) ~= "function" then
+    return false, "clipboard writer must be a function"
+  end
+  next_clipboard_writer_id = next_clipboard_writer_id + 1
+  clipboard_writers[#clipboard_writers + 1] = { id = next_clipboard_writer_id, fn = fn }
+  return next_clipboard_writer_id
+end
+
+function M.unregister_clipboard_writer(id)
+  for index, writer in ipairs(clipboard_writers) do
+    if writer.id == id then
+      table.remove(clipboard_writers, index)
+      return true
+    end
+  end
+  return false
+end
+
+function M.clear_clipboard_writers()
+  clipboard_writers = {}
+end
+
+function M.write_clipboard(text, clipboard_context)
+  clipboard_context = type(clipboard_context) == "table" and clipboard_context or {}
+  if clipboard_context.disabled then
+    return false
+  end
+  for _, writer in ipairs(clipboard_writers) do
+    local ok, handled = pcall(writer.fn, text or "", clipboard_context)
+    if ok and handled ~= false then
+      return true
+    end
+    if not ok then
+      io.stderr:write("psi: TUI clipboard writer failed: " .. tostring(handled) .. "\n")
+    end
+  end
+  return false
+end
+
 -- High-level TUI key policy. C normalizes terminal-specific
 -- input into semantic key names ("enter", "shift-enter", "alt-b",
 -- "ctrl-d", "text", ...), then Lua decides what that key means in the
