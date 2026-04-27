@@ -219,10 +219,7 @@ end
 local function handle_visual(arg)
   local c = char(arg)
   return dispatch(VISUAL_KEY_BINDINGS, arg.key, arg)
-    or (
-      arg.selection_kind == SELECTION_BLOCK
-      and dispatch(VISUAL_BLOCK_CHAR_BINDINGS, c, arg)
-    )
+    or (arg.selection_kind == SELECTION_BLOCK and dispatch(VISUAL_BLOCK_CHAR_BINDINGS, c, arg))
     or dispatch(VISUAL_CHAR_BINDINGS, c, arg)
     or action(ACTION_NOOP)
 end
