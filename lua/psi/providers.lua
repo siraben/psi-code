@@ -184,6 +184,17 @@ M.register_api("openrouter-chat-completions", {
   },
 })
 
+M.register_api("openai-responses", {
+  module = "psi.codex",
+  compat = {
+    supports_tool_use = true,
+    supports_reasoning = true,
+    supports_reasoning_effort = true,
+    thinking_format = "openai-responses",
+    max_tokens_field = "max_output_tokens",
+  },
+})
+
 M.register_provider("anthropic", {
   api = "anthropic-messages",
   model_env = "PSI_ANTHROPIC_MODEL",
@@ -200,6 +211,12 @@ M.register_provider("openrouter", {
   api = "openrouter-chat-completions",
   model_env = "PSI_OPENROUTER_MODEL",
   default_model = "google/gemini-3-flash-preview",
+})
+
+M.register_provider("codex", {
+  api = "openai-responses",
+  model_env = "PSI_CODEX_MODEL",
+  default_model = "gpt-5.1-codex",
 })
 
 M.register_model("anthropic/claude-opus-4-7", {
@@ -221,6 +238,24 @@ M.register_model("openrouter/google/gemini-3-flash-preview", {
   api = "openrouter-chat-completions",
   context_window = 1048576,
   max_output_tokens = 65536,
+  reasoning = true,
+  supports_tool_use = true,
+})
+
+M.register_model("codex/gpt-5.1-codex", {
+  provider = "codex",
+  api = "openai-responses",
+  context_window = 400000,
+  max_output_tokens = 128000,
+  reasoning = true,
+  supports_tool_use = true,
+})
+
+M.register_model("codex/gpt-5.5", {
+  provider = "codex",
+  api = "openai-responses",
+  context_window = 400000,
+  max_output_tokens = 128000,
   reasoning = true,
   supports_tool_use = true,
 })
