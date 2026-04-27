@@ -559,9 +559,26 @@ def t_commands_help_generated(psi: Psi):
     )
     assert_contains(out, "built-ins:", "built-in help section")
     assert_contains(out, "/hotkeys", "built-in command from metadata")
+    assert_contains(out, "/rainbow", "rainbow command from metadata")
     assert_contains(out, "extensions:", "extension help section")
     assert_contains(out, "/greet <name>", "extension argument hint")
     assert_contains(out, "Say hello", "extension description")
+
+
+@test("commands/rainbow_prints_256_backgrounds")
+def t_commands_rainbow(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local action = require("psi.commands").handle("/rainbow")\n'
+        + 'local payload = action.payload or ""\n'
+        + 'return table.concat({\n'
+        + '  action.kind,\n'
+        + '  tostring(payload:find("48;5;0", 1, true) ~= nil),\n'
+        + '  tostring(payload:find("48;5;255", 1, true) ~= nil)\n'
+        + '}, "|")',
+        env_extra={"NO_COLOR": "", "PSI_COLOR": "1"},
+    ).stdout.strip()
+    assert_equals(out, "ansi-print|true|true", "rainbow command emits ANSI bg swatches")
 
 
 @test("commands/help_includes_prompt_templates")
