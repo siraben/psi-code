@@ -24,6 +24,11 @@ Every `*.lua` file in each directory is `dofile`'d. If it returns a
 function, psi invokes it with the `psi` global. Extension load failures
 are logged to stderr and don't abort psi.
 
+`/reload` reloads keybinding/settings/prompt-template state, clears TUI key
+and status hooks, reinstalls built-in Lua extensions, and then reloads user
+extensions. Extension registration should therefore be idempotent across a
+fresh load; TUI hooks do not need to defensively unregister themselves first.
+
 ## Extension skeleton
 
 ```lua
@@ -410,15 +415,16 @@ What we **intentionally** do not support yet — open tickets, not bugs:
 
 - No `psi install` / package manager. Extensions are single-file drops.
 - No TypeScript. Lua only.
-- No provider registration (psi is Anthropic-only; revisit when we add a
-  second provider).
+- No stable provider registration API yet. Built-in Anthropic, Ollama, and
+  OpenRouter providers are available through the provider registry, but
+  extension authors should treat registration internals as unstable.
 - No sandboxing. Extensions run with full Lua and `psi` access — trust
   the files you install.
 - No extension manifest, versioning, or compatibility checks.
-- No hot reload.
+- No file-watcher hot reload. `/reload` is the explicit manual reload path.
 - No MCP bridge.
-- No extension-controlled system-prompt injection (future
-  `system-prompt-build` event).
+- No dedicated system-prompt event. Use `psi.prompt.register_transformer(fn)`
+  for extension-controlled prompt rewrites.
 - pi ships ~27 events; psi starts with the 10 above. New ones will be
   added on demand.
 

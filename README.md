@@ -52,8 +52,8 @@ This repository currently contains:
   markdown rendering, mode-aware hints, readline-style and Lua
   extension-backed Vim modal editing (normal/insert/visual/block
   visual, `w`/`b`, `I`/`A`/`o`/`O`, `^`/`$`, `gg`/`G`,
-  `Ctrl-U`/`Ctrl-D`, `y`/`p`, `Ctrl-A`/`Ctrl-E`), Esc-abort
-  to normal mode, `Ctrl-G` abort while busy, `Ctrl-C` clear-buffer, and Ctrl-Z
+  `Ctrl-U`/`Ctrl-D`, `y`/`p`, `Ctrl-A`/`Ctrl-E`), Esc to
+  normal mode, `Ctrl-G` abort while busy, `Ctrl-C` clear-buffer, and Ctrl-Z
   suspend/resume, plus a Lua-driven theme registry with a bundled
   dark default. Single-threaded: the agent turn runs as
   a Lua coroutine on the TUI thread, pumping input and
@@ -217,8 +217,8 @@ for the authoring guide.
 - `scripts/embed_lua.c`: build-time helper that deflate-compresses
   Lua sources and docs into C byte arrays
 - `lua/boot.lua`: bootstrap that wires the `psi.*` Lua modules
-  together, bridges render hooks onto the events bus, and loads
-  extensions
+  together, installs built-in Lua extensions, bridges render hooks
+  onto the events bus, and loads user extensions
 - `lua/psi/`: Lua modules — tool registry, built-in tools, prompt
   assembly, session records/format, provider registry, provider loops
   (Anthropic, Ollama, OpenRouter), settings/resources, agent orchestration,
