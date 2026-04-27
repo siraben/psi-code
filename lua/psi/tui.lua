@@ -31,6 +31,20 @@ local function action(name, arg)
   return { action = name, arg = arg }
 end
 
+local key_handlers = {}
+
+function M.register_key_handler(fn)
+  if type(fn) ~= "function" then
+    return false, "key handler must be a function"
+  end
+  key_handlers[#key_handlers + 1] = fn
+  return true
+end
+
+function M.clear_key_handlers()
+  key_handlers = {}
+end
+
 -- Status-line hooks. Extensions can register fns that return a short
 -- string appended to the TUI status line. Called on every redraw, so
 -- they must be cheap and side-effect-free. Return nil / "" to skip.
@@ -67,6 +81,16 @@ function M.handle_key(arg)
   local busy = not not arg.busy
   local input_length = tonumber(arg.input_length) or 0
   local text = arg.text or ""
+
+  for _, handler in ipairs(key_handlers) do
+    local ok, result = pcall(handler, arg)
+    if ok and result ~= nil then
+      return result
+    end
+    if not ok then
+      io.stderr:write("psi: TUI key handler failed: " .. tostring(result) .. "\n")
+    end
+  end
 
   if key == "text" then
     if text ~= "" then
@@ -208,7 +232,10 @@ local function busy_chip(text, phase)
   local chars = utf8_chars(text)
 
   if not enabled_setting("tui.busy_glisten", "PSI_BUSY_GLISTEN", true) or #chars == 0 then
-    return ansi.color("1;38;5;" .. tostring(base_fg) .. ";48;5;" .. tostring(bg), " " .. text .. " ")
+    return ansi.color(
+      "1;38;5;" .. tostring(base_fg) .. ";48;5;" .. tostring(bg),
+      " " .. text .. " "
+    )
   end
 
   local sweep = ((tonumber(phase) or 0) % (#chars + 4)) - 1
@@ -225,8 +252,7 @@ local function busy_chip(text, phase)
     end
     out[#out + 1] = ansi.color("1;38;5;" .. tostring(fg) .. ";48;5;" .. tostring(bg), ch)
   end
-  out[#out + 1] =
-    ansi.color("1;38;5;" .. tostring(base_fg) .. ";48;5;" .. tostring(bg), " ")
+  out[#out + 1] = ansi.color("1;38;5;" .. tostring(base_fg) .. ";48;5;" .. tostring(bg), " ")
   return table.concat(out)
 end
 
@@ -275,21 +301,21 @@ local function default_busy_label()
 end
 
 enabled_setting = function(path, env_name, default_value)
-  local value = settings.get(path, nil)
-  if value == nil and env_name ~= nil then
-    value = os.getenv(env_name)
+  local setting_value = settings.get(path, nil)
+  if setting_value == nil and env_name ~= nil then
+    setting_value = os.getenv(env_name)
   end
-  if value == nil then
+  if setting_value == nil then
     return default_value
   end
-  if type(value) == "boolean" then
-    return value
+  if type(setting_value) == "boolean" then
+    return setting_value
   end
-  if type(value) == "number" then
-    return value ~= 0
+  if type(setting_value) == "number" then
+    return setting_value ~= 0
   end
-  if type(value) == "string" then
-    local normalized = value:lower()
+  if type(setting_value) == "string" then
+    local normalized = setting_value:lower()
     if normalized == "0" or normalized == "false" or normalized == "off" or normalized == "no" then
       return false
     end
@@ -412,7 +438,7 @@ function M.status_line(arg_json)
     parts[#parts + 1] = "busy…"
   end
   for _, fn in ipairs(status_hooks) do
-    local ok_hook, extra = pcall(fn)
+    local ok_hook, extra = pcall(fn, arg)
     if ok_hook and type(extra) == "string" and extra ~= "" then
       parts[#parts + 1] = extra
     end
@@ -431,7 +457,7 @@ function M.status_bar(arg_json)
     pair("messages", tostring(psi.session_message_count()), false),
   }
   for _, fn in ipairs(status_hooks) do
-    local ok_hook, extra = pcall(fn)
+    local ok_hook, extra = pcall(fn, arg)
     if ok_hook and type(extra) == "string" and extra ~= "" then
       right_parts[#right_parts + 1] = extra
     end
@@ -443,12 +469,15 @@ end
 function M.footer_hint(arg_json)
   local arg = type(arg_json) == "table" and arg_json or prelude.safe_json_decode(arg_json, {})
   if arg.busy then
-    local label = (type(arg.busy_label) == "string" and arg.busy_label ~= "") and arg.busy_label or "gooning"
+    local busy_label = (type(arg.busy_label) == "string" and arg.busy_label ~= "")
+        and arg.busy_label
+      or "gooning"
     local dots = string.rep(".", math.max(1, tonumber(arg.busy_phase) or 1))
     return string.format(
-      "%s (%s  • esc to interrupt) %s",
-      label,
+      "%s (%s  • %s to interrupt) %s",
+      busy_label,
       format_elapsed(arg.elapsed_seconds),
+      keybindings.display("app.interrupt"),
       dots
     )
   end
@@ -476,7 +505,13 @@ function M.render_busy_status(label_text, phase, elapsed_seconds, glisten_phase)
   local dots = ({ ".", "..", "..." })[((tonumber(phase) or 0) % 3) + 1]
   local chip = busy_chip(text, glisten_phase or phase)
   return chip
-    .. label(" (" .. format_elapsed(elapsed_seconds) .. "  • esc to interrupt)")
+    .. label(
+      " ("
+        .. format_elapsed(elapsed_seconds)
+        .. "  • "
+        .. keybindings.display("app.interrupt")
+        .. " to interrupt)"
+    )
     .. accent(" " .. dots)
 end
 
