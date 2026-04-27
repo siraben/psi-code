@@ -61,7 +61,7 @@ can replace any one bit and keep the rest.
 | `nanosleep`                           | POSIX-1b; universal on modern Unices |
 | `sigaction` / `sigemptyset`           | POSIX; universal |
 | `fork` / `execl` / `pipe` / `waitpid` | POSIX; gated by `#ifndef _WIN32` |
-| Vendored vs system deps               | Lua 5.4, cJSON, argtable3, libedit, libcurl, ncurses, zlib are system-supplied via pkg-config on Linux/Haiku. Hosts without pkg-config can vendor or override per-dep — see "untested-OS predictions" below. |
+| Vendored vs system deps               | Lua 5.4, cJSON, argtable3, libedit, libcurl, zlib are system-supplied via pkg-config on Linux/Haiku. Hosts without pkg-config can vendor or override per-dep — see "untested-OS predictions" below. |
 
 ## Untested-OS predictions
 
@@ -91,7 +91,7 @@ The pattern from `haiku/`:
      stubbed for Win, would need CreateProcess).
    - `src/lua/vm.c`'s `psi.readline` binding — line editor (libedit
      on POSIX, fgets fallback elsewhere).
-   - `src/runtime/tui_mode.c` — TUI (ncurses on POSIX; skip on
+   - `src/runtime/tui_mode.c` — TUI (termios + ANSI on POSIX; skip on
      constrained platforms).
 3. Vendor what isn't already present:
    - Lua 5.4: vendor source, build statically. Watch for the
@@ -111,7 +111,7 @@ portability bug — file it.
 The Makefile assumes:
 - GNU `make` (or BSD make with `?=` and `:=`)
 - `pkg-config` (or `pkgconf`)
-- `lua5.4`, `libcjson`, `libedit`, `libcurl`, `zlib`, `ncursesw`,
+- `lua5.4`, `libcjson`, `libedit`, `libcurl`, `zlib`,
   `argtable3` discoverable via pkg-config
 
 For platforms without pkg-config, override per-dependency via
