@@ -1208,6 +1208,29 @@ def t_process_finish_idempotent(psi: Psi):
     assert_equals(out, "idempotent-test|0|", "double-finish returns empty")
 
 
+@test("handles/process_run_argv")
+def t_process_run_argv(psi: Psi):
+    out = psi.eval(
+        'local r = psi.process_run_argv({"printf", "%s", "argv test"})\n'
+        + 'return r.output .. "|" .. tostring(r.status) .. "|" .. tostring(r.truncated)'
+    )
+    assert_equals(out, "argv test|0|false", "process_run_argv result")
+
+
+@test("handles/process_begin_argv")
+def t_process_begin_argv(psi: Psi):
+    out = psi.eval(
+        'local h = psi.process_begin_argv({"printf", "%s", "async argv"})\n'
+        + 'while true do\n'
+        + '  local _, done = psi.process_poll(h, 50)\n'
+        + '  if done then break end\n'
+        + 'end\n'
+        + 'local r = psi.process_finish(h)\n'
+        + 'return r.output .. "|" .. tostring(r.status)'
+    )
+    assert_equals(out, "async argv|0", "process_begin_argv result")
+
+
 @test("handles/process_gc_runs")
 def t_process_gc_runs(psi: Psi):
     """If a coroutine orphans a handle (never calls finish), __gc

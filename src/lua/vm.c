@@ -1216,6 +1216,50 @@ static int lfn_process_run(lua_State *L) {
     return 1;
 }
 
+static char **psi_vm_argv_from_table(lua_State *L, int idx, int *argc_out);
+static void psi_vm_argv_free(char **argv);
+
+static int lfn_process_run_argv(lua_State *L) {
+    const struct psi_host_context *host = PSI_VM_HOST(L);
+    char *output = NULL;
+    int exit_status = -1;
+    int truncated = 0;
+    int status;
+    int argc;
+    char **argv;
+
+    argc = 0;
+    argv = psi_vm_argv_from_table(L, 1, &argc);
+    if (argv == NULL || argc <= 0) {
+        psi_vm_argv_free(argv);
+        lua_newtable(L);
+        lua_pushstring(L, "invalid argv");
+        lua_setfield(L, -2, "output");
+        lua_pushinteger(L, -1);
+        lua_setfield(L, -2, "status");
+        lua_pushboolean(L, 0);
+        lua_setfield(L, -2, "truncated");
+        return 1;
+    }
+
+    status = psi_process_run_argv(argv, &output, &exit_status, &truncated, host ? host->abort_signal : NULL);
+    psi_vm_argv_free(argv);
+
+    lua_newtable(L);
+    if (status == PSI_STATUS_OK && output != NULL) {
+        lua_pushstring(L, output);
+    } else {
+        lua_pushstring(L, "");
+    }
+    lua_setfield(L, -2, "output");
+    lua_pushinteger(L, exit_status);
+    lua_setfield(L, -2, "status");
+    lua_pushboolean(L, truncated ? 1 : 0);
+    lua_setfield(L, -2, "truncated");
+    free(output);
+    return 1;
+}
+
 /* ------------------------------------------------------------------
  * Async process (psi.process_begin / _poll / _finish).
  *
@@ -1263,6 +1307,74 @@ static int lfn_process_begin(lua_State *L) {
     if (status != PSI_STATUS_OK || h == NULL) {
         lua_pushnil(L);
         lua_pushstring(L, "failed to spawn shell");
+        return 2;
+    }
+    ud = (struct psi_process_handle **)lua_newuserdata(L, sizeof(*ud));
+    *ud = h;
+    luaL_setmetatable(L, PSI_PROCESS_HANDLE_MT);
+    return 1;
+}
+
+static char **psi_vm_argv_from_table(lua_State *L, int idx, int *argc_out) {
+    lua_Integer n;
+    char **argv;
+    lua_Integer i;
+
+    luaL_checktype(L, idx, LUA_TTABLE);
+    n = lua_rawlen(L, idx);
+    if (n <= 0) return NULL;
+    argv = (char **)calloc((size_t)n + 1u, sizeof(char *));
+    if (argv == NULL) return NULL;
+    for (i = 1; i <= n; i++) {
+        const char *value;
+        lua_rawgeti(L, idx, i);
+        value = luaL_checkstring(L, -1);
+        argv[i - 1] = psi_strdup(value);
+        lua_pop(L, 1);
+        if (argv[i - 1] == NULL) {
+            lua_Integer j;
+            for (j = 0; j < i - 1; j++) free(argv[j]);
+            free(argv);
+            return NULL;
+        }
+    }
+    argv[n] = NULL;
+    if (argc_out != NULL) *argc_out = (int)n;
+    return argv;
+}
+
+static void psi_vm_argv_free(char **argv) {
+    int i;
+    if (argv == NULL) return;
+    for (i = 0; argv[i] != NULL; i++) {
+        free(argv[i]);
+    }
+    free(argv);
+}
+
+static int lfn_process_begin_argv(lua_State *L) {
+    const struct psi_host_context *host = PSI_VM_HOST(L);
+    struct psi_process_handle *h;
+    struct psi_process_handle **ud;
+    char **argv;
+    int argc;
+    int status;
+
+    argc = 0;
+    argv = psi_vm_argv_from_table(L, 1, &argc);
+    if (argv == NULL || argc <= 0) {
+        psi_vm_argv_free(argv);
+        lua_pushnil(L);
+        lua_pushstring(L, "invalid argv");
+        return 2;
+    }
+
+    h = NULL;
+    status = psi_process_begin_argv(argv, host ? host->abort_signal : NULL, &h);
+    psi_vm_argv_free(argv);
+    if (status != PSI_STATUS_OK || h == NULL) {
+        lua_pushnil(L);
+        lua_pushstring(L, "failed to spawn process");
         return 2;
     }
     ud = (struct psi_process_handle **)lua_newuserdata(L, sizeof(*ud));
@@ -1940,7 +2052,8 @@ static int lfn_runtime_info(lua_State *L) {
         "file_write", "current_date", "cwd", "parent_directory", "path_join",
         "path_expand", "path_resolve", "file_exists", "file_type", "list_dir",
         "mkdir_p", "mkdir_parent", "runtime_info", "session_messages",
-        "process_run", "session_append", "session_clear",
+        "process_run", "process_run_argv", "process_begin_argv",
+        "session_append", "session_clear",
         "http_get", "http_post",
         "tool_call",
         NULL
@@ -2309,7 +2422,9 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("runtime_info",          lfn_runtime_info);
     PSI_REG("session_messages",      lfn_session_messages);
     PSI_REG("process_run",           lfn_process_run);
+    PSI_REG("process_run_argv",      lfn_process_run_argv);
     PSI_REG("process_begin",         lfn_process_begin);
+    PSI_REG("process_begin_argv",    lfn_process_begin_argv);
     PSI_REG("process_poll",          lfn_process_poll);
     PSI_REG("process_finish",        lfn_process_finish);
     PSI_REG("session_append",        lfn_session_append);

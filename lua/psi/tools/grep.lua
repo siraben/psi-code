@@ -4,27 +4,34 @@ local shell = require("psi.tool_shell")
 local path_util = require("psi.path")
 local helpers = require("psi.tool_helpers")
 
-local function build_command(pattern, path, glob, limit, context, ignore_case, literal)
-  local parts = {
-    "command -v rg >/dev/null 2>&1 || { echo 'rg is required for grep' >&2; exit 127; }; ",
-    "rg -n --no-heading --color never --hidden --max-count ",
+local function build_argv(pattern, path, glob, limit, context, ignore_case, literal)
+  local argv = {
+    "rg",
+    "-n",
+    "--no-heading",
+    "--color",
+    "never",
+    "--hidden",
+    "--max-count",
     tostring(limit),
   }
   if context and context > 0 then
-    parts[#parts + 1] = " -C " .. tostring(context)
+    argv[#argv + 1] = "-C"
+    argv[#argv + 1] = tostring(context)
   end
   if ignore_case then
-    parts[#parts + 1] = " -i"
+    argv[#argv + 1] = "-i"
   end
   if literal then
-    parts[#parts + 1] = " -F"
+    argv[#argv + 1] = "-F"
   end
   if glob then
-    parts[#parts + 1] = " --glob " .. shell.quote(glob)
+    argv[#argv + 1] = "--glob"
+    argv[#argv + 1] = glob
   end
-  parts[#parts + 1] = " " .. shell.quote(pattern)
-  parts[#parts + 1] = " " .. shell.quote(path)
-  return table.concat(parts)
+  argv[#argv + 1] = pattern
+  argv[#argv + 1] = path
+  return argv
 end
 
 local function impl(input, meta)
@@ -39,8 +46,8 @@ local function impl(input, meta)
   local context = registry.optional_number(input, "context", 0)
   local ignore_case = registry.optional_boolean(input, "ignoreCase", false)
   local literal = registry.optional_boolean(input, "literal", false)
-  local command = build_command(pattern, path, glob, limit, context, ignore_case, literal)
-  return shell.run_tool("grep", command, raw_path, true, meta)
+  local argv = build_argv(pattern, path, glob, limit, context, ignore_case, literal)
+  return shell.run_tool_argv("grep", argv, raw_path, true, meta)
 end
 
 return function()
