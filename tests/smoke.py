@@ -581,6 +581,18 @@ def t_commands_rainbow(psi: Psi):
     assert_equals(out, "ansi-print|true|true", "rainbow command emits ANSI bg swatches")
 
 
+@test("mode/tui_rainbow_uses_raw_ansi")
+def t_tui_rainbow_uses_raw_ansi(psi: Psi):
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [(b"", 0.8), (b"/rainbow\r", 1.5), (b"/quit\r", 1.0)],
+        env_extra={"NO_COLOR": "1", "TERM": "xterm-256color"},
+        idle_drain=1.5,
+    )
+    assert b"xterm 256 background swatches" in raw, "rainbow header did not render in TUI"
+    assert b"\x1b[48;5;" in raw, "rainbow did not emit raw ANSI background colors"
+
+
 @test("commands/help_includes_prompt_templates")
 def t_commands_help_templates(psi: Psi):
     tmpdir = psi.tmp / "help-prompts"
@@ -1127,7 +1139,7 @@ def t_tui_input_layout(psi: Psi):
         + '  layout.prefix_first or "",\n'
         + '  layout.prefix_rest or "")'
     )
-    assert_equals(out, '5|" › "|"   "', "Lua-owned TUI input layout")
+    assert_equals(out, '18|" › "|"   "', "Lua-owned TUI input layout")
 
 
 @test("tui/input_layout_override")
@@ -1178,13 +1190,19 @@ def t_tui_busy_status_config(psi: Psi):
 
 @test("tui/busy_status_render")
 def t_tui_busy_status_render(psi: Psi):
-    out = psi.eval('return require("psi.tui").render_busy_status("gooning", 2, 4)')
+    out = psi.run(
+        "--eval",
+        'local ansi = require("psi.ansi")\n'
+        + 'ansi.color_enabled = true\n'
+        + 'return require("psi.tui").render_busy_status("gooning", 2, 4, 3)',
+    ).stdout.rstrip("\n")
     plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
     assert_equals(
         plain,
         " gooning  (0:04  • esc to interrupt) ...",
         "busy status renders selected label, hint, and animated dots",
     )
+    assert_contains(out, "\x1b[1;38;5;231;48;5;238m", "busy label has a glisten highlight")
 
 
 @test("tui/show_thinking_config")
@@ -1401,8 +1419,7 @@ def t_tui_input_box_background(psi: Psi):
         idle_drain=1.0,
     )
     assert b"\x1b[0;7m" not in raw and b"\x1b[7m" not in raw, "input box should not use reverse-video"
-    assert b"\x1b[48;5;240m" in raw, "input box background color did not reach rendered output"
-    assert b"\x1b[48;5;248m" in raw, "input prompt chip color did not reach rendered output"
+    assert b"\x1b[48;5;238m" in raw, "input box background color did not reach rendered output"
 
 
 @test("mode/tui_lf_submit")

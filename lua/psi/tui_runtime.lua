@@ -85,7 +85,7 @@ end
 local function default_input_layout(height)
   height = math.max(12, tonumber(height) or 24)
   return {
-    max_rows = math.min(5, math.max(1, height - 6)),
+    max_rows = math.max(1, height - 6),
     prefix_first = "> ",
     prefix_rest = "| ",
   }
@@ -792,29 +792,31 @@ local function scroll_by(state, delta)
 end
 
 local function style_input_prefix(prefix, is_first)
-  local bg = tonumber(settings.get("tui.input.background", 240)) or 240
+  local bg = tonumber(settings.get("tui.input.background", 238)) or 238
   if is_first then
-    local chip_bg = tonumber(settings.get("tui.input.prefix_background", 248)) or 248
+    local chip_bg = tonumber(settings.get("tui.input.prefix_background", 245)) or 245
     return ansi.color("1;38;5;16;48;5;" .. tostring(chip_bg), prefix)
   end
-  return ansi.color("38;5;245;48;5;" .. tostring(bg), prefix)
+  return ansi.color("38;5;242;48;5;" .. tostring(bg), prefix)
 end
 
 local function style_input_text(text)
-  local bg = tonumber(settings.get("tui.input.background", 240)) or 240
+  local bg = tonumber(settings.get("tui.input.background", 238)) or 238
   local fg = tonumber(settings.get("tui.input.foreground", 253)) or 253
   return ansi.color("38;5;" .. tostring(fg) .. ";48;5;" .. tostring(bg), text)
 end
 
-local function style_input_fill(width)
-  local bg = tonumber(settings.get("tui.input.background", 240)) or 240
+local function style_input_fill(width, slot)
+  local default_bg = tonumber(settings.get("tui.input.background", 238)) or 238
+  local setting = slot == "rail" and "tui.input.rail_background" or "tui.input.background"
+  local bg = tonumber(settings.get(setting, default_bg)) or default_bg
   return ansi.color("48;5;" .. tostring(bg), string.rep(" ", math.max(0, width)))
 end
 
 local function input_box_line(content, width)
   content = content or ""
   width = math.max(1, tonumber(width) or 1)
-  return content .. style_input_fill(width - display_width(content))
+  return content .. style_input_fill(width - display_width(content), "body")
 end
 
 local function redraw(state)
@@ -837,9 +839,16 @@ local function redraw(state)
     first_line = 1
   end
   local transcript_lines = build_render_window(state, first_line, rows.transcript_height)
+  local raw_lines = {}
   for i = 0, rows.transcript_height - 1 do
     local line = transcript_lines[i + 1]
-    psi.tui_draw_line(rows.transcript_start + i, line and style_line(line) or "")
+    local row = rows.transcript_start + i
+    if line and line.kind == "ansi" then
+      raw_lines[#raw_lines + 1] = { row = row, text = line.text }
+      psi.tui_draw_line(row, "")
+    else
+      psi.tui_draw_line(row, line and style_line(line) or "")
+    end
   end
 
   status_arg = {
@@ -860,13 +869,24 @@ local function redraw(state)
     status_text = tui.render_busy_status(
       state.busy_label or "gooning",
       state.busy_phase,
-      status_arg.elapsed_seconds
+      status_arg.elapsed_seconds,
+      state.busy_tick
     )
   end
-  psi.tui_draw_line(rows.status_row, status_text)
+  if state.busy and status_text ~= "" then
+    raw_lines[#raw_lines + 1] = { row = rows.status_row, text = status_text }
+    psi.tui_draw_line(rows.status_row, "")
+  else
+    psi.tui_draw_line(rows.status_row, status_text)
+  end
 
   local input_width = math.max(1, state.width - 1)
-  psi.tui_draw_line(rows.input_start_row, style_input_fill(input_width))
+  local input_raw_lines = {}
+  input_raw_lines[#input_raw_lines + 1] = {
+    row = rows.input_start_row,
+    text = style_input_fill(input_width, "rail"),
+  }
+  psi.tui_draw_line(rows.input_start_row, "")
   for i = 0, rows.input_rows - 1 do
     local line_index = rows.input_first_line + i
     local line = rows.input_lines[line_index]
@@ -876,12 +896,17 @@ local function redraw(state)
     if line ~= nil then
       text = state.input:sub(line.start + 1, line.start + line.len)
     end
-    psi.tui_draw_line(
-      rows.input_start_row + 1 + i,
-      input_box_line(style_input_prefix(prefix, line_index == 1) .. style_input_text(text), input_width)
-    )
+    input_raw_lines[#input_raw_lines + 1] = {
+      row = rows.input_start_row + 1 + i,
+      text = input_box_line(style_input_prefix(prefix, line_index == 1) .. style_input_text(text), input_width),
+    }
+    psi.tui_draw_line(rows.input_start_row + 1 + i, "")
   end
-  psi.tui_draw_line(rows.input_start_row + rows.input_rows + 1, style_input_fill(input_width))
+  input_raw_lines[#input_raw_lines + 1] = {
+    row = rows.input_start_row + rows.input_rows + 1,
+    text = style_input_fill(input_width, "rail"),
+  }
+  psi.tui_draw_line(rows.input_start_row + rows.input_rows + 1, "")
 
   psi.tui_draw_line(rows.footer_row, tui.compose_bar(tui.status_bar(status_arg) or "", state.width - 1))
 
@@ -894,6 +919,20 @@ local function redraw(state)
   cursor_col = clamp(cursor_col, 1, math.max(1, state.width - 1))
   psi.tui_set_cursor(cursor_row, cursor_col, true)
   psi.tui_refresh()
+  for _, raw_line in ipairs(raw_lines) do
+    if type(psi.tui_draw_raw_line) == "function" then
+      psi.tui_draw_raw_line(raw_line.row, raw_line.text)
+    else
+      psi.tui_draw_line(raw_line.row, raw_line.text)
+    end
+  end
+  for _, raw_line in ipairs(input_raw_lines) do
+    if type(psi.tui_draw_raw_line) == "function" then
+      psi.tui_draw_raw_line(raw_line.row, raw_line.text)
+    else
+      psi.tui_draw_line(raw_line.row, raw_line.text)
+    end
+  end
   state.dirty = false
 end
 
@@ -1504,9 +1543,9 @@ local function tick(state)
   end
   if state.busy then
     state.busy_tick = (state.busy_tick or 0) + 1
+    state.dirty = true
     if state.busy_tick % 4 == 0 then
       state.busy_phase = ((state.busy_phase or 0) % 3) + 1
-      state.dirty = true
     end
   end
   if state.dirty then
