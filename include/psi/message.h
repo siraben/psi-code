@@ -17,6 +17,7 @@ struct psi_message {
     enum psi_message_role role;
     char *text;
     char *data_json;
+    size_t token_estimate;
 };
 
 void psi_message_init(struct psi_message *message, enum psi_message_role role, const char *text);

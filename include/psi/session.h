@@ -10,6 +10,7 @@
 
 struct psi_session {
     struct psi_message *messages;
+    size_t *token_prefix;
     size_t count;
     size_t capacity;
     char *id;
@@ -31,5 +32,7 @@ int psi_session_set_path(struct psi_session *session, const char *path);
 int psi_session_set_parent_id(struct psi_session *session, const char *parent_id);
 int psi_session_clear(struct psi_session *session);
 enum psi_message_role psi_session_role_from_name(const char *role_name);
+size_t psi_session_token_estimate_from(const struct psi_session *session, size_t start_index);
+size_t psi_session_keep_recent_by_tokens(const struct psi_session *session, size_t target_tokens);
 
 #endif

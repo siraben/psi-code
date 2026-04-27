@@ -550,8 +550,14 @@ function M.save(path)
     return true
   end
 
-  local messages = psi.session_messages_from(last_saved_count + 1)
-  local ok, err = append_session_file(path, messages)
+  local ok, err
+  if psi.session_append_jsonl then
+    ok, err = psi.session_append_jsonl(path, last_saved_count + 1)
+  end
+  if ok == nil or (ok == false and err == "message has no structured data") then
+    local messages = psi.session_messages_from(last_saved_count + 1)
+    ok, err = append_session_file(path, messages)
+  end
   if ok then
     last_saved_count = count
   else
