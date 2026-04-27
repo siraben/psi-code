@@ -257,6 +257,7 @@ changing provider replay again.
 - `grep`
 - `find`
 - `ls`
+- `web_search`
 - `lua`
 
 Tool design rules:
@@ -313,10 +314,18 @@ Currently shipped modules (see `lua/psi/`):
 ### `psi.tools` and `psi.tool_registry`
 
 `psi.tools` holds the built-in tool implementations (`read`, `write`,
-`edit`, `bash`, `grep`, `find`, `ls`, `lua`) and exposes
+`edit`, `bash`, `grep`, `find`, `ls`, `web_search`, `lua`) and exposes
 `psi.tools.dispatch_alist` for C glue. `psi.tool_registry` owns
 declarative registration, schema capture, dispatch, and before/after
 hook plumbing; extensions register new tools through it.
+
+### `psi.web_search`
+
+Provider-neutral network search helper layered over the libcurl-backed
+`psi.http_request` primitive. The built-in `web_search` tool stays thin;
+backend-specific HTTP request/response mapping lives here so additional
+search providers can be added without changing the model-visible tool
+contract.
 
 ### `psi.session`
 

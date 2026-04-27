@@ -16,8 +16,8 @@
 
 #include "psi/abort.h"
 #include "psi/agent.h"
-#include "psi/anthropic.h"
 #include "psi/http_async.h"
+#include "psi/http_client.h"
 #include "psi/common.h"
 #include "psi/embedded_lua.h"
 #include "psi/host_ops.h"
@@ -911,11 +911,94 @@ static int lfn_http_post(lua_State *L) {
     psi_lua_free_headers(headers, header_count);
 
     if (status != PSI_STATUS_OK) {
-        free(response);
         lua_pushnil(L);
-        lua_pushstring(L, "http request failed");
+        lua_pushstring(L, response != NULL ? response : "http request failed");
+        free(response);
         return 2;
     }
+    lua_pushinteger(L, status_code);
+    lua_pushstring(L, response != NULL ? response : "");
+    free(response);
+    return 2;
+}
+
+static int lfn_http_request(lua_State *L) {
+    struct psi_http_request_options request;
+    char **headers;
+    size_t header_count;
+    const struct psi_host_context *host;
+    long status_code;
+    char *response;
+    int status;
+
+    luaL_checktype(L, 1, LUA_TTABLE);
+
+    memset(&request, 0, sizeof(request));
+    headers = NULL;
+    header_count = 0u;
+
+    lua_getfield(L, 1, "url");
+    if (!lua_isstring(L, -1)) {
+        return luaL_error(L, "http_request: missing string field: url");
+    }
+    request.url = lua_tostring(L, -1);
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "method");
+    if (!lua_isnil(L, -1) && !lua_isstring(L, -1)) {
+        return luaL_error(L, "http_request: field method must be a string");
+    }
+    request.method = lua_isstring(L, -1) ? lua_tostring(L, -1) : NULL;
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "headers");
+    if (!lua_isnil(L, -1)) {
+        luaL_checktype(L, -1, LUA_TTABLE);
+        if (psi_lua_collect_headers(L, -1, &headers, &header_count) != 0) {
+            lua_pop(L, 1);
+            return luaL_error(L, "failed to collect headers");
+        }
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "body");
+    if (!lua_isnil(L, -1) && !lua_isstring(L, -1)) {
+        psi_lua_free_headers(headers, header_count);
+        return luaL_error(L, "http_request: field body must be a string");
+    }
+    if (lua_isstring(L, -1)) {
+        request.body = lua_tolstring(L, -1, &request.body_len);
+    } else {
+        request.body = NULL;
+        request.body_len = 0u;
+    }
+
+    lua_getfield(L, 1, "timeout_ms");
+    request.timeout_ms = lua_isnil(L, -1) ? 0l : (long)luaL_checkinteger(L, -1);
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "max_response_bytes");
+    request.max_response_bytes = lua_isnil(L, -1) ? 0l : (long)luaL_checkinteger(L, -1);
+    lua_pop(L, 1);
+
+    request.header_lines = (const char *const *)headers;
+    request.header_count = header_count;
+
+    host = PSI_VM_HOST(L);
+    status_code = 0l;
+    response = NULL;
+    status = psi_http_request(&request, host ? host->abort_signal : NULL, &status_code, &response);
+
+    lua_pop(L, 1); /* body */
+    psi_lua_free_headers(headers, header_count);
+
+    if (status != PSI_STATUS_OK) {
+        lua_pushnil(L);
+        lua_pushstring(L, response != NULL ? response : "http request failed");
+        free(response);
+        return 2;
+    }
+
     lua_pushinteger(L, status_code);
     lua_pushstring(L, response != NULL ? response : "");
     free(response);
@@ -948,6 +1031,69 @@ static int lfn_set_usage(lua_State *L) {
     host->usage.total          = (long)luaL_optinteger(L, 5, 0);
     host->usage.context_window = (long)luaL_optinteger(L, 6, 0);
     return 0;
+}
+
+/* psi.set_tui_theme(json)
+ *
+ * Stores a Lua-selected ncurses palette on the host context so TUI
+ * mode can reapply it on redraw. Payload shape:
+ *   { pairs = [ { fg = int, bg = int }, ... seven entries ... ] }
+ *
+ * The Lua theme layer owns semantic names and inheritance; C only
+ * receives the final ordered pair list. Safe to call outside TUI —
+ * it just updates the host-side cache for any later TUI startup. */
+static int lfn_set_tui_theme(lua_State *L) {
+    const char *payload;
+    cJSON *root;
+    cJSON *pairs;
+    int i;
+    struct psi_host_context *host;
+
+    host = PSI_VM_HOST(L);
+    payload = luaL_checkstring(L, 1);
+    if (host == NULL) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+
+    root = cJSON_Parse(payload);
+    if (root == NULL) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+
+    host->tui_theme.active = 0;
+    for (i = 0; i < PSI_HOST_TUI_THEME_PAIR_COUNT; i++) {
+        host->tui_theme.pairs[i].fg = -1;
+        host->tui_theme.pairs[i].bg = -1;
+        host->tui_theme.pairs[i].is_set = 0;
+    }
+
+    pairs = cJSON_GetObjectItemCaseSensitive(root, "pairs");
+    if (cJSON_IsArray(pairs)) {
+        int limit = cJSON_GetArraySize(pairs);
+        if (limit > PSI_HOST_TUI_THEME_PAIR_COUNT) {
+            limit = PSI_HOST_TUI_THEME_PAIR_COUNT;
+        }
+        for (i = 0; i < limit; i++) {
+            cJSON *entry = cJSON_GetArrayItem(pairs, i);
+            cJSON *fg;
+            cJSON *bg;
+            if (!cJSON_IsObject(entry)) {
+                continue;
+            }
+            fg = cJSON_GetObjectItemCaseSensitive(entry, "fg");
+            bg = cJSON_GetObjectItemCaseSensitive(entry, "bg");
+            host->tui_theme.pairs[i].fg = cJSON_IsNumber(fg) ? (int)fg->valuedouble : -1;
+            host->tui_theme.pairs[i].bg = cJSON_IsNumber(bg) ? (int)bg->valuedouble : -1;
+            host->tui_theme.pairs[i].is_set = 1;
+        }
+        host->tui_theme.active = 1;
+    }
+
+    cJSON_Delete(root);
+    lua_pushboolean(L, 1);
+    return 1;
 }
 
 /* Inflate an embedded entry into a caller-provided buffer. Returns
@@ -1086,6 +1232,7 @@ static int lfn_runtime_info(lua_State *L) {
         "version", "log", "session_message_count", "read_file", "file_write",
         "current_date", "cwd", "parent_directory", "file_exists", "runtime_info",
         "session_messages", "process_run", "session_append", "session_clear",
+        "http_request",
         "tool_call",
         NULL
     };
@@ -1267,12 +1414,14 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("session_set_parent_id", lfn_session_set_parent_id);
     PSI_REG("is_aborted",            lfn_is_aborted);
     PSI_REG("set_usage",             lfn_set_usage);
+    PSI_REG("set_tui_theme",         lfn_set_tui_theme);
     PSI_REG("embedded_doc",          lfn_embedded_doc);
     PSI_REG("embedded_doc_names",    lfn_embedded_doc_names);
     PSI_REG("embedded_source",       lfn_embedded_source);
     PSI_REG("embedded_source_names", lfn_embedded_source_names);
     PSI_REG("json_encode",           lfn_json_encode);
     PSI_REG("json_decode",           lfn_json_decode);
+    PSI_REG("http_request",          lfn_http_request);
     PSI_REG("http_post",             lfn_http_post);
     PSI_REG("http_post_stream",      lfn_http_post_stream);
     PSI_REG("http_stream_begin",     lfn_http_stream_begin);
@@ -1599,6 +1748,18 @@ int psi_vm_tui_status_line(struct psi_vm *vm, const char *arg_json, char **outpu
 
 int psi_vm_tui_footer_hint(struct psi_vm *vm, const char *arg_json, char **output_text) {
     return psi_vm_call_string_procedure(vm, "psi.tui.footer_hint", arg_json, output_text);
+}
+
+int psi_vm_tui_workspace_line(struct psi_vm *vm, const char *cwd, char **output_text) {
+    return psi_vm_call_string_procedure(vm, "psi.tui.workspace_line", cwd, output_text);
+}
+
+int psi_vm_tui_status_bar(struct psi_vm *vm, const char *arg_json, char **output_text) {
+    return psi_vm_call_string_procedure(vm, "psi.tui.status_bar", arg_json, output_text);
+}
+
+int psi_vm_tui_workspace_bar(struct psi_vm *vm, const char *cwd, char **output_text) {
+    return psi_vm_call_string_procedure(vm, "psi.tui.workspace_bar", cwd, output_text);
 }
 
 int psi_vm_call_procedure0_to_string(struct psi_vm *vm, const char *procedure_name,

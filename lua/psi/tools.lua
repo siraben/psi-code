@@ -10,6 +10,7 @@ local shell = require("psi.tool_shell")
 local prelude = require("psi.prelude")
 local truncate = require("psi.truncate")
 local mutation_queue = require("psi.tool_mutation_queue")
+local web_search = require("psi.web_search")
 
 local M = {}
 
@@ -234,6 +235,24 @@ local function impl_ls(input, meta)
   return shell.run_tool("ls", command, path, true, meta)
 end
 
+-- ---------- web_search ----------
+
+local function impl_web_search(input)
+  local query = registry.require_string(input, "query")
+  local result, err
+  if not query then
+    return records.tool_failure("web_search", "missing string field: query")
+  end
+  result, err = web_search.search({
+    query = query,
+    limit = registry.optional_number(input, "limit", 5),
+  })
+  if not result then
+    return records.tool_failure("web_search", err or "web search failed")
+  end
+  return records.tool_success("web_search", result)
+end
+
 -- ---------- lua (runtime inspect / eval) ----------
 
 local function eval_to_string(expression)
@@ -381,6 +400,23 @@ registry.register(
       limit = schema_type("number"),
     }, {}),
     impl_ls
+  )
+)
+
+registry.register(
+  records.new_tool(
+    "web_search",
+    "Search the live web for current external information and return the top matching results.",
+    "Search the live web for current information and external references",
+    {
+      "Use web_search when the user needs current external information that is not in the repo.",
+      "Prefer repo-local tools first when the answer can be derived from local files.",
+    },
+    schema_object({
+      query = schema_type("string"),
+      limit = schema_type("number"),
+    }, { "query" }),
+    impl_web_search
   )
 )
 
