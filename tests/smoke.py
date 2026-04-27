@@ -1029,6 +1029,33 @@ def t_theme_reload_reverts_default(psi: Psi):
     assert_equals(out, "midnight-ember|233|234", "reload falls back to default theme")
 
 
+@test("theme/reload_preserves_extension_selected_theme")
+def t_theme_reload_preserves_extension_selected_theme(psi: Psi):
+    project = psi.tmp / "theme-command-reload-project"
+    extdir = psi.tmp / "theme-command-reload-ext"
+    (project / ".psi").mkdir(parents=True, exist_ok=True)
+    extdir.mkdir(parents=True, exist_ok=True)
+    (extdir / "select.lua").write_text(
+        "return function(psi)\n"
+        "  psi.theme.register('reload-picked', {\n"
+        "    tui = { accent = { fg = 118, bg = 233 } },\n"
+        "  })\n"
+        "  assert(psi.theme.use('reload-picked'))\n"
+        "end\n"
+    )
+    out = psi.run(
+        "--eval",
+        'local commands = require("psi.commands")\n'
+        'local theme = require("psi.theme")\n'
+        'commands.handle("/reload")\n'
+        'local cur = theme.current()\n'
+        'return theme.current_name() .. "|" .. tostring(cur.tui.accent.fg)',
+        cwd=project,
+        env_extra={"PSI_EXTENSIONS_DIR": str(extdir)},
+    ).stdout.strip()
+    assert_equals(out, "reload-picked|118", "/reload preserves extension-selected theme")
+
+
 @test("tui/status_hook")
 def t_tui_status_hook(psi: Psi):
     out = psi.eval(

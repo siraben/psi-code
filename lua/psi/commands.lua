@@ -294,7 +294,7 @@ local function cmd_reload()
     end
   end
   if psi.theme and psi.theme.apply_configured then
-    pcall(psi.theme.apply_configured)
+    pcall(psi.theme.apply_configured, { preserve_current = true })
   end
   -- Prompt templates are cheap to rescan and usually edited side-by-
   -- side with extensions; reloading them here lets users iterate on
