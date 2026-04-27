@@ -961,8 +961,208 @@ def t_providers_api_registry(psi: Psi):
         + '  tostring(#p.all_apis()),\n'
         + '}, "|")'
     )
-    assert_equals(out, "psi.anthropic|anthropic-messages|true|function|3",
+    assert_equals(out, "psi.anthropic|anthropic-messages|true|function|4",
                   "provider API registry should route API adapters")
+
+
+@test("providers/codex_routing")
+def t_providers_codex_routing(psi: Psi):
+    """`codex/<model>` routes to the codex provider, the
+    openai-responses API adapter, and the codex/gpt-5.1-codex model
+    metadata is resolvable. Verifies registry wiring without making
+    any network calls."""
+    out = psi.eval(
+        'local p = require("psi.providers")\n'
+        + 'local desc = p.resolve_descriptor("codex/gpt-5.1-codex")\n'
+        + 'local api = p.api("openai-responses")\n'
+        + 'local mod = p.load_api("openai-responses")\n'
+        + 'return table.concat({\n'
+        + '  desc.provider,\n'
+        + '  desc.api,\n'
+        + '  desc.id,\n'
+        + '  tostring(desc.context_window),\n'
+        + '  tostring(desc.compat.supports_tool_use),\n'
+        + '  tostring(desc.compat.supports_reasoning_effort),\n'
+        + '  tostring(api.module),\n'
+        + '  tostring(type(mod.run_turn)),\n'
+        + '  tostring(type(mod.complete_text)),\n'
+        + '}, "|")'
+    )
+    assert_equals(
+        out,
+        "codex|openai-responses|gpt-5.1-codex|400000|true|true|psi.codex|function|function",
+        "codex provider should route through openai-responses API",
+    )
+
+
+@test("codex/sse_parser")
+def t_codex_sse_parser(psi: Psi):
+    """Feed a synthetic Responses-API SSE stream byte-by-byte
+    (worst-case fragmentation) and confirm the parser reconstructs
+    text deltas, function_call arguments, and usage totals."""
+    # Use a Lua long-string literal to keep JSON escapes readable
+    # without four layers of Python+Lua quoting.
+    lua = r"""
+        local codex = require("psi.codex")
+        local state = codex._test.new_state()
+        local parser = codex._test.new_sse_parser()
+        local seen_text = {}
+        local observer = {
+          on_assistant_text_delta = function(t) seen_text[#seen_text+1] = t end,
+        }
+        local stream = "event: response.created\n"
+          .. "data: {\"response\":{\"id\":\"resp_abc\"}}\n\n"
+          .. "event: response.output_text.delta\n"
+          .. "data: {\"delta\":\"Hello \"}\n\n"
+          .. "event: response.output_text.delta\n"
+          .. "data: {\"delta\":\"world\"}\n\n"
+          .. "event: response.output_item.added\n"
+          .. "data: {\"item\":{\"type\":\"function_call\",\"id\":\"item_1\",\"call_id\":\"call_x\",\"name\":\"bash\"}}\n\n"
+          .. "event: response.function_call_arguments.delta\n"
+          .. [==[data: {"item_id":"item_1","delta":"{\"cmd\":"}]==] .. "\n\n"
+          .. "event: response.function_call_arguments.delta\n"
+          .. [==[data: {"item_id":"item_1","delta":"\"ls\"}"}]==] .. "\n\n"
+          .. "event: response.function_call_arguments.done\n"
+          .. "data: {\"item_id\":\"item_1\"}\n\n"
+          .. "event: response.completed\n"
+          .. "data: {\"response\":{\"id\":\"resp_abc\",\"status\":\"completed\",\"usage\":{\"input_tokens\":120,\"output_tokens\":30,\"input_tokens_details\":{\"cached_tokens\":50}}}}\n\n"
+        -- Feed one byte at a time to stress the line buffer
+        -- (covers SSE chunk-boundary regression).
+        for i = 1, #stream do
+          codex._test.sse_push(parser, stream:sub(i, i), function(ev, data)
+            codex._test.dispatch_sse(state, ev, data, observer)
+          end)
+        end
+        local _, calls = codex._test.finalize(state)
+        local call = calls[1] or {}
+        return table.concat({
+          state.response_id or "",
+          codex._test.state_text(state),
+          table.concat(seen_text),
+          tostring(state.stop_reason),
+          tostring(state.usage and state.usage.input_tokens),
+          tostring(state.usage and state.usage.output_tokens),
+          tostring(state.usage and state.usage.cache_read),
+          tostring(call.id),
+          tostring(call.name),
+          tostring(call.arguments and call.arguments.cmd),
+        }, "|")
+    """
+    out = psi.eval(lua)
+    assert_equals(
+        out,
+        "resp_abc|Hello world|Hello world|completed|70|30|50|call_x|bash|ls",
+        "codex SSE parser should reconstruct text + tool_call across byte boundaries",
+    )
+
+
+@test("codex/build_api_input")
+def t_codex_build_api_input(psi: Psi):
+    """build_api_input maps a v2 session into Responses input items:
+    user/assistant messages with input_text/output_text content,
+    function_call items for prior tool calls, and function_call_output
+    items for prior tool results. Orphan tool_results (id never
+    emitted) are dropped."""
+    out = psi.eval(
+        'local codex = require("psi.codex")\n'
+        + 'local session = {\n'
+        + '  { role = "user", data = psi.json_encode({ message = { role = "user", content = {{ type = "text", text = "hi" }} } }) },\n'
+        + '  { role = "assistant", data = psi.json_encode({ message = { role = "assistant", content = {\n'
+        + '      { type = "text", text = "on it" },\n'
+        + '      { type = "toolCall", id = "call_a", name = "bash", arguments = { cmd = "ls" } },\n'
+        + '    } } }) },\n'
+        + '  { role = "tool-result", data = psi.json_encode({ message = { toolCallId = "call_a", toolName = "bash", content = {{ type = "text", text = "file1\\nfile2" }} } }) },\n'
+        + '  { role = "tool-result", data = psi.json_encode({ message = { toolCallId = "orphan_zz", toolName = "bash", content = {{ type = "text", text = "ghost" }} } }) },\n'
+        + '}\n'
+        + 'local items = codex._test.build_api_input(session)\n'
+        + 'local types = {}\n'
+        + 'for _, it in ipairs(items) do types[#types+1] = it.type end\n'
+        + 'local user_text = items[1].content[1].text\n'
+        + 'local asst_text = items[2].content[1].text\n'
+        + 'local tc = items[3]\n'
+        + 'local out_item = items[4]\n'
+        + 'return table.concat({\n'
+        + '  table.concat(types, ","),\n'
+        + '  user_text,\n'
+        + '  asst_text,\n'
+        + '  tc.call_id,\n'
+        + '  tc.name,\n'
+        + '  tc.arguments,\n'
+        + '  out_item.call_id,\n'
+        + '  out_item.output,\n'
+        + '  tostring(#items),\n'
+        + '}, "|")'
+    )
+    assert_equals(
+        out,
+        'message,message,function_call,function_call_output|hi|on it|call_a|bash|{"cmd":"ls"}|call_a|file1\nfile2|4',
+        "codex build_api_input should drop orphan tool results and emit function_call items",
+    )
+
+
+@test("codex/request_body_shape")
+def t_codex_request_body_shape(psi: Psi):
+    """build_request_body produces the Responses-API request shape:
+    `input` instead of `messages`, `instructions` instead of
+    `system`, `max_output_tokens` instead of `max_tokens`,
+    `store: false`, `stream: true`, `parallel_tool_calls: true`,
+    and no `reasoning` block when neither env var is set."""
+    out = psi.eval(
+        'local codex = require("psi.codex")\n'
+        + 'local body = codex._test.build_request_body({\n'
+        + '  model = "gpt-5.1-codex",\n'
+        + '  messages = { { type = "message", role = "user", content = {} } },\n'
+        + '  tool_specs = { { type = "function", name = "bash" } },\n'
+        + '  system_prompt = "sys",\n'
+        + '  max_tokens = 8000,\n'
+        + '})\n'
+        + 'return table.concat({\n'
+        + '  body.model,\n'
+        + '  tostring(body.messages),  -- must be nil\n'
+        + '  tostring(#body.input),\n'
+        + '  body.instructions,\n'
+        + '  tostring(body.max_output_tokens),\n'
+        + '  tostring(body.store),\n'
+        + '  tostring(body.stream),\n'
+        + '  tostring(body.parallel_tool_calls),\n'
+        + '  tostring(body.reasoning),\n'
+        + '  tostring(#body.tools),\n'
+        + '}, "|")'
+    )
+    assert_equals(
+        out,
+        "gpt-5.1-codex|nil|1|sys|8000|false|true|true|nil|1",
+        "codex request body should match Responses API shape",
+    )
+
+
+@test("codex/finalize_malformed_args")
+def t_codex_finalize_malformed(psi: Psi):
+    """A truncated function_call arguments JSON should not crash
+    finalize; tool_use is dispatched with empty input and a stderr
+    warning is logged."""
+    out = psi.eval(
+        'local codex = require("psi.codex")\n'
+        + 'local state = codex._test.new_state()\n'
+        + '-- Synthesize an item with truncated arguments\n'
+        + 'state.items["item_1"] = {\n'
+        + '  id = "item_1", call_id = "call_x", name = "bash",\n'
+        + '  arg_parts = { \'{"cm\' },\n'
+        + '}\n'
+        + 'state.tool_calls_order[1] = "item_1"\n'
+        + 'local content, calls = codex._test.finalize(state)\n'
+        + 'local call = calls[1]\n'
+        + 'return table.concat({\n'
+        + '  call.id, call.name,\n'
+        + '  tostring(type(call.arguments)),\n'
+        + '  tostring(next(call.arguments) == nil),\n'
+        + '}, "|")'
+    )
+    assert_equals(
+        out,
+        "call_x|bash|table|true",
+        "codex finalize should fall back to empty input on malformed args",
+    )
 
 
 @test("tui/status_context_window")

@@ -39,7 +39,8 @@ This repository currently contains:
 - a streamed Anthropic-backed `--agent` mode with host tool
   execution, prompt caching, dynamic token-accounting, and session
   logging in a pi-compatible v3 JSONL format
-- Ollama and OpenRouter providers for local/open-router iteration (see
+- Ollama, OpenRouter, and Codex (OpenAI Responses API) providers for
+  local/open-router/codex iteration (see
   [docs/providers.md](docs/providers.md))
 - a default interactive coding-agent shell backed by the same
   streamed agent loop, with slash commands (`/help`, `/hotkeys`,
@@ -160,7 +161,7 @@ Current limitations of `--agent`:
   than a full branch tree walker
 - compaction is summary-based and now dynamically token-aware, but
   not branch-aware
-- three wired providers (Anthropic, Ollama, OpenRouter); extension-level
+- four wired providers (Anthropic, Ollama, OpenRouter, Codex); extension-level
   provider registration is not frozen yet
 
 ## Extensions
