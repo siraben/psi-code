@@ -148,7 +148,7 @@ Built-in commands take precedence over registered ones —
 extensions cannot shadow them. Full list:
 
 ```
-/help  /hotkeys  /quit (+ /q, :quit, :q)  /session  /system-prompt
+/help  /hotkeys  /quit (+ /q, :quit, :q)  /session  /system-prompt  /vim
 /new (alias: /clear)  /reload  /copy
 /resume <path>  /import <path>
 /name <text>  /model <spec>
@@ -304,9 +304,11 @@ These are part of the stable surface:
 | `psi.tools.cancel(reason)` | Shorthand for a failure `ToolResult` used in before-hooks to short-circuit dispatch. Example: `tools.add_before_hook(function(n, i) if n == "bash" and i.command:find("rm %-rf") then return tools.cancel("refused") end end)`. |
 | `psi.prompt.register_transformer(fn)` | Append a system-prompt rewriter. Receives the assembled prompt, returns a replacement (or `nil` to leave it). Runs after built-in assembly; transformers stack in registration order. |
 | `psi.agent.set_model(name)` / `psi.agent.current_model(fallback)` | Switch the default model at runtime (any prefix psi understands: `anthropic/`, `ollama/`, `openrouter/`). Picked up on the *next* turn; the TUI status line reflects it immediately. Pass `nil` to clear. |
-| `psi.tui.register_key_handler(fn)` | Intercept normalized TUI key events before built-in bindings. Return `{ action = "...", arg = ... }` to handle, `nil` to fall through. |
+| `psi.tui.register_key_handler(fn)` | Intercept normalized TUI key events before built-in bindings. Return `{ action = "...", arg = ... }` to handle, `nil` to fall through. Returns a handler id. |
+| `psi.tui.unregister_key_handler(id)` | Remove one key handler previously returned by `register_key_handler`. |
 | `psi.tui.clear_key_handlers()` | Remove registered key handlers. Mostly useful in tests. |
-| `psi.tui.register_status_hook(fn)` | Append a short status-bar snippet. `fn(status)` is called on every redraw (must be cheap) and returns a string or nil. Useful for tokens/sec meters, background-task indicators, etc. Suppressed while an active status message is on screen. |
+| `psi.tui.register_status_hook(fn)` | Append a short status-bar snippet. `fn(status)` is called on every redraw (must be cheap) and returns a string or nil. Returns a hook id. Useful for tokens/sec meters, background-task indicators, etc. Suppressed while an active status message is on screen. |
+| `psi.tui.unregister_status_hook(id)` | Remove one status hook previously returned by `register_status_hook`. |
 | `psi.tui.clear_status_hooks()` | Remove registered status hooks. Mostly useful in tests. |
 | `psi.tui_layout.set_prompt_max_rows(rows_or_nil)` | Override the visible multiline prompt height from Lua. Pass a number to set the row cap, or `nil` to clear the override. The TUI runtime may still supply `tui.prompt.max_rows` from settings; the layout module itself stays deterministic and the final value is always clamped to available terminal height. |
 | `psi.tools.set_active(names)` / `get_active()` | Narrow the tool set offered to the model for subsequent turns. Pass a list of tool names to restrict; pass `nil` to clear the scope and restore all registered tools. Useful for skill-scoped agents (e.g. `tools.set_active({"read","grep"})` for a read-only investigation). |
@@ -319,9 +321,13 @@ These are part of the stable surface:
 | `psi.prompt_templates.load()` / `list()` / `find(name)` / `expand(text)` | Loader + lookup + runtime expansion for user-authored slash-command templates. `/reload` reloads them. See "Prompt templates" below. |
 
 The built-in Vim keybinding layer (`lua/psi/extensions/vim_keybindings.lua`)
-uses the TUI hook APIs rather than C editor logic; the C side only
-performs generic terminal normalization, such as mapping ASCII control
-bytes to `ctrl-a` through `ctrl-z`.
+is a core-bundled extension. It is disabled by default, enabled at
+startup by setting `"extensions": { "vim_keybindings": { "enabled": true } }`
+in `~/.config/psi/settings.json` or `./.psi/settings.json`, and toggled
+during a TUI session with `/vim`, `/vim on`, or `/vim off`. It owns its
+slash command, startup config hook, and TUI key/status hooks; the C side
+only performs generic terminal normalization, such as mapping ASCII
+control bytes to `ctrl-a` through `ctrl-z`.
 
 ### Prompt templates
 

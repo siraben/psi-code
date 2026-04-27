@@ -15,14 +15,14 @@ local enabled_setting
 
 local DEFAULT_BUSY_LABEL_WEIGHT_TOTAL = 100
 local DEFAULT_BUSY_LABELS = {
-  { label = "gooning", weight = 60 },
-  { label = "gooning fr", weight = 8 },
-  { label = "lowkirkuinely", weight = 8 },
-  { label = "trolling", weight = 6 },
-  { label = "rewriting in rust", weight = 6 },
-  { label = "type error", weight = 4 },
-  { label = "nix building", weight = 4 },
-  { label = "hallucinating", weight = 4 },
+  { label = "gooning", weight = 20 },
+  { label = "gooning fr", weight = 15 },
+  { label = "lowkirkuinely", weight = 15 },
+  { label = "trolling", weight = 12 },
+  { label = "rewriting in rust", weight = 12 },
+  { label = "type error", weight = 9 },
+  { label = "nix building", weight = 9 },
+  { label = "hallucinating", weight = 8 },
 }
 
 local function action(name, arg)
@@ -30,13 +30,25 @@ local function action(name, arg)
 end
 
 local key_handlers = {}
+local next_key_handler_id = 0
 
 function M.register_key_handler(fn)
   if type(fn) ~= "function" then
     return false, "key handler must be a function"
   end
-  key_handlers[#key_handlers + 1] = fn
-  return true
+  next_key_handler_id = next_key_handler_id + 1
+  key_handlers[#key_handlers + 1] = { id = next_key_handler_id, fn = fn }
+  return next_key_handler_id
+end
+
+function M.unregister_key_handler(id)
+  for index, handler in ipairs(key_handlers) do
+    if handler.id == id then
+      table.remove(key_handlers, index)
+      return true
+    end
+  end
+  return false
 end
 
 function M.clear_key_handlers()
@@ -58,13 +70,84 @@ end
 -- active. For a dedicated row with arbitrary content, wait for a
 -- real widget API — this is the pi-gap shim.
 local status_hooks = {}
+local next_status_hook_id = 0
 
 function M.register_status_hook(fn)
-  status_hooks[#status_hooks + 1] = fn
+  if type(fn) ~= "function" then
+    return false, "status hook must be a function"
+  end
+  next_status_hook_id = next_status_hook_id + 1
+  status_hooks[#status_hooks + 1] = { id = next_status_hook_id, fn = fn }
+  return next_status_hook_id
+end
+
+function M.unregister_status_hook(id)
+  for index, hook in ipairs(status_hooks) do
+    if hook.id == id then
+      table.remove(status_hooks, index)
+      return true
+    end
+  end
+  return false
 end
 
 function M.clear_status_hooks()
   status_hooks = {}
+end
+
+local command_action_handlers = {}
+
+function M.register_command_action_handler(kind, fn)
+  if type(kind) ~= "string" or kind == "" or type(fn) ~= "function" then
+    return false, "command action handler requires a kind and function"
+  end
+  command_action_handlers[kind] = fn
+  return true
+end
+
+function M.unregister_command_action_handler(kind)
+  command_action_handlers[kind] = nil
+end
+
+function M.handle_command_action(action_value, action_context)
+  if type(action_value) ~= "table" then
+    return false
+  end
+  local handler = command_action_handlers[action_value.kind]
+  if handler == nil then
+    return false
+  end
+  local ok, handled = pcall(handler, action_value.payload, action_context or {})
+  if not ok then
+    io.stderr:write(
+      "psi: TUI command action handler failed: " .. tostring(handled) .. "\n"
+    )
+    return true
+  end
+  return handled ~= false
+end
+
+local startup_hooks = {}
+
+function M.register_startup_hook(name, fn)
+  if type(name) ~= "string" or name == "" or type(fn) ~= "function" then
+    return false, "startup hook requires a name and function"
+  end
+  startup_hooks[name] = fn
+  return true
+end
+
+function M.unregister_startup_hook(name)
+  startup_hooks[name] = nil
+end
+
+function M.run_startup_hooks(startup_context)
+  for name, fn in pairs(startup_hooks) do
+    local ok, err = pcall(fn, startup_context or {})
+    if not ok then
+      io.stderr:write("psi: TUI startup hook " .. name .. " failed: " .. tostring(err) .. "\n")
+    end
+  end
 end
 
 -- High-level TUI key policy. C normalizes terminal-specific
@@ -79,7 +162,7 @@ function M.handle_key(arg)
   local text = arg.text or ""
 
   for _, handler in ipairs(key_handlers) do
-    local ok, result = pcall(handler, arg)
+    local ok, result = pcall(handler.fn, arg)
     if ok and result ~= nil then
       return result
     end
@@ -438,8 +521,8 @@ function M.status_line(arg_json)
   if busy then
     parts[#parts + 1] = "busy…"
   end
-  for _, fn in ipairs(status_hooks) do
-    local ok_hook, extra = pcall(fn, arg)
+  for _, hook in ipairs(status_hooks) do
+    local ok_hook, extra = pcall(hook.fn, arg)
     if ok_hook and type(extra) == "string" and extra ~= "" then
       parts[#parts + 1] = extra
     end
@@ -457,8 +540,8 @@ function M.status_bar(arg_json)
     pair("model", model, false),
     pair("messages", tostring(psi.session_message_count()), false),
   }
-  for _, fn in ipairs(status_hooks) do
-    local ok_hook, extra = pcall(fn, arg)
+  for _, hook in ipairs(status_hooks) do
+    local ok_hook, extra = pcall(hook.fn, arg)
     if ok_hook and type(extra) == "string" and extra ~= "" then
       right_parts[#right_parts + 1] = extra
     end

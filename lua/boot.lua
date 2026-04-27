@@ -51,10 +51,9 @@ psi.commands = require("psi.commands")
 psi.prompt_templates = require("psi.prompt_templates")
 psi.tui = require("psi.tui")
 psi.tui_layout = require("psi.tui_layout")
-function psi.install_builtin_extensions()
-  require("psi.extensions.vim_keybindings")(psi)
-end
-psi.install_builtin_extensions()
+psi.extensions = psi.extensions or {}
+psi.extensions.vim_keybindings = require("psi.extensions.vim_keybindings")
+psi.extensions.vim_keybindings.register(psi)
 psi.modes = require("psi.modes")
 psi.markdown = require("psi.markdown")
 
