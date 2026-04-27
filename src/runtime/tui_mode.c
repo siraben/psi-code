@@ -5,6 +5,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -67,8 +68,11 @@ struct psi_tui_state {
     size_t input_capacity;
     size_t cursor;
     char *status_text;
+    char *busy_label;
     int status_is_error;
     int busy;
+    int busy_phase;
+    int show_thinking;
     int running;
     int scroll_offset;
     int streaming_assistant_index;
@@ -82,6 +86,7 @@ struct psi_tui_state {
      * host tick hook clears it and repaints. Avoids one redraw per
      * SSE delta; one per sched tick (~every 50ms during a stream). */
     int transcript_dirty;
+    long busy_next_frame_ms;
     int width;
     int height;
 
@@ -106,6 +111,14 @@ static int psi_tui_add_entry(
     const char *text,
     int is_error
 );
+static int psi_tui_add_entry_at(
+    struct psi_tui_state *state,
+    size_t index,
+    enum psi_tui_entry_kind kind,
+    const char *title,
+    const char *text,
+    int is_error
+);
 static int psi_tui_build_render_lines(
     struct psi_tui_state *state,
     struct psi_tui_render_line **lines_out,
@@ -113,6 +126,14 @@ static int psi_tui_build_render_lines(
 );
 static void psi_tui_render_free_lines(struct psi_tui_render_line *lines, size_t count);
 static void psi_tui_redraw(struct psi_tui_state *state);
+
+static long psi_tui_now_ms(void) {
+    struct timeval tv;
+    if (gettimeofday(&tv, NULL) != 0) {
+        return 0l;
+    }
+    return (long)(tv.tv_sec * 1000l) + (long)(tv.tv_usec / 1000l);
+}
 static void psi_tui_insert_char(struct psi_tui_state *state, int ch);
 static void psi_tui_delete_backward(struct psi_tui_state *state);
 static void psi_tui_delete_forward(struct psi_tui_state *state);
@@ -295,6 +316,26 @@ static void psi_tui_set_status(struct psi_tui_state *state, const char *text, in
     state->status_is_error = is_error;
 }
 
+static void psi_tui_set_busy_label(struct psi_tui_state *state, const char *text) {
+    if (state == NULL) {
+        return;
+    }
+    free(state->busy_label);
+    state->busy_label = psi_strdup(text != NULL ? text : "");
+    state->busy_phase = 0;
+    state->busy_next_frame_ms = 0l;
+}
+
+static void psi_tui_clear_busy_label(struct psi_tui_state *state) {
+    if (state == NULL) {
+        return;
+    }
+    free(state->busy_label);
+    state->busy_label = NULL;
+    state->busy_phase = 0;
+    state->busy_next_frame_ms = 0l;
+}
+
 static int psi_tui_reserve_entries(struct psi_tui_state *state, size_t extra) {
     struct psi_tui_entry *next_entries;
     size_t next_capacity;
@@ -341,6 +382,53 @@ static int psi_tui_reserve_input(struct psi_tui_state *state, size_t extra) {
     return PSI_STATUS_OK;
 }
 
+static int psi_tui_add_entry_at(
+    struct psi_tui_state *state,
+    size_t index,
+    enum psi_tui_entry_kind kind,
+    const char *title,
+    const char *text,
+    int is_error
+) {
+    struct psi_tui_entry *entry;
+    size_t scan;
+    char *entry_text;
+    char *entry_title;
+
+    if (state == NULL) {
+        return -1;
+    }
+    if (index > state->entry_count) {
+        index = state->entry_count;
+    }
+    entry_title = psi_strdup(title != NULL ? title : "");
+    entry_text = psi_strdup(text != NULL ? text : "");
+    if (entry_title == NULL || entry_text == NULL) {
+        free(entry_title);
+        free(entry_text);
+        return -1;
+    }
+    if (psi_tui_reserve_entries(state, 1u) != PSI_STATUS_OK) {
+        free(entry_title);
+        free(entry_text);
+        return -1;
+    }
+    for (scan = state->entry_count; scan > index; scan--) {
+        state->entries[scan] = state->entries[scan - 1u];
+    }
+
+    entry = &state->entries[index];
+    memset(entry, 0, sizeof(*entry));
+    entry->kind = kind;
+    entry->title = entry_title;
+    entry->text = entry_text;
+    entry->is_error = is_error;
+    entry->tool_call_id = NULL;
+
+    state->entry_count++;
+    return (int)index;
+}
+
 static int psi_tui_add_entry(
     struct psi_tui_state *state,
     enum psi_tui_entry_kind kind,
@@ -348,28 +436,10 @@ static int psi_tui_add_entry(
     const char *text,
     int is_error
 ) {
-    struct psi_tui_entry *entry;
-
     if (state == NULL) {
         return -1;
     }
-    if (psi_tui_reserve_entries(state, 1u) != PSI_STATUS_OK) {
-        return -1;
-    }
-
-    entry = &state->entries[state->entry_count];
-    entry->kind = kind;
-    entry->title = psi_strdup(title != NULL ? title : "");
-    entry->text = psi_strdup(text != NULL ? text : "");
-    entry->is_error = is_error;
-    entry->tool_call_id = NULL;
-    if (entry->title == NULL || entry->text == NULL) {
-        psi_tui_free_entry(entry);
-        return -1;
-    }
-
-    state->entry_count++;
-    return (int)(state->entry_count - 1u);
+    return psi_tui_add_entry_at(state, state->entry_count, kind, title, text, is_error);
 }
 
 /* Tag the most-recently added entry with a tool-call id. Used right
@@ -1597,6 +1667,7 @@ static void psi_tui_redraw(struct psi_tui_state *state) {
     psi_tui_render_free_lines(lines, line_count);
 
     {
+        char *busy_text = NULL;
         char arg_json[256];
         char *workspace_bar = NULL;
         char *status_bar = NULL;
@@ -1620,6 +1691,15 @@ static void psi_tui_redraw(struct psi_tui_state *state) {
             } else {
                 psi_tui_draw_ansi_line(status_row, state->status_text, 7);
             }
+        } else if (state->busy && state->busy_label != NULL && state->busy_label[0] != '\0') {
+            if (psi_vm_tui_render_busy_status(
+                    &state->runtime.vm, state->busy_label, (long)state->busy_phase, &busy_text)
+                == PSI_STATUS_OK && busy_text != NULL) {
+                psi_tui_draw_ansi_line(status_row, busy_text, 7);
+            } else {
+                psi_tui_draw_line(status_row, state->busy_label, 7, A_DIM);
+            }
+            free(busy_text);
         } else {
             psi_tui_draw_line(status_row, "", 0, 0);
         }
@@ -1811,7 +1891,6 @@ static void psi_tui_observer_text_delta(void *userdata, const char *text) {
     size_t lines_before;
     if (state == NULL || text == NULL) return;
     lines_before = psi_tui_scroll_anchor_before(state);
-    state->streaming_thinking_index = -1;
     if (state->streaming_assistant_index < 0) {
         state->streaming_assistant_index =
             psi_tui_add_entry(state, PSI_TUI_ENTRY_ASSISTANT, NULL, "", 0);
@@ -1823,12 +1902,20 @@ static void psi_tui_observer_text_delta(void *userdata, const char *text) {
 
 static void psi_tui_observer_thinking_delta(void *userdata, const char *text) {
     struct psi_tui_state *state = (struct psi_tui_state *)userdata;
+    int insert_index;
     size_t lines_before;
     if (state == NULL || text == NULL || text[0] == '\0') return;
+    if (!state->show_thinking) return;
     lines_before = psi_tui_scroll_anchor_before(state);
     if (state->streaming_thinking_index < 0) {
+        insert_index = state->streaming_assistant_index >= 0
+            ? state->streaming_assistant_index
+            : (int)state->entry_count;
         state->streaming_thinking_index =
-            psi_tui_add_entry(state, PSI_TUI_ENTRY_THINKING, NULL, "", 0);
+            psi_tui_add_entry_at(state, (size_t)insert_index, PSI_TUI_ENTRY_THINKING, NULL, "", 0);
+        if (state->streaming_assistant_index >= insert_index) {
+            state->streaming_assistant_index++;
+        }
     }
     psi_tui_append_entry_text(state, state->streaming_thinking_index, text);
     psi_tui_scroll_anchor_after(state, lines_before);
@@ -1950,16 +2037,28 @@ static void psi_tui_add_session_entry(struct psi_tui_state *state, const struct 
             psi_tui_add_entry(state, PSI_TUI_ENTRY_USER, NULL, message->text, 0);
             break;
         case PSI_MESSAGE_ASSISTANT:
+            parsed = message->data_json != NULL ? cJSON_Parse(message->data_json) : NULL;
+            payload = parsed != NULL ? cJSON_GetObjectItemCaseSensitive(parsed, "message") : NULL;
+            content_array = payload != NULL ? cJSON_GetObjectItemCaseSensitive(payload, "content") : NULL;
+            if (state->show_thinking) {
+                cJSON_ArrayForEach(block, content_array) {
+                    const char *thinking_text;
+                    type_field = cJSON_GetObjectItemCaseSensitive(block, "type");
+                    if (type_field == NULL || !cJSON_IsString(type_field)) continue;
+                    if (strcmp(type_field->valuestring, "thinking") != 0) continue;
+                    thinking_text = psi_tui_json_string(block, "thinking");
+                    if (thinking_text != NULL && thinking_text[0] != '\0') {
+                        psi_tui_add_entry(state, PSI_TUI_ENTRY_THINKING, NULL, thinking_text, 0);
+                    }
+                }
+            }
             if (message->text != NULL && message->text[0] != '\0') {
                 psi_tui_add_entry(state, PSI_TUI_ENTRY_ASSISTANT, NULL, message->text, 0);
             }
             /* Mirror pi: tool calls live inside the assistant message's
              * content array. Walk the stored data_json and synthesize a
              * tool-call entry for every tool_use block. */
-            if (message->data_json != NULL) {
-                parsed = cJSON_Parse(message->data_json);
-                payload = parsed != NULL ? cJSON_GetObjectItemCaseSensitive(parsed, "message") : NULL;
-                content_array = payload != NULL ? cJSON_GetObjectItemCaseSensitive(payload, "content") : NULL;
+            if (content_array != NULL) {
                 cJSON_ArrayForEach(block, content_array) {
                     type_field = cJSON_GetObjectItemCaseSensitive(block, "type");
                     if (type_field == NULL || !cJSON_IsString(type_field)) continue;
@@ -1985,8 +2084,8 @@ static void psi_tui_add_session_entry(struct psi_tui_state *state, const struct 
                         free(summary);
                     }
                 }
-                cJSON_Delete(parsed);
             }
+            cJSON_Delete(parsed);
             break;
         case PSI_MESSAGE_TOOL_CALL:
             /* Legacy role: no longer written by the agent loop. Ignored
@@ -2133,8 +2232,25 @@ static int psi_tui_handle_command(
  */
 static void psi_tui_input_once(struct psi_tui_state *state, int ch);
 
+static int psi_tui_show_thinking_enabled(struct psi_tui_state *state) {
+    char *value;
+    int enabled;
+
+    if (state == NULL) return 1;
+    value = NULL;
+    enabled = 1;
+    if (psi_vm_call_procedure0_to_string(
+            &state->runtime.vm, "psi.tui.show_thinking", &value) == PSI_STATUS_OK
+        && value != NULL && strcmp(value, "0") == 0) {
+        enabled = 0;
+    }
+    free(value);
+    return enabled;
+}
+
 static void psi_tui_tick(void *userdata) {
     struct psi_tui_state *state = (struct psi_tui_state *)userdata;
+    long now_ms;
     int prev_timeout;
     int ch;
 
@@ -2148,6 +2264,19 @@ static void psi_tui_tick(void *userdata) {
         ch = getch();
         if (ch == ERR) break;
         psi_tui_input_once(state, ch);
+    }
+
+    if (state->busy
+        && state->busy_label != NULL
+        && (state->status_text == NULL || state->status_text[0] == '\0')) {
+        now_ms = psi_tui_now_ms();
+        if (state->busy_next_frame_ms == 0l) {
+            state->busy_next_frame_ms = now_ms + 180l;
+        } else if (now_ms >= state->busy_next_frame_ms) {
+            state->busy_phase = (state->busy_phase + 1) % 3;
+            state->busy_next_frame_ms = now_ms + 180l;
+            state->transcript_dirty = 1;
+        }
     }
 
     if (state->transcript_dirty) {
@@ -2409,7 +2538,9 @@ static int psi_tui_submit(struct psi_tui_state *state) {
     }
 
     psi_tui_add_entry(state, PSI_TUI_ENTRY_USER, NULL, line, 0);
-    state->streaming_assistant_index = psi_tui_add_entry(state, PSI_TUI_ENTRY_ASSISTANT, NULL, "", 0);
+    state->show_thinking = psi_tui_show_thinking_enabled(state);
+    state->streaming_assistant_index = -1;
+    state->streaming_thinking_index = -1;
     state->scroll_offset = 0;
     state->busy = 1;
     psi_abort_signal_reset(&state->abort_signal);
@@ -2417,10 +2548,11 @@ static int psi_tui_submit(struct psi_tui_state *state) {
     if (psi_vm_call_procedure0_to_string(
             &state->runtime.vm, "psi.tui.pick_busy_status", &busy_status) == PSI_STATUS_OK
         && busy_status != NULL && busy_status[0] != '\0') {
-        psi_tui_set_status(state, busy_status, 0);
+        psi_tui_set_busy_label(state, busy_status);
     } else {
-        psi_tui_set_status(state, "Working...", 0);
+        psi_tui_set_busy_label(state, "working");
     }
+    psi_tui_set_status(state, "", 0);
     free(busy_status);
     psi_tui_redraw(state);
 
@@ -2428,6 +2560,7 @@ static int psi_tui_submit(struct psi_tui_state *state) {
     free(line);
 
     state->busy = 0;
+    psi_tui_clear_busy_label(state);
     psi_tui_redraw(state);
     return PSI_STATUS_OK;
 }
@@ -2441,11 +2574,13 @@ static int psi_tui_start_compact(struct psi_tui_state *state, long keep_recent) 
     int status;
     if (state == NULL || state->busy) return PSI_STATUS_OK;
     state->busy = 1;
+    psi_tui_set_busy_label(state, "compacting");
     psi_abort_signal_reset(&state->abort_signal);
-    psi_tui_set_status(state, "Compacting...", 0);
+    psi_tui_set_status(state, "", 0);
     psi_tui_redraw(state);
     status = psi_tui_run_compact_sync(state, keep_recent);
     state->busy = 0;
+    psi_tui_clear_busy_label(state);
     psi_tui_redraw(state);
     return status;
 }
@@ -2676,6 +2811,7 @@ static int psi_tui_setup_runtime(struct psi_tui_state *state, const struct psi_c
             "psi.session.announce_start", "", &ignored);
         free(ignored);
     }
+    state->show_thinking = psi_tui_show_thinking_enabled(state);
     return PSI_STATUS_OK;
 }
 
@@ -2684,6 +2820,7 @@ static void psi_tui_state_init(struct psi_tui_state *state, const struct psi_cli
     state->options = options;
     state->streaming_assistant_index = -1;
     state->streaming_thinking_index = -1;
+    state->show_thinking = 1;
     state->running = 1;
     psi_abort_signal_init(&state->abort_signal);
 }
@@ -2706,6 +2843,7 @@ static void psi_tui_state_free(struct psi_tui_state *state) {
         psi_tui_free_entry(&state->entries[index]);
     }
     free(state->entries);
+    free(state->busy_label);
     free(state->input);
     free(state->status_text);
     psi_agent_runtime_free(&state->runtime);

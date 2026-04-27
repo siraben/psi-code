@@ -827,9 +827,32 @@ def t_tui_busy_status_config(psi: Psi):
         'return require("psi.tui").pick_busy_status()',
         cwd=project,
     ).stdout
+    assert_equals(out.strip(), "custom busy", "busy label pulled from settings")
+
+
+@test("tui/busy_status_render")
+def t_tui_busy_status_render(psi: Psi):
+    out = psi.eval('return require("psi.tui").render_busy_status("gooning", 2)')
     plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
-    assert_contains(plain, "custom busy", "busy label pulled from settings")
+    assert_contains(plain, "working", "working chip rendered")
+    assert_contains(plain, "gooning", "busy label rendered")
     assert_contains(plain, "esc to interrupt", "busy hint rendered")
+    assert_contains(plain, "...", "animated dots rendered")
+
+
+@test("tui/show_thinking_config")
+def t_tui_show_thinking_config(psi: Psi):
+    project = psi.tmp / "thinking-config-project"
+    (project / ".psi").mkdir(parents=True, exist_ok=True)
+    (project / ".psi" / "settings.json").write_text(
+        json.dumps({"tui": {"show_thinking": False}})
+    )
+    out = psi.run(
+        "--eval",
+        'return require("psi.tui").show_thinking()',
+        cwd=project,
+    ).stdout.strip()
+    assert_equals(out, "0", "thinking visibility pulled from settings")
 
 
 @test("tui/layout_geometry")

@@ -32,6 +32,7 @@ int psi_vm_tui_footer_hint(struct psi_vm *vm, const char *arg_json, char **outpu
 int psi_vm_tui_workspace_line(struct psi_vm *vm, const char *cwd, char **output_text);
 int psi_vm_tui_status_bar(struct psi_vm *vm, const char *arg_json, char **output_text);
 int psi_vm_tui_workspace_bar(struct psi_vm *vm, const char *cwd, char **output_text);
+int psi_vm_tui_render_busy_status(struct psi_vm *vm, const char *label, long phase, char **output_text);
 int psi_vm_render_event_json(
     struct psi_vm *vm,
     const char *event_name,

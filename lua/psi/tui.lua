@@ -100,6 +100,33 @@ local function configured_busy_labels()
   return DEFAULT_BUSY_LABELS
 end
 
+local function enabled_setting(path, env_name, default_value)
+  local configured = settings.get(path, nil)
+  local value = configured
+  if value == nil and env_name ~= nil then
+    value = os.getenv(env_name)
+  end
+  if value == nil then
+    return default_value
+  end
+  if type(value) == "boolean" then
+    return value
+  end
+  if type(value) == "number" then
+    return value ~= 0
+  end
+  if type(value) == "string" then
+    local normalized = value:lower()
+    if normalized == "0" or normalized == "false" or normalized == "off" or normalized == "no" then
+      return false
+    end
+    if normalized == "1" or normalized == "true" or normalized == "on" or normalized == "yes" then
+      return true
+    end
+  end
+  return default_value
+end
+
 local function split_path(path)
   local parts = {}
   for part in tostring(path or ""):gmatch("[^/]+") do
@@ -225,16 +252,21 @@ function M.workspace_bar(cwd)
   return pair("cwd", tilde_path(cwd or "-"), false) .. BAR_SPLIT .. ""
 end
 
-function M.render_busy_status(label_text)
+function M.render_busy_status(label_text, phase)
   local text = tostring(label_text or "working")
+  local dots = ({ ".", "..", "..." })[((phase or 0) % 3) + 1]
   local chip = ansi.color("1;30;46", " working ")
-  return chip .. accent(" " .. text) .. label("  esc to interrupt")
+  return chip .. accent(" " .. text) .. label("  esc to interrupt") .. accent(" " .. dots)
 end
 
 function M.pick_busy_status()
   local labels = configured_busy_labels()
   seed_busy_rng()
-  return M.render_busy_status(labels[math.random(#labels)])
+  return labels[math.random(#labels)]
+end
+
+function M.show_thinking()
+  return enabled_setting("tui.show_thinking", "PSI_SHOW_THINKING", true) and "1" or "0"
 end
 
 return M

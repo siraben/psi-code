@@ -1762,6 +1762,23 @@ int psi_vm_tui_workspace_bar(struct psi_vm *vm, const char *cwd, char **output_t
     return psi_vm_call_string_procedure(vm, "psi.tui.workspace_bar", cwd, output_text);
 }
 
+int psi_vm_tui_render_busy_status(
+    struct psi_vm *vm,
+    const char *label,
+    long phase,
+    char **output_text
+) {
+    if (!vm || !vm->L || !output_text) return PSI_STATUS_ERROR;
+    *output_text = NULL;
+    if (psi_vm_begin_call(vm->L, "psi.tui.render_busy_status") != 0) return PSI_STATUS_ERROR;
+    lua_pushstring(vm->L, label != NULL ? label : "");
+    lua_pushinteger(vm->L, (lua_Integer)phase);
+    if (psi_vm_finish_call(vm->L, 2, 1, "psi.tui.render_busy_status") != PSI_STATUS_OK) {
+        return PSI_STATUS_ERROR;
+    }
+    return psi_vm_pop_string(vm->L, output_text);
+}
+
 int psi_vm_call_procedure0_to_string(struct psi_vm *vm, const char *procedure_name,
                                       char **output_text) {
     if (!vm || !vm->L || !procedure_name || !output_text) return PSI_STATUS_ERROR;
