@@ -45,16 +45,17 @@ This repository currently contains:
   streamed agent loop, with slash commands (`/help`, `/hotkeys`,
   `/session`, `/new`, `/clear`, `/resume`, `/import`, `/name`,
   `/model`, `/copy`, `/export`, `/compact`, `/fork`, `/clone`,
-  `/reload`, `/system-prompt`, `/quit`). Extensions add their own
+  `/reload`, `/vim`, `/system-prompt`, `/quit`). Extensions add their own
   via `psi.commands.register`.
 - a full-screen `--tui` mode with rich status (cwd / model /
   session / token usage), unicode tool-call borders, live
-  markdown rendering, mode-aware hints, readline-style and Lua
-  extension-backed Vim modal editing (normal/insert/visual/block
-  visual, `w`/`b`, `I`/`A`/`o`/`O`, `^`/`$`, `gg`/`G`,
-  `Ctrl-U`/`Ctrl-D`, `y`/`p`, `Ctrl-A`/`Ctrl-E`), Esc to
-  normal mode, `Ctrl-G` abort while busy, `Ctrl-C` clear-buffer, and Ctrl-Z
-  suspend/resume, plus a Lua-driven theme registry with a bundled
+  markdown rendering, mode-aware hints, readline-style editing,
+  optional bundled Vim modal editing via `extensions.vim_keybindings.enabled`
+  in settings or `/vim`
+  (normal/insert/visual/block visual, `w`/`b`, `I`/`A`/`o`/`O`,
+  `^`/`$`, `gg`/`G`, `Ctrl-U`/`Ctrl-D`, `y`/`p`,
+  `Ctrl-A`/`Ctrl-E`), `Ctrl-G` abort while busy, `Ctrl-C`
+  clear-buffer, and Ctrl-Z suspend/resume, plus a Lua-driven theme registry with a bundled
   dark default. Single-threaded: the agent turn runs as
   a Lua coroutine on the TUI thread, pumping input and
   ANSI redraws between every cooperative yield
