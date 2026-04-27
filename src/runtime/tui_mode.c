@@ -122,6 +122,7 @@ static void psi_tui_move_word_backward(struct psi_tui_state *state);
 static void psi_tui_move_word_forward(struct psi_tui_state *state);
 static void psi_tui_kill_to_end(struct psi_tui_state *state);
 static void psi_tui_kill_to_start(struct psi_tui_state *state);
+static void psi_tui_apply_theme(struct psi_tui_state *state);
 static int psi_tui_start_compact(struct psi_tui_state *state, long keep_recent);
 
 static int psi_tui_transcript_height(const struct psi_tui_state *state) {
@@ -1269,12 +1270,41 @@ static void psi_tui_draw_line(int row, const char *text, int color_pair, int att
     }
 }
 
+static int psi_tui_ansi_visible_width(const char *text) {
+    int width;
+    int i;
+    int len;
+
+    if (text == NULL) {
+        return 0;
+    }
+
+    width = 0;
+    len = (int)strlen(text);
+    i = 0;
+    while (i < len) {
+        unsigned char ch = (unsigned char)text[i];
+        if (ch == 0x1b && i + 1 < len && text[i + 1] == '[') {
+            int j = i + 2;
+            while (j < len && text[j] != 'm') j++;
+            i = (j < len) ? (j + 1) : len;
+            continue;
+        }
+        if ((ch & 0xc0u) != 0x80u) {
+            width++;
+        }
+        i++;
+    }
+    return width;
+}
+
 /* Map a single ANSI SGR code to the equivalent ncurses attr + color
  * pair overlay. Supports just the codes that psi.ansi and
  * psi.markdown emit — reset (0), bold (1), dim (2), italic (3, mapped
  * to A_UNDERLINE since ncurses italic support is spotty), underline
- * (4), and foreground colors 31-37 which we map to pre-initialised
- * color pairs (see psi_tui_init_colors). Unknown codes are ignored.
+ * (4), black-on-accent chip (30), and foreground colors 31-37 which
+ * we map to pre-initialised color pairs (see psi_tui_init_colors).
+ * Unknown codes are ignored.
  */
 struct psi_tui_ansi_state {
     attr_t attrs;
@@ -1291,6 +1321,7 @@ static void psi_tui_ansi_apply(struct psi_tui_ansi_state *s, int code) {
         case 2:  s->attrs |= A_DIM; break;
         case 3:  s->attrs |= A_UNDERLINE; break; /* italic → underline */
         case 4:  s->attrs |= A_UNDERLINE; break;
+        case 30: s->color_pair = 8; break; /* black on accent chip */
         case 31: s->color_pair = 6; break; /* red    */
         case 32: s->color_pair = 5; break; /* green  */
         case 33: s->color_pair = 4; break; /* yellow */
@@ -1308,7 +1339,13 @@ static void psi_tui_ansi_apply(struct psi_tui_ansi_state *s, int code) {
  * Pre-existing pair overrides (color_pair argument) are used as the
  * base; they're union'd into the live attrs on every cell. Lines
  * without escapes render identically to psi_tui_draw_line. */
-static void psi_tui_draw_ansi_line(int row, const char *text, int base_color_pair) {
+static void psi_tui_draw_ansi_text_at(
+    int row,
+    int start_col,
+    const char *text,
+    int base_color_pair,
+    int clear_row
+) {
     int max_width;
     int len;
     int col;
@@ -1316,9 +1353,14 @@ static void psi_tui_draw_ansi_line(int row, const char *text, int base_color_pai
     struct psi_tui_ansi_state st;
     attr_t base;
 
-    max_width = COLS > 1 ? COLS - 1 : 0;
-    move(row, 0);
-    clrtoeol();
+    if (start_col < 0) start_col = 0;
+    max_width = COLS > start_col + 1 ? COLS - start_col - 1 : 0;
+    move(row, start_col);
+    if (clear_row) {
+        move(row, 0);
+        clrtoeol();
+        move(row, start_col);
+    }
     if (text == NULL) return;
 
     st.attrs = 0;
@@ -1389,12 +1431,71 @@ static void psi_tui_draw_ansi_line(int row, const char *text, int base_color_pai
             pair = st.color_pair > 0 ? st.color_pair : base_color_pair;
             if (pair > 0) cur |= COLOR_PAIR(pair);
             if (cur != 0) attron(cur);
-            addnstr(text + span_start, take);
+            mvaddnstr(row, start_col + col, text + span_start, take);
             if (cur != 0) attroff(cur);
             col += take;
             i = span_start + take;
         }
     }
+}
+
+static void psi_tui_draw_ansi_line(int row, const char *text, int base_color_pair) {
+    psi_tui_draw_ansi_text_at(row, 0, text, base_color_pair, 1);
+}
+
+static void psi_tui_split_bar(char *text, char **left, char **right) {
+    char *sep;
+
+    if (left != NULL) *left = text;
+    if (right != NULL) *right = "";
+    if (text == NULL) return;
+
+    sep = strchr(text, 31);
+    if (sep == NULL) return;
+
+    *sep = '\0';
+    if (left != NULL) *left = text;
+    if (right != NULL) *right = sep + 1;
+}
+
+static void psi_tui_draw_split_ansi_line(
+    int row,
+    char *text,
+    int base_color_pair
+) {
+    char *left;
+    char *right;
+    int left_width;
+    int right_width;
+    int right_col;
+    int max_width;
+
+    left = text;
+    right = "";
+    psi_tui_split_bar(text, &left, &right);
+
+    move(row, 0);
+    clrtoeol();
+    psi_tui_draw_ansi_text_at(row, 0, left != NULL ? left : "", base_color_pair, 0);
+
+    if (right == NULL || right[0] == '\0') {
+        return;
+    }
+
+    max_width = COLS > 1 ? COLS - 1 : 0;
+    left_width = psi_tui_ansi_visible_width(left);
+    right_width = psi_tui_ansi_visible_width(right);
+    right_col = max_width - right_width;
+    if (right_col < left_width + 2) {
+        right_col = left_width + 2;
+    }
+    if (right_col < 0) {
+        right_col = 0;
+    }
+    if (right_col >= max_width) {
+        return;
+    }
+    psi_tui_draw_ansi_text_at(row, right_col, right, base_color_pair, 0);
 }
 
 static void psi_tui_redraw(struct psi_tui_state *state) {
@@ -1404,8 +1505,6 @@ static void psi_tui_redraw(struct psi_tui_state *state) {
     int transcript_start;
     int transcript_height;
     int status_row;
-    int footer_row1;
-    int footer_row2;
     int input_row;
     int bottom_row;
     int first_line;
@@ -1420,26 +1519,19 @@ static void psi_tui_redraw(struct psi_tui_state *state) {
     }
 
     getmaxyx(stdscr, state->height, state->width);
+    psi_tui_apply_theme(state);
     erase();
 
     header_row = 0;
     transcript_start = 1;
-    status_row = state->height - 5;
-    footer_row1 = state->height - 4;
-    footer_row2 = state->height - 3;
+    status_row = state->height - 3;
     input_row = state->height - 2;
     bottom_row = state->height - 1;
     if (status_row < transcript_start) {
         status_row = transcript_start;
     }
-    if (footer_row1 < status_row) {
-        footer_row1 = status_row;
-    }
-    if (footer_row2 < footer_row1) {
-        footer_row2 = footer_row1;
-    }
-    if (input_row < footer_row2) {
-        input_row = footer_row2;
+    if (input_row < status_row) {
+        input_row = status_row;
     }
     if (bottom_row < input_row) {
         bottom_row = input_row;
@@ -1506,42 +1598,35 @@ static void psi_tui_redraw(struct psi_tui_state *state) {
 
     {
         char arg_json[256];
-        char *hint = NULL;
-        char *status_line = NULL;
+        char *workspace_bar = NULL;
+        char *status_bar = NULL;
         char cwd_buffer[4096];
         const char *cwd;
 
         psi_tui_footer_arg_json(state, arg_json, sizeof(arg_json));
-
-        /* status_text (set by operations via psi_tui_set_status)
-         * wins over the regular Lua-rendered hint; otherwise we
-         * defer to psi.tui.footer_hint. */
-        if (state->status_text != NULL) {
-            psi_tui_draw_line(
-                status_row, state->status_text,
-                state->status_is_error ? 6 : 7,
-                state->status_is_error ? A_BOLD : A_DIM
-            );
-        } else {
-            psi_vm_tui_footer_hint(&state->runtime.vm, arg_json, &hint);
-            psi_tui_draw_line(
-                status_row, hint != NULL ? hint : "",
-                7, A_DIM
-            );
-            free(hint);
-        }
 
         cwd = getcwd(cwd_buffer, sizeof(cwd_buffer));
         if (cwd == NULL) {
             snprintf(cwd_buffer, sizeof(cwd_buffer),
                      "<cwd unavailable: %s>", strerror(errno));
         }
-        psi_tui_draw_line(footer_row1, cwd_buffer, 7, A_DIM);
+        psi_vm_tui_workspace_bar(&state->runtime.vm, cwd != NULL ? cwd : cwd_buffer, &workspace_bar);
+        psi_tui_draw_split_ansi_line(header_row, workspace_bar != NULL ? workspace_bar : cwd_buffer, 7);
+        free(workspace_bar);
 
-        psi_vm_tui_status_line(&state->runtime.vm, arg_json, &status_line);
-        psi_tui_draw_line(footer_row2, status_line != NULL ? status_line : "",
-                          7, A_DIM);
-        free(status_line);
+        if (state->status_text != NULL && state->status_text[0] != '\0') {
+            if (state->status_is_error) {
+                psi_tui_draw_line(status_row, state->status_text, 6, A_BOLD);
+            } else {
+                psi_tui_draw_ansi_line(status_row, state->status_text, 7);
+            }
+        } else {
+            psi_tui_draw_line(status_row, "", 0, 0);
+        }
+
+        psi_vm_tui_status_bar(&state->runtime.vm, arg_json, &status_bar);
+        psi_tui_draw_split_ansi_line(bottom_row, status_bar != NULL ? status_bar : "", 7);
+        free(status_bar);
     }
 
     prompt_width = state->width - 3;
@@ -1554,7 +1639,6 @@ static void psi_tui_redraw(struct psi_tui_state *state) {
     }
     snprintf(prompt_buffer, sizeof(prompt_buffer), "> %s", state->input != NULL ? state->input + input_start : "");
     psi_tui_draw_line(input_row, prompt_buffer, 2, A_BOLD);
-    psi_tui_draw_line(bottom_row, "", 0, 0);
 
     {
         int cursor_col;
@@ -2299,6 +2383,7 @@ static int psi_tui_run_compact_sync(struct psi_tui_state *state, long keep_recen
 }
 
 static int psi_tui_submit(struct psi_tui_state *state) {
+    char *busy_status;
     char *line;
     int status;
 
@@ -2328,7 +2413,15 @@ static int psi_tui_submit(struct psi_tui_state *state) {
     state->scroll_offset = 0;
     state->busy = 1;
     psi_abort_signal_reset(&state->abort_signal);
-    psi_tui_set_status(state, "Working...", 0);
+    busy_status = NULL;
+    if (psi_vm_call_procedure0_to_string(
+            &state->runtime.vm, "psi.tui.pick_busy_status", &busy_status) == PSI_STATUS_OK
+        && busy_status != NULL && busy_status[0] != '\0') {
+        psi_tui_set_status(state, busy_status, 0);
+    } else {
+        psi_tui_set_status(state, "Working...", 0);
+    }
+    free(busy_status);
     psi_tui_redraw(state);
 
     (void)psi_tui_run_turn_sync(state, line);
@@ -2479,19 +2572,72 @@ static void psi_tui_kill_to_start(struct psi_tui_state *state) {
     state->cursor = 0u;
 }
 
-static int psi_tui_init_colors(void) {
+static int psi_tui_default_fg(int pair_id) {
+    switch (pair_id) {
+        case 1: return COLOR_BLUE;
+        case 2: return COLOR_CYAN;
+        case 3: return COLOR_WHITE;
+        case 4: return COLOR_YELLOW;
+        case 5: return COLOR_GREEN;
+        case 6: return COLOR_RED;
+        case 7: return -1;
+        default: return -1;
+    }
+}
+
+static int psi_tui_resolve_color(int pair_id, int requested, int is_background) {
+    int fallback;
+
+    fallback = is_background ? -1 : psi_tui_default_fg(pair_id);
+    if (requested == -1) {
+        return fallback;
+    }
+    if (requested >= 0 && requested < COLORS) {
+        return requested;
+    }
+    if (is_background && COLOR_BLACK >= 0 && COLOR_BLACK < COLORS) {
+        return COLOR_BLACK;
+    }
+    if (fallback >= 0 && fallback < COLORS) {
+        return fallback;
+    }
+    return fallback;
+}
+
+static void psi_tui_apply_theme(struct psi_tui_state *state) {
+    const struct psi_host_tui_theme *theme;
+    int accent_fg;
+    int pair_id;
+
+    if (state == NULL || !has_colors()) {
+        return;
+    }
+
+    theme = &state->runtime.vm.host.tui_theme;
+    for (pair_id = 1; pair_id <= PSI_HOST_TUI_THEME_PAIR_COUNT; pair_id++) {
+        int fg = psi_tui_default_fg(pair_id);
+        int bg = -1;
+        if (theme->active && theme->pairs[pair_id - 1].is_set) {
+            fg = psi_tui_resolve_color(pair_id, theme->pairs[pair_id - 1].fg, 0);
+            bg = psi_tui_resolve_color(pair_id, theme->pairs[pair_id - 1].bg, 1);
+        }
+        init_pair((short)pair_id, (short)fg, (short)bg);
+    }
+    accent_fg = psi_tui_default_fg(2);
+    if (theme->active && theme->pairs[1].is_set) {
+        accent_fg = psi_tui_resolve_color(2, theme->pairs[1].fg, 0);
+    }
+    init_pair(8, COLOR_BLACK, (short)accent_fg);
+    bkgdset((chtype)' ' | COLOR_PAIR(7));
+}
+
+static int psi_tui_init_colors(struct psi_tui_state *state) {
     if (!has_colors()) {
         return PSI_STATUS_ERROR;
     }
     start_color();
     use_default_colors();
-    init_pair(1, COLOR_BLUE, -1);
-    init_pair(2, COLOR_CYAN, -1);
-    init_pair(3, COLOR_WHITE, -1);
-    init_pair(4, COLOR_YELLOW, -1);
-    init_pair(5, COLOR_GREEN, -1);
-    init_pair(6, COLOR_RED, -1);
-    init_pair(7, -1, -1); /* info: default foreground for portability across light/dark terminals */
+    psi_tui_apply_theme(state);
     return PSI_STATUS_OK;
 }
 
@@ -2598,7 +2744,7 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
      * or the arrow keys. */
     scrollok(stdscr, FALSE);
     set_escdelay(25);
-    psi_tui_init_colors();
+    psi_tui_init_colors(&state);
     psi_tui_redraw(&state);
 
     status = PSI_STATUS_OK;

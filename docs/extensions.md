@@ -153,6 +153,54 @@ Canonical source: `lua/psi/prompt.lua M.HELP_TEXT`.
 { kind = "print" | "compact", payload = "..." | 12 }
 ```
 
+### Themes — `psi.theme`
+
+Theme support stays Lua-first: extensions register a theme spec, then
+select it. The bundled default is a dark TUI theme; custom themes can
+override just the slots they care about and inherit the rest.
+
+| API | Notes |
+|---|---|
+| `psi.theme.register(name, spec)` | Add or replace a named theme. |
+| `psi.theme.use(name_or_spec)` | Apply a registered theme or an ad-hoc spec immediately. |
+| `psi.theme.current()` | Returns the currently applied normalized theme table. |
+| `psi.theme.current_name()` | Returns the active theme name. |
+| `psi.theme.names()` | Sorted array of registered theme names. |
+
+Theme spec shape:
+
+```lua
+{
+  ansi = {
+    ["31"] = "31",   -- optional ANSI SGR remap
+    ["36"] = "36",
+  },
+  tui = {
+    header  = { fg = 111, bg = 234 },
+    accent  = { fg = 81,  bg = 234 },
+    text    = { fg = 253, bg = 234 },
+    warning = { fg = 223, bg = 234 },
+    success = { fg = 150, bg = 234 },
+    error   = { fg = 210, bg = 234 },
+    chrome  = { fg = 245, bg = 234 },
+  },
+}
+```
+
+Example extension:
+
+```lua
+return function(psi)
+  psi.theme.register("toxic", {
+    tui = {
+      accent = { fg = 118, bg = 233 },
+      chrome = { fg = 244, bg = 233 },
+    },
+  })
+  psi.theme.use("toxic")
+end
+```
+
 ### Render hooks — `psi.render.register_hook(event, fn)`
 
 For extensions that want to *change the rendered terminal output*
@@ -207,6 +255,7 @@ These are part of the stable surface:
 | `psi.current_date()` | `"YYYY-MM-DD"`. |
 | `psi.is_aborted()` | `true` when Ctrl-C / Esc requested. Poll during long work. |
 | `psi.json_encode(v)` / `psi.json_decode(s)` | JSON. |
+| `psi.http_request(opts)` | Buffered libcurl-backed HTTP request. `opts` supports `url`, `method`, `headers`, `body`, `timeout_ms`, and `max_response_bytes`. Returns `(status_code, body)` or `(nil, err)`. |
 | `psi.session_message_count()` / `psi.session_messages()` | Read current in-memory session. |
 | `psi.embedded_doc(name)` / `psi.embedded_doc_names()` | Fetch doc files bundled into the binary (e.g. `README.md`). |
 | `psi.embedded_source(name)` / `psi.embedded_source_names()` | Fetch the raw Lua source of an embedded module (e.g. `psi.render`). Useful for live introspection when there is no on-disk path. |

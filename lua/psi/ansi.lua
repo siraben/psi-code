@@ -10,14 +10,33 @@
 local M = {}
 
 local ESC = string.char(27)
+local code_map = {}
 
 M.enabled = true
+
+local function resolve_code(code)
+  local parts = {}
+  code = tostring(code or "")
+  for part in code:gmatch("[^;]+") do
+    parts[#parts + 1] = code_map[part] or part
+  end
+  return #parts > 0 and table.concat(parts, ";") or code
+end
+
+function M.set_code_map(next_map)
+  code_map = {}
+  for key, value in pairs(next_map or {}) do
+    if value ~= nil then
+      code_map[tostring(key)] = tostring(value)
+    end
+  end
+end
 
 function M.color(code, text)
   if not M.enabled then
     return text
   end
-  return ESC .. "[" .. code .. "m" .. text .. ESC .. "[0m"
+  return ESC .. "[" .. resolve_code(code) .. "m" .. text .. ESC .. "[0m"
 end
 function M.bold(text)
   return M.color("1", text)

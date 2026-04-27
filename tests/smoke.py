@@ -18,6 +18,8 @@ Exit status: 0 on clean, 1 on any failure.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import http.server
 import json
 import os
 import pty
@@ -28,6 +30,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -81,7 +84,7 @@ def assert_true(cond, reason: str) -> None:
 
 class Psi:
     def __init__(self, binary: str, tmp: Path):
-        self.binary = binary
+        self.binary = str(Path(binary).resolve())
         self.tmp = tmp
 
     def run(self, *args: str, input_text: str | None = None,
@@ -201,6 +204,34 @@ def strip_ansi(raw: bytes) -> str:
     return text
 
 
+@contextlib.contextmanager
+def static_http_server(body: bytes, *, content_type: str = "text/plain",
+                       status: int = 200):
+    """Serve a fixed response on localhost for libcurl-backed HTTP tests."""
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, fmt, *args):  # noqa: A003
+            return
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        host, port = server.server_address
+        yield f"http://{host}:{port}"
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
 # ---------------------------------------------------------------------------
 # Offline tests (no API key required).
 # ---------------------------------------------------------------------------
@@ -215,6 +246,16 @@ def t_eval_arithmetic(psi: Psi):
 def t_eval_read_primitive(psi: Psi):
     out = psi.eval('return #psi.read_file("README.md") > 0 and "ok" or "bad"')
     assert_equals(out, "ok", "read primitive")
+
+
+@test("eval/http_request_get")
+def t_eval_http_request_get(psi: Psi):
+    with static_http_server(b'{"ok":true}', content_type="application/json") as base:
+        out = psi.eval(
+            f'local status, body = psi.http_request({{url="{base}/ping", method="GET"}})\n'
+            'return tostring(status) .. "|" .. body'
+        )
+    assert_equals(out, '200|{"ok":true}', "http_request GET")
 
 
 @test("eval/tool_registry")
@@ -297,6 +338,45 @@ def t_tool_ls(psi: Psi):
     assert_equals(out, "ls true true", "ls tool result")
 
 
+@test("tool/web_search")
+def t_tool_web_search(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local real = psi.http_request\n'
+        + 'psi.http_request = function(opts)\n'
+        + '  return 200, psi.json_encode({\n'
+        + '    web = { results = {\n'
+        + '      { title = "Example Result", url = "https://example.com",\n'
+        + '        description = "Search snippet" }\n'
+        + '    } }\n'
+        + '  })\n'
+        + 'end\n'
+        + 'local r = require("psi.tools").dispatch("web_search", {\n'
+        + '  query = "current release status", limit = 1\n'
+        + '})\n'
+        + 'psi.http_request = real\n'
+        + 'return r.tool .. " " .. tostring(r.ok) .. " " .. tostring(r.extras.count)\n'
+        + '  .. "|" .. r.extras.results[1].title .. "|" .. r.extras.results[1].url',
+        env_extra={"BRAVE_SEARCH_API_KEY": "dummy"},
+    ).stdout.strip()
+    assert_equals(
+        out,
+        "web_search true 1|Example Result|https://example.com",
+        "web_search tool result",
+    )
+
+
+@test("tool/web_search_missing_key")
+def t_tool_web_search_missing_key(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local r = require("psi.tools").dispatch("web_search", {query="latest psi release"})\n'
+        'return tostring(r.ok) .. "|" .. tostring(r.error)',
+        env_extra={"BRAVE_SEARCH_API_KEY": ""},
+    ).stdout.strip()
+    assert_contains(out, "false|BRAVE_SEARCH_API_KEY is not set", "web_search missing key")
+
+
 @test("tool/lua_summary")
 def t_tool_lua_summary(psi: Psi):
     out = psi.eval(
@@ -308,13 +388,13 @@ def t_tool_lua_summary(psi: Psi):
 
 @test("tool/lua_eval")
 def t_tool_lua_eval(psi: Psi):
-    # 8 tools registered today (read/write/edit/bash/grep/find/ls/lua).
+    # 9 tools registered today (read/write/edit/bash/grep/find/ls/web_search/lua).
     out = psi.eval(
         'local r = require("psi.tools").dispatch("lua", '
         '{mode="eval", expression="#require(\\"psi.tools\\").all()"})\n'
         'return r.extras.result'
     )
-    assert_equals(out, "8", "tool count")
+    assert_equals(out, "9", "tool count")
 
 
 @test("render/tool_write_diff")
@@ -663,6 +743,54 @@ def t_agent_set_model(psi: Psi):
                     "override then clear")
 
 
+@test("theme/default_dark")
+def t_theme_default(psi: Psi):
+    out = psi.eval(
+        'local t = require("psi.theme")\n'
+        + 'local cur = t.current()\n'
+        + 'return t.current_name() .. "|"\n'
+        + '  .. tostring(cur.tui.chrome.bg) .. "|"\n'
+        + '  .. tostring(cur.tui.accent.fg)'
+    )
+    assert_equals(out, "midnight-ember|234|81", "default theme")
+
+
+@test("theme/settings_selects_extension_theme")
+def t_theme_settings_select(psi: Psi):
+    project = psi.tmp / "theme-project"
+    extdir = psi.tmp / "theme-ext"
+    (project / ".psi").mkdir(parents=True, exist_ok=True)
+    extdir.mkdir(exist_ok=True)
+    (project / ".psi" / "settings.json").write_text(
+        json.dumps({"theme": {"name": "toxic"}})
+    )
+    (extdir / "toxic.lua").write_text(
+        "return function(psi)\n"
+        "  psi.theme.register('toxic', {\n"
+        "    tui = {\n"
+        "      accent = { fg = 118, bg = 233 },\n"
+        "      chrome = { fg = 244, bg = 233 },\n"
+        "    },\n"
+        "  })\n"
+        "end\n"
+    )
+    expr = (
+        'local t = require("psi.theme")\n'
+        + 'local cur = t.current()\n'
+        + 'return t.current_name() .. "|"\n'
+        + '  .. tostring(cur.tui.accent.fg) .. "|"\n'
+        + '  .. tostring(cur.tui.chrome.bg) .. "|"\n'
+        + '  .. tostring(cur.tui.text.fg)'
+    )
+    out = psi.run(
+        "--eval",
+        expr,
+        cwd=project,
+        env_extra={"PSI_EXTENSIONS_DIR": str(extdir)},
+    ).stdout.strip()
+    assert_equals(out, "toxic|118|233|253", "configured theme override")
+
+
 @test("tui/status_hook")
 def t_tui_status_hook(psi: Psi):
     out = psi.eval(
@@ -674,6 +802,34 @@ def t_tui_status_hook(psi: Psi):
         + 'return line'
     )
     assert_contains(out, "ext:foo", "status hook contribution shows")
+
+
+@test("tui/workspace_line")
+def t_tui_workspace_line(psi: Psi):
+    out = psi.eval(
+        'return require("psi.tui").workspace_line('
+        + '"/home/jrestivo/dev/psi-code.workspace/.worktrees/feature-add_network_search_tool")'
+    )
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_contains(plain, "repo psi-code.workspace", "repo label shows")
+    assert_contains(plain, "worktree feature-add_network_search_tool", "worktree label shows")
+
+
+@test("tui/busy_status_config")
+def t_tui_busy_status_config(psi: Psi):
+    project = psi.tmp / "busy-config-project"
+    (project / ".psi").mkdir(parents=True, exist_ok=True)
+    (project / ".psi" / "settings.json").write_text(
+        json.dumps({"tui": {"busy_labels": ["custom busy"]}})
+    )
+    out = psi.run(
+        "--eval",
+        'return require("psi.tui").pick_busy_status()',
+        cwd=project,
+    ).stdout
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_contains(plain, "custom busy", "busy label pulled from settings")
+    assert_contains(plain, "esc to interrupt", "busy hint rendered")
 
 
 @test("tui/layout_geometry")
@@ -774,9 +930,10 @@ def t_tui_quits(psi: Psi):
     # Drive the TUI through a pty, send /quit, expect a clean exit.
     raw = run_pty([psi.binary, "--tui"], [(b"", 0.5), (b"/quit\r", 1.0)])
     text = strip_ansi(raw)
-    # We don't require any specific text — just confirm the binary ran
-    # long enough to render its header before accepting /quit.
-    assert_contains(text, "psi coding agent", "TUI header")
+    # We don't require the full chrome — just confirm the binary ran
+    # long enough to render the themed top bar before accepting /quit.
+    assert_contains(text, "repo", "TUI header")
+    assert_contains(text, "worktree", "TUI header")
 
 
 @test("session/save_no_path_is_distinct")
