@@ -1375,6 +1375,18 @@ def t_tui_theme_applies_to_rendered_colors(psi: Psi):
     assert b"\x1b[38;5;118m" in raw, "configured TUI accent color did not reach rendered output"
 
 
+@test("mode/tui_input_box_background")
+def t_tui_input_box_background(psi: Psi):
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [(b"", 0.5), (b"/quit\r", 1.0)],
+        env_extra={"NO_COLOR": "1", "TERM": "xterm-256color"},
+        idle_drain=1.0,
+    )
+    assert b"\x1b[48;5;244m" in raw, "input box background did not reach rendered output"
+    assert b"\x1b[48;5;250m" in raw, "input prompt chip background did not reach rendered output"
+
+
 @test("mode/tui_lf_submit")
 def t_tui_lf_submit(psi: Psi):
     raw = run_pty(
