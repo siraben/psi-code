@@ -888,6 +888,7 @@ local function redraw(state)
   local status_text = ""
   local cwd
 
+  psi.tui_set_cursor(1, 1, false)
   state.scroll_offset = clamp(state.scroll_offset, 0, max_scroll)
 
   if state.force_physical_clear then

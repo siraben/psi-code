@@ -518,6 +518,8 @@ static void psi_vm_invoke_registry_callback2(
 extern void psi_tui_suspend_terminal(void);
 extern void psi_tui_resume_terminal(void);
 
+static int psi_vm_tui_frame_active = 0;
+
 static int psi_vm_tui_read_byte(int timeout_ms) {
     struct pollfd pfd;
     unsigned char ch;
@@ -2482,12 +2484,20 @@ static int lfn_tui_set_cursor(lua_State *L) {
     if (col < 1) {
         col = 1;
     }
+    if (!visible && !psi_vm_tui_frame_active) {
+        psi_vm_tui_write("\033[?2026h");
+        psi_vm_tui_frame_active = 1;
+    }
     printf("%s\033[%ld;%ldH", visible ? "\033[?25h" : "\033[?25l", (long)row, (long)col);
     return 0;
 }
 
 static int lfn_tui_refresh(lua_State *L) {
     psi_vm_require_tui(L);
+    if (psi_vm_tui_frame_active) {
+        psi_vm_tui_write("\033[?2026l");
+        psi_vm_tui_frame_active = 0;
+    }
     fflush(stdout);
     return 0;
 }
