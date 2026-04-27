@@ -2472,6 +2472,32 @@ static int lfn_tui_draw_raw_line(lua_State *L) {
     return 0;
 }
 
+static int lfn_tui_render_frame(lua_State *L) {
+    const char *frame = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : "";
+    lua_Integer row = luaL_optinteger(L, 2, 1);
+    lua_Integer col = luaL_optinteger(L, 3, 1);
+    int visible = lua_toboolean(L, 4);
+
+    psi_vm_require_tui(L);
+    if (row < 1) {
+        row = 1;
+    }
+    if (col < 1) {
+        col = 1;
+    }
+    printf(
+        "\033[?2026h\033[?25l%s%s\033[%ld;%ldH%s\033[?2026l",
+        frame,
+        "\033[0m",
+        (long)row,
+        (long)col,
+        visible ? "\033[?25h" : "\033[?25l"
+    );
+    fflush(stdout);
+    psi_vm_tui_frame_active = 0;
+    return 0;
+}
+
 static int lfn_tui_set_cursor(lua_State *L) {
     lua_Integer row = luaL_optinteger(L, 1, 1);
     lua_Integer col = luaL_optinteger(L, 2, 1);
@@ -2545,6 +2571,7 @@ static int lfn_tui_poll_key(lua_State *L) { return lfn_tui_unavailable(L); }
 static int lfn_tui_clear(lua_State *L) { return lfn_tui_unavailable(L); }
 static int lfn_tui_draw_line(lua_State *L) { return lfn_tui_unavailable(L); }
 static int lfn_tui_draw_raw_line(lua_State *L) { return lfn_tui_unavailable(L); }
+static int lfn_tui_render_frame(lua_State *L) { return lfn_tui_unavailable(L); }
 static int lfn_tui_set_cursor(lua_State *L) { return lfn_tui_unavailable(L); }
 static int lfn_tui_refresh(lua_State *L) { return lfn_tui_unavailable(L); }
 static int lfn_tui_suspend(lua_State *L) { return lfn_tui_unavailable(L); }
@@ -2712,6 +2739,7 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("tui_clear",             lfn_tui_clear);
     PSI_REG("tui_draw_line",         lfn_tui_draw_line);
     PSI_REG("tui_draw_raw_line",     lfn_tui_draw_raw_line);
+    PSI_REG("tui_render_frame",      lfn_tui_render_frame);
     PSI_REG("tui_set_cursor",        lfn_tui_set_cursor);
     PSI_REG("tui_refresh",           lfn_tui_refresh);
     PSI_REG("tui_suspend",           lfn_tui_suspend);
