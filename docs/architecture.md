@@ -164,7 +164,7 @@ Lua owns:
 
 C owns only the terminal boundary:
 
-- `ncurses` bootstrap and teardown
+- raw terminal bootstrap and teardown
 - key normalization from terminal escape sequences to semantic keys
 - line drawing primitives
 - cursor visibility/placement primitives
@@ -174,39 +174,80 @@ C owns only the terminal boundary:
 
 ### TUI module boundaries
 
-- `src/runtime/tui_mode.c` bootstraps ncurses and delegates to Lua mode
+- `src/runtime/tui_mode.c` switches the terminal into raw mode and delegates to Lua mode
 - `src/lua/vm.c` exposes the `psi.tui_*` host primitives
 - `lua/psi/tui_runtime.lua` owns the runtime state machine for `--tui`
 - `lua/psi/tui.lua` maps semantic keys to edit/navigation actions
 - `lua/psi/tui_layout.lua` owns layout policy such as prefixes, footer text,
   and row caps
 
-The intended rule is simple: C reports terminal facts and performs terminal
-drawing; Lua decides what the interface means and what the screen should say.
+The intended rule is simple: C reports terminal facts and writes terminal
+bytes; Lua decides what the interface means and what the screen should say.
+
+### TUI rendering path
+
+The TUI renderer is selected by Lua at startup from host/runtime capabilities.
+`lua/psi/tui_runtime.lua` derives `ansi`, `color`, and `raw_ansi` from
+`psi.runtime_info()`, `TERM`, `NO_COLOR`, and explicit override environment
+variables.
+
+Rendering policy:
+
+- Use raw ANSI line drawing when ANSI is compiled in, the terminal is not
+  `dumb`, and `psi.tui_draw_raw_line` is available.
+- Fall back to plain-text frames when ANSI or color is disabled by the
+  runtime policy.
+
+C owns only the low-level terminal effects. The Lua TUI is ANSI-terminal
+backed, so a no-ANSI build disables TUI support rather than exposing a
+frontend that still writes escape bytes.
+
+Runtime overrides:
+
+- `PSI_ANSI=0|1` forces Lua's ANSI rendering policy within compiled support.
+- `PSI_COLOR=0|1` forces Lua's color rendering policy within compiled support.
+- `PSI_TUI_RAW_ANSI=0|1` forces raw ANSI TUI line drawing within compiled and
+  terminal support.
+- `NO_COLOR=1` disables color rendering.
 
 ### TUI availability
 
 The TUI is an optional host capability.
 
-- `TUI=1` compiles the ncurses-backed full-screen frontend and the backing
+- `TUI=1` compiles the ANSI full-screen frontend and the backing
   `psi.tui_*` primitives
-- `TUI=0` keeps the rest of the runtime buildable without ncurses; `--tui`
+- `TUI=0` keeps the rest of the runtime buildable without terminal raw-mode support; `--tui`
   exits with a clear error
+- `ANSI=0` implies `TUI=0`, because the Lua TUI backend has no non-ANSI
+  renderer
 - even when compiled in, `psi.tui_*` primitives are guarded so non-TUI modes
-  cannot accidentally call terminal operations before ncurses is active
+  cannot accidentally call terminal operations before the TUI is active
 
 Lua-owned TUI code should treat the host terminal as a capability, not as a
 global assumption.
+
+### TUI extension hooks
+
+Built-in Vim-style modal editing is installed as a Lua extension through the
+same `psi.tui.register_key_handler` and `psi.tui.register_status_hook` APIs
+available to user extensions. C normalizes terminal input to semantic key ids;
+Lua chooses whether a key edits text, switches editor mode, scrolls the
+transcript, updates the status bar, or falls through to the default policy.
+
+`/reload` resets bundled TUI extension state, clears TUI key, status, and
+clipboard hooks, reloads user extensions, and then runs TUI startup hooks. That
+keeps repeated reloads idempotent while letting settings-gated extensions, such
+as bundled Vim modal editing and OSC 52 clipboard yanks, reinstall exactly the
+hooks their current configuration requires.
 
 ### ANSI and color
 
 ANSI styling is also capability-driven.
 
-- `ANSI=1` allows Lua renderers to emit SGR styling and lets the ncurses draw
-  bridge interpret those sequences
-- `ANSI=0` makes `psi.ansi` return plain text and skips ANSI parsing in the C
-  draw bridge
-- `COLOR=1` enables color SGR handling and ncurses color-pair initialization
+- `ANSI=1` allows Lua renderers to emit SGR styling
+- `ANSI=0` makes `psi.ansi` return plain text for styled content and disables
+  the ANSI-backed TUI
+- `COLOR=1` enables color SGR emission
 - `COLOR=0` disables color while still allowing non-color styles such as bold
   or dim when ANSI support is present
 
@@ -222,11 +263,16 @@ or terminal dependency.
 
 Current gates:
 
-- `TUI`: full-screen ncurses frontend and `psi.tui_*` host primitives
+- `TUI`: full-screen ANSI frontend and `psi.tui_*` host primitives
 - `ANSI`: ANSI SGR emission and parsing
-- `COLOR`: color SGR handling and ncurses color-pair setup
+- `COLOR`: color SGR emission
 - `REPL_EDITLINE`: libedit-backed REPL input/history; falls back to plain
   `fgets` input when disabled
+
+Every feature-gate combination must compile. `make check-build-configs`
+builds the complete `TUI` / `ANSI` / `COLOR` / `REPL_EDITLINE` matrix into
+isolated build directories and should be run whenever C preprocessor guards
+or optional dependencies change.
 
 The architectural rule for new gates:
 

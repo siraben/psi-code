@@ -11,10 +11,10 @@ architecture it is porting.
 | Structured message model | `packages/coding-agent/src/core/messages.ts` | Ported. user, assistant, tool-call, tool-result, branch-summary, compaction-summary; assistant messages persist their full content-block array (text + tool_use + thinking blocks with signatures). |
 | Default coding tools | `packages/coding-agent/src/core/tools/` | Ported. `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `lua` registered in `lua/psi/tools.lua`, dispatched through host glue with before/after hooks. |
 | Session persistence | `packages/coding-agent/docs/session.md` | Ported to pi-style v3 JSONL schema: typed entries, parent pointers, cache markers, file-op provenance, custom entries, custom model-context messages, UTF-16 surrogate sanitising. Still single active-branch rather than a full tree walker. |
-| Project context discovery | `packages/coding-agent/src/core/resource-loader.ts` | Ported for global/project `AGENTS.md` / `CLAUDE.md` discovery. Prompt templates are ported; skills and theme loading are not ported yet. |
+| Project context discovery | `packages/coding-agent/src/core/resource-loader.ts` | Ported for global/project `AGENTS.md` / `CLAUDE.md` discovery. Prompt templates and Lua-native theme loading are ported; skills are still not ported. |
 | System prompt assembly | `packages/coding-agent/src/core/system-prompt.ts` | Ported via `psi.prompt`. Assembled from tool metadata, guidelines, cwd, date, and project context files; prompt caching applied per `pi`. |
 | Interactive shell | `packages/coding-agent/src/modes/interactive/` | Ported. `libedit`-backed coding-agent shell over the streamed loop, slash commands include `/help`, `/session`, `/fork`, `/compact`, `/new`, `/clear`, `/reload`, `/system-prompt`, `/quit`, tier-1/2/3 additions. |
-| Full-screen TUI | `packages/tui/` | Ported core. `--tui` runs the streamed agent loop under `ncursesw` on a single thread — the agent turn is a Lua coroutine driven by `psi.sched`, yielding cooperatively on HTTP / process poll so the redraw loop keeps up. Rich status line (cwd / model / session / token usage), unicode tool-call borders, live markdown, readline editing (Alt-B/F/D/Backspace, Ctrl-W/K/U), Esc-abort, and Ctrl-Z suspend. Smaller than `pi`'s TUI: no session tree view, no modals, no theme switching. |
+| Full-screen TUI | `packages/tui/` | Ported core. `--tui` runs the streamed agent loop in raw terminal mode with Lua-owned ANSI rendering on a single thread — the agent turn is a Lua coroutine driven by `psi.sched`, yielding cooperatively on HTTP / process poll so the redraw loop keeps up. Rich status line (cwd / model / session / token usage), unicode tool-call borders, live markdown, readline editing (Alt-B/F/D/Backspace, Ctrl-W/K/U), optional bundled Vim modal editing via settings or `/vim`, Ctrl-G abort, Ctrl-Z suspend, and a Lua-driven theme registry with a bundled dark default. Smaller than `pi`'s TUI: no session tree view, no modals, no interactive theme picker. |
 | RPC mode | `packages/coding-agent/src/modes/rpc/` | Not started. |
 | Compaction and summaries | `packages/coding-agent/src/core/compaction/` | Ported. Manual and dynamic token-aware auto-compaction; file-op provenance from `psi.session` feeds the compaction prompt. Not yet branch-aware. |
 | Hooks and extensions | `packages/coding-agent/src/core/skills.ts`, `src/core/extensions/` | Early-to-partial. `psi.tool_registry` exposes before/after tool-call hooks; `psi.events` is a neutral pub/sub bus; `psi.commands.register` opens slash commands to extensions; boot loads Lua files from `$PSI_EXTENSIONS_DIR`, `~/.config/psi/extensions/`, and `./.psi/extensions/`. No npm/git package manager, no TS transpile, no sandboxing. |
@@ -33,14 +33,15 @@ architecture it is porting.
   instead of GPL.
 - `libcurl`: pragmatic choice for HTTPS provider integration. Heavier than the
   rest, but the portability tradeoff is worth it here.
-- `ncursesw`: used by `--tui`. A UTF-8 locale is set before `initscr()` so
-  unicode glyphs render correctly rather than appearing as caret-notation
-  escapes.
+- ANSI terminal control: used by `--tui` for full-screen rendering. A UTF-8
+  locale is set before entering raw mode so unicode glyphs render correctly.
+  The Lua TUI has no non-ANSI renderer, so `ANSI=0` disables TUI support at
+  compile time.
 - `argtable3`: CLI option parsing.
 - `pthread`: used only by the `src/core/http_async.c` helper thread
   that runs `curl_easy_perform` behind a chunk queue. The TUI no
   longer has a worker thread; the agent turn runs as a Lua
-  coroutine on the same thread that owns `lua_State` and ncurses.
+  coroutine on the same thread that owns `lua_State` and terminal rendering.
 - process execution: the safer process layer uses POSIX `fork`/`exec` on Unix
   and falls back to `system()` elsewhere. That is practical, but not strict
   portable C89.

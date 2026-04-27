@@ -5,8 +5,8 @@
 --   * self-contained (kind="print") — rendered directly
 --   * action-kinds that the REPL dispatcher in modes.lua knows how to
 --     handle (set-model, new-session, resume, reload, export, name,
---     quit). TUI mode currently understands only "print" and "compact";
---     new actions are REPL-only.
+--     quit). TUI mode handles print/compact directly and can route
+--     extension-defined action kinds through psi.tui handlers.
 --
 -- Extension-registered commands (psi.commands.register(name, handler))
 -- are consulted last, after built-ins.
@@ -19,6 +19,10 @@ local session = require("psi.session")
 local M = {}
 
 local COMPACT_DEFAULT = 12
+local BUILTIN_TUI_EXTENSIONS = {
+  "vim_keybindings",
+  "osc52_clipboard",
+}
 
 -- ---------- parsers ----------
 
@@ -283,11 +287,39 @@ local function cmd_new_session()
 end
 
 local function cmd_reload()
+  if psi.settings and psi.settings.reload then
+    pcall(psi.settings.reload)
+  end
+  if psi.extensions then
+    for _, name in ipairs(BUILTIN_TUI_EXTENSIONS) do
+      local extension = psi.extensions[name]
+      if extension and extension.disable then
+        pcall(extension.disable, psi)
+      end
+    end
+  end
+  if psi.tui then
+    if psi.tui.clear_key_handlers then
+      pcall(psi.tui.clear_key_handlers)
+    end
+    if psi.tui.clear_status_hooks then
+      pcall(psi.tui.clear_status_hooks)
+    end
+    if psi.tui.clear_clipboard_writers then
+      pcall(psi.tui.clear_clipboard_writers)
+    end
+  end
+  if type(psi.install_builtin_extensions) == "function" then
+    pcall(psi.install_builtin_extensions)
+  end
   if type(psi.load_extensions) == "function" then
     local ok, err = pcall(psi.load_extensions)
     if not ok then
       return records.new_command_action("print", "reload failed: " .. tostring(err))
     end
+  end
+  if psi.theme and psi.theme.apply_configured then
+    pcall(psi.theme.apply_configured, { preserve_current = true })
   end
   -- Prompt templates are cheap to rescan and usually edited side-by-
   -- side with extensions; reloading them here lets users iterate on
@@ -298,7 +330,59 @@ local function cmd_reload()
   if keybindings.reload then
     pcall(keybindings.reload)
   end
+  if psi.tui and psi.tui.run_startup_hooks then
+    pcall(psi.tui.run_startup_hooks, { reason = "reload" })
+  end
   return records.new_command_action("print", "extensions reloaded")
+end
+
+local function rainbow_fg(bg)
+  bg = tonumber(bg) or 0
+  if bg < 16 then
+    return (bg == 0 or bg == 1 or bg == 2 or bg == 4 or bg == 5 or bg == 8) and 15 or 16
+  end
+  if bg >= 232 then
+    return bg < 244 and 15 or 16
+  end
+  local n = bg - 16
+  local b = n % 6
+  local g = math.floor(n / 6) % 6
+  local r = math.floor(n / 36) % 6
+  local function level(v)
+    return v == 0 and 0 or (55 + (v * 40))
+  end
+  local luminance = (0.2126 * level(r)) + (0.7152 * level(g)) + (0.0722 * level(b))
+  return luminance < 140 and 15 or 16
+end
+
+local function rainbow_color(code, text)
+  return string.char(27) .. "[" .. code .. "m" .. text .. string.char(27) .. "[0m"
+end
+
+local function rainbow_line(start_code, end_code, cols)
+  local cells = {}
+  for code = start_code, end_code do
+    cells[#cells + 1] = rainbow_color(
+      "38;5;" .. tostring(rainbow_fg(code)) .. ";48;5;" .. tostring(code),
+      string.format("%03d ", code)
+    )
+    if #cells == cols then
+      break
+    end
+  end
+  return table.concat(cells)
+end
+
+local function cmd_rainbow()
+  local lines = {
+    "xterm 256 background swatches (/rainbow)",
+  }
+  local code = 0
+  while code <= 255 do
+    lines[#lines + 1] = rainbow_line(code, math.min(255, code + 15), 16)
+    code = code + 16
+  end
+  return records.new_command_action("ansi-print", table.concat(lines, "\n"))
 end
 
 -- ---------- dispatcher + registry ----------
@@ -374,6 +458,10 @@ local BUILTIN_COMMANDS = {
   {
     name = "reload",
     description = "Reload extensions, prompt templates, and keybindings",
+  },
+  {
+    name = "rainbow",
+    description = "Show all 256 terminal background colors",
   },
   {
     name = "system-prompt",
@@ -533,6 +621,9 @@ function M.handle(line)
   end
   if line == "/reload" then
     return cmd_reload()
+  end
+  if line == "/rainbow" then
+    return cmd_rainbow()
   end
   if starts_word(line, "/model") then
     local spec = arg_after(line, "/model")
