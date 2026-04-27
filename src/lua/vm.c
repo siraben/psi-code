@@ -538,7 +538,40 @@ struct psi_vm_tui_ansi_state {
 #endif
 };
 
-static void psi_vm_tui_ansi_apply(struct psi_vm_tui_ansi_state *s, int code) {
+#if PSI_ENABLE_COLOR
+#define PSI_VM_TUI_DYNAMIC_PAIR_START 9
+#define PSI_VM_TUI_DYNAMIC_PAIR_MAX 64
+
+static int psi_vm_tui_dynamic_fg[PSI_VM_TUI_DYNAMIC_PAIR_MAX];
+static int psi_vm_tui_dynamic_pairs = 0;
+
+static int psi_vm_tui_pair_for_fg(int fg) {
+    int i;
+    int pair;
+
+    if (fg < 0 || fg >= COLORS || COLOR_PAIRS <= PSI_VM_TUI_DYNAMIC_PAIR_START) {
+        return 0;
+    }
+    for (i = 0; i < psi_vm_tui_dynamic_pairs; i++) {
+        if (psi_vm_tui_dynamic_fg[i] == fg) {
+            return PSI_VM_TUI_DYNAMIC_PAIR_START + i;
+        }
+    }
+    if (psi_vm_tui_dynamic_pairs >= PSI_VM_TUI_DYNAMIC_PAIR_MAX) {
+        return 0;
+    }
+    pair = PSI_VM_TUI_DYNAMIC_PAIR_START + psi_vm_tui_dynamic_pairs;
+    if (pair >= COLOR_PAIRS) {
+        return 0;
+    }
+    init_pair((short)pair, (short)fg, -1);
+    psi_vm_tui_dynamic_fg[psi_vm_tui_dynamic_pairs] = fg;
+    psi_vm_tui_dynamic_pairs++;
+    return pair;
+}
+#endif
+
+static void psi_vm_tui_ansi_apply_code(struct psi_vm_tui_ansi_state *s, int code) {
     switch (code) {
         case 0:
             s->attrs = 0;
@@ -575,6 +608,30 @@ static void psi_vm_tui_ansi_apply(struct psi_vm_tui_ansi_state *s, int code) {
     }
 }
 
+static void psi_vm_tui_ansi_apply_params(struct psi_vm_tui_ansi_state *s,
+                                         const int *params,
+                                         int count) {
+    int i;
+
+    if (count <= 0) {
+        psi_vm_tui_ansi_apply_code(s, 0);
+        return;
+    }
+    for (i = 0; i < count; i++) {
+#if PSI_ENABLE_COLOR
+        if (params[i] == 38 && i + 2 < count && params[i + 1] == 5) {
+            int pair = psi_vm_tui_pair_for_fg(params[i + 2]);
+            if (pair > 0) {
+                s->color_pair = pair;
+            }
+            i += 2;
+            continue;
+        }
+#endif
+        psi_vm_tui_ansi_apply_code(s, params[i]);
+    }
+}
+
 static void psi_vm_tui_draw_ansi_line(int row, const char *text) {
     int max_width;
     int len;
@@ -599,6 +656,8 @@ static void psi_vm_tui_draw_ansi_line(int row, const char *text) {
     while (i < len && col < max_width) {
         if (text[i] == 0x1b && i + 1 < len && text[i + 1] == '[') {
             int j = i + 2;
+            int params[16];
+            int param_count = 0;
             unsigned int code = 0u;
             int has_digit = 0;
             while (j < len && text[j] != 'm') {
@@ -608,8 +667,8 @@ static void psi_vm_tui_draw_ansi_line(int row, const char *text) {
                     }
                     has_digit = 1;
                 } else if (text[j] == ';') {
-                    if (has_digit) {
-                        psi_vm_tui_ansi_apply(&st, (int)code);
+                    if (param_count < (int)(sizeof(params) / sizeof(params[0]))) {
+                        params[param_count++] = has_digit ? (int)code : 0;
                     }
                     code = 0u;
                     has_digit = 0;
@@ -619,11 +678,12 @@ static void psi_vm_tui_draw_ansi_line(int row, const char *text) {
                 j++;
             }
             if (j < len && text[j] == 'm') {
-                if (has_digit) {
-                    psi_vm_tui_ansi_apply(&st, (int)code);
-                } else {
-                    psi_vm_tui_ansi_apply(&st, 0);
+                if (has_digit || param_count == 0) {
+                    if (param_count < (int)(sizeof(params) / sizeof(params[0]))) {
+                        params[param_count++] = has_digit ? (int)code : 0;
+                    }
                 }
+                psi_vm_tui_ansi_apply_params(&st, params, param_count);
                 i = j + 1;
                 continue;
             }
