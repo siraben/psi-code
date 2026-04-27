@@ -19,6 +19,10 @@ local session = require("psi.session")
 local M = {}
 
 local COMPACT_DEFAULT = 12
+local BUILTIN_TUI_EXTENSIONS = {
+  "vim_keybindings",
+  "osc52_clipboard",
+}
 
 -- ---------- parsers ----------
 
@@ -286,12 +290,13 @@ local function cmd_reload()
   if psi.settings and psi.settings.reload then
     pcall(psi.settings.reload)
   end
-  if
-    psi.extensions
-    and psi.extensions.vim_keybindings
-    and psi.extensions.vim_keybindings.disable
-  then
-    pcall(psi.extensions.vim_keybindings.disable, psi)
+  if psi.extensions then
+    for _, name in ipairs(BUILTIN_TUI_EXTENSIONS) do
+      local extension = psi.extensions[name]
+      if extension and extension.disable then
+        pcall(extension.disable, psi)
+      end
+    end
   end
   if psi.tui then
     if psi.tui.clear_key_handlers then
