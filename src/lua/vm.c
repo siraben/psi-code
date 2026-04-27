@@ -1032,6 +1032,52 @@ static int lfn_file_write(lua_State *L) {
     return 1;
 }
 
+static int lfn_file_append(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    size_t len;
+    const char *content = luaL_checklstring(L, 2, &len);
+    FILE *f;
+
+    if ((long)len > PSI_VM_FILE_WRITE_MAX_BYTES) { lua_pushboolean(L, 0); return 1; }
+    f = fopen(path, "ab");
+    if (!f) { lua_pushboolean(L, 0); return 1; }
+    if (len > 0 && fwrite(content, 1u, len, f) != len) {
+        fclose(f); lua_pushboolean(L, 0); return 1;
+    }
+    if (fclose(f) != 0) { lua_pushboolean(L, 0); return 1; }
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+/* psi.tempfile_path([prefix]) -> string
+ *
+ * Compute a unique path under the system tempdir. Does NOT create
+ * the file; callers (e.g. bash spillover) decide when to materialise
+ * it via psi.file_write / psi.file_append. We avoid mkstemp because
+ * we want C89 portability and don't need the open-fd guarantee — the
+ * filename is randomised with PID + monotonic counter + time.
+ */
+static int lfn_tempfile_path(lua_State *L) {
+    const char *prefix = luaL_optstring(L, 1, "psi-bash-");
+    static unsigned long counter = 0u;
+    const char *tmpdir;
+    char buffer[1024];
+    long pid = 0;
+    long ts;
+
+    tmpdir = getenv("TMPDIR");
+    if (tmpdir == NULL || *tmpdir == '\0') tmpdir = "/tmp";
+#ifndef _WIN32
+    pid = (long)getpid();
+#endif
+    ts = (long)time(NULL);
+    counter++;
+    snprintf(buffer, sizeof(buffer), "%s/%s%ld-%ld-%lu",
+             tmpdir, prefix, pid, ts, counter);
+    lua_pushstring(L, buffer);
+    return 1;
+}
+
 static int lfn_current_date(lua_State *L) {
     char *d = psi_vm_current_date();
     if (!d) { lua_pushnil(L); return 1; }
@@ -2354,7 +2400,7 @@ static int lfn_session_keep_recent_by_tokens(lua_State *L) {
 static int lfn_runtime_info(lua_State *L) {
     static const char *PRIMITIVES[] = {
         "version", "log", "session_message_count", "read_file", "read_file_slice",
-        "file_write", "current_date", "cwd", "parent_directory", "path_join",
+        "file_write", "file_append", "tempfile_path", "current_date", "cwd", "parent_directory", "path_join",
         "path_expand", "path_resolve", "file_exists", "file_type", "list_dir",
         "list_dir_typed",
         "mkdir_p", "mkdir_parent", "runtime_info", "session_messages",
@@ -2715,6 +2761,8 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("read_file",             lfn_read_file);
     PSI_REG("read_file_slice",       lfn_read_file_slice);
     PSI_REG("file_write",            lfn_file_write);
+    PSI_REG("file_append",           lfn_file_append);
+    PSI_REG("tempfile_path",         lfn_tempfile_path);
     PSI_REG("current_date",          lfn_current_date);
     PSI_REG("cwd",                   lfn_cwd);
     PSI_REG("parent_directory",      lfn_parent_directory);

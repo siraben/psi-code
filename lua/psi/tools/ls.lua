@@ -2,6 +2,9 @@ local records = require("psi.records")
 local registry = require("psi.tool_registry")
 local path_util = require("psi.path")
 local helpers = require("psi.tool_helpers")
+local truncate = require("psi.truncate")
+
+local DEFAULT_BYTES = truncate.DEFAULT_MAX_BYTES
 
 local function impl(input)
   local raw_path = registry.optional_string(input, "path", ".")
@@ -24,10 +27,10 @@ local function impl(input)
   end)
 
   local out = {}
-  local truncated = false
+  local entry_truncated = false
   for _, name in ipairs(entries) do
     if #out >= limit then
-      truncated = true
+      entry_truncated = true
       break
     end
     local full = path_util.join(path, name) or (path .. "/" .. name)
@@ -41,24 +44,47 @@ local function impl(input)
     out[1] = "(empty directory)"
   end
   local text = table.concat(out, "\n")
-  if truncated then
-    text = text
-      .. "\n\n["
-      .. tostring(limit)
-      .. " entries limit reached. Use a higher limit for more.]"
+
+  -- Apply byte-based head truncation on top of the entry count cap so a
+  -- single huge directory full of long names can't blow the budget.
+  local result = truncate.truncate_head(text, {
+    max_bytes = DEFAULT_BYTES,
+    max_lines = math.huge,
+  })
+  text = result.content
+
+  local notices = {}
+  if entry_truncated then
+    notices[#notices + 1] = string.format(
+      "[%d entries limit reached. Use a higher limit for more.]",
+      limit
+    )
   end
+  if result.truncated then
+    local n = truncate.head_notice(result)
+    if n then notices[#notices + 1] = n end
+  end
+  if #notices > 0 then
+    text = text .. "\n\n" .. table.concat(notices, "\n")
+  end
+
   return records.new_tool_result(true, "ls", nil, {
     path = raw_path,
     resolved_path = path,
     output = text,
-    entry_limit_reached = truncated and limit or nil,
+    entry_limit_reached = entry_truncated and limit or nil,
+    truncated = entry_truncated or result.truncated,
   })
 end
 
 return function()
   helpers.register(registry, records, {
     name = "ls",
-    description = "List directory contents. Returns entries sorted alphabetically, with '/' suffix for directories. Includes dotfiles.",
+    description = string.format(
+      "List directory contents. Returns entries sorted alphabetically, with '/' suffix "
+      .. "for directories. Includes dotfiles. Output is truncated to %dKB.",
+      math.floor(DEFAULT_BYTES / 1024)
+    ),
     prompt_snippet = "List directory contents",
     guidelines = { "Prefer ls over bash for a quick directory listing." },
     input_schema = helpers.schema_object({
