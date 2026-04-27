@@ -167,7 +167,7 @@ Users can override defaults in `~/.config/psi/keybindings.json` or
 {
   "tui.input.submit": "enter",
   "tui.input.newLine": ["shift-enter"],
-  "app.interrupt": "escape"
+  "app.interrupt": "ctrl-g"
 }
 ```
 
@@ -299,7 +299,10 @@ These are part of the stable surface:
 | `psi.tools.cancel(reason)` | Shorthand for a failure `ToolResult` used in before-hooks to short-circuit dispatch. Example: `tools.add_before_hook(function(n, i) if n == "bash" and i.command:find("rm %-rf") then return tools.cancel("refused") end end)`. |
 | `psi.prompt.register_transformer(fn)` | Append a system-prompt rewriter. Receives the assembled prompt, returns a replacement (or `nil` to leave it). Runs after built-in assembly; transformers stack in registration order. |
 | `psi.agent.set_model(name)` / `psi.agent.current_model(fallback)` | Switch the default model at runtime (any prefix psi understands: `anthropic/`, `ollama/`, `openrouter/`). Picked up on the *next* turn; the TUI status line reflects it immediately. Pass `nil` to clear. |
-| `psi.tui.register_status_hook(fn)` | Append a short status-bar snippet. `fn()` is called on every redraw (must be cheap) and returns a string or nil. Useful for tokens/sec meters, background-task indicators, etc. Suppressed while an active status message is on screen. |
+| `psi.tui.register_key_handler(fn)` | Intercept normalized TUI key events before built-in bindings. Return `{ action = "...", arg = ... }` to handle, `nil` to fall through. |
+| `psi.tui.clear_key_handlers()` | Remove registered key handlers. Mostly useful in tests. |
+| `psi.tui.register_status_hook(fn)` | Append a short status-bar snippet. `fn(status)` is called on every redraw (must be cheap) and returns a string or nil. Useful for tokens/sec meters, background-task indicators, etc. Suppressed while an active status message is on screen. |
+| `psi.tui.clear_status_hooks()` | Remove registered status hooks. Mostly useful in tests. |
 | `psi.tui_layout.set_prompt_max_rows(rows_or_nil)` | Override the visible multiline prompt height from Lua. Pass a number to set the row cap, or `nil` to clear the override. The TUI runtime may still supply `tui.prompt.max_rows` from settings; the layout module itself stays deterministic and the final value is always clamped to available terminal height. |
 | `psi.tools.set_active(names)` / `get_active()` | Narrow the tool set offered to the model for subsequent turns. Pass a list of tool names to restrict; pass `nil` to clear the scope and restore all registered tools. Useful for skill-scoped agents (e.g. `tools.set_active({"read","grep"})` for a read-only investigation). |
 | `psi.session.send_message(role, text)` | Inject a user or assistant message into the in-memory session without triggering a turn. `role` is `"user"` or `"assistant"`. Call `psi.session.save()` afterwards to persist. Replaces the former internal-only `append_user` / `append_assistant` for extension use. |
@@ -309,6 +312,11 @@ These are part of the stable surface:
 | `psi.settings.get(path, default)` / `reload()` | Read layered JSON settings from `~/.config/psi/settings.json` and `./.psi/settings.json`. |
 | `psi.resources.context_files()` | Discover global/project context files. Emits `resources_discover`. |
 | `psi.prompt_templates.load()` / `list()` / `find(name)` / `expand(text)` | Loader + lookup + runtime expansion for user-authored slash-command templates. `/reload` reloads them. See "Prompt templates" below. |
+
+The built-in Vim keybinding layer (`lua/psi/extensions/vim_keybindings.lua`)
+uses the TUI hook APIs rather than C editor logic; the C side only
+performs generic terminal normalization, such as mapping ASCII control
+bytes to `ctrl-a` through `ctrl-z`.
 
 ### Prompt templates
 
