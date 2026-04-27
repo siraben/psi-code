@@ -281,6 +281,18 @@ job is turn execution and session-correct event emission.
 
 Tools are registered in Lua and dispatched through a common registry.
 
+Built-in tools currently shipped from `lua/psi/tools.lua`:
+
+- `read`
+- `write`
+- `edit`
+- `bash`
+- `grep`
+- `find`
+- `ls`
+- `web_search`
+- `lua`
+
 The tool layer owns:
 
 - schemas exposed to providers
@@ -292,6 +304,11 @@ The tool layer owns:
 The shell-facing tools should stream incremental progress without buffering the
 same bytes repeatedly in Lua, while still producing a final structured tool
 result for the session log.
+
+`web_search` is implemented as a thin built-in tool over `lua/psi/web_search.lua`,
+which in turn uses the libcurl-backed `psi.http_request` host primitive. Search
+provider request/response mapping lives there so the model-visible tool
+contract can remain stable if the backend changes.
 
 ## Extension surface
 

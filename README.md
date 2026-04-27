@@ -51,7 +51,8 @@ This repository currently contains:
   session / token usage), unicode tool-call borders, live
   markdown rendering, mode-aware hints, readline-style editing
   (Alt-B/F/D/Backspace, Ctrl-W/K/U), Esc-abort while busy, and
-  Ctrl-Z suspend/resume. Single-threaded: the agent turn runs as
+  Ctrl-Z suspend/resume, plus a Lua-driven theme registry with a
+  bundled dark default. Single-threaded: the agent turn runs as
   a Lua coroutine on the ncurses thread, pumping input and
   redraws between every cooperative yield
 - manual session compaction through `--compact` and `/compact`
@@ -117,6 +118,7 @@ Current structured host tools registered in `lua/psi/tools.lua`:
 - `grep`
 - `find`
 - `ls`
+- `web_search`
 - `lua`
 
 Tool inputs are plain Lua tables (or Lua alists when routed through the C
@@ -128,7 +130,12 @@ the same time.
 
 `bash`, `grep`, `find`, and `ls` run through a small host process layer in
 `src/core/process.c` that captures output and exit status using `fork`/`exec`
-on POSIX.
+on POSIX. `web_search` uses the libcurl-backed HTTP bridge exposed to Lua as
+`psi.http_request`, not a shell `curl` subprocess. The initial backend is
+Brave Search; configure it with `BRAVE_SEARCH_API_KEY` (or
+`PSI_BRAVE_SEARCH_API_KEY`). Optional knobs: `PSI_WEB_SEARCH_PROVIDER`,
+`PSI_BRAVE_SEARCH_BASE_URL`, `PSI_WEB_SEARCH_TIMEOUT_MS`, and
+`PSI_WEB_SEARCH_MAX_RESPONSE_BYTES`.
 
 `--system-prompt` is the current bridge from scaffold to usable harness
 behavior. It emits the default coding-agent prompt that `psi` would hand to a
@@ -167,7 +174,7 @@ Current limitations of `--agent`:
 
 Lua files dropped into any of the following directories are
 loaded at startup and can register tools, subscribe to events, or
-add slash commands. See [docs/extensions.md](docs/extensions.md)
+add slash commands and themes. See [docs/extensions.md](docs/extensions.md)
 for the authoring guide.
 
 - `$PSI_EXTENSIONS_DIR` (colon-separated list, takes precedence)

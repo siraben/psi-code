@@ -23,8 +23,8 @@
 
 #include "psi/abort.h"
 #include "psi/agent.h"
-#include "psi/anthropic.h"
 #include "psi/http_async.h"
+#include "psi/http_client.h"
 #include "psi/common.h"
 #include "psi/embedded_lua.h"
 #include "psi/host_ops.h"
@@ -1390,11 +1390,94 @@ static int lfn_http_post(lua_State *L) {
     psi_lua_free_headers(headers, header_count);
 
     if (status != PSI_STATUS_OK) {
-        free(response);
         lua_pushnil(L);
-        lua_pushstring(L, "http request failed");
+        lua_pushstring(L, response != NULL ? response : "http request failed");
+        free(response);
         return 2;
     }
+    lua_pushinteger(L, status_code);
+    lua_pushstring(L, response != NULL ? response : "");
+    free(response);
+    return 2;
+}
+
+static int lfn_http_request(lua_State *L) {
+    struct psi_http_request_options request;
+    char **headers;
+    size_t header_count;
+    const struct psi_host_context *host;
+    long status_code;
+    char *response;
+    int status;
+
+    luaL_checktype(L, 1, LUA_TTABLE);
+
+    memset(&request, 0, sizeof(request));
+    headers = NULL;
+    header_count = 0u;
+
+    lua_getfield(L, 1, "url");
+    if (!lua_isstring(L, -1)) {
+        return luaL_error(L, "http_request: missing string field: url");
+    }
+    request.url = lua_tostring(L, -1);
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "method");
+    if (!lua_isnil(L, -1) && !lua_isstring(L, -1)) {
+        return luaL_error(L, "http_request: field method must be a string");
+    }
+    request.method = lua_isstring(L, -1) ? lua_tostring(L, -1) : NULL;
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "headers");
+    if (!lua_isnil(L, -1)) {
+        luaL_checktype(L, -1, LUA_TTABLE);
+        if (psi_lua_collect_headers(L, -1, &headers, &header_count) != 0) {
+            lua_pop(L, 1);
+            return luaL_error(L, "failed to collect headers");
+        }
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "body");
+    if (!lua_isnil(L, -1) && !lua_isstring(L, -1)) {
+        psi_lua_free_headers(headers, header_count);
+        return luaL_error(L, "http_request: field body must be a string");
+    }
+    if (lua_isstring(L, -1)) {
+        request.body = lua_tolstring(L, -1, &request.body_len);
+    } else {
+        request.body = NULL;
+        request.body_len = 0u;
+    }
+
+    lua_getfield(L, 1, "timeout_ms");
+    request.timeout_ms = lua_isnil(L, -1) ? 0l : (long)luaL_checkinteger(L, -1);
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "max_response_bytes");
+    request.max_response_bytes = lua_isnil(L, -1) ? 0l : (long)luaL_checkinteger(L, -1);
+    lua_pop(L, 1);
+
+    request.header_lines = (const char *const *)headers;
+    request.header_count = header_count;
+
+    host = PSI_VM_HOST(L);
+    status_code = 0l;
+    response = NULL;
+    status = psi_http_request(&request, host ? host->abort_signal : NULL, &status_code, &response);
+
+    lua_pop(L, 1); /* body */
+    psi_lua_free_headers(headers, header_count);
+
+    if (status != PSI_STATUS_OK) {
+        lua_pushnil(L);
+        lua_pushstring(L, response != NULL ? response : "http request failed");
+        free(response);
+        return 2;
+    }
+
     lua_pushinteger(L, status_code);
     lua_pushstring(L, response != NULL ? response : "");
     free(response);
@@ -1581,6 +1664,7 @@ static int lfn_runtime_info(lua_State *L) {
         "version", "log", "session_message_count", "read_file", "file_write",
         "current_date", "cwd", "parent_directory", "file_exists", "runtime_info",
         "session_messages", "process_run", "session_append", "session_clear",
+        "http_request",
         "tool_call",
         NULL
     };
@@ -1961,6 +2045,7 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("embedded_source_names", lfn_embedded_source_names);
     PSI_REG("json_encode",           lfn_json_encode);
     PSI_REG("json_decode",           lfn_json_decode);
+    PSI_REG("http_request",          lfn_http_request);
     PSI_REG("http_post",             lfn_http_post);
     PSI_REG("http_post_stream",      lfn_http_post_stream);
     PSI_REG("http_stream_begin",     lfn_http_stream_begin);

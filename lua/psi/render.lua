@@ -174,6 +174,16 @@ local function render_search_call(tool, p)
   return banner
 end
 
+local function render_web_search_call(p)
+  local input = payload_input(p)
+  local query = input.query or ""
+  local banner = tool_banner("web_search", nil)
+  if query ~= "" then
+    return banner .. ansi.dim("query: " .. query) .. "\n"
+  end
+  return banner
+end
+
 local function render_lua_call(p)
   local mode = payload_input(p).mode or "summary"
   return tool_call_leading() .. "\n" .. ansi.bold(ansi.cyan("lua")) .. " " .. mode .. "\n"
@@ -290,6 +300,9 @@ function M.render_tool_call(p)
   if tool == "ls" then
     return render_search_call("ls", p)
   end
+  if tool == "web_search" then
+    return render_web_search_call(p)
+  end
   if tool == "lua" then
     return render_lua_call(p)
   end
@@ -312,6 +325,9 @@ function M.render_tool_result(p)
     return render_edit_result(p, frame)
   end
   if tool == "grep" or tool == "find" or tool == "ls" then
+    return render_search_result(p)
+  end
+  if tool == "web_search" then
     return render_search_result(p)
   end
   if tool == "lua" then
