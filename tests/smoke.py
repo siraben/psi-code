@@ -420,6 +420,24 @@ def t_context_event(psi: Psi):
                     f"context event shape wrong: {out!r}")
 
 
+@test("agent/control_queues")
+def t_agent_control_queues(psi: Psi):
+    out = psi.eval(
+        'local agent = require("psi.agent")\n'
+        + 'agent.clear_queues()\n'
+        + 'local ok1 = agent.queue_steering("steer")\n'
+        + 'local ok2 = agent.queue_follow_up({text = "follow"})\n'
+        + 'local pending = agent.pending_message_count()\n'
+        + 'local steering = agent.drain_steering()\n'
+        + 'local follow = agent.drain_follow_ups()\n'
+        + 'return tostring(ok1) .. "|" .. tostring(ok2) .. "|"\n'
+        + '  .. pending .. "|" .. steering[1] .. "|" .. follow[1] .. "|"\n'
+        + '  .. agent.pending_message_count()'
+    )
+    assert_equals(out, "true|true|2|steer|follow|0",
+                  "agent queues should drain in FIFO order")
+
+
 @test("events/session_lifecycle")
 def t_session_lifecycle(psi: Psi):
     out = psi.eval(
@@ -926,6 +944,25 @@ def t_providers_openrouter_metadata(psi: Psi):
     ).stdout.strip()
     assert_equals(out, "1048576|65536|400000|678|openai/gpt-5.1-codex|openrouter",
                   "OpenRouter metadata resolves full and stripped model ids")
+
+
+@test("providers/api_registry")
+def t_providers_api_registry(psi: Psi):
+    out = psi.eval(
+        'local p = require("psi.providers")\n'
+        + 'local api = p.api("anthropic-messages")\n'
+        + 'local desc = p.resolve_descriptor("anthropic/claude-opus-4-7")\n'
+        + 'local mod = p.load_api("anthropic-messages")\n'
+        + 'return table.concat({\n'
+        + '  tostring(api.module),\n'
+        + '  tostring(desc.api),\n'
+        + '  tostring(desc.compat.supports_tool_use),\n'
+        + '  tostring(type(mod.run_turn)),\n'
+        + '  tostring(#p.all_apis()),\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "psi.anthropic|anthropic-messages|true|function|3",
+                  "provider API registry should route API adapters")
 
 
 @test("tui/status_context_window")

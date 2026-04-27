@@ -21,6 +21,8 @@
 
 local context = require("psi.context")
 local prelude = require("psi.prelude")
+local provider_loop = require("psi.provider_loop")
+local transform = require("psi.message_transform")
 local tools = require("psi.tools")
 local session_mod = require("psi.session")
 
@@ -30,7 +32,6 @@ local MODEL_ENV = "PSI_ANTHROPIC_MODEL"
 local MODEL_DEFAULT = "claude-opus-4-7"
 local BASE_URL_ENV = "PSI_ANTHROPIC_BASE_URL"
 local BASE_URL_DEFAULT = "https://api.anthropic.com/"
-local MAX_TOOL_ITERATIONS = 32
 
 local function api_url()
   local base = os.getenv(BASE_URL_ENV) or BASE_URL_DEFAULT
@@ -196,13 +197,11 @@ local function build_api_messages(session)
   local i, n = 1, #session
   while i <= n do
     local m = session[i]
-    local body = safe_decode(m.data)
-    local message = type(body) == "table" and body.message or nil
+    local message, body = transform.message_body(m)
     local role = m.role
 
     if role == "assistant" and message then
-      local stop = message.stopReason
-      if stop == "aborted" or stop == "error" then
+      if transform.skip_assistant(message) then
         -- Skip entirely; any tool_use blocks here were never dispatched
         -- and are paired with synthetic results below when a user turn
         -- arrives. (No need to track them in pending_tool_calls since
@@ -760,229 +759,64 @@ function M.run_turn(opts)
     return false
   end
 
-  local observer = opts.observer or {}
   local model = resolve_model(opts.model)
   local max_tokens = opts.max_tokens or 16384
-  local system_prompt = opts.system_prompt or ""
-  local tool_specs = opts.tool_specs or api_tool_specs("")
-  local abort_check = opts.abort_check or function()
-    return false
-  end
-
-  local headers = anthropic_headers(api_key)
-  local url = api_url()
-
-  for _ = 1, MAX_TOOL_ITERATIONS do
-    if abort_check() then
-      return false, "aborted"
-    end
-
-    local session_messages = require("psi.session").messages()
-    -- messages() returns Message records; convert to plain alists for
-    -- build_api_messages' sake (only role/text/data needed).
-    local plain = {}
-    for i, m in ipairs(session_messages) do
-      plain[i] = { role = m.role, text = m.text, data = m.data }
-    end
-    local api_messages = build_api_messages(plain)
-
-    -- See openai_compat.run_turn for the mutation contract. Mirror
-    -- the context event here so extensions that want to rewrite the
-    -- message list don't have to special-case the Anthropic path.
-    if psi.events then
-      psi.events.emit("context", {
-        messages = api_messages,
-        model = model,
-        provider = "anthropic",
-        system_prompt = system_prompt,
-      })
-    end
-
-    local request = {
-      model = model,
-      max_tokens = max_tokens,
-      system = system_as_blocks(system_prompt),
-      messages = mark_last_message_cache(api_messages),
-      tools = tools_with_cache(tool_specs),
-      stream = true,
-    }
-    local body = psi.json_encode(request)
-    if psi.events then
-      psi.events.emit("before-provider-request", {
-        provider = "anthropic",
-        model = model,
-        body = request,
-      })
-    end
-
-    local state = new_state()
-    local parser = new_sse_parser()
-    local sched = require("psi.sched")
-    local compat = require("psi.openai_compat")
-
-    -- Async pull-loop. http_stream_begin spawns a helper thread that
-    -- runs curl_easy_perform; we cooperatively yield to the host
-    -- between chunks so the TUI redraw loop keeps running. Chunks
-    -- stream into the stateful SSE parser, which never holds a
-    -- multi-chunk "leftover" string — the old `leftover ..= chunk`
-    -- approach paid O(N²) in chunk count for events fragmented
-    -- across many TCP segments.
-    --
-    -- Raw chunks are also accumulated (capped) into raw_body so
-    -- compat.classify_http_error can lift `{"error":{"message":…}}`
-    -- out of the body on non-2xx — matches pi-mono's behaviour of
-    -- surfacing the provider's real error message instead of just
-    -- the status code.
-    local raw_body = {}
-    local raw_body_len = 0
-    local RAW_BODY_MAX = 16 * 1024
-
-    local handle, begin_err = psi.http_stream_begin(url, headers, body)
-    if handle == nil then
-      save_failed_partial(state, model, "error", tostring(begin_err))
-      io.stderr:write("http error: " .. tostring(begin_err) .. "\n")
-      return false, "error"
-    end
-
-    while true do
-      if abort_check() then
-        break
-      end
-      local chunk, done = sched.http_poll(handle, 50)
-      if chunk ~= nil then
-        if raw_body_len < RAW_BODY_MAX then
-          raw_body[#raw_body + 1] = chunk
-          raw_body_len = raw_body_len + #chunk
-        end
-        sse_push(parser, chunk, function(event_type, data)
-          dispatch_sse(state, event_type, data, observer)
-        end)
-      end
-      if done then
-        break
-      end
-    end
-    local status = psi.http_stream_finish(handle)
-
-    if status < 0 then
-      local aborted = abort_check()
-      local reason = aborted and "aborted" or "error"
-      local emsg = aborted and "Request was aborted" or "http transport error"
-      save_failed_partial(state, model, reason, emsg)
-      if not aborted then
-        io.stderr:write("http error: " .. emsg .. "\n")
-      end
-      return false, reason
-    end
-    if status < 200 or status >= 300 then
-      local emsg = compat.classify_http_error(status, table.concat(raw_body), "anthropic")
-      save_failed_partial(state, model, "error", emsg)
-      io.stderr:write(emsg .. "\n")
-      -- Surface the detailed message as the reply so TUI and
-      -- scripted --agent callers see it instead of a generic code.
-      return false, emsg
-    end
-
-    local content, tool_uses = finalize_blocks(state)
-    local assistant_text = state_assistant_text(state)
-    session_mod.append_assistant(assistant_text, content, {
-      usage = state.usage,
-      stop_reason = state.stop_reason,
-      model = model,
-      provider = "anthropic",
-      api = "anthropic-messages",
-      response_id = state.response_id,
-    })
-    context.record_usage(psi.session_message_count(), state.usage, model)
-    session_mod.save()
-
-    if psi.events then
-      psi.events.emit("after-provider-response", {
+  return provider_loop.run_turn({
+    model = model,
+    max_tokens = max_tokens,
+    system_prompt = opts.system_prompt or "",
+    tool_specs = opts.tool_specs,
+    observer = opts.observer,
+    abort_check = opts.abort_check,
+    no_auto_compact = opts.no_auto_compact,
+  }, {
+    provider_name = "anthropic",
+    api_name = "anthropic-messages",
+    url = api_url(),
+    headers = anthropic_headers(api_key),
+    tool_specs = api_tool_specs,
+    build_messages = function(session)
+      return build_api_messages(session)
+    end,
+    request_body = function(args)
+      return {
+        model = args.model,
+        max_tokens = args.max_tokens,
+        system = system_as_blocks(args.system_prompt or ""),
+        messages = mark_last_message_cache(args.messages),
+        tools = tools_with_cache(args.tool_specs),
+        stream = true,
+      }
+    end,
+    new_state = new_state,
+    parser_new = new_sse_parser,
+    parser_push = function(parser, chunk, state, observer)
+      sse_push(parser, chunk, function(event_type, data)
+        dispatch_sse(state, event_type, data, observer)
+      end)
+    end,
+    finalize = finalize_blocks,
+    persist = function(state, persisted_model, content, _tool_uses, stop_override, error_message)
+      session_mod.append_assistant(state_assistant_text(state), content, {
         usage = state.usage,
-        stop_reason = state.stop_reason,
+        stop_reason = stop_override or state.stop_reason,
+        error_message = error_message,
+        model = persisted_model,
+        provider = "anthropic",
+        api = "anthropic-messages",
         response_id = state.response_id,
-        model = model,
       })
-    end
-
-    if #tool_uses == 0 then
-      maybe_auto_compact(model, opts)
-      if psi.events then
-        psi.events.emit("turn-end", { text = state_assistant_text(state), model = model })
-      end
-      return true, state_assistant_text(state)
-    end
-
-    -- Run every tool_use block in this turn concurrently. When
-    -- Claude emits N tool_use blocks in a single assistant
-    -- message, we expect their wall time to be ~max(times) rather
-    -- than sum(times). sched.run_all wraps each tool dispatch in
-    -- a sub-coroutine and round-robins them through the event
-    -- loop; each tool's own async primitives (sched.proc_poll,
-    -- etc.) keep yielding cooperatively, so none of them blocks
-    -- the others.
-    --
-    -- Abort semantics: if the user cancels between emitting
-    -- tool_use blocks, we check first and bail out cleanly. If
-    -- abort fires partway through a parallel batch, each
-    -- sub-coroutine's own abort_check picks it up (process_poll
-    -- honours the shared abort_signal); we still wait for all of
-    -- them to finish and emit results so the session stays
-    -- consistent.
-    if abort_check() then
-      return false, "aborted"
-    end
-
-    for _, tu in ipairs(tool_uses) do
-      local input_json = psi.json_encode(tu.input)
-      if observer.on_tool_call then
-        observer.on_tool_call(tu.id, tu.name, input_json)
-      end
-    end
-
-    local tasks = {}
-    for i, tu in ipairs(tool_uses) do
-      tasks[i] = function()
-        -- meta carries tool_call_id downstream so shell-family
-        -- tools can tag on_tool_progress chunks with the id of the
-        -- tool that produced them. Without this, two tools
-        -- running under sched.run_all would stream into the same
-        -- TUI panel.
-        return psi.tools.dispatch_alist(tu.name, tu.input, { tool_call_id = tu.id })
-      end
-    end
-    local results = require("psi.sched").run_all(tasks)
-
-    for i, tu in ipairs(tool_uses) do
-      local r = results[i]
-      local result_alist
-      if r.ok and r.values and r.values.n > 0 then
-        result_alist = r.values[1]
-      else
-        -- Sub-coroutine errored. Synthesize an error ToolResult so
-        -- the next turn can see something sensible rather than an
-        -- orphan tool_use.
-        result_alist = {
-          tool = tu.name,
-          ok = false,
-          error = tostring(r and r.error or "tool dispatch failed"),
-        }
-      end
-      local result_json = psi.json_encode(result_alist)
-      if observer.on_tool_result then
-        observer.on_tool_result(tu.id, tu.name, result_json)
-      end
-      session_mod.append_tool_result(tu.id, tu.name, result_json, not result_alist.ok)
-    end
-    session_mod.save()
-
-    maybe_auto_compact(model, opts)
-  end
-
-  io.stderr:write(
-    "Anthropic tool loop exceeded " .. tostring(MAX_TOOL_ITERATIONS) .. " iterations\n"
-  )
-  return false
+    end,
+    response_id = function(state)
+      return state.response_id
+    end,
+    save_failed_partial = save_failed_partial,
+    classify_http_error = require("psi.openai_compat").classify_http_error,
+    text = state_assistant_text,
+    after_iteration = function(iter_model, iter_opts)
+      maybe_auto_compact(iter_model, iter_opts)
+    end,
+  })
 end
 
 -- Exported for tests/bench.py only. Safe to drop if internal.

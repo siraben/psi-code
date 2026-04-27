@@ -1003,6 +1003,12 @@ local function run_turn(state, line)
       end
     end,
     on_tool_call = function(id, name, input_json)
+      -- Match pi-mono's event ordering: assistant message_end is
+      -- delivered before tool_execution_start. Without this boundary,
+      -- text streamed after the tool result can append to the same
+      -- live assistant entry that emitted the tool call.
+      finish_streaming_assistant(state)
+      state.streaming_thinking_index = nil
       observer_tool_call(state, id, name, input_json)
     end,
     on_tool_result = function(id, name, output_json)
@@ -1038,8 +1044,12 @@ local function run_turn(state, line)
   fire_turn_event(state, "after-turn", after_turn_payload(reply, assistant_streamed))
 
   if not ok then
-    add_entry(state, "error", reply ~= "" and reply or "provider request failed")
-    set_status(state, "agent turn failed", true)
+    if reply == "aborted" then
+      set_status(state, "aborted", false)
+    else
+      add_entry(state, "error", reply ~= "" and reply or "provider request failed")
+      set_status(state, "agent turn failed", true)
+    end
     session.save()
     return false
   end
