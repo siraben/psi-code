@@ -132,7 +132,8 @@ class Psi:
 
 
 def run_pty(cmd: list[str], scenario: list[tuple[str, float]],
-            env_extra: dict | None = None, idle_drain: float = 2.0) -> bytes:
+            env_extra: dict | None = None, idle_drain: float = 2.0,
+            cwd: Path | None = None) -> bytes:
     """Drive a pty session with a scripted (input, wait_secs) sequence.
 
     Reads everything the child writes and returns it as raw bytes. Sends
@@ -146,6 +147,8 @@ def run_pty(cmd: list[str], scenario: list[tuple[str, float]],
     pid, fd = pty.fork()
     if pid == 0:
         try:
+            if cwd is not None:
+                os.chdir(cwd)
             os.execvpe(cmd[0], cmd, env)
         except Exception as exc:  # noqa: BLE001
             os.write(2, f"exec failed: {exc}\n".encode())
@@ -1218,6 +1221,36 @@ def t_tui_quits(psi: Psi):
     # We don't require any specific text — just confirm the binary ran
     # long enough to render its header before accepting /quit.
     assert_contains(text, "psi coding agent", "TUI header")
+
+
+@test("mode/tui_theme_applies_to_rendered_colors")
+def t_tui_theme_applies_to_rendered_colors(psi: Psi):
+    project = psi.tmp / "theme-tui-project"
+    extdir = psi.tmp / "theme-tui-ext"
+    (project / ".psi").mkdir(parents=True, exist_ok=True)
+    extdir.mkdir(exist_ok=True)
+    (project / ".psi" / "settings.json").write_text(
+        json.dumps({"theme": {"name": "hot-accent"}})
+    )
+    (extdir / "hot.lua").write_text(
+        "return function(psi)\n"
+        "  psi.theme.register('hot-accent', {\n"
+        "    tui = { accent = { fg = 118, bg = -1 } },\n"
+        "  })\n"
+        "end\n"
+    )
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [(b"", 0.5), (b"/quit\r", 1.0)],
+        env_extra={
+            "NO_COLOR": "",
+            "PSI_EXTENSIONS_DIR": str(extdir),
+            "TERM": "xterm-256color",
+        },
+        idle_drain=1.0,
+        cwd=project,
+    )
+    assert b"\x1b[38;5;118m" in raw, "configured TUI accent color did not reach rendered output"
 
 
 @test("mode/tui_lf_submit")

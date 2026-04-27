@@ -11,6 +11,7 @@
 #endif
 #include <lua.h>
 #include "psi/abort.h"
+#include "psi/host_ops.h"
 #include "psi/runtime.h"
 #include "psi/session.h"
 #include "psi/vm.h"
@@ -101,8 +102,10 @@ static void psi_tui_restore_stderr(int saved_fd) {
     close(saved_fd);
 }
 
-static int psi_tui_init_colors(void) {
+static int psi_tui_init_colors(const struct psi_host_context *host) {
 #if PSI_ENABLE_COLOR
+    int i;
+
     if (!has_colors()) {
         return PSI_STATUS_OK;
     }
@@ -117,6 +120,16 @@ static int psi_tui_init_colors(void) {
     init_pair(7, -1, -1);
     if (COLOR_PAIRS > 8) {
         init_pair(8, COLORS > 242 ? 242 : COLOR_BLACK, -1);
+    }
+    if (host != NULL && host->tui_theme.active) {
+        for (i = 0; i < PSI_HOST_TUI_THEME_PAIR_COUNT && i + 1 < COLOR_PAIRS; i++) {
+            const struct psi_host_tui_theme_pair *pair = &host->tui_theme.pairs[i];
+            if (pair->is_set) {
+                int fg = pair->fg >= 0 && pair->fg < COLORS ? pair->fg : -1;
+                int bg = pair->bg >= 0 && pair->bg < COLORS ? pair->bg : -1;
+                init_pair((short)(i + 1), (short)fg, (short)bg);
+            }
+        }
     }
 #endif
     return PSI_STATUS_OK;
@@ -204,7 +217,7 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
         keypad(stdscr, TRUE);
         scrollok(stdscr, FALSE);
         set_escdelay(25);
-        psi_tui_init_colors();
+        psi_tui_init_colors(&vm.host);
 
         psi_vm_set_tui_active(&vm, 1);
         status = psi_tui_run_lua(&vm, options);
