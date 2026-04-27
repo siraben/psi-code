@@ -317,10 +317,7 @@ M.install = M.enable
 
 local function command_handler(rest)
   rest = tostring(rest or ""):match("^%s*(.-)%s*$")
-  return records().new_command_action(
-    COMMAND_ACTION_KIND,
-    rest ~= "" and rest or "toggle"
-  )
+  return records().new_command_action(COMMAND_ACTION_KIND, rest ~= "" and rest or "toggle")
 end
 
 function M.register(psi)
@@ -339,10 +336,7 @@ function M.register(psi)
       context.reset_editor()
     end
     if context and context.set_status then
-      context.set_status(
-        enabled and "Vim keybindings enabled" or "Vim keybindings disabled",
-        false
-      )
+      context.set_status(enabled and "Vim keybindings enabled" or "Vim keybindings disabled", false)
     end
     return true
   end)

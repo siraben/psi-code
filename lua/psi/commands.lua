@@ -5,8 +5,8 @@
 --   * self-contained (kind="print") — rendered directly
 --   * action-kinds that the REPL dispatcher in modes.lua knows how to
 --     handle (set-model, new-session, resume, reload, export, name,
---     quit). TUI mode currently understands only "print" and "compact";
---     new actions are REPL-only.
+--     quit). TUI mode handles print/compact directly and can route
+--     extension-defined action kinds through psi.tui handlers.
 --
 -- Extension-registered commands (psi.commands.register(name, handler))
 -- are consulted last, after built-ins.
@@ -286,12 +286,22 @@ local function cmd_reload()
   if psi.settings and psi.settings.reload then
     pcall(psi.settings.reload)
   end
+  if
+    psi.extensions
+    and psi.extensions.vim_keybindings
+    and psi.extensions.vim_keybindings.disable
+  then
+    pcall(psi.extensions.vim_keybindings.disable, psi)
+  end
   if psi.tui then
     if psi.tui.clear_key_handlers then
       pcall(psi.tui.clear_key_handlers)
     end
     if psi.tui.clear_status_hooks then
       pcall(psi.tui.clear_status_hooks)
+    end
+    if psi.tui.clear_clipboard_writers then
+      pcall(psi.tui.clear_clipboard_writers)
     end
   end
   if type(psi.install_builtin_extensions) == "function" then
@@ -314,6 +324,9 @@ local function cmd_reload()
   end
   if keybindings.reload then
     pcall(keybindings.reload)
+  end
+  if psi.tui and psi.tui.run_startup_hooks then
+    pcall(psi.tui.run_startup_hooks, { reason = "reload" })
   end
   return records.new_command_action("print", "extensions reloaded")
 end
