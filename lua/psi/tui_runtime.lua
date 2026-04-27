@@ -104,7 +104,6 @@ local function detect_tui_capabilities()
   local color_ok = ansi_ok and info.color ~= false
   local force_ansi = env_bool("PSI_ANSI")
   local force_color = env_bool("PSI_COLOR")
-  local force_raw = env_bool("PSI_TUI_RAW_ANSI")
 
   if force_ansi ~= nil then
     ansi_ok = force_ansi and info.ansi ~= false
@@ -116,7 +115,7 @@ local function detect_tui_capabilities()
     color_ok = force_color and ansi_ok and info.color ~= false
   end
 
-  local raw_ansi_ok = force_raw == true and ansi_ok and type(psi.tui_draw_raw_line) == "function"
+  local raw_ansi_ok = ansi_ok and type(psi.tui_draw_raw_line) == "function"
 
   return {
     ansi = ansi_ok,
@@ -888,26 +887,11 @@ local function redraw(state)
   local status_arg
   local status_text = ""
   local cwd
-  local raw_ansi = state.tui_caps and state.tui_caps.raw_ansi
-  local raw_transcript_ansi = state.tui_caps
-    and state.tui_caps.ansi
-    and type(psi.tui_draw_raw_line) == "function"
-  local raw_input_ansi = raw_transcript_ansi
-  local raw_lines = {}
-  local input_raw_lines = {}
-  local current_raw_rows = {}
-
-  local function add_raw_line(row, text, input_line)
-    local target = input_line and input_raw_lines or raw_lines
-    target[#target + 1] = { row = row, text = text }
-    current_raw_rows[row] = true
-  end
 
   state.scroll_offset = clamp(state.scroll_offset, 0, max_scroll)
 
   if state.force_physical_clear then
     psi.tui_clear(true)
-    state.last_raw_rows = {}
   end
   state.force_physical_clear = false
   cwd = psi.cwd() or "."
@@ -921,12 +905,7 @@ local function redraw(state)
   for i = 0, rows.transcript_height - 1 do
     local line = transcript_lines[i + 1]
     local row = rows.transcript_start + i
-    if raw_transcript_ansi and line and line.kind == "ansi" then
-      add_raw_line(row, line.text, false)
-      psi.tui_draw_line(row, "")
-    else
-      psi.tui_draw_line(row, line and style_line(line) or "")
-    end
+    psi.tui_draw_line(row, line and style_line(line) or "")
   end
 
   status_arg = {
@@ -953,20 +932,10 @@ local function redraw(state)
       state.busy_tick
     )
   end
-  if raw_ansi and state.busy and status_text ~= "" then
-    add_raw_line(rows.status_row, status_text, false)
-    psi.tui_draw_line(rows.status_row, "")
-  else
-    psi.tui_draw_line(rows.status_row, status_text)
-  end
+  psi.tui_draw_line(rows.status_row, status_text)
 
   local input_width = math.max(1, state.width - 1)
-  if raw_input_ansi then
-    add_raw_line(rows.input_start_row, style_input_fill(input_width, "rail"), true)
-    psi.tui_draw_line(rows.input_start_row, "")
-  else
-    psi.tui_draw_line(rows.input_start_row, style_input_fill(input_width, "rail"))
-  end
+  psi.tui_draw_line(rows.input_start_row, style_input_fill(input_width, "rail"))
   for i = 0, rows.input_rows - 1 do
     local line_index = rows.input_first_line + i
     local line = rows.input_lines[line_index]
@@ -985,39 +954,17 @@ local function redraw(state)
         input_width
       )
     end
-    if raw_input_ansi then
-      add_raw_line(rows.input_start_row + 1 + i, input_text, true)
-      psi.tui_draw_line(rows.input_start_row + 1 + i, "")
-    else
-      psi.tui_draw_line(rows.input_start_row + 1 + i, input_text)
-    end
+    psi.tui_draw_line(rows.input_start_row + 1 + i, input_text)
   end
-  if raw_input_ansi then
-    add_raw_line(
-      rows.input_start_row + rows.input_rows + 1,
-      style_input_fill(input_width, "rail"),
-      true
-    )
-    psi.tui_draw_line(rows.input_start_row + rows.input_rows + 1, "")
-  else
-    psi.tui_draw_line(
-      rows.input_start_row + rows.input_rows + 1,
-      style_input_fill(input_width, "rail")
-    )
-  end
+  psi.tui_draw_line(
+    rows.input_start_row + rows.input_rows + 1,
+    style_input_fill(input_width, "rail")
+  )
 
   psi.tui_draw_line(
     rows.footer_row,
     tui.compose_bar(tui.status_bar(status_arg) or "", state.width - 1)
   )
-  if type(psi.tui_draw_raw_line) == "function" then
-    for row in pairs(state.last_raw_rows or {}) do
-      if not current_raw_rows[row] then
-        psi.tui_draw_raw_line(row, "")
-      end
-    end
-  end
-
   local visible_cursor_line = rows.cursor_line - rows.input_first_line + 1
   local cursor_prefix = rows.cursor_line == 1 and state.input_layout.prefix_first
     or state.input_layout.prefix_rest
@@ -1027,25 +974,6 @@ local function redraw(state)
   cursor_col = clamp(cursor_col, 1, math.max(1, state.width - 1))
   psi.tui_set_cursor(cursor_row, cursor_col, true)
   psi.tui_refresh()
-  for _, raw_line in ipairs(raw_lines) do
-    if type(psi.tui_draw_raw_line) == "function" then
-      psi.tui_draw_raw_line(raw_line.row, raw_line.text)
-    else
-      psi.tui_draw_line(raw_line.row, raw_line.text)
-    end
-  end
-  for _, raw_line in ipairs(input_raw_lines) do
-    if type(psi.tui_draw_raw_line) == "function" then
-      psi.tui_draw_raw_line(raw_line.row, raw_line.text)
-    else
-      psi.tui_draw_line(raw_line.row, raw_line.text)
-    end
-  end
-  state.last_raw_rows = current_raw_rows
-  if #raw_lines > 0 or #input_raw_lines > 0 then
-    psi.tui_set_cursor(cursor_row, cursor_col, true)
-    psi.tui_refresh()
-  end
   state.dirty = false
 end
 
@@ -2443,41 +2371,15 @@ function M._debug_redraw_counts(input)
         stale_clears = stale_clears + 1
       end
     end
-    reset_calls()
-    state.tui_caps = { raw_ansi = true }
-    state.input = input or "hello\nhi"
-    state.cursor = #state.input
-    state.status_text = nil
-    state.busy = true
-    state.busy_tick = 3
-    state.dirty = true
-    redraw(state)
-    reset_calls()
-    state.busy_tick = 4
-    state.dirty = true
-    redraw(state)
-    local raw_cursor_sets = calls.cursor_sets
-    local raw_refreshes = calls.refreshes
-    reset_calls()
-    state.busy = false
-    state.status_text = "aborted"
-    state.dirty = true
-    redraw(state)
-    local raw_clears_after_busy = 0
-    for _, call in ipairs(calls.raw_rows) do
-      if call.text == "" then
-        raw_clears_after_busy = raw_clears_after_busy + 1
-      end
-    end
     return {
       first_draws = first_draws,
       second_draws = second_draws,
       second_input_draws = second_input_draws,
       second_clears = calls.clears,
       stale_clears = stale_clears,
-      raw_clears_after_busy = raw_clears_after_busy,
-      raw_cursor_sets = raw_cursor_sets,
-      raw_refreshes = raw_refreshes,
+      raw_draws = #calls.raw_rows,
+      cursor_sets = calls.cursor_sets,
+      refreshes = calls.refreshes,
     }
   end, debug.traceback)
 
