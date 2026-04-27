@@ -15,6 +15,13 @@ local MODE_INSERT = "insert"
 local MODE_NORMAL = "normal"
 local MODE_VISUAL = "visual"
 
+local COMMAND_NAME = "vim"
+local COMMAND_ARGUMENT_HINT = "[on|off|toggle]"
+local COMMAND_DESCRIPTION = "Toggle TUI Vim modal editing"
+local COMMAND_ACTION_KIND = "vim-toggle"
+local CONFIG_ENABLED = "extensions.vim_keybindings.enabled"
+local STARTUP_HOOK_NAME = "vim_keybindings"
+
 local SELECTION_CHAR = "char"
 local SELECTION_LINE = "line"
 local SELECTION_BLOCK = "block"
@@ -73,6 +80,17 @@ local STATUS_BY_SELECTION = {
   [SELECTION_LINE] = "mode:VISUAL LINE",
   [SELECTION_BLOCK] = "mode:VISUAL BLOCK",
 }
+
+local key_handler_id = nil
+local status_hook_id = nil
+
+local function records()
+  return require("psi.records")
+end
+
+local function settings()
+  return require("psi.settings")
+end
 
 local function action(name, arg)
   return { action = name, arg = arg }
@@ -224,28 +242,116 @@ local function handle_visual(arg)
     or action(ACTION_NOOP)
 end
 
-function M.install(psi)
+local function key_handler(arg)
+  arg = type(arg) == "table" and arg or {}
+  if is_mode(arg, MODE_INSERT) then
+    return dispatch(INSERT_KEY_BINDINGS, arg.key, arg)
+  end
+  if is_mode(arg, MODE_VISUAL) then
+    return handle_visual(arg)
+  end
+  return handle_normal(arg)
+end
+
+local function status_hook(arg)
+  local mode = type(arg) == "table" and arg.editor_mode or nil
+  if mode == MODE_VISUAL then
+    return STATUS_BY_SELECTION[arg.selection_kind or SELECTION_CHAR]
+  end
+  return STATUS_BY_MODE[mode] or STATUS_BY_MODE[MODE_INSERT]
+end
+
+function M.is_enabled()
+  return key_handler_id ~= nil
+end
+
+function M.enable(psi)
+  if M.is_enabled() then
+    return true
+  end
   local tui = psi.tui or require("psi.tui")
-  tui.register_key_handler(function(arg)
-    arg = type(arg) == "table" and arg or {}
-    if is_mode(arg, MODE_INSERT) then
-      return dispatch(INSERT_KEY_BINDINGS, arg.key, arg)
-    end
-    if is_mode(arg, MODE_VISUAL) then
-      return handle_visual(arg)
-    end
-    return handle_normal(arg)
-  end)
-  tui.register_status_hook(function(arg)
-    local mode = type(arg) == "table" and arg.editor_mode or nil
-    if mode == MODE_VISUAL then
-      return STATUS_BY_SELECTION[arg.selection_kind or SELECTION_CHAR]
-    end
-    return STATUS_BY_MODE[mode] or STATUS_BY_MODE[MODE_INSERT]
-  end)
+  key_handler_id = tui.register_key_handler(key_handler)
+  status_hook_id = tui.register_status_hook(status_hook)
   return true
 end
 
-return function(psi)
-  return M.install(psi)
+function M.disable(psi)
+  if not M.is_enabled() then
+    return true
+  end
+  local tui = psi.tui or require("psi.tui")
+  if tui.unregister_key_handler then
+    tui.unregister_key_handler(key_handler_id)
+  end
+  if tui.unregister_status_hook then
+    tui.unregister_status_hook(status_hook_id)
+  end
+  key_handler_id = nil
+  status_hook_id = nil
+  return true
 end
+
+function M.set_enabled(psi, enabled)
+  if enabled then
+    return M.enable(psi)
+  end
+  return M.disable(psi)
+end
+
+function M.toggle(psi, value)
+  if value == "on" or value == true then
+    M.enable(psi)
+  elseif value == "off" or value == false then
+    M.disable(psi)
+  else
+    if M.is_enabled() then
+      M.disable(psi)
+    else
+      M.enable(psi)
+    end
+  end
+  return M.is_enabled()
+end
+
+M.install = M.enable
+
+local function command_handler(rest)
+  rest = tostring(rest or ""):match("^%s*(.-)%s*$")
+  return records().new_command_action(
+    COMMAND_ACTION_KIND,
+    rest ~= "" and rest or "toggle"
+  )
+end
+
+function M.register(psi)
+  local commands = psi.commands or require("psi.commands")
+  local tui = psi.tui or require("psi.tui")
+
+  commands.register(COMMAND_NAME, {
+    handler = command_handler,
+    description = COMMAND_DESCRIPTION,
+    argument_hint = COMMAND_ARGUMENT_HINT,
+  })
+
+  tui.register_command_action_handler(COMMAND_ACTION_KIND, function(payload, context)
+    local enabled = M.toggle(psi, payload)
+    if context and context.reset_editor then
+      context.reset_editor()
+    end
+    if context and context.set_status then
+      context.set_status(
+        enabled and "Vim keybindings enabled" or "Vim keybindings disabled",
+        false
+      )
+    end
+    return true
+  end)
+
+  tui.register_startup_hook(STARTUP_HOOK_NAME, function()
+    M.set_enabled(psi, settings().get(CONFIG_ENABLED, false) == true)
+  end)
+
+  return true
+end
+
+return M

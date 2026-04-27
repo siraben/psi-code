@@ -184,7 +184,6 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     if (args.max_tokens->count > 0) {
         options->max_tokens = (long)args.max_tokens->ival[0];
     }
-
     psi_cli_free_argtable(&args);
 
     if (options->max_tokens <= 0l) {
