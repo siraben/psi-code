@@ -20,25 +20,6 @@ void psi_vm_destroy(struct psi_vm *vm);
 void psi_vm_bind_session(struct psi_vm *vm, struct psi_session *session);
 void psi_vm_set_tui_active(struct psi_vm *vm, int active);
 int psi_vm_eval_to_string(struct psi_vm *vm, const char *expression, char **output_text);
-int psi_vm_call_string_procedure(struct psi_vm *vm, const char *procedure_name, const char *argument, char **output_text);
-int psi_vm_call_procedure0_to_string(struct psi_vm *vm, const char *procedure_name, char **output_text);
-int psi_vm_build_compaction_request(
-    struct psi_vm *vm,
-    long keep_recent,
-    char **system_prompt,
-    char **user_prompt
-);
-int psi_vm_dispatch_tool_json(
-    struct psi_vm *vm,
-    const char *tool_name,
-    const char *input_json,
-    char **output_json
-);
-int psi_vm_session_compact(
-    struct psi_vm *vm,
-    long keep_recent,
-    const char *summary_text
-);
 
 /* Bridge into the Lua agent layer. The observer is wrapped as a Lua
  * table whose callbacks invoke the C function pointers. abort_signal
