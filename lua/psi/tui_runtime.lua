@@ -13,6 +13,35 @@ local tui_layout = require("psi.tui_layout")
 local M = {}
 
 local MAX_RENDER_TEXT = 8192
+local MAX_RENDER_TRUNCATION_SUFFIX = "\n\n[output truncated]"
+
+local DEFAULT_WIDTH = 80
+local DEFAULT_HEIGHT = 24
+local MIN_SIZE = 1
+local MIN_HEIGHT = 12
+local PROMPT_RESERVED_ROWS = 6
+local FRAME_WIDTH_MARGIN = 1
+
+local BYTE_TAB = 9
+local BYTE_LF = 10
+local BYTE_VTAB = 11
+local BYTE_FF = 12
+local BYTE_CR = 13
+local BYTE_ESC = 27
+local BYTE_SPACE = 32
+local UTF8_CONTINUATION_MASK = 0xC0
+local UTF8_CONTINUATION_TAG = 0x80
+
+local SETTING_PROMPT_MAX_ROWS = "tui.prompt.max_rows"
+
+local ANSI_PATTERN_CSI = "\27%[[%d;?]*[A-Za-z]"
+local ANSI_PATTERN_KEYPAD = "\27[=>]"
+local ANSI_PATTERN_PRIVATE_MODE = "\27%[%?[%d]+[a-z]"
+
+local EMPTY = ""
+local NEWLINE = "\n"
+local FALLBACK_PROMPT_PREFIX_FIRST = "> "
+local FALLBACK_PROMPT_PREFIX_REST = "| "
 
 local function safe_decode(text, fallback)
   return prelude.safe_json_decode(text, fallback)
@@ -29,19 +58,24 @@ local function clamp(value, low, high)
 end
 
 local function is_space_byte(b)
-  return b == 32 or b == 9 or b == 10 or b == 11 or b == 12 or b == 13
+  return b == BYTE_SPACE
+    or b == BYTE_TAB
+    or b == BYTE_LF
+    or b == BYTE_VTAB
+    or b == BYTE_FF
+    or b == BYTE_CR
 end
 
 local function trim_trailing_newlines(text)
-  text = text or ""
-  return (text:gsub("\n+$", ""))
+  text = text or EMPTY
+  return (text:gsub(NEWLINE .. "+$", EMPTY))
 end
 
 local function strip_ansi(text)
-  text = text or ""
-  text = text:gsub("\27%[[%d;?]*[A-Za-z]", "")
-  text = text:gsub("\27[=>]", "")
-  text = text:gsub("\27%[%?[%d]+[a-z]", "")
+  text = text or EMPTY
+  text = text:gsub(ANSI_PATTERN_CSI, EMPTY)
+  text = text:gsub(ANSI_PATTERN_KEYPAD, EMPTY)
+  text = text:gsub(ANSI_PATTERN_PRIVATE_MODE, EMPTY)
   return text
 end
 
@@ -51,14 +85,14 @@ local function display_width(text)
   text = tostring(text or "")
   while i <= #text do
     local ch = text:byte(i)
-    if ch == 27 and text:sub(i + 1, i + 1) == "[" then
+    if ch == BYTE_ESC and text:sub(i + 1, i + 1) == "[" then
       local j = i + 2
       while j <= #text and text:sub(j, j) ~= "m" do
         j = j + 1
       end
       i = j < #text and (j + 1) or (#text + 1)
     else
-      if (ch & 0xC0) ~= 0x80 then
+      if (ch & UTF8_CONTINUATION_MASK) ~= UTF8_CONTINUATION_TAG then
         width = width + 1
       end
       i = i + 1
@@ -68,17 +102,17 @@ local function display_width(text)
 end
 
 local function limit_text(text)
-  text = text or ""
+  text = text or EMPTY
   if #text <= MAX_RENDER_TEXT then
     return text
   end
-  return text:sub(1, MAX_RENDER_TEXT) .. "\n\n[output truncated]"
+  return text:sub(1, MAX_RENDER_TEXT) .. MAX_RENDER_TRUNCATION_SUFFIX
 end
 
 local function current_size()
   local size = psi.tui_size()
-  local width = math.max(1, tonumber(size and size.width) or 80)
-  local height = math.max(1, tonumber(size and size.height) or 24)
+  local width = math.max(MIN_SIZE, tonumber(size and size.width) or DEFAULT_WIDTH)
+  local height = math.max(MIN_SIZE, tonumber(size and size.height) or DEFAULT_HEIGHT)
   return width, height
 end
 
@@ -126,11 +160,11 @@ local function detect_tui_capabilities()
 end
 
 local function default_input_layout(height)
-  height = math.max(12, tonumber(height) or 24)
+  height = math.max(MIN_HEIGHT, tonumber(height) or DEFAULT_HEIGHT)
   return {
-    max_rows = math.max(1, height - 6),
-    prefix_first = "> ",
-    prefix_rest = "| ",
+    max_rows = math.max(MIN_SIZE, height - PROMPT_RESERVED_ROWS),
+    prefix_first = FALLBACK_PROMPT_PREFIX_FIRST,
+    prefix_rest = FALLBACK_PROMPT_PREFIX_REST,
   }
 end
 
@@ -140,7 +174,7 @@ local function refresh_input_layout(state)
     height = state.height,
     busy = state.busy,
     scroll = state.scroll_offset,
-    max_rows = settings.get("tui.prompt.max_rows", nil),
+    max_rows = settings.get(SETTING_PROMPT_MAX_ROWS, nil),
   }
   local layout = tui_layout.input_layout_table and tui_layout.input_layout_table(arg)
     or safe_decode(tui_layout.input_layout(psi.json_encode(arg)), {})
@@ -156,21 +190,21 @@ end
 
 local function input_max_rows(state)
   local max_rows = tonumber(state.input_layout.max_rows) or 5
-  max_rows = math.max(1, max_rows)
-  max_rows = math.min(max_rows, math.max(1, state.height - 6))
+  max_rows = math.max(MIN_SIZE, max_rows)
+  max_rows = math.min(max_rows, math.max(MIN_SIZE, state.height - PROMPT_RESERVED_ROWS))
   return max_rows
 end
 
 local function input_wrap_width(width, prefix)
-  local available = (width - 1) - display_width(prefix)
-  if available < 1 then
-    available = 1
+  local available = (width - FRAME_WIDTH_MARGIN) - display_width(prefix)
+  if available < MIN_SIZE then
+    available = MIN_SIZE
   end
   return available
 end
 
 local function build_input_lines(state)
-  local input = state.input or ""
+  local input = state.input or EMPTY
   local input_length = #input
   local lines = {}
   local pos = 0
@@ -180,7 +214,7 @@ local function build_input_lines(state)
 
   while true do
     local line_end = pos
-    while line_end < input_length and input:byte(line_end + 1) ~= 10 do
+    while line_end < input_length and input:byte(line_end + 1) ~= BYTE_LF do
       line_end = line_end + 1
     end
 
@@ -231,10 +265,10 @@ end
 local function entry_prefixes(entry)
   local kind = entry.kind
   if kind == "user" then
-    return "You: ", ""
+    return "You: ", EMPTY
   end
   if kind == "assistant" then
-    return "", ""
+    return EMPTY, EMPTY
   end
   if kind == "tool_call" then
     return "╭─ ", "│  "
@@ -243,12 +277,12 @@ local function entry_prefixes(entry)
     return "│  ", "│  "
   end
   if kind == "error" then
-    return "error: ", ""
+    return "error: ", EMPTY
   end
   if kind == "compaction" then
-    return "— ", ""
+    return "— ", EMPTY
   end
-  return "", ""
+  return EMPTY, EMPTY
 end
 
 local function is_fence_line(text)

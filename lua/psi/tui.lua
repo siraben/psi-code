@@ -13,18 +13,16 @@ local BAR_SPLIT = string.char(31)
 local busy_rng_seeded = false
 local enabled_setting
 
-local DEFAULT_PRIMARY_BUSY_LABELS = {
-  "gooning",
-  "gooning fr",
-}
-
-local DEFAULT_SECONDARY_BUSY_LABELS = {
-  "lowkirkuinely",
-  "trolling",
-  "rewriting in rust",
-  "type error",
-  "nix building",
-  "hallucinating",
+local DEFAULT_BUSY_LABEL_WEIGHT_TOTAL = 100
+local DEFAULT_BUSY_LABELS = {
+  { label = "gooning", weight = 60 },
+  { label = "gooning fr", weight = 8 },
+  { label = "lowkirkuinely", weight = 8 },
+  { label = "trolling", weight = 6 },
+  { label = "rewriting in rust", weight = 6 },
+  { label = "type error", weight = 4 },
+  { label = "nix building", weight = 4 },
+  { label = "hallucinating", weight = 4 },
 }
 
 local function action(name, arg)
@@ -292,10 +290,15 @@ local function configured_busy_labels()
 end
 
 local function default_busy_label()
-  if math.random(10) <= 9 then
-    return DEFAULT_PRIMARY_BUSY_LABELS[math.random(#DEFAULT_PRIMARY_BUSY_LABELS)]
+  local roll = math.random(DEFAULT_BUSY_LABEL_WEIGHT_TOTAL)
+  local cumulative = 0
+  for _, entry in ipairs(DEFAULT_BUSY_LABELS) do
+    cumulative = cumulative + entry.weight
+    if roll <= cumulative then
+      return entry.label
+    end
   end
-  return DEFAULT_SECONDARY_BUSY_LABELS[math.random(#DEFAULT_SECONDARY_BUSY_LABELS)]
+  return DEFAULT_BUSY_LABELS[#DEFAULT_BUSY_LABELS].label
 end
 
 enabled_setting = function(path, env_name, default_value)
