@@ -8,6 +8,7 @@
 local M = {}
 
 local providers = {}
+local apis = {}
 local models = {}
 
 local function copy_table(t)
@@ -32,6 +33,16 @@ function M.register_provider(name, spec)
   return true
 end
 
+function M.register_api(name, spec)
+  if type(name) ~= "string" or name == "" then
+    return false, "api name is required"
+  end
+  spec = copy_table(spec or {})
+  spec.name = name
+  apis[name] = spec
+  return true
+end
+
 function M.register_model(id, spec)
   if type(id) ~= "string" or id == "" then
     return false, "model id is required"
@@ -44,6 +55,10 @@ end
 
 function M.provider(name)
   return providers[name]
+end
+
+function M.api(name)
+  return apis[name]
 end
 
 function M.model(id)
@@ -78,6 +93,17 @@ function M.all_providers()
   local out = {}
   for name, spec in pairs(providers) do
     out[#out + 1] = { name = name, api = spec.api, default_model = spec.default_model }
+  end
+  table.sort(out, function(a, b)
+    return a.name < b.name
+  end)
+  return out
+end
+
+function M.all_apis()
+  local out = {}
+  for name, spec in pairs(apis) do
+    out[#out + 1] = { name = name, module = spec.module, compat = copy_table(spec.compat or {}) }
   end
   table.sort(out, function(a, b)
     return a.name < b.name
@@ -132,11 +158,8 @@ local function canonical_id(provider_name, model_id)
   return provider_name .. "/" .. model_id
 end
 
-M.register_provider("anthropic", {
-  api = "anthropic-messages",
+M.register_api("anthropic-messages", {
   module = "psi.anthropic",
-  model_env = "PSI_ANTHROPIC_MODEL",
-  default_model = "claude-opus-4-7",
   compat = {
     supports_reasoning = true,
     supports_tool_use = true,
@@ -144,27 +167,39 @@ M.register_provider("anthropic", {
   },
 })
 
-M.register_provider("ollama", {
-  api = "ollama-chat",
+M.register_api("ollama-chat", {
   module = "psi.ollama",
-  model_env = "PSI_OLLAMA_MODEL",
-  default_model = "llama3.1:latest",
   compat = {
     supports_tool_use = true,
     thinking_format = "openai-compatible",
   },
 })
 
-M.register_provider("openrouter", {
-  api = "openrouter-chat-completions",
+M.register_api("openrouter-chat-completions", {
   module = "psi.openrouter",
-  model_env = "PSI_OPENROUTER_MODEL",
-  default_model = "google/gemini-3-flash-preview",
   compat = {
     supports_tool_use = true,
     supports_reasoning_effort = false,
     max_tokens_field = "max_tokens",
   },
+})
+
+M.register_provider("anthropic", {
+  api = "anthropic-messages",
+  model_env = "PSI_ANTHROPIC_MODEL",
+  default_model = "claude-opus-4-7",
+})
+
+M.register_provider("ollama", {
+  api = "ollama-chat",
+  model_env = "PSI_OLLAMA_MODEL",
+  default_model = "llama3.1:latest",
+})
+
+M.register_provider("openrouter", {
+  api = "openrouter-chat-completions",
+  model_env = "PSI_OPENROUTER_MODEL",
+  default_model = "google/gemini-3-flash-preview",
 })
 
 M.register_model("anthropic/claude-opus-4-7", {
@@ -252,6 +287,7 @@ function M.resolve_descriptor(model)
   local out = copy_table(meta)
   out.provider = spec.name
   out.api = out.api or spec.api
+  out.compat = copy_table((apis[out.api] and apis[out.api].compat) or {})
   out.id = real_model
   out.model = real_model
   out.ref = canonical_id(spec.name, real_model)
@@ -259,6 +295,14 @@ function M.resolve_descriptor(model)
 end
 
 function M.load_provider(spec)
+  if not spec or not spec.api then
+    return nil
+  end
+  return M.load_api(spec.api)
+end
+
+function M.load_api(api_name)
+  local spec = apis[api_name]
   if not spec or not spec.module then
     return nil
   end
