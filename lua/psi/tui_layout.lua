@@ -10,7 +10,7 @@ local M = {}
 local prompt_max_rows_override = nil
 
 local function clamp_prompt_max_rows(rows, height)
-  local max_allowed = math.max(1, height - 5)
+  local max_allowed = math.max(1, height - 6)
   rows = tonumber(rows)
   if rows == nil then
     return nil
@@ -26,7 +26,7 @@ local function clamp_prompt_max_rows(rows, height)
 end
 
 local function default_prompt_max_rows(height)
-  return math.min(5, math.max(1, height - 5))
+  return math.min(5, math.max(1, height - 6))
 end
 
 local function resolve_prompt_max_rows(configured, height)

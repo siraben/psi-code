@@ -534,7 +534,8 @@ static void psi_vm_tui_draw_plain_line(int row, const char *text) {
 struct psi_vm_tui_ansi_state {
     attr_t attrs;
 #if PSI_ENABLE_COLOR
-    int color_pair;
+    int fg;
+    int bg;
 #endif
 };
 
@@ -543,17 +544,24 @@ struct psi_vm_tui_ansi_state {
 #define PSI_VM_TUI_DYNAMIC_PAIR_MAX 64
 
 static int psi_vm_tui_dynamic_fg[PSI_VM_TUI_DYNAMIC_PAIR_MAX];
+static int psi_vm_tui_dynamic_bg[PSI_VM_TUI_DYNAMIC_PAIR_MAX];
 static int psi_vm_tui_dynamic_pairs = 0;
 
-static int psi_vm_tui_pair_for_fg(int fg) {
+static int psi_vm_tui_pair_for_colors(int fg, int bg) {
     int i;
     int pair;
 
-    if (fg < 0 || fg >= COLORS || COLOR_PAIRS <= PSI_VM_TUI_DYNAMIC_PAIR_START) {
+    if (COLOR_PAIRS <= PSI_VM_TUI_DYNAMIC_PAIR_START) {
+        return 0;
+    }
+    if ((fg < -1 || fg >= COLORS) || (bg < -1 || bg >= COLORS)) {
+        return 0;
+    }
+    if (fg < 0 && bg < 0) {
         return 0;
     }
     for (i = 0; i < psi_vm_tui_dynamic_pairs; i++) {
-        if (psi_vm_tui_dynamic_fg[i] == fg) {
+        if (psi_vm_tui_dynamic_fg[i] == fg && psi_vm_tui_dynamic_bg[i] == bg) {
             return PSI_VM_TUI_DYNAMIC_PAIR_START + i;
         }
     }
@@ -564,8 +572,9 @@ static int psi_vm_tui_pair_for_fg(int fg) {
     if (pair >= COLOR_PAIRS) {
         return 0;
     }
-    init_pair((short)pair, (short)fg, -1);
+    init_pair((short)pair, (short)fg, (short)bg);
     psi_vm_tui_dynamic_fg[psi_vm_tui_dynamic_pairs] = fg;
+    psi_vm_tui_dynamic_bg[psi_vm_tui_dynamic_pairs] = bg;
     psi_vm_tui_dynamic_pairs++;
     return pair;
 }
@@ -576,7 +585,8 @@ static void psi_vm_tui_ansi_apply_code(struct psi_vm_tui_ansi_state *s, int code
         case 0:
             s->attrs = 0;
 #if PSI_ENABLE_COLOR
-            s->color_pair = 0;
+            s->fg = -1;
+            s->bg = -1;
 #endif
             break;
         case 1:  s->attrs |= A_BOLD; break;
@@ -590,15 +600,27 @@ static void psi_vm_tui_ansi_apply_code(struct psi_vm_tui_ansi_state *s, int code
             break;
         case 4:  s->attrs |= A_UNDERLINE; break;
 #if PSI_ENABLE_COLOR
-        case 31: s->color_pair = 6; break;
-        case 32: s->color_pair = 5; break;
-        case 33: s->color_pair = 4; break;
-        case 34: s->color_pair = 1; break;
-        case 36: s->color_pair = 2; break;
-        case 37: s->color_pair = 3; break;
+        case 30: s->fg = COLOR_BLACK; break;
+        case 31: s->fg = COLOR_RED; break;
+        case 32: s->fg = COLOR_GREEN; break;
+        case 33: s->fg = COLOR_YELLOW; break;
+        case 34: s->fg = COLOR_BLUE; break;
+        case 35: s->fg = COLOR_MAGENTA; break;
+        case 36: s->fg = COLOR_CYAN; break;
+        case 37: s->fg = COLOR_WHITE; break;
+        case 39: s->fg = -1; break;
+        case 40: s->bg = COLOR_BLACK; break;
+        case 41: s->bg = COLOR_RED; break;
+        case 42: s->bg = COLOR_GREEN; break;
+        case 43: s->bg = COLOR_YELLOW; break;
+        case 44: s->bg = COLOR_BLUE; break;
+        case 45: s->bg = COLOR_MAGENTA; break;
+        case 46: s->bg = COLOR_CYAN; break;
+        case 47: s->bg = COLOR_WHITE; break;
+        case 49: s->bg = -1; break;
         case 242:
-            if (COLOR_PAIRS > 8) {
-                s->color_pair = 8;
+            if (COLORS > 242) {
+                s->fg = 242;
             } else {
                 s->attrs |= A_DIM;
             }
@@ -620,10 +642,12 @@ static void psi_vm_tui_ansi_apply_params(struct psi_vm_tui_ansi_state *s,
     for (i = 0; i < count; i++) {
 #if PSI_ENABLE_COLOR
         if (params[i] == 38 && i + 2 < count && params[i + 1] == 5) {
-            int pair = psi_vm_tui_pair_for_fg(params[i + 2]);
-            if (pair > 0) {
-                s->color_pair = pair;
-            }
+            s->fg = params[i + 2];
+            i += 2;
+            continue;
+        }
+        if (params[i] == 48 && i + 2 < count && params[i + 1] == 5) {
+            s->bg = params[i + 2];
             i += 2;
             continue;
         }
@@ -648,7 +672,8 @@ static void psi_vm_tui_draw_ansi_line(int row, const char *text) {
     max_width = COLS > 1 ? COLS - 1 : 0;
     st.attrs = 0;
 #if PSI_ENABLE_COLOR
-    st.color_pair = 0;
+    st.fg = -1;
+    st.bg = -1;
 #endif
     len = (int)strlen(text);
     col = 0;
@@ -708,8 +733,11 @@ static void psi_vm_tui_draw_ansi_line(int row, const char *text) {
             }
 
 #if PSI_ENABLE_COLOR
-            if (st.color_pair > 0) {
-                cur |= COLOR_PAIR(st.color_pair);
+            {
+                int pair = psi_vm_tui_pair_for_colors(st.fg, st.bg);
+                if (pair > 0) {
+                    cur |= COLOR_PAIR(pair);
+                }
             }
 #endif
             if (cur != 0) {
