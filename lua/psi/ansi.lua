@@ -20,9 +20,16 @@ local function is_color_code(code)
   code = tostring(code or "")
   return code:match("^3[0-7]$") ~= nil
     or code:match("^9[0-7]$") ~= nil
+    or code:match("^4[0-7]$") ~= nil
+    or code:match("^10[0-7]$") ~= nil
     or code:match("^38;5;%d+$") ~= nil
+    or code:match("^48;5;%d+$") ~= nil
+    or code:match("38;5;%d+") ~= nil
+    or code:match("48;5;%d+") ~= nil
     or code:match("^%d+;3[0-7]$") ~= nil
     or code:match("^%d+;9[0-7]$") ~= nil
+    or code:match("^%d+;4[0-7]$") ~= nil
+    or code:match("^%d+;10[0-7]$") ~= nil
 end
 
 local function resolve_code(code)
