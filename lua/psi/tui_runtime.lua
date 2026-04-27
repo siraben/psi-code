@@ -842,26 +842,33 @@ local function scroll_by(state, delta)
   state.dirty = true
 end
 
+local function tui_chrome_color(code, text)
+  if not ansi.enabled then
+    return text
+  end
+  return string.char(27) .. "[" .. code .. "m" .. text .. string.char(27) .. "[0m"
+end
+
 local function style_input_prefix(prefix, is_first)
   local bg = tonumber(settings.get("tui.input.background", 238)) or 238
   if is_first then
     local chip_bg = tonumber(settings.get("tui.input.prefix_background", 245)) or 245
-    return ansi.color("1;38;5;16;48;5;" .. tostring(chip_bg), prefix)
+    return tui_chrome_color("1;38;5;16;48;5;" .. tostring(chip_bg), prefix)
   end
-  return ansi.color("38;5;242;48;5;" .. tostring(bg), prefix)
+  return tui_chrome_color("38;5;242;48;5;" .. tostring(bg), prefix)
 end
 
 local function style_input_text(text)
   local bg = tonumber(settings.get("tui.input.background", 238)) or 238
   local fg = tonumber(settings.get("tui.input.foreground", 253)) or 253
-  return ansi.color("38;5;" .. tostring(fg) .. ";48;5;" .. tostring(bg), text)
+  return tui_chrome_color("38;5;" .. tostring(fg) .. ";48;5;" .. tostring(bg), text)
 end
 
 local function style_input_fill(width, slot)
   local default_bg = tonumber(settings.get("tui.input.background", 238)) or 238
   local setting = slot == "rail" and "tui.input.rail_background" or "tui.input.background"
   local bg = tonumber(settings.get(setting, default_bg)) or default_bg
-  return ansi.color("48;5;" .. tostring(bg), string.rep(" ", math.max(0, width)))
+  return tui_chrome_color("48;5;" .. tostring(bg), string.rep(" ", math.max(0, width)))
 end
 
 local function input_box_line(content, width)
@@ -882,6 +889,10 @@ local function redraw(state)
   local status_text = ""
   local cwd
   local raw_ansi = state.tui_caps and state.tui_caps.raw_ansi
+  local raw_transcript_ansi = state.tui_caps
+    and state.tui_caps.ansi
+    and type(psi.tui_draw_raw_line) == "function"
+  local raw_input_ansi = raw_transcript_ansi
   local raw_lines = {}
   local input_raw_lines = {}
   local current_raw_rows = {}
@@ -910,7 +921,7 @@ local function redraw(state)
   for i = 0, rows.transcript_height - 1 do
     local line = transcript_lines[i + 1]
     local row = rows.transcript_start + i
-    if raw_ansi and line and line.kind == "ansi" then
+    if raw_transcript_ansi and line and line.kind == "ansi" then
       add_raw_line(row, line.text, false)
       psi.tui_draw_line(row, "")
     else
@@ -950,7 +961,7 @@ local function redraw(state)
   end
 
   local input_width = math.max(1, state.width - 1)
-  if raw_ansi then
+  if raw_input_ansi then
     add_raw_line(rows.input_start_row, style_input_fill(input_width, "rail"), true)
     psi.tui_draw_line(rows.input_start_row, "")
   else
@@ -974,14 +985,14 @@ local function redraw(state)
         input_width
       )
     end
-    if raw_ansi then
+    if raw_input_ansi then
       add_raw_line(rows.input_start_row + 1 + i, input_text, true)
       psi.tui_draw_line(rows.input_start_row + 1 + i, "")
     else
       psi.tui_draw_line(rows.input_start_row + 1 + i, input_text)
     end
   end
-  if raw_ansi then
+  if raw_input_ansi then
     add_raw_line(
       rows.input_start_row + rows.input_rows + 1,
       style_input_fill(input_width, "rail"),
