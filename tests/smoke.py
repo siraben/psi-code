@@ -1533,6 +1533,28 @@ def t_tool_bash_temp_file_exact(psi: Psi):
     assert_equals(out, "60000|60000", "bash spillover should not duplicate chunks")
 
 
+@test("tool/shell_streaming_truncates_in_shared_layer")
+def t_tool_shell_streaming_shared_truncation(psi: Psi):
+    out = psi.eval(
+        'local shell = require("psi.tool_shell")\n'
+        + 'local r = shell.run_streaming("printf \'one\\\\ntwo\\\\nthree\\\\nfour\'", nil, {\n'
+        + '  max_lines = 2,\n'
+        + '  max_bytes = 1000,\n'
+        + '  mode = "tail",\n'
+        + '  spill_to_disk = false,\n'
+        + '  truncate_final = true,\n'
+        + '  notice = "tail",\n'
+        + '})\n'
+        + 'return tostring(r.truncated) .. "|"\n'
+        + '  .. tostring(r.truncation_meta.output_lines) .. "|"\n'
+        + '  .. r.output'
+    )
+    assert_contains(out, "true|2|three\nfour",
+                    f"shared stream truncation kept wrong tail: {out!r}")
+    assert_contains(out, "Showing lines 3-4 of 4",
+                    f"shared stream truncation did not append notice: {out!r}")
+
+
 @test("tool/grep_clips_long_lines")
 def t_tool_grep_clips_lines(psi: Psi):
     target = psi.tmp / "long.txt"
