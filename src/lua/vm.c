@@ -599,6 +599,7 @@ static void psi_vm_tui_ansi_apply_code(struct psi_vm_tui_ansi_state *s, int code
 #endif
             break;
         case 4:  s->attrs |= A_UNDERLINE; break;
+        case 7:  s->attrs |= A_REVERSE; break;
 #if PSI_ENABLE_COLOR
         case 30: s->fg = COLOR_BLACK; break;
         case 31: s->fg = COLOR_RED; break;
