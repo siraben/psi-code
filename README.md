@@ -49,14 +49,17 @@ This repository currently contains:
   via `psi.commands.register`.
 - a full-screen `--tui` mode with rich status (cwd / model /
   session / token usage), unicode tool-call borders, live
-  markdown rendering, mode-aware hints, readline-style editing
-  (Alt-B/F/D/Backspace, Ctrl-W/K/U), Esc-abort while busy, and
-  Ctrl-Z suspend/resume, plus a Lua-driven theme registry with a
-  bundled dark default. Single-threaded: the agent turn runs as
+  markdown rendering, mode-aware hints, readline-style and Lua
+  extension-backed Vim modal editing (normal/insert/visual/block
+  visual, `w`/`b`, `I`/`A`/`o`/`O`, `^`/`$`, `gg`/`G`,
+  `Ctrl-U`/`Ctrl-D`, `y`/`p`, `Ctrl-A`/`Ctrl-E`), Esc-abort
+  to normal mode, `Ctrl-G` abort while busy, `Ctrl-C` clear-buffer, and Ctrl-Z
+  suspend/resume, plus a Lua-driven theme registry with a bundled
+  dark default. Single-threaded: the agent turn runs as
   a Lua coroutine on the ncurses thread, pumping input and
   redraws between every cooperative yield
 - manual session compaction through `--compact` and `/compact`
-- cooperative abort plumbing (Ctrl-C for non-TUI, Esc in TUI)
+- cooperative abort plumbing (Ctrl-C for non-TUI, Ctrl-G in TUI)
   that cancels the current curl transfer, kills any child
   process, and persists a truncated tool result
 - static analysis wired into the flake (`nix run .#analyze`) with

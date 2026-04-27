@@ -35,6 +35,9 @@ end
 local function resolve_code(code)
   local parts = {}
   code = tostring(code or "")
+  if code_map[code] ~= nil then
+    return code_map[code]
+  end
   for part in code:gmatch("[^;]+") do
     parts[#parts + 1] = code_map[part] or part
   end

@@ -744,6 +744,7 @@ static void psi_vm_tui_draw_ansi_line(int row, const char *text) {
             if (cur != 0) {
                 attron(cur);
             }
+#if PSI_ENABLE_COLOR
             if (st.bg >= 0) {
                 int k;
                 for (k = 0; k < take; k++) {
@@ -752,6 +753,9 @@ static void psi_vm_tui_draw_ansi_line(int row, const char *text) {
             } else {
                 addnstr(text + span_start, take);
             }
+#else
+            addnstr(text + span_start, take);
+#endif
             if (cur != 0) {
                 attroff(cur);
             }
@@ -865,6 +869,7 @@ static int psi_vm_tui_normalize_key(
     struct psi_vm_tui_key_event *event
 ) {
     char sequence[64];
+    char ctrl_name[7];
     const char *key_name;
 
     if (event == NULL) {
@@ -901,14 +906,6 @@ static int psi_vm_tui_normalize_key(
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), key_name);
         return 1;
     }
-    if (ch == 12) {
-        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "ctrl-l");
-        return 1;
-    }
-    if (ch == 26) {
-        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "ctrl-z");
-        return 1;
-    }
     if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "backspace");
         return 1;
@@ -917,40 +914,35 @@ static int psi_vm_tui_normalize_key(
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "delete");
         return 1;
     }
-    if (ch == 4) {
-        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "ctrl-d");
-        return 1;
-    }
-    if (ch == 23) {
-        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "ctrl-w");
-        return 1;
-    }
-    if (ch == 11) {
-        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "ctrl-k");
-        return 1;
-    }
-    if (ch == 21) {
-        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "ctrl-u");
-        return 1;
-    }
-    if (ch == KEY_LEFT || ch == 2) {
+    if (ch == KEY_LEFT) {
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "left");
         return 1;
     }
-    if (ch == KEY_RIGHT || ch == 6) {
+    if (ch == KEY_RIGHT) {
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "right");
         return 1;
     }
-    if (ch == KEY_HOME || ch == 1) {
+    if (ch == KEY_HOME) {
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "home");
         return 1;
     }
-    if (ch == KEY_END || ch == 5) {
+    if (ch == KEY_END) {
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "end");
         return 1;
     }
     if (ch == KEY_ENTER || ch == '\r' || ch == '\n') {
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "enter");
+        return 1;
+    }
+    if (ch >= 1 && ch <= 26) {
+        ctrl_name[0] = 'c';
+        ctrl_name[1] = 't';
+        ctrl_name[2] = 'r';
+        ctrl_name[3] = 'l';
+        ctrl_name[4] = '-';
+        ctrl_name[5] = (char)('a' + ch - 1);
+        ctrl_name[6] = '\0';
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), ctrl_name);
         return 1;
     }
     if (isprint(ch)) {
@@ -2623,8 +2615,12 @@ static int lfn_tui_poll_key(lua_State *L) {
 }
 
 static int lfn_tui_clear(lua_State *L) {
+    int force_physical_clear = lua_toboolean(L, 1);
     psi_vm_require_tui(L);
     erase();
+    if (force_physical_clear) {
+        clearok(stdscr, TRUE);
+    }
     return 0;
 }
 
