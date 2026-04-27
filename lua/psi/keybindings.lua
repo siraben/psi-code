@@ -30,13 +30,13 @@ local DEFINITIONS = {
   {
     id = "tui.editor.cursorLeft",
     section = "Navigation",
-    default_keys = { "left" },
+    default_keys = { "left", "ctrl-b" },
     description = "Move cursor left",
   },
   {
     id = "tui.editor.cursorRight",
     section = "Navigation",
-    default_keys = { "right" },
+    default_keys = { "right", "ctrl-f" },
     description = "Move cursor right",
   },
   {
@@ -54,13 +54,13 @@ local DEFINITIONS = {
   {
     id = "tui.editor.cursorLineStart",
     section = "Navigation",
-    default_keys = { "home" },
+    default_keys = { "home", "ctrl-a" },
     description = "Move to line start",
   },
   {
     id = "tui.editor.cursorLineEnd",
     section = "Navigation",
-    default_keys = { "end" },
+    default_keys = { "end", "ctrl-e" },
     description = "Move to line end",
   },
   {
@@ -120,7 +120,7 @@ local DEFINITIONS = {
   {
     id = "app.interrupt",
     section = "Other",
-    default_keys = { "escape" },
+    default_keys = { "ctrl-g" },
     description = "Abort current turn",
   },
   {
@@ -327,10 +327,16 @@ local DISPLAY = {
   ["alt-d"] = "Alt-D",
   ["alt-backspace"] = "Alt-Backspace",
   ["backspace"] = "Backspace",
+  ["ctrl-a"] = "Ctrl-A",
+  ["ctrl-b"] = "Ctrl-B",
   ["ctrl-d"] = "Ctrl-D",
+  ["ctrl-e"] = "Ctrl-E",
+  ["ctrl-f"] = "Ctrl-F",
+  ["ctrl-g"] = "Ctrl-G",
   ["ctrl-k"] = "Ctrl-K",
   ["ctrl-l"] = "Ctrl-L",
   ["ctrl-u"] = "Ctrl-U",
+  ["ctrl-v"] = "Ctrl-V",
   ["ctrl-w"] = "Ctrl-W",
   ["ctrl-z"] = "Ctrl-Z",
   ["delete"] = "Delete",

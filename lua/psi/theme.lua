@@ -85,18 +85,6 @@ local function normalize(theme)
   return merged
 end
 
-local function tui_payload(theme)
-  local payload = { pairs = {} }
-  for index, slot in ipairs(TUI_SLOTS) do
-    local spec = theme.tui[slot] or {}
-    payload.pairs[index] = {
-      fg = tonumber(spec.fg) or -1,
-      bg = tonumber(spec.bg) or -1,
-    }
-  end
-  return payload
-end
-
 local function configured_name()
   local value = settings.get("theme.name", settings.get("tui.theme", nil))
   if type(value) == "string" and value ~= "" then
@@ -107,9 +95,6 @@ end
 
 local function apply(theme)
   ansi.set_code_map(theme.ansi or {})
-  if type(psi.set_tui_theme) == "function" then
-    psi.set_tui_theme(psi.json_encode(tui_payload(theme)))
-  end
 end
 
 function M.register(name, theme)
@@ -127,7 +112,7 @@ end
 
 function M.use(theme_or_name)
   local name = theme_or_name
-  local theme = theme_or_name
+  local theme
   if type(theme_or_name) == "string" then
     theme = registry[theme_or_name]
     if not theme then
@@ -163,7 +148,8 @@ function M.names()
   return names
 end
 
-function M.apply_configured()
+function M.apply_configured(opts)
+  opts = type(opts) == "table" and opts or {}
   local name = configured_name()
   if name then
     local ok = M.use(name)
@@ -171,10 +157,11 @@ function M.apply_configured()
       return true
     end
   end
-  if current_theme == nil then
-    return M.use(DEFAULT_THEME_NAME)
+  if opts.preserve_current and current_theme ~= nil then
+    apply(current_theme)
+    return true
   end
-  return true
+  return M.use(DEFAULT_THEME_NAME)
 end
 
 function M.bootstrap()
