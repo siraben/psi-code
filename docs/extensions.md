@@ -24,10 +24,12 @@ Every `*.lua` file in each directory is `dofile`'d. If it returns a
 function, psi invokes it with the `psi` global. Extension load failures
 are logged to stderr and don't abort psi.
 
-`/reload` reloads keybinding/settings/prompt-template state, clears TUI key
-and status hooks, reinstalls built-in Lua extensions, and then reloads user
-extensions. Extension registration should therefore be idempotent across a
-fresh load; TUI hooks do not need to defensively unregister themselves first.
+`/reload` reloads keybinding/settings/prompt-template state, resets bundled
+TUI extension state, clears TUI key, status, and clipboard hooks, reloads user
+extensions, and then runs TUI startup hooks so settings-gated extensions
+reconcile with the fresh configuration. Extension registration should therefore
+be idempotent across a fresh load; TUI hooks do not need to defensively
+unregister themselves first.
 
 ## Extension skeleton
 
@@ -309,6 +311,9 @@ These are part of the stable surface:
 | `psi.tui.register_status_hook(fn)` | Append a short status-bar snippet. `fn(status)` is called on every redraw (must be cheap) and returns a string or nil. Returns a hook id. Useful for tokens/sec meters, background-task indicators, etc. Suppressed while an active status message is on screen. |
 | `psi.tui.unregister_status_hook(id)` | Remove one status hook previously returned by `register_status_hook`. |
 | `psi.tui.clear_status_hooks()` | Remove registered status hooks. Mostly useful in tests. |
+| `psi.tui.register_clipboard_writer(fn)` | Append a TUI clipboard writer used by yank-style editor actions. `fn(text, context)` should return `true` when it handled the write. Returns a writer id. |
+| `psi.tui.unregister_clipboard_writer(id)` | Remove one clipboard writer previously returned by `register_clipboard_writer`. |
+| `psi.tui.clear_clipboard_writers()` | Remove registered clipboard writers. Mostly useful in tests and reload reset paths. |
 | `psi.tui_layout.set_prompt_max_rows(rows_or_nil)` | Override the visible multiline prompt height from Lua. Pass a number to set the row cap, or `nil` to clear the override. The TUI runtime may still supply `tui.prompt.max_rows` from settings; the layout module itself stays deterministic and the final value is always clamped to available terminal height. |
 | `psi.tools.set_active(names)` / `get_active()` | Narrow the tool set offered to the model for subsequent turns. Pass a list of tool names to restrict; pass `nil` to clear the scope and restore all registered tools. Useful for skill-scoped agents (e.g. `tools.set_active({"read","grep"})` for a read-only investigation). |
 | `psi.session.send_message(role, text)` | Inject a user or assistant message into the in-memory session without triggering a turn. `role` is `"user"` or `"assistant"`. Call `psi.session.save()` afterwards to persist. Replaces the former internal-only `append_user` / `append_assistant` for extension use. |

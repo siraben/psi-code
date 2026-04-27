@@ -218,7 +218,7 @@ for the authoring guide.
 - `scripts/embed_lua.c`: build-time helper that deflate-compresses
   Lua sources and docs into C byte arrays
 - `lua/boot.lua`: bootstrap that wires the `psi.*` Lua modules
-  together, installs built-in Lua extensions, bridges render hooks
+  together, registers bundled Lua extensions, bridges render hooks
   onto the events bus, and loads user extensions
 - `lua/psi/`: Lua modules — tool registry, built-in tools, prompt
   assembly, session records/format, provider registry, provider loops
