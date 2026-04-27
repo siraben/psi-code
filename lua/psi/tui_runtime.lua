@@ -45,6 +45,28 @@ local function strip_ansi(text)
   return text
 end
 
+local function display_width(text)
+  local width = 0
+  local i = 1
+  text = tostring(text or "")
+  while i <= #text do
+    local ch = text:byte(i)
+    if ch == 27 and text:sub(i + 1, i + 1) == "[" then
+      local j = i + 2
+      while j <= #text and text:sub(j, j) ~= "m" do
+        j = j + 1
+      end
+      i = j < #text and (j + 1) or (#text + 1)
+    else
+      if (ch & 0xC0) ~= 0x80 then
+        width = width + 1
+      end
+      i = i + 1
+    end
+  end
+  return width
+end
+
 local function limit_text(text)
   text = text or ""
   if #text <= MAX_RENDER_TEXT then
@@ -97,7 +119,7 @@ local function input_max_rows(state)
 end
 
 local function input_wrap_width(width, prefix)
-  local available = (width - 1) - #(prefix or "")
+  local available = (width - 1) - display_width(prefix)
   if available < 1 then
     available = 1
   end
@@ -139,7 +161,7 @@ local function build_input_lines(state)
           and state.cursor <= chunk_start + take
         then
           cursor_line = #lines
-          cursor_col = state.cursor - chunk_start
+          cursor_col = display_width(input:sub(chunk_start + 1, state.cursor))
           cursor_found = true
         end
         chunk_start = chunk_start + take
@@ -157,7 +179,7 @@ local function build_input_lines(state)
   end
   if not cursor_found then
     cursor_line = #lines
-    cursor_col = lines[#lines].len
+    cursor_col = display_width(input:sub(lines[#lines].start + 1, lines[#lines].start + lines[#lines].len))
   end
   return lines, cursor_line, cursor_col
 end
@@ -743,6 +765,10 @@ local function style_input_prefix(prefix, is_first)
   return ansi.dim(prefix)
 end
 
+local function style_input_text(text)
+  return ansi.color("37", text)
+end
+
 local function redraw(state)
   state.width, state.height = current_size()
   local rows = layout_rows(state)
@@ -784,7 +810,7 @@ local function redraw(state)
       or ansi.dim(state.status_text)
   elseif state.busy then
     status_text = tui.render_busy_status(
-      state.busy_label or "working",
+      state.busy_label or "gooning",
       state.busy_phase,
       status_arg.elapsed_seconds
     )
@@ -802,7 +828,7 @@ local function redraw(state)
     end
     psi.tui_draw_line(
       rows.input_start_row + i,
-      style_input_prefix(prefix, line_index == 1) .. ansi.bold(ansi.cyan(text))
+      style_input_prefix(prefix, line_index == 1) .. style_input_text(text)
     )
   end
 
@@ -812,7 +838,7 @@ local function redraw(state)
   local cursor_prefix = rows.cursor_line == 1 and state.input_layout.prefix_first
     or state.input_layout.prefix_rest
   local cursor_row = rows.input_start_row + visible_cursor_line - 1
-  local cursor_col = #cursor_prefix + rows.cursor_col + 1
+  local cursor_col = display_width(cursor_prefix) + rows.cursor_col + 1
   cursor_row = clamp(cursor_row, rows.input_start_row, state.height)
   cursor_col = clamp(cursor_col, 1, math.max(1, state.width - 1))
   psi.tui_set_cursor(cursor_row, cursor_col, true)
@@ -1271,7 +1297,7 @@ local function submit(state)
   state.show_thinking = tui.show_thinking() == "1"
   state.scroll_offset = 0
   state.busy = true
-  state.busy_label = tui.pick_busy_status() or "working"
+  state.busy_label = tui.pick_busy_status() or "gooning"
   state.busy_phase = 0
   state.busy_tick = 0
   state.busy_started_at = os.time()
@@ -1505,6 +1531,9 @@ function M._debug_input_lines(input, cursor, width, prefix_first, prefix_rest)
     lines = out,
     cursor_line = cursor_line,
     cursor_col = cursor_col,
+    cursor_screen_col = display_width(
+      cursor_line == 1 and state.input_layout.prefix_first or state.input_layout.prefix_rest
+    ) + cursor_col + 1,
   }
 end
 
