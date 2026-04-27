@@ -127,7 +127,8 @@ local function sanitize_terminal_text(text, preserve_newlines)
     if byte == BYTE_ESC then
       if next_char == CHAR_CSI then
         i = find_csi_terminator(text, i + 2)
-      elseif next_char == CHAR_OSC
+      elseif
+        next_char == CHAR_OSC
         or next_char == CHAR_DCS
         or next_char == CHAR_PM
         or next_char == CHAR_APC
@@ -1492,10 +1493,8 @@ function render_input_text(state, line)
       if cursor < start then
         out[#out + 1] = sanitize_terminal_text(state.input:sub(cursor + 1, start), false)
       end
-      out[#out + 1] = ansi.color(
-        "7",
-        sanitize_terminal_text(state.input:sub(start + 1, finish), false)
-      )
+      out[#out + 1] =
+        ansi.color("7", sanitize_terminal_text(state.input:sub(start + 1, finish), false))
       cursor = finish
     end
   end
