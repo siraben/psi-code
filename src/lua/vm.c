@@ -744,12 +744,15 @@ static void psi_vm_tui_draw_ansi_line(int row, const char *text) {
             if (cur != 0) {
                 attron(cur);
             }
+#if PSI_ENABLE_COLOR
             if (st.bg >= 0) {
                 int k;
                 for (k = 0; k < take; k++) {
                     addch((chtype)(unsigned char)text[span_start + k]);
                 }
-            } else {
+            } else
+#endif
+            {
                 addnstr(text + span_start, take);
             }
             if (cur != 0) {

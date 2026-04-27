@@ -955,6 +955,44 @@ def t_theme_settings_select(psi: Psi):
     assert_equals(out, "toxic|118|233|253", "configured theme override")
 
 
+@test("theme/extension_selected_theme_survives_boot")
+def t_theme_extension_selected_theme(psi: Psi):
+    project = psi.tmp / "theme-extension-selected-project"
+    extdir = psi.tmp / "theme-extension-selected-ext"
+    (project / ".psi").mkdir(parents=True, exist_ok=True)
+    extdir.mkdir(exist_ok=True)
+    (extdir / "select.lua").write_text(
+        "return function(psi)\n"
+        "  psi.theme.register('extension-picked', {\n"
+        "    tui = { accent = { fg = 118, bg = 233 } },\n"
+        "  })\n"
+        "  assert(psi.theme.use('extension-picked'))\n"
+        "end\n"
+    )
+    out = psi.run(
+        "--eval",
+        'local t = require("psi.theme")\n'
+        + 'local cur = t.current()\n'
+        + 'return t.current_name() .. "|" .. tostring(cur.tui.accent.fg)',
+        cwd=project,
+        env_extra={"PSI_EXTENSIONS_DIR": str(extdir)},
+    ).stdout.strip()
+    assert_equals(out, "extension-picked|118", "extension-selected theme survives boot")
+
+
+@test("theme/composite_ansi_remap")
+def t_theme_composite_ansi_remap(psi: Psi):
+    out = psi.eval(
+        'local ansi = require("psi.ansi")\n'
+        + 'local theme = require("psi.theme")\n'
+        + 'ansi.enabled = true\n'
+        + 'ansi.color_enabled = true\n'
+        + 'theme.use({ tui = { chrome = { fg = 118, bg = 233 } } })\n'
+        + 'return ansi.gray("x")'
+    )
+    assert_contains(out, "\x1b[38;5;118m", "composite ANSI chrome remap applies")
+
+
 @test("theme/reload_reverts_to_default")
 def t_theme_reload_reverts_default(psi: Psi):
     project = psi.tmp / "theme-reload-project"

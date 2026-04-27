@@ -207,5 +207,5 @@ function psi.load_extensions()
 end
 
 psi.load_extensions()
-psi.theme.apply_configured()
+psi.theme.apply_configured({ preserve_current = true })
 psi.prompt_templates.load()
