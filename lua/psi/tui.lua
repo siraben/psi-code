@@ -11,6 +11,7 @@ local settings = require("psi.settings")
 local M = {}
 local BAR_SPLIT = string.char(31)
 local busy_rng_seeded = false
+local enabled_setting
 
 local DEFAULT_PRIMARY_BUSY_LABELS = {
   "gooning",
@@ -190,6 +191,45 @@ local function accent(text)
   return ansi.color("1;36", tostring(text or ""))
 end
 
+local function utf8_chars(text)
+  local chars = {}
+  text = tostring(text or "")
+  for ch in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+    chars[#chars + 1] = ch
+  end
+  return chars
+end
+
+local function busy_chip(text, phase)
+  local bg = tonumber(settings.get("tui.busy_background", 238)) or 238
+  local base_fg = tonumber(settings.get("tui.busy_foreground", 253)) or 253
+  local glisten_fg = tonumber(settings.get("tui.busy_glisten_foreground", 231)) or 231
+  local wake_fg = tonumber(settings.get("tui.busy_glisten_wake", 250)) or 250
+  local chars = utf8_chars(text)
+
+  if not enabled_setting("tui.busy_glisten", "PSI_BUSY_GLISTEN", true) or #chars == 0 then
+    return ansi.color("1;38;5;" .. tostring(base_fg) .. ";48;5;" .. tostring(bg), " " .. text .. " ")
+  end
+
+  local sweep = ((tonumber(phase) or 0) % (#chars + 4)) - 1
+  local out = {
+    ansi.color("1;38;5;" .. tostring(base_fg) .. ";48;5;" .. tostring(bg), " "),
+  }
+  for index, ch in ipairs(chars) do
+    local distance = math.abs(index - sweep)
+    local fg = base_fg
+    if distance == 0 then
+      fg = glisten_fg
+    elseif distance == 1 then
+      fg = wake_fg
+    end
+    out[#out + 1] = ansi.color("1;38;5;" .. tostring(fg) .. ";48;5;" .. tostring(bg), ch)
+  end
+  out[#out + 1] =
+    ansi.color("1;38;5;" .. tostring(base_fg) .. ";48;5;" .. tostring(bg), " ")
+  return table.concat(out)
+end
+
 local function sep()
   return label("  •  ")
 end
@@ -234,7 +274,7 @@ local function default_busy_label()
   return DEFAULT_SECONDARY_BUSY_LABELS[math.random(#DEFAULT_SECONDARY_BUSY_LABELS)]
 end
 
-local function enabled_setting(path, env_name, default_value)
+enabled_setting = function(path, env_name, default_value)
   local value = settings.get(path, nil)
   if value == nil and env_name ~= nil then
     value = os.getenv(env_name)
@@ -431,10 +471,10 @@ function M.workspace_bar(cwd)
   return pair("cwd", tilde_path(cwd or "-"), false) .. BAR_SPLIT .. ""
 end
 
-function M.render_busy_status(label_text, phase, elapsed_seconds)
+function M.render_busy_status(label_text, phase, elapsed_seconds, glisten_phase)
   local text = tostring(label_text or "gooning")
   local dots = ({ ".", "..", "..." })[((tonumber(phase) or 0) % 3) + 1]
-  local chip = ansi.color("1;30;46", " " .. text .. " ")
+  local chip = busy_chip(text, glisten_phase or phase)
   return chip
     .. label(" (" .. format_elapsed(elapsed_seconds) .. "  • esc to interrupt)")
     .. accent(" " .. dots)
