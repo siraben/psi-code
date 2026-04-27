@@ -6,6 +6,7 @@
 -- API message mapping, tool loop, compaction assembly) is pure Lua.
 
 local context = require("psi.context")
+local control = require("psi.agent_control")
 local prompt = require("psi.prompt")
 local sched = require("psi.sched")
 local session = require("psi.session")
@@ -67,6 +68,13 @@ function M.effective_model(fallback)
   local resolved = M.model_descriptor(fallback)
   return resolved and resolved.id
 end
+
+M.queue_steering = control.queue_steering
+M.queue_follow_up = control.queue_follow_up
+M.drain_steering = control.drain_steering
+M.drain_follow_ups = control.drain_follow_ups
+M.pending_message_count = control.pending_count
+M.clear_queues = control.clear_queues
 
 -- Append the user's turn, build the system prompt, and drive the
 -- streaming tool loop via the chosen provider's run_turn.
