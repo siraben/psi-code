@@ -270,7 +270,7 @@ via `psi.events.on` if you need per-delta visibility.
 **Do not use `io.stderr:write` from a hook running during a TUI
 turn.** The TUI redirects stderr to `$XDG_STATE_HOME/psi/debug.log`
 (default `~/.local/state/psi/debug.log`) while a turn is in flight so
-provider/curl chatter doesn't corrupt the ncurses canvas. Bytes
+provider/curl chatter doesn't corrupt the ANSI TUI. Bytes
 written during the turn are appended to the log, not shown. To show
 text in the transcript, return it as a string from a render hook; to
 show text in the status bar, register a `psi.tui.register_status_hook`

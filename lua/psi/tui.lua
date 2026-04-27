@@ -69,12 +69,10 @@ function M.clear_status_hooks()
   status_hooks = {}
 end
 
--- High-level TUI key policy. C normalizes terminal-specific ncurses
+-- High-level TUI key policy. C normalizes terminal-specific
 -- input into semantic key names ("enter", "shift-enter", "alt-b",
 -- "ctrl-d", "text", ...), then Lua decides what that key means in the
--- current editor state. The host still owns the terminal mechanics:
--- raw escape parsing, cursor placement, redraw cadence, and actually
--- mutating the input buffer.
+-- current editor state. Lua owns editor state and rendering policy.
 function M.handle_key(arg)
   arg = type(arg) == "table" and arg or {}
   local key = arg.key

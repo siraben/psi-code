@@ -13,14 +13,14 @@
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
-#if PSI_ENABLE_TUI
-#include <ncurses.h>
-#endif
 
 #include <time.h>
 #include <errno.h>
+#include <poll.h>
+#include <termios.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 
 #include "psi/abort.h"
@@ -515,267 +515,44 @@ static void psi_vm_invoke_registry_callback2(
 
 #if PSI_ENABLE_TUI
 
-static void psi_vm_tui_draw_plain_line(int row, const char *text) {
-    int max_width;
+extern void psi_tui_suspend_terminal(void);
+extern void psi_tui_resume_terminal(void);
 
-    move(row, 0);
-    clrtoeol();
-    if (text == NULL) {
-        return;
+static int psi_vm_tui_read_byte(int timeout_ms) {
+    struct pollfd pfd;
+    unsigned char ch;
+    int result;
+
+    pfd.fd = STDIN_FILENO;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    result = poll(&pfd, 1, timeout_ms);
+    if (result <= 0 || (pfd.revents & POLLIN) == 0) {
+        return -1;
     }
-    max_width = COLS > 1 ? COLS - 1 : 0;
-    if (max_width > 0) {
-        mvaddnstr(row, 0, text, max_width);
+    if (read(STDIN_FILENO, &ch, 1) != 1) {
+        return -1;
+    }
+    return (int)ch;
+}
+
+static void psi_vm_tui_write(const char *text) {
+    if (text != NULL) {
+        fputs(text, stdout);
     }
 }
 
-#if PSI_ENABLE_ANSI
-
-struct psi_vm_tui_ansi_state {
-    attr_t attrs;
-#if PSI_ENABLE_COLOR
-    int fg;
-    int bg;
-#endif
-};
-
-#if PSI_ENABLE_COLOR
-#define PSI_VM_TUI_DYNAMIC_PAIR_START 9
-#define PSI_VM_TUI_DYNAMIC_PAIR_MAX 64
-
-static int psi_vm_tui_dynamic_fg[PSI_VM_TUI_DYNAMIC_PAIR_MAX];
-static int psi_vm_tui_dynamic_bg[PSI_VM_TUI_DYNAMIC_PAIR_MAX];
-static int psi_vm_tui_dynamic_pairs = 0;
-
-static int psi_vm_tui_pair_for_colors(int fg, int bg) {
-    int i;
-    int pair;
-
-    if (COLOR_PAIRS <= PSI_VM_TUI_DYNAMIC_PAIR_START) {
-        return 0;
-    }
-    if ((fg < -1 || fg >= COLORS) || (bg < -1 || bg >= COLORS)) {
-        return 0;
-    }
-    if (fg < 0 && bg < 0) {
-        return 0;
-    }
-    for (i = 0; i < psi_vm_tui_dynamic_pairs; i++) {
-        if (psi_vm_tui_dynamic_fg[i] == fg && psi_vm_tui_dynamic_bg[i] == bg) {
-            return PSI_VM_TUI_DYNAMIC_PAIR_START + i;
-        }
-    }
-    if (psi_vm_tui_dynamic_pairs >= PSI_VM_TUI_DYNAMIC_PAIR_MAX) {
-        return 0;
-    }
-    pair = PSI_VM_TUI_DYNAMIC_PAIR_START + psi_vm_tui_dynamic_pairs;
-    if (pair >= COLOR_PAIRS) {
-        return 0;
-    }
-    init_pair((short)pair, (short)fg, (short)bg);
-    psi_vm_tui_dynamic_fg[psi_vm_tui_dynamic_pairs] = fg;
-    psi_vm_tui_dynamic_bg[psi_vm_tui_dynamic_pairs] = bg;
-    psi_vm_tui_dynamic_pairs++;
-    return pair;
-}
-#endif
-
-static void psi_vm_tui_ansi_apply_code(struct psi_vm_tui_ansi_state *s, int code) {
-    switch (code) {
-        case 0:
-            s->attrs = 0;
-#if PSI_ENABLE_COLOR
-            s->fg = -1;
-            s->bg = -1;
-#endif
-            break;
-        case 1:  s->attrs |= A_BOLD; break;
-        case 2:  s->attrs |= A_DIM; break;
-        case 3:
-#ifdef A_ITALIC
-            s->attrs |= A_ITALIC;
-#else
-            s->attrs |= A_DIM;
-#endif
-            break;
-        case 4:  s->attrs |= A_UNDERLINE; break;
-        case 7:  s->attrs |= A_REVERSE; break;
-#if PSI_ENABLE_COLOR
-        case 30: s->fg = COLOR_BLACK; break;
-        case 31: s->fg = COLOR_RED; break;
-        case 32: s->fg = COLOR_GREEN; break;
-        case 33: s->fg = COLOR_YELLOW; break;
-        case 34: s->fg = COLOR_BLUE; break;
-        case 35: s->fg = COLOR_MAGENTA; break;
-        case 36: s->fg = COLOR_CYAN; break;
-        case 37: s->fg = COLOR_WHITE; break;
-        case 39: s->fg = -1; break;
-        case 40: s->bg = COLOR_BLACK; break;
-        case 41: s->bg = COLOR_RED; break;
-        case 42: s->bg = COLOR_GREEN; break;
-        case 43: s->bg = COLOR_YELLOW; break;
-        case 44: s->bg = COLOR_BLUE; break;
-        case 45: s->bg = COLOR_MAGENTA; break;
-        case 46: s->bg = COLOR_CYAN; break;
-        case 47: s->bg = COLOR_WHITE; break;
-        case 49: s->bg = -1; break;
-        case 242:
-            if (COLORS > 242) {
-                s->fg = 242;
-            } else {
-                s->attrs |= A_DIM;
-            }
-            break;
-#endif
-        default: break;
-    }
+static void psi_vm_tui_draw_raw_line(long row, const char *text) {
+    printf("\033[%ld;1H\033[2K%s\033[0m", row, text != NULL ? text : "");
 }
 
-static void psi_vm_tui_ansi_apply_params(struct psi_vm_tui_ansi_state *s,
-                                         const int *params,
-                                         int count) {
-    int i;
-
-    if (count <= 0) {
-        psi_vm_tui_ansi_apply_code(s, 0);
-        return;
-    }
-    for (i = 0; i < count; i++) {
-#if PSI_ENABLE_COLOR
-        if (params[i] == 38 && i + 2 < count && params[i + 1] == 5) {
-            s->fg = params[i + 2];
-            i += 2;
-            continue;
-        }
-        if (params[i] == 48 && i + 2 < count && params[i + 1] == 5) {
-            s->bg = params[i + 2];
-            i += 2;
-            continue;
-        }
-#endif
-        psi_vm_tui_ansi_apply_code(s, params[i]);
-    }
-}
-
-static void psi_vm_tui_draw_ansi_line(int row, const char *text) {
-    int max_width;
-    int len;
-    int col;
-    int i;
-    struct psi_vm_tui_ansi_state st;
-
-    move(row, 0);
-    clrtoeol();
-    if (text == NULL) {
-        return;
-    }
-
-    max_width = COLS > 1 ? COLS - 1 : 0;
-    st.attrs = 0;
-#if PSI_ENABLE_COLOR
-    st.fg = -1;
-    st.bg = -1;
-#endif
-    len = (int)strlen(text);
-    col = 0;
-    i = 0;
-    while (i < len && col < max_width) {
-        if (text[i] == 0x1b && i + 1 < len && text[i + 1] == '[') {
-            int j = i + 2;
-            int params[16];
-            int param_count = 0;
-            unsigned int code = 0u;
-            int has_digit = 0;
-            while (j < len && text[j] != 'm') {
-                if (text[j] >= '0' && text[j] <= '9') {
-                    if (code <= 999u) {
-                        code = code * 10u + (unsigned int)(text[j] - '0');
-                    }
-                    has_digit = 1;
-                } else if (text[j] == ';') {
-                    if (param_count < (int)(sizeof(params) / sizeof(params[0]))) {
-                        params[param_count++] = has_digit ? (int)code : 0;
-                    }
-                    code = 0u;
-                    has_digit = 0;
-                } else {
-                    break;
-                }
-                j++;
-            }
-            if (j < len && text[j] == 'm') {
-                if (has_digit || param_count == 0) {
-                    if (param_count < (int)(sizeof(params) / sizeof(params[0]))) {
-                        params[param_count++] = has_digit ? (int)code : 0;
-                    }
-                }
-                psi_vm_tui_ansi_apply_params(&st, params, param_count);
-                i = j + 1;
-                continue;
-            }
-            i = j < len ? j : len;
-            continue;
-        }
-
-        {
-            int span_start = i;
-            int take;
-            attr_t cur = st.attrs;
-
-            while (i < len && text[i] != 0x1b) {
-                i++;
-            }
-            take = i - span_start;
-            if (take > max_width - col) {
-                take = max_width - col;
-            }
-            if (take <= 0) {
-                continue;
-            }
-
-#if PSI_ENABLE_COLOR
-            {
-                int pair = psi_vm_tui_pair_for_colors(st.fg, st.bg);
-                if (pair > 0) {
-                    cur |= COLOR_PAIR(pair);
-                }
-            }
-#endif
-            if (cur != 0) {
-                attron(cur);
-            }
-#if PSI_ENABLE_COLOR
-            if (st.bg >= 0) {
-                int k;
-                for (k = 0; k < take; k++) {
-                    addch((chtype)(unsigned char)text[span_start + k]);
-                }
-            } else
-#endif
-            {
-                addnstr(text + span_start, take);
-            }
-#else
-            addnstr(text + span_start, take);
-#endif
-            if (cur != 0) {
-                attroff(cur);
-            }
-            col += take;
-            i = span_start + take;
-        }
-    }
-}
-
-#endif
-
-static void psi_vm_tui_suspend_terminal(void) {
+static void psi_vm_tui_suspend(void) {
     struct sigaction dfl;
     struct sigaction prev;
     sigset_t mask;
     sigset_t prev_mask;
 
-    endwin();
+    psi_tui_suspend_terminal();
     memset(&dfl, 0, sizeof(dfl));
     dfl.sa_handler = SIG_DFL;
     sigemptyset(&dfl.sa_mask);
@@ -786,8 +563,7 @@ static void psi_vm_tui_suspend_terminal(void) {
     kill(getpid(), SIGTSTP);
     sigprocmask(SIG_SETMASK, &prev_mask, NULL);
     sigaction(SIGTSTP, &prev, NULL);
-    refresh();
-    clearok(stdscr, TRUE);
+    psi_tui_resume_terminal();
 }
 
 static int psi_vm_tui_collect_escape_sequence(char *buffer, size_t buffer_size, int restore_timeout_ms) {
@@ -804,12 +580,8 @@ static int psi_vm_tui_collect_escape_sequence(char *buffer, size_t buffer_size, 
     for (;;) {
         int ch;
 
-        wtimeout(stdscr, timeout_ms);
-        ch = getch();
-        if (ch == ERR) {
-            break;
-        }
-        if (ch < 0 || ch > 255) {
+        ch = psi_vm_tui_read_byte(timeout_ms);
+        if (ch < 0) {
             break;
         }
         if (length + 1u >= buffer_size) {
@@ -824,7 +596,7 @@ static int psi_vm_tui_collect_escape_sequence(char *buffer, size_t buffer_size, 
         timeout_ms = 5;
     }
 
-    wtimeout(stdscr, restore_timeout_ms);
+    PSI_UNUSED(restore_timeout_ms);
     return (int)length;
 }
 
@@ -851,6 +623,35 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
     }
     if (strcmp(sequence, "\r") == 0 || strcmp(sequence, "\n") == 0) {
         return "shift-enter";
+    }
+    if (strcmp(sequence, "[A") == 0 || strcmp(sequence, "OA") == 0) {
+        return "up";
+    }
+    if (strcmp(sequence, "[B") == 0 || strcmp(sequence, "OB") == 0) {
+        return "down";
+    }
+    if (strcmp(sequence, "[C") == 0 || strcmp(sequence, "OC") == 0) {
+        return "right";
+    }
+    if (strcmp(sequence, "[D") == 0 || strcmp(sequence, "OD") == 0) {
+        return "left";
+    }
+    if (strcmp(sequence, "[H") == 0 || strcmp(sequence, "OH") == 0 ||
+        strcmp(sequence, "[1~") == 0 || strcmp(sequence, "[7~") == 0) {
+        return "home";
+    }
+    if (strcmp(sequence, "[F") == 0 || strcmp(sequence, "OF") == 0 ||
+        strcmp(sequence, "[4~") == 0 || strcmp(sequence, "[8~") == 0) {
+        return "end";
+    }
+    if (strcmp(sequence, "[3~") == 0) {
+        return "delete";
+    }
+    if (strcmp(sequence, "[5~") == 0) {
+        return "page-up";
+    }
+    if (strcmp(sequence, "[6~") == 0) {
+        return "page-down";
     }
     if (sscanf(sequence, "[%u;%u;%u%c", &first, &second, &third, &final) == 4 &&
         final == '~' && first == 27u && third == 13u && second >= 2u) {
@@ -879,26 +680,6 @@ static int psi_vm_tui_normalize_key(
     }
     memset(event, 0, sizeof(*event));
 
-    if (ch == KEY_RESIZE) {
-        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "resize");
-        return 1;
-    }
-    if (ch == KEY_PPAGE) {
-        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "page-up");
-        return 1;
-    }
-    if (ch == KEY_NPAGE) {
-        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "page-down");
-        return 1;
-    }
-    if (ch == KEY_UP) {
-        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "up");
-        return 1;
-    }
-    if (ch == KEY_DOWN) {
-        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "down");
-        return 1;
-    }
     if (ch == 27) {
         psi_vm_tui_collect_escape_sequence(sequence, sizeof(sequence), restore_timeout_ms);
         key_name = psi_vm_tui_escape_sequence_key(sequence);
@@ -908,31 +689,11 @@ static int psi_vm_tui_normalize_key(
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), key_name);
         return 1;
     }
-    if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
+    if (ch == 127 || ch == 8) {
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "backspace");
         return 1;
     }
-    if (ch == KEY_DC) {
-        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "delete");
-        return 1;
-    }
-    if (ch == KEY_LEFT) {
-        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "left");
-        return 1;
-    }
-    if (ch == KEY_RIGHT) {
-        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "right");
-        return 1;
-    }
-    if (ch == KEY_HOME) {
-        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "home");
-        return 1;
-    }
-    if (ch == KEY_END) {
-        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "end");
-        return 1;
-    }
-    if (ch == KEY_ENTER || ch == '\r' || ch == '\n') {
+    if (ch == '\r' || ch == '\n') {
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "enter");
         return 1;
     }
@@ -2570,10 +2331,19 @@ static int psi_vm_tui_raw_ansi_supported(void) {
 }
 
 static int lfn_tui_size(lua_State *L) {
-    int height;
-    int width;
+    struct winsize ws;
+    int height = 24;
+    int width = 80;
+
     psi_vm_require_tui(L);
-    getmaxyx(stdscr, height, width);
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
+        if (ws.ws_col > 0) {
+            width = (int)ws.ws_col;
+        }
+        if (ws.ws_row > 0) {
+            height = (int)ws.ws_row;
+        }
+    }
     lua_newtable(L);
     lua_pushinteger(L, (lua_Integer)width);
     lua_setfield(L, -2, "width");
@@ -2595,9 +2365,8 @@ static int lfn_tui_poll_key(lua_State *L) {
     if (timeout_ms > 3600000) {
         timeout_ms = 3600000;
     }
-    wtimeout(stdscr, (int)timeout_ms);
-    ch = getch();
-    if (ch == ERR) {
+    ch = psi_vm_tui_read_byte((int)timeout_ms);
+    if (ch < 0) {
         lua_pushnil(L);
         return 1;
     }
@@ -2619,37 +2388,21 @@ static int lfn_tui_poll_key(lua_State *L) {
 static int lfn_tui_clear(lua_State *L) {
     int force_physical_clear = lua_toboolean(L, 1);
     psi_vm_require_tui(L);
-    erase();
     if (force_physical_clear) {
-        clearok(stdscr, TRUE);
+        psi_vm_tui_write("\033[2J\033[3J\033[H");
     }
     return 0;
 }
 
 static int lfn_tui_draw_line(lua_State *L) {
     lua_Integer row = luaL_checkinteger(L, 1);
-#if PSI_ENABLE_ANSI
-    size_t len = 0;
-    const char *text = lua_type(L, 2) == LUA_TSTRING ? lua_tolstring(L, 2, &len) : "";
-#else
     const char *text = lua_type(L, 2) == LUA_TSTRING ? lua_tostring(L, 2) : "";
-#endif
+
     psi_vm_require_tui(L);
     if (row < 1) {
         row = 1;
     }
-    if (row > LINES) {
-        row = LINES;
-    }
-#if PSI_ENABLE_ANSI
-    if (memchr(text, 0x1b, len) != NULL) {
-        psi_vm_tui_draw_ansi_line((int)row - 1, text);
-    } else {
-        psi_vm_tui_draw_plain_line((int)row - 1, text);
-    }
-#else
-    psi_vm_tui_draw_plain_line((int)row - 1, text);
-#endif
+    psi_vm_tui_draw_raw_line((long)row, text);
     return 0;
 }
 
@@ -2661,22 +2414,13 @@ static int lfn_tui_draw_raw_line(lua_State *L) {
     if (row < 1) {
         row = 1;
     }
-    if (row > LINES) {
-        row = LINES;
-    }
 
     if (!psi_vm_tui_raw_ansi_supported()) {
-        psi_vm_tui_draw_plain_line((int)row - 1, text);
+        psi_vm_tui_draw_raw_line((long)row, text);
         return 0;
     }
 
-    /*
-     * Bypass ncurses color-pair translation for diagnostic / raw ANSI
-     * output. Save and restore the hardware cursor so Lua-owned cursor
-     * placement remains stable after direct terminal writes.
-     */
-    printf("\0337\033[%ld;1H\033[2K%s\033[0m\0338", (long)row, text);
-    fflush(stdout);
+    psi_vm_tui_draw_raw_line((long)row, text);
     return 0;
 }
 
@@ -2686,24 +2430,25 @@ static int lfn_tui_set_cursor(lua_State *L) {
     int visible = lua_toboolean(L, 3);
 
     psi_vm_require_tui(L);
-    if (row < 1) row = 1;
-    if (col < 1) col = 1;
-    if (row > LINES) row = LINES;
-    if (col > COLS) col = COLS;
-    curs_set(visible ? 1 : 0);
-    move((int)row - 1, (int)col - 1);
+    if (row < 1) {
+        row = 1;
+    }
+    if (col < 1) {
+        col = 1;
+    }
+    printf("%s\033[%ld;%ldH", visible ? "\033[?25h" : "\033[?25l", (long)row, (long)col);
     return 0;
 }
 
 static int lfn_tui_refresh(lua_State *L) {
     psi_vm_require_tui(L);
-    refresh();
+    fflush(stdout);
     return 0;
 }
 
 static int lfn_tui_suspend(lua_State *L) {
     psi_vm_require_tui(L);
-    psi_vm_tui_suspend_terminal();
+    psi_vm_tui_suspend();
     return 0;
 }
 
@@ -2756,7 +2501,7 @@ static int lfn_tui_set_tool_progress_handler(lua_State *L) { return lfn_tui_unav
  *
  * Called by psi.sched between coroutine resumes. Does nothing if no
  * host (e.g. --eval, --print, --agent scripts) has installed a hook.
- * The TUI installs one that pumps ncurses input + redraws; this is
+ * The TUI installs one that pumps terminal input + redraws; this is
  * how the UI stays responsive during a streaming turn. */
 static int lfn_host_tick(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);

@@ -1,10 +1,9 @@
 #include <locale.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <termios.h>
 #include <unistd.h>
-#if PSI_ENABLE_TUI
-#include <ncurses.h>
-#endif
 #include <lua.h>
 #include "psi/abort.h"
 #include "psi/runtime.h"
@@ -20,24 +19,83 @@
 
 #if PSI_ENABLE_TUI
 
-static int psi_tui_init_colors(void) {
-#if PSI_ENABLE_COLOR
-    if (!has_colors()) {
-        return PSI_STATUS_OK;
+static struct termios psi_tui_original_termios;
+static int psi_tui_has_original_termios = 0;
+
+static int psi_tui_enter_terminal(void) {
+    struct termios raw_attrs;
+
+    if (tcgetattr(STDIN_FILENO, &psi_tui_original_termios) != 0) {
+        perror("tcgetattr");
+        return PSI_STATUS_ERROR;
     }
-    start_color();
-    use_default_colors();
-    init_pair(1, COLOR_BLUE, -1);
-    init_pair(2, COLOR_CYAN, -1);
-    init_pair(3, COLOR_WHITE, -1);
-    init_pair(4, COLOR_YELLOW, -1);
-    init_pair(5, COLOR_GREEN, -1);
-    init_pair(6, COLOR_RED, -1);
-    init_pair(7, -1, -1);
-    if (COLOR_PAIRS > 8) {
-        init_pair(8, COLORS > 242 ? 242 : COLOR_BLACK, -1);
+    psi_tui_has_original_termios = 1;
+    raw_attrs = psi_tui_original_termios;
+    raw_attrs.c_iflag &= (tcflag_t) ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+    raw_attrs.c_oflag &= (tcflag_t) ~(OPOST);
+    raw_attrs.c_cflag |= (tcflag_t)CS8;
+    raw_attrs.c_lflag &= (tcflag_t) ~(ECHO | ICANON | IEXTEN | ISIG);
+    raw_attrs.c_cc[VMIN] = 0;
+    raw_attrs.c_cc[VTIME] = 0;
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_attrs) != 0) {
+        perror("tcsetattr");
+        return PSI_STATUS_ERROR;
     }
-#endif
+    fputs("\033[?1049h\033[?25h\033[2J\033[H", stdout);
+    fflush(stdout);
+    return PSI_STATUS_OK;
+}
+
+static void psi_tui_leave_terminal(void) {
+    fputs("\033[0m\033[?25h\033[?1049l", stdout);
+    fflush(stdout);
+    if (psi_tui_has_original_termios) {
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &psi_tui_original_termios);
+    }
+}
+
+void psi_tui_suspend_terminal(void) {
+    if (psi_tui_has_original_termios) {
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &psi_tui_original_termios);
+    }
+    fputs("\033[0m\033[?25h", stdout);
+    fflush(stdout);
+}
+
+void psi_tui_resume_terminal(void) {
+    struct termios raw_attrs;
+
+    if (!psi_tui_has_original_termios) {
+        return;
+    }
+    raw_attrs = psi_tui_original_termios;
+    raw_attrs.c_iflag &= (tcflag_t) ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+    raw_attrs.c_oflag &= (tcflag_t) ~(OPOST);
+    raw_attrs.c_cflag |= (tcflag_t)CS8;
+    raw_attrs.c_lflag &= (tcflag_t) ~(ECHO | ICANON | IEXTEN | ISIG);
+    raw_attrs.c_cc[VMIN] = 0;
+    raw_attrs.c_cc[VTIME] = 0;
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_attrs);
+    fputs("\033[?25h\033[2J\033[H", stdout);
+    fflush(stdout);
+}
+
+static void psi_tui_atexit_restore(void) {
+    if (psi_tui_has_original_termios) {
+        psi_tui_leave_terminal();
+        psi_tui_has_original_termios = 0;
+    }
+}
+
+static int psi_tui_install_atexit(void) {
+    static int installed = 0;
+
+    if (!installed) {
+        if (atexit(psi_tui_atexit_restore) != 0) {
+            return PSI_STATUS_ERROR;
+        }
+        installed = 1;
+    }
     return PSI_STATUS_OK;
 }
 
@@ -108,20 +166,25 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
     vm.host.abort_signal = &abort_signal;
 
     setlocale(LC_ALL, "");
-    initscr();
-    raw();
-    nonl();
-    noecho();
-    keypad(stdscr, TRUE);
-    scrollok(stdscr, FALSE);
-    set_escdelay(25);
-    psi_tui_init_colors();
+    status = psi_tui_install_atexit();
+    if (status != PSI_STATUS_OK) {
+        psi_vm_destroy(&vm);
+        psi_session_free(&session);
+        return status;
+    }
+    status = psi_tui_enter_terminal();
+    if (status != PSI_STATUS_OK) {
+        psi_vm_destroy(&vm);
+        psi_session_free(&session);
+        return status;
+    }
 
     psi_vm_set_tui_active(&vm, 1);
     status = psi_tui_run_lua(&vm, options);
     psi_vm_set_tui_active(&vm, 0);
 
-    endwin();
+    psi_tui_leave_terminal();
+    psi_tui_has_original_termios = 0;
     psi_vm_destroy(&vm);
     psi_session_free(&session);
     return status;

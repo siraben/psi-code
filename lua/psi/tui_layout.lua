@@ -1,8 +1,7 @@
 -- Shared TUI layout helpers.
 --
--- The POSIX TUI renders through ncurses, while small ports such as
--- ReactOS may render through a native console API. Keep geometry and
--- labels here so those backends can converge on the same screen shape.
+-- The POSIX TUI renders ANSI frames from Lua. Keep geometry and labels
+-- here so ports can converge on the same screen shape.
 
 local prelude = require("psi.prelude")
 
@@ -67,11 +66,9 @@ function M.geometry(width, height)
   }
 end
 
--- Layout policy for the editable prompt area. C still owns the hard
--- terminal constraints (minimum transcript space, actual cursor
--- placement, ncurses repainting); Lua owns the presentation policy so
--- ports and user customisations can override prefixes or the nominal
--- visible-row cap without patching tui_mode.c.
+-- Layout policy for the editable prompt area. Lua owns the presentation
+-- policy so ports and user customisations can override prefixes or the
+-- nominal visible-row cap without patching tui_mode.c.
 function M.input_layout_table(arg)
   arg = type(arg) == "table" and arg or {}
   local height = math.max(12, tonumber(arg.height) or 24)
