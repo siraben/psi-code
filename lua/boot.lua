@@ -35,6 +35,8 @@ psi.diff = require("psi.diff")
 psi.records = require("psi.records")
 psi.context = require("psi.context")
 psi.settings = require("psi.settings")
+psi.theme = require("psi.theme")
+psi.theme.bootstrap()
 psi.providers = require("psi.providers")
 psi.resources = require("psi.resources")
 psi.session = require("psi.session")
@@ -49,6 +51,16 @@ psi.commands = require("psi.commands")
 psi.prompt_templates = require("psi.prompt_templates")
 psi.tui = require("psi.tui")
 psi.tui_layout = require("psi.tui_layout")
+psi.extensions = psi.extensions or {}
+psi.extensions.osc52_clipboard = require("psi.extensions.osc52_clipboard")
+psi.extensions.vim_keybindings = require("psi.extensions.vim_keybindings")
+
+function psi.install_builtin_extensions()
+  psi.extensions.osc52_clipboard.register(psi)
+  psi.extensions.vim_keybindings.register(psi)
+end
+
+psi.install_builtin_extensions()
 psi.modes = require("psi.modes")
 psi.markdown = require("psi.markdown")
 
@@ -205,4 +217,5 @@ function psi.load_extensions()
 end
 
 psi.load_extensions()
+psi.theme.apply_configured({ preserve_current = true })
 psi.prompt_templates.load()

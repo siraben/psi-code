@@ -24,6 +24,13 @@ Every `*.lua` file in each directory is `dofile`'d. If it returns a
 function, psi invokes it with the `psi` global. Extension load failures
 are logged to stderr and don't abort psi.
 
+`/reload` reloads keybinding/settings/prompt-template state, resets bundled
+TUI extension state, clears TUI key, status, and clipboard hooks, reloads user
+extensions, and then runs TUI startup hooks so settings-gated extensions
+reconcile with the fresh configuration. Extension registration should therefore
+be idempotent across a fresh load; TUI hooks do not need to defensively
+unregister themselves first.
+
 ## Extension skeleton
 
 ```lua
@@ -143,7 +150,7 @@ Built-in commands take precedence over registered ones —
 extensions cannot shadow them. Full list:
 
 ```
-/help  /hotkeys  /quit (+ /q, :quit, :q)  /session  /system-prompt
+/help  /hotkeys  /quit (+ /q, :quit, :q)  /session  /system-prompt  /vim
 /new (alias: /clear)  /reload  /copy
 /resume <path>  /import <path>
 /name <text>  /model <spec>
@@ -167,7 +174,7 @@ Users can override defaults in `~/.config/psi/keybindings.json` or
 {
   "tui.input.submit": "enter",
   "tui.input.newLine": ["shift-enter"],
-  "app.interrupt": "escape"
+  "app.interrupt": "ctrl-g"
 }
 ```
 
@@ -184,6 +191,54 @@ Users can override defaults in `~/.config/psi/keybindings.json` or
 **CommandAction** (from `psi.records.new_command_action(kind, payload)`):
 ```lua
 { kind = "print" | "compact", payload = "..." | 12 }
+```
+
+### Themes — `psi.theme`
+
+Theme support stays Lua-first: extensions register a theme spec, then
+select it. The bundled default is a dark TUI theme; custom themes can
+override just the slots they care about and inherit the rest.
+
+| API | Notes |
+|---|---|
+| `psi.theme.register(name, spec)` | Add or replace a named theme. |
+| `psi.theme.use(name_or_spec)` | Apply a registered theme or an ad-hoc spec immediately. |
+| `psi.theme.current()` | Returns the currently applied normalized theme table. |
+| `psi.theme.current_name()` | Returns the active theme name. |
+| `psi.theme.names()` | Sorted array of registered theme names. |
+
+Theme spec shape:
+
+```lua
+{
+  ansi = {
+    ["31"] = "31",   -- optional ANSI SGR remap
+    ["36"] = "36",
+  },
+  tui = {
+    header  = { fg = 111, bg = 234 },
+    accent  = { fg = 81,  bg = 234 },
+    text    = { fg = 253, bg = 234 },
+    warning = { fg = 223, bg = 234 },
+    success = { fg = 150, bg = 234 },
+    error   = { fg = 210, bg = 234 },
+    chrome  = { fg = 245, bg = 234 },
+  },
+}
+```
+
+Example extension:
+
+```lua
+return function(psi)
+  psi.theme.register("toxic", {
+    tui = {
+      accent = { fg = 118, bg = 233 },
+      chrome = { fg = 244, bg = 233 },
+    },
+  })
+  psi.theme.use("toxic")
+end
 ```
 
 ### Render hooks — `psi.render.register_hook(event, fn)`
@@ -222,7 +277,7 @@ via `psi.events.on` if you need per-delta visibility.
 **Do not use `io.stderr:write` from a hook running during a TUI
 turn.** The TUI redirects stderr to `$XDG_STATE_HOME/psi/debug.log`
 (default `~/.local/state/psi/debug.log`) while a turn is in flight so
-provider/curl chatter doesn't corrupt the ncurses canvas. Bytes
+provider/curl chatter doesn't corrupt the ANSI TUI. Bytes
 written during the turn are appended to the log, not shown. To show
 text in the transcript, return it as a string from a render hook; to
 show text in the status bar, register a `psi.tui.register_status_hook`
@@ -251,7 +306,16 @@ These are part of the stable surface:
 | `psi.tools.cancel(reason)` | Shorthand for a failure `ToolResult` used in before-hooks to short-circuit dispatch. Example: `tools.add_before_hook(function(n, i) if n == "bash" and i.command:find("rm %-rf") then return tools.cancel("refused") end end)`. |
 | `psi.prompt.register_transformer(fn)` | Append a system-prompt rewriter. Receives the assembled prompt, returns a replacement (or `nil` to leave it). Runs after built-in assembly; transformers stack in registration order. |
 | `psi.agent.set_model(name)` / `psi.agent.current_model(fallback)` | Switch the default model at runtime (any prefix psi understands: `anthropic/`, `ollama/`, `openrouter/`). Picked up on the *next* turn; the TUI status line reflects it immediately. Pass `nil` to clear. |
-| `psi.tui.register_status_hook(fn)` | Append a short status-bar snippet. `fn()` is called on every redraw (must be cheap) and returns a string or nil. Useful for tokens/sec meters, background-task indicators, etc. Suppressed while an active status message is on screen. |
+| `psi.tui.register_key_handler(fn)` | Intercept normalized TUI key events before built-in bindings. Return `{ action = "...", arg = ... }` to handle, `nil` to fall through. Returns a handler id. |
+| `psi.tui.unregister_key_handler(id)` | Remove one key handler previously returned by `register_key_handler`. |
+| `psi.tui.clear_key_handlers()` | Remove registered key handlers. Mostly useful in tests. |
+| `psi.tui.register_status_hook(fn)` | Append a short status-bar snippet. `fn(status)` is called on every redraw (must be cheap) and returns a string or nil. Returns a hook id. Useful for tokens/sec meters, background-task indicators, etc. Suppressed while an active status message is on screen. |
+| `psi.tui.unregister_status_hook(id)` | Remove one status hook previously returned by `register_status_hook`. |
+| `psi.tui.clear_status_hooks()` | Remove registered status hooks. Mostly useful in tests. |
+| `psi.tui.register_clipboard_writer(fn)` | Append a TUI clipboard writer used by yank-style editor actions. `fn(text, context)` should return `true` when it handled the write. Returns a writer id. |
+| `psi.tui.unregister_clipboard_writer(id)` | Remove one clipboard writer previously returned by `register_clipboard_writer`. |
+| `psi.tui.clear_clipboard_writers()` | Remove registered clipboard writers. Mostly useful in tests and reload reset paths. |
+| `psi.tui_layout.set_prompt_max_rows(rows_or_nil)` | Override the visible multiline prompt height from Lua. Pass a number to set the row cap, or `nil` to clear the override. The TUI runtime may still supply `tui.prompt.max_rows` from settings; the layout module itself stays deterministic and the final value is always clamped to available terminal height. |
 | `psi.tools.set_active(names)` / `get_active()` | Narrow the tool set offered to the model for subsequent turns. Pass a list of tool names to restrict; pass `nil` to clear the scope and restore all registered tools. Useful for skill-scoped agents (e.g. `tools.set_active({"read","grep"})` for a read-only investigation). |
 | `psi.session.send_message(role, text)` | Inject a user or assistant message into the in-memory session without triggering a turn. `role` is `"user"` or `"assistant"`. Call `psi.session.save()` afterwards to persist. Replaces the former internal-only `append_user` / `append_assistant` for extension use. |
 | `psi.session.append_custom(name, data)` | Persist extension data in the session file without adding it to model context. |
@@ -260,6 +324,21 @@ These are part of the stable surface:
 | `psi.settings.get(path, default)` / `reload()` | Read layered JSON settings from `~/.config/psi/settings.json` and `./.psi/settings.json`. |
 | `psi.resources.context_files()` | Discover global/project context files. Emits `resources_discover`. |
 | `psi.prompt_templates.load()` / `list()` / `find(name)` / `expand(text)` | Loader + lookup + runtime expansion for user-authored slash-command templates. `/reload` reloads them. See "Prompt templates" below. |
+
+The built-in Vim keybinding layer (`lua/psi/extensions/vim_keybindings.lua`)
+is a core-bundled extension. It is disabled by default, enabled at
+startup by setting `"extensions": { "vim_keybindings": { "enabled": true } }`
+in `~/.config/psi/settings.json` or `./.psi/settings.json`, and toggled
+during a TUI session with `/vim`, `/vim on`, or `/vim off`. It owns its
+slash command, startup config hook, and TUI key/status hooks; the C side
+only performs generic terminal normalization, such as mapping ASCII
+control bytes to `ctrl-a` through `ctrl-z`.
+
+The built-in OSC 52 clipboard layer
+(`lua/psi/extensions/osc52_clipboard.lua`) registers a TUI clipboard writer.
+It is enabled by default so yanks update terminal clipboards, including tmux
+via DCS passthrough. Disable it with
+`"extensions": { "osc52_clipboard": { "enabled": false } }`.
 
 ### Prompt templates
 
@@ -353,15 +432,16 @@ What we **intentionally** do not support yet — open tickets, not bugs:
 
 - No `psi install` / package manager. Extensions are single-file drops.
 - No TypeScript. Lua only.
-- No provider registration (psi is Anthropic-only; revisit when we add a
-  second provider).
+- No stable provider registration API yet. Built-in Anthropic, Ollama, and
+  OpenRouter providers are available through the provider registry, but
+  extension authors should treat registration internals as unstable.
 - No sandboxing. Extensions run with full Lua and `psi` access — trust
   the files you install.
 - No extension manifest, versioning, or compatibility checks.
-- No hot reload.
+- No file-watcher hot reload. `/reload` is the explicit manual reload path.
 - No MCP bridge.
-- No extension-controlled system-prompt injection (future
-  `system-prompt-build` event).
+- No dedicated system-prompt event. Use `psi.prompt.register_transformer(fn)`
+  for extension-controlled prompt rewrites.
 - pi ships ~27 events; psi starts with the 10 above. New ones will be
   added on demand.
 

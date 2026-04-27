@@ -42,7 +42,6 @@
             p.curl
             p.libedit
             p.lua5_4
-            p.ncurses
             p.zlib
           ];
 
@@ -142,7 +141,6 @@
               pkgs.curl
               pkgs.libedit
               pkgs.lua5_4
-              pkgs.ncurses
             ];
             text = ''
               set -eu
@@ -176,7 +174,6 @@
               pkgs.curl
               pkgs.libedit
               pkgs.lua5_4
-              pkgs.ncurses
             ];
             text = ''
               set -eu
@@ -212,7 +209,6 @@
               pkgs.curl
               pkgs.libedit
               pkgs.lua5_4
-              pkgs.ncurses
               pkgs.zlib
             ];
             text = ''
@@ -246,7 +242,6 @@
             pkgs.lua54Packages.luacheck
             pkgs.stylua
             pkgs.tinycc
-            pkgs.ncurses
             pkgs.valgrind
           ];
 

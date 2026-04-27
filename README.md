@@ -25,7 +25,7 @@ This repository currently contains:
 - `cJSON` for JSON session records and structured tool payloads
 - `libcurl` for HTTPS provider integration
 - `libedit` for interactive line editing without the GPL constraint of GNU Readline
-- `ncursesw` (with UTF-8 locale) for the full-screen TUI
+- ANSI terminal control for the full-screen TUI
 - `zlib` to gzip-compress embedded Lua sources and docs inside the binary
 - an embedded Lua 5.4 runtime with host glue in `src/lua/vm.c` and a
   compressed embed-table (`include/psi/embedded_lua.h`) so portable
@@ -45,17 +45,22 @@ This repository currently contains:
   streamed agent loop, with slash commands (`/help`, `/hotkeys`,
   `/session`, `/new`, `/clear`, `/resume`, `/import`, `/name`,
   `/model`, `/copy`, `/export`, `/compact`, `/fork`, `/clone`,
-  `/reload`, `/system-prompt`, `/quit`). Extensions add their own
+  `/reload`, `/vim`, `/system-prompt`, `/quit`). Extensions add their own
   via `psi.commands.register`.
 - a full-screen `--tui` mode with rich status (cwd / model /
   session / token usage), unicode tool-call borders, live
-  markdown rendering, mode-aware hints, readline-style editing
-  (Alt-B/F/D/Backspace, Ctrl-W/K/U), Esc-abort while busy, and
-  Ctrl-Z suspend/resume. Single-threaded: the agent turn runs as
-  a Lua coroutine on the ncurses thread, pumping input and
-  redraws between every cooperative yield
+  markdown rendering, mode-aware hints, readline-style editing,
+  optional bundled Vim modal editing via `extensions.vim_keybindings.enabled`
+  in settings or `/vim`
+  (normal/insert/visual/block visual, `w`/`b`, `I`/`A`/`o`/`O`,
+  `^`/`$`, `gg`/`G`, `Ctrl-U`/`Ctrl-D`, `y`/`p`,
+  `Ctrl-A`/`Ctrl-E`), `Ctrl-G` abort while busy, `Ctrl-C`
+  clear-buffer, OSC 52 terminal clipboard yanks, and Ctrl-Z suspend/resume, plus a Lua-driven theme registry with a bundled
+  dark default. Single-threaded: the agent turn runs as
+  a Lua coroutine on the TUI thread, pumping input and
+  ANSI redraws between every cooperative yield
 - manual session compaction through `--compact` and `/compact`
-- cooperative abort plumbing (Ctrl-C for non-TUI, Esc in TUI)
+- cooperative abort plumbing (Ctrl-C for non-TUI, Ctrl-G in TUI)
   that cancels the current curl transfer, kills any child
   process, and persists a truncated tool result
 - static analysis wired into the flake (`nix run .#analyze`) with
@@ -102,6 +107,27 @@ set -a && . ./.env.local && ./build/psi --session .psi/session.jsonl --compact 1
 ./build/psi --session .psi/session.jsonl --print 'hello again'
 ```
 
+Optional build flags are plain Make variables. They default to `1` and can be
+disabled per build:
+
+- `TUI=0`: build without the full-screen frontend. The Lua TUI requires ANSI;
+  `ANSI=0` disables TUI support at compile time.
+- `ANSI=0`: build without ANSI SGR emission/parsing.
+- `COLOR=0`: build ANSI text styles without color handling.
+- `REPL_EDITLINE=0`: build the REPL without libedit/history support.
+
+Use a separate `BUILD_DIR` when checking variants so object files do not mix:
+
+```bash
+make BUILD_DIR=build-color0 COLOR=0
+make BUILD_DIR=build-no-tui TUI=0
+make check-build-configs
+```
+
+`make check-build-configs` builds the full `TUI` / `ANSI` / `COLOR` /
+`REPL_EDITLINE` toggle matrix and is the expected regression check for
+compile-time feature gates.
+
 When no `--session FILE` is set, psi assigns a default path under
 `$XDG_STATE_HOME/psi/sessions` or `~/.local/state/psi/sessions`. The on-disk
 format matches the pi-style v3 JSONL shape: a session header followed by typed
@@ -140,7 +166,7 @@ API, streams text to stdout as it arrives, executes built-in host tools, and
 persists user/tool/assistant events in the session log. Starting `psi` with no
 explicit mode opens the same agent loop in an interactive shell with `/help`,
 `/session`, `/system-prompt`, `/compact`, and `/quit`. `--tui` opens a
-full-screen ncurses view over the same runtime and uses the same Lua hook
+full-screen ANSI view over the same runtime and uses the same Lua hook
 renderers for tool execution blocks and diffs. The default model is
 `claude-opus-4-7`, overridable via `--model` or `PSI_ANTHROPIC_MODEL`.
 
@@ -167,7 +193,7 @@ Current limitations of `--agent`:
 
 Lua files dropped into any of the following directories are
 loaded at startup and can register tools, subscribe to events, or
-add slash commands. See [docs/extensions.md](docs/extensions.md)
+add slash commands and themes. See [docs/extensions.md](docs/extensions.md)
 for the authoring guide.
 
 - `$PSI_EXTENSIONS_DIR` (colon-separated list, takes precedence)
@@ -192,8 +218,8 @@ for the authoring guide.
 - `scripts/embed_lua.c`: build-time helper that deflate-compresses
   Lua sources and docs into C byte arrays
 - `lua/boot.lua`: bootstrap that wires the `psi.*` Lua modules
-  together, bridges render hooks onto the events bus, and loads
-  extensions
+  together, registers bundled Lua extensions, bridges render hooks
+  onto the events bus, and loads user extensions
 - `lua/psi/`: Lua modules — tool registry, built-in tools, prompt
   assembly, session records/format, provider registry, provider loops
   (Anthropic, Ollama, OpenRouter), settings/resources, agent orchestration,

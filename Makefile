@@ -23,6 +23,11 @@ TUI ?= 1
 ANSI ?= 1
 COLOR ?= 1
 REPL_EDITLINE ?= 1
+ifeq ($(ANSI),0)
+# The Lua TUI backend is ANSI-terminal based. A no-ANSI build should keep
+# --tui unavailable instead of compiling a TUI that still emits escapes.
+TUI := 0
+endif
 ifeq ($(STATIC),1)
 PKG_CONFIG_FLAGS = --static
 LDFLAGS += -static
@@ -59,9 +64,6 @@ LOCAL_CPPFLAGS += $(call pkg_cflags,EDIT,libedit)
 endif
 LOCAL_CPPFLAGS += $(call pkg_cflags,CURL,libcurl)
 LOCAL_CPPFLAGS += $(call pkg_cflags,ZLIB,zlib)
-ifeq ($(TUI),1)
-LOCAL_CPPFLAGS += $(call pkg_cflags,NCURSES,ncursesw ncurses)
-endif
 LOCAL_CPPFLAGS += $(call pkg_cflags,ARGTABLE,argtable3)
 
 LOCAL_LDFLAGS  = $(call pkg_libs,LUA,lua5.4)
@@ -71,9 +73,6 @@ LOCAL_LDFLAGS += $(call pkg_libs,EDIT,libedit)
 endif
 LOCAL_LDFLAGS += $(call pkg_libs,CURL,libcurl)
 LOCAL_LDFLAGS += $(call pkg_libs,ZLIB,zlib)
-ifeq ($(TUI),1)
-LOCAL_LDFLAGS += $(call pkg_libs,NCURSES,ncursesw ncurses)
-endif
 LOCAL_LDFLAGS += $(if $(PSI_LIBS_ARGTABLE),$(PSI_LIBS_ARGTABLE),$(or $(call pkg_libs,ARGTABLE,argtable3),-largtable3))
 LOCAL_LDFLAGS += $(if $(PSI_LIBS_PTHREAD),$(PSI_LIBS_PTHREAD),-lpthread)
 LOCAL_RPATH_LDFLAGS = $(patsubst -L%,-Wl$(comma)-rpath$(comma)%,$(filter -L%,$(LOCAL_LDFLAGS)))
@@ -239,4 +238,7 @@ analyze-gcc:
 
 analyze: analyze-cppcheck analyze-gcc
 
-.PHONY: all clean install lint lint-lua lint-c format-lua analyze analyze-cppcheck analyze-gcc
+check-build-configs:
+	sh tests/build_configs.sh
+
+.PHONY: all clean install lint lint-lua lint-c format-lua analyze analyze-cppcheck analyze-gcc check-build-configs

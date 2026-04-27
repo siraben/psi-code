@@ -1,14 +1,9 @@
-#include <fcntl.h>
 #include <locale.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <sys/types.h>
+#include <stdlib.h>
+#include <termios.h>
 #include <unistd.h>
-#if PSI_ENABLE_TUI
-#include <ncurses.h>
-#endif
 #include <lua.h>
 #include "psi/abort.h"
 #include "psi/runtime.h"
@@ -24,101 +19,83 @@
 
 #if PSI_ENABLE_TUI
 
-/* Redirect fd 2 to a per-session log while curses owns the terminal.
- *
- * Without this, any fprintf(stderr, ...) or io.stderr:write() lands as raw
- * bytes wherever the cursor happens to be, leaving sticky garbage on the
- * input prompt that ncurses won't redraw over (it didn't write those bytes
- * itself, so it doesn't track them in its line buffers).
- *
- * Path:
- *   $XDG_STATE_HOME/psi/tui-stderr.log  (or $HOME/.local/state/psi/...)
- *
- * Returns the duplicated original fd 2 on success so the caller can restore
- * it after endwin(). Returns -1 on any failure; in that case stderr is
- * untouched and we silently accept the corruption (better than failing the
- * TUI launch outright).
- */
-static int psi_tui_redirect_stderr(void) {
-    const char *xdg;
-    const char *home;
-    char path[1024];
-    char dir[1024];
-    int fd;
-    int saved;
-    size_t n;
+static struct termios psi_tui_original_termios;
+static int psi_tui_has_original_termios = 0;
 
-    xdg = getenv("XDG_STATE_HOME");
-    if (xdg != NULL && xdg[0] != '\0') {
-        n = (size_t)snprintf(dir, sizeof(dir), "%s/psi", xdg);
-    } else {
-        home = getenv("HOME");
-        if (home == NULL || home[0] == '\0') return -1;
-        n = (size_t)snprintf(dir, sizeof(dir), "%s/.local/state/psi", home);
+static int psi_tui_enter_terminal(void) {
+    struct termios raw_attrs;
+
+    if (tcgetattr(STDIN_FILENO, &psi_tui_original_termios) != 0) {
+        perror("tcgetattr");
+        return PSI_STATUS_ERROR;
     }
-    if (n == 0u || n >= sizeof(dir)) return -1;
+    psi_tui_has_original_termios = 1;
+    raw_attrs = psi_tui_original_termios;
+    raw_attrs.c_iflag &= (tcflag_t) ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+    raw_attrs.c_oflag &= (tcflag_t) ~(OPOST);
+    raw_attrs.c_cflag |= (tcflag_t)CS8;
+    raw_attrs.c_lflag &= (tcflag_t) ~(ECHO | ICANON | IEXTEN | ISIG);
+    raw_attrs.c_cc[VMIN] = 0;
+    raw_attrs.c_cc[VTIME] = 0;
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_attrs) != 0) {
+        perror("tcsetattr");
+        return PSI_STATUS_ERROR;
+    }
+    fputs("\033[?1049h\033[?25h\033[2J\033[H", stdout);
+    fflush(stdout);
+    return PSI_STATUS_OK;
+}
 
-    /* mkdir -p the parent chain ($HOME/.local, $HOME/.local/state, then psi). */
-    {
-        size_t i;
-        for (i = 1u; i < n; i++) {
-            if (dir[i] == '/') {
-                dir[i] = '\0';
-                (void)mkdir(dir, 0700);
-                dir[i] = '/';
-            }
+static void psi_tui_leave_terminal(void) {
+    fputs("\033[?2026l\033[0m\033[?25h\033[?1049l", stdout);
+    fflush(stdout);
+    if (psi_tui_has_original_termios) {
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &psi_tui_original_termios);
+    }
+}
+
+void psi_tui_suspend_terminal(void) {
+    if (psi_tui_has_original_termios) {
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &psi_tui_original_termios);
+    }
+    fputs("\033[?2026l\033[0m\033[?25h\033[?1049l", stdout);
+    fflush(stdout);
+}
+
+void psi_tui_resume_terminal(void) {
+    struct termios raw_attrs;
+
+    if (!psi_tui_has_original_termios) {
+        return;
+    }
+    raw_attrs = psi_tui_original_termios;
+    raw_attrs.c_iflag &= (tcflag_t) ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+    raw_attrs.c_oflag &= (tcflag_t) ~(OPOST);
+    raw_attrs.c_cflag |= (tcflag_t)CS8;
+    raw_attrs.c_lflag &= (tcflag_t) ~(ECHO | ICANON | IEXTEN | ISIG);
+    raw_attrs.c_cc[VMIN] = 0;
+    raw_attrs.c_cc[VTIME] = 0;
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_attrs);
+    fputs("\033[?1049h\033[?25h\033[2J\033[H", stdout);
+    fflush(stdout);
+}
+
+static void psi_tui_atexit_restore(void) {
+    if (psi_tui_has_original_termios) {
+        psi_tui_leave_terminal();
+        psi_tui_has_original_termios = 0;
+    }
+}
+
+static int psi_tui_install_atexit(void) {
+    static int installed = 0;
+
+    if (!installed) {
+        if (atexit(psi_tui_atexit_restore) != 0) {
+            return PSI_STATUS_ERROR;
         }
-        (void)mkdir(dir, 0700);
+        installed = 1;
     }
-
-    n = (size_t)snprintf(path, sizeof(path), "%s/tui-stderr.log", dir);
-    if (n == 0u || n >= sizeof(path)) return -1;
-
-    /* O_TRUNC: a fresh log per TUI session keeps it scannable.
-     * O_APPEND would defeat that on every relaunch. */
-    fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    if (fd < 0) return -1;
-
-    saved = dup(STDERR_FILENO);
-    if (saved < 0) {
-        close(fd);
-        return -1;
-    }
-
-    if (dup2(fd, STDERR_FILENO) < 0) {
-        close(fd);
-        close(saved);
-        return -1;
-    }
-    close(fd);
-    return saved;
-}
-
-static void psi_tui_restore_stderr(int saved_fd) {
-    if (saved_fd < 0) return;
-    fflush(stderr);
-    (void)dup2(saved_fd, STDERR_FILENO);
-    close(saved_fd);
-}
-
-static int psi_tui_init_colors(void) {
-#if PSI_ENABLE_COLOR
-    if (!has_colors()) {
-        return PSI_STATUS_OK;
-    }
-    start_color();
-    use_default_colors();
-    init_pair(1, COLOR_BLUE, -1);
-    init_pair(2, COLOR_CYAN, -1);
-    init_pair(3, COLOR_WHITE, -1);
-    init_pair(4, COLOR_YELLOW, -1);
-    init_pair(5, COLOR_GREEN, -1);
-    init_pair(6, COLOR_RED, -1);
-    init_pair(7, -1, -1);
-    if (COLOR_PAIRS > 8) {
-        init_pair(8, COLORS > 242 ? 242 : COLOR_BLACK, -1);
-    }
-#endif
     return PSI_STATUS_OK;
 }
 
@@ -189,30 +166,25 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
     vm.host.abort_signal = &abort_signal;
 
     setlocale(LC_ALL, "");
-
-    /* Redirect stderr to a log file BEFORE initscr() so even early curses
-     * setup errors don't corrupt the screen. Restore AFTER endwin() so any
-     * post-shutdown errors (Lua teardown, psi.modes.run error) reach the
-     * user's terminal as before. */
-    {
-        int saved_stderr = psi_tui_redirect_stderr();
-
-        initscr();
-        raw();
-        nonl();
-        noecho();
-        keypad(stdscr, TRUE);
-        scrollok(stdscr, FALSE);
-        set_escdelay(25);
-        psi_tui_init_colors();
-
-        psi_vm_set_tui_active(&vm, 1);
-        status = psi_tui_run_lua(&vm, options);
-        psi_vm_set_tui_active(&vm, 0);
-
-        endwin();
-        psi_tui_restore_stderr(saved_stderr);
+    status = psi_tui_install_atexit();
+    if (status != PSI_STATUS_OK) {
+        psi_vm_destroy(&vm);
+        psi_session_free(&session);
+        return status;
     }
+    status = psi_tui_enter_terminal();
+    if (status != PSI_STATUS_OK) {
+        psi_vm_destroy(&vm);
+        psi_session_free(&session);
+        return status;
+    }
+
+    psi_vm_set_tui_active(&vm, 1);
+    status = psi_tui_run_lua(&vm, options);
+    psi_vm_set_tui_active(&vm, 0);
+
+    psi_tui_leave_terminal();
+    psi_tui_has_original_termios = 0;
     psi_vm_destroy(&vm);
     psi_session_free(&session);
     return status;

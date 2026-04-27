@@ -183,6 +183,10 @@ local function handle_slash_command(opts, line)
     print(action.payload or "")
     return true, false
   end
+  if kind == "ansi-print" then
+    print(action.payload or "")
+    return true, false
+  end
   if kind == "quit" then
     return true, true
   end
@@ -259,7 +263,6 @@ function M.run_repl(opts)
     session.announce_start()
   end
   print("psi coding agent")
-  print("type a prompt to run the agent, /help for commands, or /quit to exit")
   while true do
     local line = psi.readline("psi> ")
     if line == nil then
