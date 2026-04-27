@@ -5,7 +5,6 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <cjson/cJSON.h>
 #include "psi/common.h"
 #include "psi/message.h"
 #include "psi/session.h"
@@ -19,123 +18,16 @@ static size_t psi_estimate_tokens(const char *text) {
     return (len + 3u) / 4u;
 }
 
-static size_t psi_token_chars_to_tokens(size_t chars) {
-    return chars == 0u ? 0u : (chars + 3u) / 4u;
-}
+static size_t psi_calibrate_tokens(size_t pi_tokens) {
+    const size_t max = (size_t)-1;
 
-static const char *psi_json_string(const cJSON *object, const char *name) {
-    cJSON *item;
-    if (object == NULL) return NULL;
-    item = cJSON_GetObjectItemCaseSensitive((cJSON *)object, name);
-    return cJSON_IsString(item) ? item->valuestring : NULL;
-}
-
-static size_t psi_json_string_len(const cJSON *object, const char *name) {
-    const char *value = psi_json_string(object, name);
-    return value != NULL ? strlen(value) : 0u;
-}
-
-static size_t psi_json_printed_len(const cJSON *value) {
-    char *encoded;
-    size_t len;
-
-    if (value == NULL) return 0u;
-    encoded = cJSON_PrintUnformatted((cJSON *)value);
-    if (encoded == NULL) return 0u;
-    len = strlen(encoded);
-    free(encoded);
-    return len;
-}
-
-static size_t psi_estimate_content_chars(const cJSON *content, int mode) {
-    size_t chars;
-    int i;
-    int n;
-
-    if (cJSON_IsString((cJSON *)content)) {
-        return content->valuestring != NULL ? strlen(content->valuestring) : 0u;
-    }
-    if (!cJSON_IsArray((cJSON *)content)) return 0u;
-
-    chars = 0u;
-    n = cJSON_GetArraySize((cJSON *)content);
-    for (i = 0; i < n; i++) {
-        cJSON *block = cJSON_GetArrayItem((cJSON *)content, i);
-        const char *type = psi_json_string(block, "type");
-        if (type == NULL) continue;
-        if (strcmp(type, "text") == 0) {
-            chars += psi_json_string_len(block, "text");
-        } else if (mode == 1 && strcmp(type, "thinking") == 0) {
-            chars += psi_json_string_len(block, "thinking");
-        } else if (mode == 1 && strcmp(type, "toolCall") == 0) {
-            const cJSON *args;
-            chars += psi_json_string_len(block, "name");
-            args = cJSON_GetObjectItemCaseSensitive(block, "arguments");
-            chars += psi_json_printed_len(args);
-        } else if (mode == 2 && strcmp(type, "image") == 0) {
-            chars += 4800u;
-        }
-    }
-    return chars;
-}
-
-static size_t psi_estimate_structured_tokens(
-    enum psi_message_role in_memory_role,
-    const char *text,
-    const char *data_json
-) {
-    cJSON *body;
-    cJSON *message;
-    size_t chars;
-
-    if (data_json == NULL || data_json[0] == '\0') return psi_estimate_tokens(text);
-
-    body = cJSON_Parse(data_json);
-    if (body == NULL || !cJSON_IsObject(body)) {
-        cJSON_Delete(body);
-        return psi_estimate_tokens(text);
-    }
-
-    message = cJSON_GetObjectItemCaseSensitive(body, "message");
-    if (cJSON_IsObject(message)) {
-        const char *role = psi_json_string(message, "role");
-        const cJSON *content = cJSON_GetObjectItemCaseSensitive(message, "content");
-
-        if (role != NULL && strcmp(role, "assistant") == 0) {
-            chars = psi_estimate_content_chars(content, 1);
-            cJSON_Delete(body);
-            return psi_token_chars_to_tokens(chars);
-        }
-        if (role != NULL && strcmp(role, "toolResult") == 0) {
-            chars = psi_estimate_content_chars(content, 2);
-            cJSON_Delete(body);
-            return psi_token_chars_to_tokens(chars);
-        }
-        if (role != NULL && strcmp(role, "bashExecution") == 0) {
-            chars = psi_json_string_len(message, "command") + psi_json_string_len(message, "output");
-            cJSON_Delete(body);
-            return psi_token_chars_to_tokens(chars);
-        }
-        if (role != NULL && strcmp(role, "custom") == 0) {
-            chars = psi_estimate_content_chars(content, 2);
-            cJSON_Delete(body);
-            return psi_token_chars_to_tokens(chars);
-        }
-
-        chars = psi_estimate_content_chars(content, 0);
-        cJSON_Delete(body);
-        return psi_token_chars_to_tokens(chars);
-    }
-
-    if (in_memory_role == PSI_MESSAGE_COMPACTION_SUMMARY ||
-        in_memory_role == PSI_MESSAGE_BRANCH_SUMMARY) {
-        chars = psi_json_string_len(body, "summary");
-        cJSON_Delete(body);
-        return psi_token_chars_to_tokens(chars != 0u ? chars : strlen(text ? text : ""));
-    }
-
-    cJSON_Delete(body);
-    return psi_estimate_tokens(text);
+    /* Live OpenRouter probes across Claude, Gemini, and GPT showed chars/4
+     * is close but slightly low on average. Target a mild ~5% overestimate:
+     *   ceil(pi_tokens * 1.105)
+     * which is equivalent to ceil((221*pi_tokens) / 200).
+     */
+    if (pi_tokens > (max - 199u) / 221u) return max;
+    return (221u * pi_tokens + 199u) / 200u;
 }
 
 void psi_message_init(struct psi_message *message, enum psi_message_role role, const char *text) {
@@ -148,11 +40,22 @@ void psi_message_init_with_data(
     const char *text,
     const char *data_json
 ) {
+    psi_message_init_with_data_and_estimate(
+        message, role, text, data_json, psi_calibrate_tokens(psi_estimate_tokens(text)));
+}
+
+void psi_message_init_with_data_and_estimate(
+    struct psi_message *message,
+    enum psi_message_role role,
+    const char *text,
+    const char *data_json,
+    size_t token_estimate
+) {
     if (message == NULL) return;
     message->role = role;
     message->text = text != NULL ? psi_strdup(text) : NULL;
     message->data_json = data_json != NULL ? psi_strdup(data_json) : NULL;
-    message->token_estimate = psi_estimate_structured_tokens(role, text, data_json);
+    message->token_estimate = token_estimate;
 }
 
 void psi_message_free(struct psi_message *message) {
@@ -242,6 +145,17 @@ int psi_session_append_with_data(
     const char *text,
     const char *data_json
 ) {
+    return psi_session_append_with_data_and_estimate(
+        session, role, text, data_json, psi_calibrate_tokens(psi_estimate_tokens(text)));
+}
+
+int psi_session_append_with_data_and_estimate(
+    struct psi_session *session,
+    enum psi_message_role role,
+    const char *text,
+    const char *data_json,
+    size_t token_estimate
+) {
     if (session == NULL) return PSI_STATUS_ERROR;
 
     if (session->count == session->capacity) {
@@ -258,7 +172,8 @@ int psi_session_append_with_data(
         session->capacity = new_capacity;
     }
 
-    psi_message_init_with_data(&session->messages[session->count], role, text, data_json);
+    psi_message_init_with_data_and_estimate(
+        &session->messages[session->count], role, text, data_json, token_estimate);
     if ((text != NULL && session->messages[session->count].text == NULL) ||
         (data_json != NULL && session->messages[session->count].data_json == NULL)) {
         psi_message_free(&session->messages[session->count]);

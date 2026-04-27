@@ -17,7 +17,7 @@
 -- The C FFI exposes:
 --   psi.session_message_count()
 --   psi.session_messages()            -- array of {role, text, data}
---   psi.session_append(role, text, data_or_nil)
+--   psi.session_append(role, text, data_or_nil, token_estimate?)
 --   psi.session_clear()
 
 local records = require("psi.records")
@@ -122,16 +122,104 @@ function M.messages_from(start_index)
   return records.messages_from_alists(psi.session_messages_from(start_index or 1))
 end
 
+local append_raw
+
 -- Internal: append an in-memory message record verbatim (used when
 -- reconstructing state during compaction). Does not re-stamp metadata.
 function M.append_message(msg)
-  psi.session_append(msg.role, msg.text, msg.data)
+  append_raw(msg.role, msg.text, msg.data)
 end
 
 -- ---------- Append wrappers (pi-shape content builders) ----------
 
 local function text_block(s)
   return { type = "text", text = s or "" }
+end
+
+local function ceil_div(n, d)
+  return math.floor((n + d - 1) / d)
+end
+
+local function token_chars_to_tokens(chars)
+  if chars <= 0 then
+    return 0
+  end
+  return ceil_div(chars, 4)
+end
+
+local function calibrate_tokens(pi_tokens)
+  return ceil_div(pi_tokens * 221, 200)
+end
+
+local function json_len(value)
+  if value == nil then
+    return 0
+  end
+  return #(psi.json_encode(value) or "")
+end
+
+local function content_chars(content, opts)
+  opts = opts or {}
+  if type(content) == "string" then
+    return #content
+  end
+  if type(content) ~= "table" then
+    return 0
+  end
+  local chars = 0
+  for _, block in ipairs(content) do
+    if type(block) == "table" then
+      if block.type == "text" then
+        chars = chars + #(block.text or "")
+      elseif opts.thinking and block.type == "thinking" then
+        chars = chars + #(block.thinking or "")
+      elseif opts.thinking and block.type == "toolCall" then
+        chars = chars + #(block.name or "") + json_len(block.arguments)
+      elseif opts.images and block.type == "image" then
+        chars = chars + 4800
+      end
+    end
+  end
+  return chars
+end
+
+local function pi_tokens_for_body(in_mem_role, text, body)
+  if type(body) ~= "table" then
+    return token_chars_to_tokens(#(text or ""))
+  end
+  local msg = body.message
+  if type(msg) == "table" then
+    if msg.role == "assistant" then
+      return token_chars_to_tokens(content_chars(msg.content, { thinking = true }))
+    elseif msg.role == "toolResult" or msg.role == "custom" then
+      return token_chars_to_tokens(content_chars(msg.content, { images = true }))
+    elseif msg.role == "bashExecution" then
+      return token_chars_to_tokens(#(msg.command or "") + #(msg.output or ""))
+    end
+    return token_chars_to_tokens(content_chars(msg.content))
+  elseif in_mem_role == "compaction-summary" or in_mem_role == "branch-summary" then
+    return token_chars_to_tokens(#(body.summary or text or ""))
+  end
+  return token_chars_to_tokens(#(text or ""))
+end
+
+local function estimate_tokens(in_mem_role, text, body)
+  return calibrate_tokens(pi_tokens_for_body(in_mem_role, text, body))
+end
+
+local function append_body(in_mem_role, text, body)
+  psi.session_append(
+    in_mem_role,
+    text or "",
+    psi.json_encode(body),
+    estimate_tokens(in_mem_role, text, body)
+  )
+end
+
+function append_raw(in_mem_role, text, data)
+  local body = prelude.safe_json_decode(data, nil)
+  local estimate = estimate_tokens(in_mem_role, text, body)
+  psi.session_append(in_mem_role, text or "", data, estimate)
 end
 
 -- pi normalizes Anthropic's verbose usage keys.
@@ -209,7 +297,7 @@ function M.append_user(text)
       timestamp = unix_ms(),
     },
   })
-  psi.session_append("user", text or "", psi.json_encode(body))
+  append_body("user", text, body)
 end
 
 -- Public extension API: inject a message into the in-memory session
@@ -264,7 +352,7 @@ function M.append_assistant(text, blocks, opts)
     msg.responseId = opts.response_id
   end
   local body = stamp_entry({ message = msg })
-  psi.session_append("assistant", text or "", psi.json_encode(body))
+  append_body("assistant", text, body)
 end
 
 function M.append_tool_result(tool_use_id, tool_name, content_text, is_error)
@@ -279,7 +367,7 @@ function M.append_tool_result(tool_use_id, tool_name, content_text, is_error)
     msg.isError = true
   end
   local body = stamp_entry({ message = msg })
-  psi.session_append("tool-result", content_text or "", psi.json_encode(body))
+  append_body("tool-result", content_text, body)
 end
 
 function M.append_compaction(summary_text, extra)
@@ -290,7 +378,7 @@ function M.append_compaction(summary_text, extra)
     end
   end
   body = stamp_entry(body)
-  psi.session_append("compaction-summary", summary_text or "", psi.json_encode(body))
+  append_body("compaction-summary", summary_text, body)
 end
 
 function M.append_custom(name, data)
@@ -299,7 +387,7 @@ function M.append_custom(name, data)
     name = name or "custom",
     data = data or {},
   })
-  psi.session_append("custom", "", psi.json_encode(body))
+  append_body("custom", "", body)
 end
 
 function M.append_custom_message(text, opts)
@@ -313,17 +401,17 @@ function M.append_custom_message(text, opts)
       hidden = opts.hidden and true or false,
     },
   })
-  psi.session_append("custom", text or "", psi.json_encode(body))
+  append_body("custom", text, body)
 end
 
 function M.append_model_change(model)
   local body = stamp_entry({ __entry_type = "model_change", model = model or "" })
-  psi.session_append("custom", "", psi.json_encode(body))
+  append_body("custom", "", body)
 end
 
 function M.append_thinking_level_change(level)
   local body = stamp_entry({ __entry_type = "thinking_level_change", thinkingLevel = level or "" })
-  psi.session_append("custom", "", psi.json_encode(body))
+  append_body("custom", "", body)
 end
 
 -- ---------- JSONL persistence ----------
@@ -611,11 +699,11 @@ local function append_v1_entry(parsed)
   elseif role == "assistant" then
     local msg = v1_assistant_data_to_v2(parsed.data, text)
     local body = stamp_entry({ message = msg })
-    psi.session_append("assistant", text, psi.json_encode(body))
+    append_body("assistant", text, body)
   elseif role == "tool-result" then
     local msg = v1_tool_result_text_to_v2(text)
     local body = stamp_entry({ message = msg })
-    psi.session_append("tool-result", text, psi.json_encode(body))
+    append_body("tool-result", text, body)
   elseif role == "compaction-summary" then
     -- v1 data held provenance JSON; preserve under v2 keys.
     local extra = prelude.safe_json_decode(parsed.data, nil)
@@ -624,7 +712,7 @@ local function append_v1_entry(parsed)
     end
     M.append_compaction(text, extra)
   else
-    psi.session_append(role, text, parsed.data)
+    append_raw(role, text, parsed.data)
   end
 end
 
@@ -653,7 +741,7 @@ local function append_v2_message(parsed)
   if role == "toolResult" then
     in_mem_role = "tool-result"
   end
-  psi.session_append(in_mem_role, text, psi.json_encode(body))
+  append_body(in_mem_role, text, body)
 end
 
 local function append_v2_compaction(parsed)
@@ -674,7 +762,7 @@ local function append_v2_compaction(parsed)
     end
   end
   last_entry_id = body.id or last_entry_id
-  psi.session_append("compaction-summary", body.summary or "", psi.json_encode(body))
+  append_body("compaction-summary", body.summary, body)
 end
 
 local function append_v3_custom(parsed)
@@ -698,7 +786,7 @@ local function append_v3_custom(parsed)
       end
     end
   end
-  psi.session_append("custom", text, psi.json_encode(body))
+  append_body("custom", text, body)
 end
 
 function M.load(path)
