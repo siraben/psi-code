@@ -430,6 +430,13 @@ local function new_state(opts)
     total_cache_width = nil,
     total_cache_version = nil,
     total_cache_lines = nil,
+    prompt_history = {},
+    history_index = nil,
+    history_draft = "",
+    history_search_active = false,
+    history_search_query = "",
+    history_search_draft = "",
+    history_search_index = nil,
     dirty = true,
   }
   refresh_input_layout(state)
@@ -437,6 +444,168 @@ local function new_state(opts)
     tui.run_startup_hooks({ opts = opts, state = state })
   end
   return state
+end
+
+local function history_add(state, text)
+  text = text or ""
+  if text == "" then
+    return
+  end
+  if state.prompt_history[#state.prompt_history] == text then
+    return
+  end
+  state.prompt_history[#state.prompt_history + 1] = text
+  while #state.prompt_history > 100 do
+    table.remove(state.prompt_history, 1)
+  end
+end
+
+local function history_seed_from_session(state)
+  state.prompt_history = {}
+  for _, msg in ipairs(session.messages()) do
+    if msg.role == "user" and type(msg.text) == "string" and msg.text ~= "" then
+      history_add(state, msg.text)
+    end
+  end
+  state.history_index = nil
+  state.history_draft = ""
+  state.history_search_active = false
+  state.history_search_query = ""
+  state.history_search_draft = ""
+  state.history_search_index = nil
+end
+
+local function reset_history_search(state)
+  state.history_search_active = false
+  state.history_search_query = ""
+  state.history_search_draft = ""
+  state.history_search_index = nil
+end
+
+local function exit_history_browse(state)
+  state.history_index = nil
+  state.history_draft = ""
+  reset_history_search(state)
+end
+
+local function history_input_target(state)
+  return not state.busy
+    and state.editor_mode == "insert"
+    and state.selection_anchor == nil
+    and state.pending_key == nil
+    and not state.history_search_active
+end
+
+local function history_up_applicable(state)
+  return history_input_target(state)
+    and #state.prompt_history > 0
+    and ((state.input or "") ~= "" or state.history_index ~= nil)
+end
+
+local function history_down_applicable(state)
+  return history_input_target(state) and state.history_index ~= nil
+end
+
+local function history_up(state)
+  if #state.prompt_history == 0 then
+    return false
+  end
+  if state.history_index == nil then
+    state.history_draft = state.input or ""
+    state.history_index = #state.prompt_history
+  elseif state.history_index > 1 then
+    state.history_index = state.history_index - 1
+  end
+  state.input = state.prompt_history[state.history_index] or state.input
+  state.cursor = #state.input
+  state.dirty = true
+  return true
+end
+
+local function history_down(state)
+  if state.history_index == nil then
+    return false
+  end
+  if state.history_index < #state.prompt_history then
+    state.history_index = state.history_index + 1
+    state.input = state.prompt_history[state.history_index] or ""
+  else
+    state.history_index = nil
+    state.input = state.history_draft or ""
+    state.history_draft = ""
+  end
+  state.cursor = #state.input
+  state.dirty = true
+  return true
+end
+
+local function history_find_reverse(state, query, before_index)
+  local start = math.min(tonumber(before_index) or #state.prompt_history, #state.prompt_history)
+  query = tostring(query or "")
+  for i = start, 1, -1 do
+    local candidate = state.prompt_history[i] or ""
+    if query == "" or candidate:find(query, 1, true) then
+      return i
+    end
+  end
+  return nil
+end
+
+local function history_reverse_search(state)
+  if #state.prompt_history == 0 then
+    set_status(state, "history empty", true)
+    return true
+  end
+  if not state.history_search_active then
+    state.history_search_active = true
+    state.history_search_query = state.input or ""
+    state.history_search_draft = state.input or ""
+    state.history_search_index = #state.prompt_history + 1
+  end
+
+  local found =
+    history_find_reverse(state, state.history_search_query, (state.history_search_index or 1) - 1)
+  if not found then
+    set_status(state, "reverse-search: no match", true)
+    return true
+  end
+
+  state.history_search_index = found
+  state.history_index = nil
+  state.input = state.prompt_history[found] or ""
+  state.cursor = #state.input
+  local query = state.history_search_query or ""
+  set_status(state, query ~= "" and ("reverse-search: " .. query) or "reverse-search", false)
+  state.dirty = true
+  return true
+end
+
+local function history_search_append(state, text)
+  state.history_search_query = (state.history_search_query or "") .. (text or "")
+  state.history_search_index = #state.prompt_history + 1
+  return history_reverse_search(state, false)
+end
+
+local function history_search_backspace(state)
+  local query = state.history_search_query or ""
+  state.history_search_query = query:sub(1, math.max(0, #query - 1))
+  state.history_search_index = #state.prompt_history + 1
+  return history_reverse_search(state, false)
+end
+
+local function history_search_cancel(state)
+  state.input = state.history_search_draft or ""
+  state.cursor = #state.input
+  reset_history_search(state)
+  set_status(state, nil, false)
+  state.dirty = true
+  return true
+end
+
+local function history_search_accept(state)
+  reset_history_search(state)
+  set_status(state, nil, false)
+  state.dirty = true
 end
 
 local function invalidate_render_totals(state)
@@ -843,6 +1012,7 @@ local function rebuild_from_session(state)
   for _, msg in ipairs(session.messages()) do
     add_session_entry(state, msg)
   end
+  history_seed_from_session(state)
   state.scroll_offset = 0
   state.dirty = true
 end
@@ -1553,12 +1723,14 @@ function render_input_text_with_cursor(state, line, draw_cursor)
 end
 
 local function insert_text(state, text)
+  exit_history_browse(state)
   state.input = state.input:sub(1, state.cursor) .. text .. state.input:sub(state.cursor + 1)
   state.cursor = state.cursor + #text
   state.dirty = true
 end
 
 local function delete_backward(state)
+  exit_history_browse(state)
   if state.cursor == 0 or #state.input == 0 then
     return
   end
@@ -1568,6 +1740,7 @@ local function delete_backward(state)
 end
 
 local function delete_forward(state)
+  exit_history_browse(state)
   if state.cursor >= #state.input then
     return
   end
@@ -1576,6 +1749,7 @@ local function delete_forward(state)
 end
 
 local function delete_word_backward(state)
+  exit_history_browse(state)
   if state.cursor == 0 then
     return
   end
@@ -1600,6 +1774,7 @@ local function delete_word_backward(state)
 end
 
 local function delete_word_forward(state)
+  exit_history_browse(state)
   if state.cursor >= #state.input then
     return
   end
@@ -1683,11 +1858,13 @@ local function move_word_start_forward(state)
 end
 
 local function kill_to_end(state)
+  exit_history_browse(state)
   state.input = state.input:sub(1, state.cursor)
   state.dirty = true
 end
 
 local function kill_to_start(state)
+  exit_history_browse(state)
   if state.cursor == 0 then
     return
   end
@@ -2259,9 +2436,7 @@ local function handle_command(state, line)
 
   if action.kind == "name" then
     session.set_display_name(action.payload)
-    if state.opts.session_file and state.opts.session_file ~= "" then
-      session.save()
-    end
+    session.save()
     add_entry(state, "info", "name set to '" .. tostring(action.payload) .. "'")
     set_status(state, "", false)
     return true
@@ -2283,6 +2458,7 @@ local function submit(state)
   state.block_edit = nil
   state.editor_mode = "insert"
   state.pending_key = nil
+  exit_history_browse(state)
 
   if state.busy then
     if state.busy_kind ~= "agent" then
@@ -2334,6 +2510,7 @@ local function submit(state)
     line = expanded or ""
   end
 
+  history_add(state, line)
   add_entry(state, "user", line)
   state.streaming_assistant_index = add_entry(state, "assistant", "")
   state.show_thinking = tui.show_thinking() == "1"
@@ -2472,6 +2649,12 @@ local function apply_action(state, action, arg)
     clear_buffer(state)
     return
   end
+  if action == "history-search" then
+    if not state.busy then
+      history_reverse_search(state, true)
+    end
+    return
+  end
   if action == "scroll" then
     if arg == "page-up" then
       scroll_by(state, math.max(4, math.floor(state.height / 2)))
@@ -2484,8 +2667,14 @@ local function apply_action(state, action, arg)
       state.scroll_offset = 0
       state.dirty = true
     elseif arg == "line-up" then
+      if history_up_applicable(state) and history_up(state) then
+        return
+      end
       scroll_by(state, 1)
     elseif arg == "line-down" then
+      if history_down_applicable(state) and history_down(state) then
+        return
+      end
       scroll_by(state, -1)
     end
     return
@@ -2578,6 +2767,28 @@ local function handle_key_event(state, event)
     state.dirty = true
     return
   end
+  if state.history_search_active then
+    if event.key == "ctrl-r" then
+      history_reverse_search(state, true)
+      return
+    end
+    if event.key == "escape" or event.key == "ctrl-g" then
+      history_search_cancel(state)
+      return
+    end
+    if event.key == "backspace" then
+      history_search_backspace(state)
+      return
+    end
+    if event.key == "enter" then
+      history_search_accept(state)
+    elseif type(event.text) == "string" and event.text ~= "" then
+      history_search_append(state, event.text)
+      return
+    else
+      history_search_accept(state)
+    end
+  end
   local result = tui.handle_key({
     key = event.key,
     busy = state.busy,
@@ -2619,6 +2830,108 @@ local function tick(state)
   end
 end
 
+local function clip_text(text, width)
+  width = tonumber(width) or 0
+  if width <= 0 then
+    return ""
+  end
+  text = tostring(text or ""):gsub("%s+", " ")
+  if #text <= width then
+    return text
+  end
+  if width <= 3 then
+    return text:sub(1, width)
+  end
+  return text:sub(1, width - 3) .. "..."
+end
+
+local function pad_right(text, width)
+  text = clip_text(text, width)
+  return text .. string.rep(" ", math.max(0, width - #text))
+end
+
+local function resume_preview_line(info, row, width)
+  if type(info) ~= "table" then
+    return ""
+  end
+  if row == 0 then
+    return ansi.bold("Preview")
+  elseif row == 1 then
+    return ansi.dim(clip_text(session.describe_session(info), width))
+  elseif row == 2 then
+    return ""
+  end
+  local line = (info.preview or {})[row - 2]
+  if line then
+    return clip_text(line, width)
+  end
+  return ""
+end
+
+local function draw_resume_picker(infos, selected, offset)
+  local width, height = current_size()
+  local list_start = 3
+  local list_rows = math.max(1, height - 4)
+  local split = width >= 70
+  local left_width = split and math.max(32, math.floor(width * 0.45)) or width
+  local right_width = split and math.max(1, width - left_width - 3) or 0
+  local selected_info = infos[selected]
+
+  psi.tui_clear()
+  psi.tui_draw_line(1, ansi.bold(ansi.cyan("Resume session")))
+  psi.tui_draw_line(2, ansi.dim("Enter selects  Esc cancels  Up/Down or Ctrl-P/Ctrl-N moves"))
+  for row = 0, list_rows - 1 do
+    local info = infos[offset + row]
+    local text = ""
+    if info then
+      local marker = (offset + row == selected) and "> " or "  "
+      text = pad_right(marker .. session.describe_session(info), left_width)
+      if offset + row == selected then
+        text = ansi.bold(ansi.cyan(text))
+      end
+    end
+    if split then
+      text = text .. ansi.dim("│ ") .. resume_preview_line(selected_info, row, right_width)
+    end
+    psi.tui_draw_line(list_start + row, text)
+  end
+  psi.tui_set_cursor(math.min(height, list_start + selected - offset), 1, false)
+  psi.tui_refresh()
+end
+
+local function choose_session_tui(infos)
+  local selected = 1
+  local offset = 1
+  while true do
+    local _, height = current_size()
+    local list_rows = math.max(1, height - 4)
+    if selected < offset then
+      offset = selected
+    elseif selected >= offset + list_rows then
+      offset = selected - list_rows + 1
+    end
+    draw_resume_picker(infos, selected, offset)
+
+    local event = psi.tui_poll_key(-1)
+    local key = event and event.key or nil
+    if key == "enter" then
+      return selected
+    elseif key == "escape" or key == "ctrl-d" then
+      return nil
+    elseif (key == "up" or key == "ctrl-p") and selected > 1 then
+      selected = selected - 1
+    elseif (key == "down" or key == "ctrl-n") and selected < #infos then
+      selected = selected + 1
+    elseif key == "page-up" then
+      selected = math.max(1, selected - list_rows)
+    elseif key == "page-down" then
+      selected = math.min(#infos, selected + list_rows)
+    elseif key == "resize" then
+      -- redraw on next loop
+    end
+  end
+end
+
 local function bootstrap_session(opts)
   if opts.session_file and opts.session_file ~= "" then
     local ok, err = session.load(opts.session_file)
@@ -2628,7 +2941,23 @@ local function bootstrap_session(opts)
     return true
   end
 
-  session.ensure_default_path()
+  if opts.resume then
+    local selected, err = session.resolve_resume_path(psi.cwd(), choose_session_tui)
+    if not selected then
+      return false, err
+    end
+    opts.session_file = selected
+    local ok, load_err = session.load(selected)
+    if not ok then
+      return false, load_err
+    end
+    return true
+  end
+
+  local path = session.ensure_default_path()
+  if not path then
+    return false, "could not determine default session path"
+  end
   session.announce_start()
   return true
 end
@@ -2770,6 +3099,13 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     busy_kind = debug_options.busy_kind or (debug_options.busy and "agent" or nil),
     running = true,
     scroll_offset = 0,
+    prompt_history = {},
+    history_index = nil,
+    history_draft = "",
+    history_search_active = false,
+    history_search_query = "",
+    history_search_draft = "",
+    history_search_index = nil,
     status_text = nil,
     status_is_error = false,
     width = 80,
@@ -2840,6 +3176,78 @@ function M._debug_consume_queued_preview(input, queued_text)
     editor_mode = state.editor_mode,
     queue_nav_index = state.queue_nav_index,
     status_text = state.status_text,
+  }
+end
+
+function M._debug_history_sequence(history, keys, input)
+  local state = {
+    prompt_history = history or {},
+    history_index = nil,
+    history_draft = "",
+    history_search_active = false,
+    history_search_query = "",
+    history_search_draft = "",
+    history_search_index = nil,
+    input = input or "",
+    cursor = #(input or ""),
+    busy = false,
+    editor_mode = "insert",
+    selection_anchor = nil,
+    pending_key = nil,
+    scroll_offset = 0,
+    height = 24,
+    status_text = nil,
+    status_is_error = false,
+    dirty = false,
+  }
+  for _, key in ipairs(keys or {}) do
+    if key == "up" then
+      history_up(state)
+    elseif key == "down" then
+      history_down(state)
+    elseif key == "line-up" then
+      if not (history_up_applicable(state) and history_up(state)) then
+        state.scrolled = true
+      end
+    elseif key == "line-down" then
+      if not (history_down_applicable(state) and history_down(state)) then
+        state.scrolled = true
+      end
+    elseif key == "ctrl-r" or key == "reverse" then
+      history_reverse_search(state, true)
+    elseif key == "backspace" then
+      if state.history_search_active then
+        history_search_backspace(state)
+      else
+        delete_backward(state)
+      end
+    elseif key == "enter" then
+      if state.history_search_active then
+        history_search_accept(state)
+      end
+    elseif key == "type" then
+      if state.history_search_active then
+        history_search_append(state, "x")
+      else
+        insert_text(state, "x")
+      end
+    elseif type(key) == "string" and key:sub(1, 5) == "text:" then
+      local text = key:sub(6)
+      if state.history_search_active then
+        history_search_append(state, text)
+      else
+        insert_text(state, text)
+      end
+    end
+  end
+  return {
+    input = state.input,
+    cursor = state.cursor,
+    history_index = state.history_index,
+    history_search_active = state.history_search_active,
+    history_search_query = state.history_search_query,
+    status_text = state.status_text,
+    scrolled = state.scrolled,
   }
 end
 
@@ -2948,6 +3356,9 @@ function M._debug_redraw_counts(input)
       total_cache_width = nil,
       total_cache_version = nil,
       total_cache_lines = nil,
+      prompt_history = {},
+      history_index = nil,
+      history_draft = "",
       dirty = true,
     }
     refresh_input_layout(state)

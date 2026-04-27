@@ -225,11 +225,12 @@ function M.run_turn(opts, cfg)
     local raw_body_len = 0
     local handle, begin_err = psi.http_stream_begin(cfg.url, cfg.headers, psi.json_encode(request))
     if handle == nil then
+      local emsg = "http request failed: " .. tostring(begin_err)
       if cfg.save_failed_partial then
-        cfg.save_failed_partial(state, model, "error", tostring(begin_err))
+        cfg.save_failed_partial(state, model, "error", emsg)
       end
-      io.stderr:write(cfg.provider_name .. ": " .. tostring(begin_err) .. "\n")
-      return false, "error"
+      io.stderr:write(cfg.provider_name .. ": " .. emsg .. "\n")
+      return false, emsg
     end
 
     while true do
@@ -266,7 +267,7 @@ function M.run_turn(opts, cfg)
       if not aborted then
         io.stderr:write(cfg.provider_name .. ": " .. emsg .. "\n")
       end
-      return false, reason
+      return false, aborted and reason or emsg
     end
 
     if status < 200 or status >= 300 then

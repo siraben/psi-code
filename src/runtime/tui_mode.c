@@ -25,6 +25,30 @@ static int psi_tui_has_original_termios = 0;
 #define PSI_TUI_ENABLE_MOUSE "\033[?1000h\033[?1006h"
 #define PSI_TUI_DISABLE_MOUSE "\033[?1006l\033[?1000l"
 
+static void psi_tui_fprint_shell_quoted(FILE *out, const char *text) {
+    const char *p;
+
+    fputc('\'', out);
+    for (p = text != NULL ? text : ""; *p != '\0'; p++) {
+        if (*p == '\'') {
+            fputs("'\\''", out);
+        } else {
+            fputc(*p, out);
+        }
+    }
+    fputc('\'', out);
+}
+
+static void psi_tui_print_resume_command(const struct psi_session *session) {
+    if (session == NULL || session->path == NULL || session->path[0] == '\0') {
+        return;
+    }
+    fputs("\nResume with: psi --tui --session ", stdout);
+    psi_tui_fprint_shell_quoted(stdout, session->path);
+    fputc('\n', stdout);
+    fflush(stdout);
+}
+
 static int psi_tui_enter_terminal(void) {
     struct termios raw_attrs;
 
@@ -127,6 +151,8 @@ static int psi_tui_run_lua(struct psi_vm *vm, const struct psi_cli_options *opti
         lua_pushstring(vm->L, options->session_file);
         lua_setfield(vm->L, -2, "session_file");
     }
+    lua_pushboolean(vm->L, options->resume ? 1 : 0);
+    lua_setfield(vm->L, -2, "resume");
     if (options->model != NULL) {
         lua_pushstring(vm->L, options->model);
         lua_setfield(vm->L, -2, "model");
@@ -192,6 +218,7 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
 
     psi_tui_leave_terminal();
     psi_tui_has_original_termios = 0;
+    psi_tui_print_resume_command(&session);
     psi_vm_destroy(&vm);
     psi_session_free(&session);
     return status;

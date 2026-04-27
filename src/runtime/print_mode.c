@@ -112,6 +112,8 @@ static int psi_run_via_lua(const struct psi_cli_options *options) {
         lua_pushstring(vm.L, options->session_file);
         lua_setfield(vm.L, -2, "session_file");
     }
+    lua_pushboolean(vm.L, options->resume ? 1 : 0);
+    lua_setfield(vm.L, -2, "resume");
     if (options->model != NULL) {
         lua_pushstring(vm.L, options->model);
         lua_setfield(vm.L, -2, "model");

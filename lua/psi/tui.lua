@@ -268,6 +268,9 @@ function M.handle_key(arg)
   if keybindings.matches(key, "tui.input.clear") then
     return action("kill-start")
   end
+  if not busy and keybindings.matches(key, "tui.input.reverseSearch") then
+    return action("history-search")
+  end
   if keybindings.matches(key, "tui.editor.cursorLeft") then
     return action("move-left")
   end

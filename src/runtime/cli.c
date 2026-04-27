@@ -18,8 +18,9 @@ struct psi_cli_argtable {
     struct arg_int *max_tokens;
     struct arg_int *compact;
     struct arg_str *session;
+    struct arg_lit *resume;
     struct arg_end *end;
-    void *table[14];
+    void *table[15];
 };
 
 static int psi_cli_valid_thinking(const char *level) {
@@ -46,6 +47,7 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
     args->max_tokens = arg_int0(NULL, "max-tokens", "N", "max output tokens for --agent");
     args->compact = arg_int0(NULL, "compact", "N", "compact the current session, keeping the most recent N messages");
     args->session = arg_str0(NULL, "session", "FILE", "load and save a JSONL session file");
+    args->resume = arg_lit0("r", "resume", "resume a session for the current directory");
     args->end = arg_end(20);
 
     args->table[0] = args->help;
@@ -61,7 +63,8 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
     args->table[10] = args->max_tokens;
     args->table[11] = args->compact;
     args->table[12] = args->session;
-    args->table[13] = args->end;
+    args->table[13] = args->resume;
+    args->table[14] = args->end;
 
     return arg_nullcheck(args->table) == 0 ? PSI_STATUS_OK : PSI_STATUS_ERROR;
 }
@@ -130,6 +133,7 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     options->thinking_level = NULL;
     options->max_tokens = 16384l;
     options->keep_recent = 12l;
+    options->resume = 0;
 
     if (psi_cli_build_argtable(&args) != PSI_STATUS_OK) {
         return PSI_STATUS_ERROR;
@@ -191,6 +195,9 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     }
     if (args.session->count > 0) {
         options->session_file = args.session->sval[0];
+    }
+    if (args.resume->count > 0) {
+        options->resume = 1;
     }
     if (args.model->count > 0) {
         options->model = args.model->sval[0];

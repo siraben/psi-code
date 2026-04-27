@@ -28,6 +28,12 @@ local DEFINITIONS = {
     description = "Delete to start of prompt",
   },
   {
+    id = "tui.input.reverseSearch",
+    section = "Editing",
+    default_keys = { "ctrl-r" },
+    description = "Reverse-search prompt history",
+  },
+  {
     id = "tui.editor.cursorLeft",
     section = "Navigation",
     default_keys = { "left", "ctrl-b" },
