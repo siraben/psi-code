@@ -312,6 +312,14 @@ local function finish_streaming_assistant(state)
   state.streaming_assistant_index = nil
 end
 
+local function discard_empty_streaming_assistant(state)
+  local index = state.streaming_assistant_index
+  if index ~= nil and state.entries[index] and state.entries[index].text == "" then
+    remove_entry(state, index)
+    state.streaming_assistant_index = nil
+  end
+end
+
 local function render_event_plain(event, payload)
   local ok, text = pcall(render.handle_event, event, payload or {})
   if not ok then
@@ -516,23 +524,35 @@ local function add_session_entry(state, msg)
   end
 
   if msg.role == "assistant" then
-    if type(msg.text) == "string" and msg.text ~= "" then
-      add_entry(state, "assistant", msg.text)
-    end
     local content = body and body.message and body.message.content
+    local added_text = false
     if type(content) == "table" then
       for _, block in ipairs(content) do
-        if type(block) == "table" and block.type == "toolCall" then
-          add_entry(
-            state,
-            "tool_call",
-            tool_call_text(block.id, block.name, block.arguments or {}),
-            block.name,
-            false,
-            block.id
-          )
+        if type(block) == "table" then
+          if
+            block.type == "thinking"
+            and type(block.thinking) == "string"
+            and block.thinking ~= ""
+          then
+            add_entry(state, "thinking", block.thinking)
+          elseif block.type == "text" and type(block.text) == "string" and block.text ~= "" then
+            add_entry(state, "assistant", block.text)
+            added_text = true
+          elseif block.type == "toolCall" then
+            add_entry(
+              state,
+              "tool_call",
+              tool_call_text(block.id, block.name, block.arguments or {}),
+              block.name,
+              false,
+              block.id
+            )
+          end
         end
       end
+    end
+    if not added_text and type(msg.text) == "string" and msg.text ~= "" then
+      add_entry(state, "assistant", msg.text)
     end
     return
   end
@@ -586,6 +606,9 @@ end
 local function style_line(line)
   if line.kind == "assistant" then
     return markdown.render_line(line.text, line.in_code_fence)
+  end
+  if line.kind == "thinking" then
+    return ansi.italic(line.text)
   end
   if line.kind == "user" then
     return ansi.bold(ansi.cyan(line.text))
@@ -922,6 +945,7 @@ local function observer_thinking_delta(state, text)
     return
   end
   local before = scroll_anchor_before(state)
+  discard_empty_streaming_assistant(state)
   if state.streaming_thinking_index == nil then
     state.streaming_thinking_index = add_entry(state, "thinking", "")
   end
