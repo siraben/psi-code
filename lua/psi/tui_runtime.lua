@@ -863,6 +863,10 @@ local function style_input_text(text)
   return tui_chrome_color("38;5;" .. tostring(fg) .. ";48;5;" .. tostring(bg), text)
 end
 
+local function style_input_cursor(text)
+  return tui_chrome_color("1;38;5;16;48;5;253", text == "" and " " or text)
+end
+
 local function style_input_fill(width, slot)
   local default_bg = tonumber(settings.get("tui.input.background", 238)) or 238
   local setting = slot == "rail" and "tui.input.rail_background" or "tui.input.background"
@@ -881,6 +885,7 @@ local function frame_line(row, text)
 end
 
 local render_input_text
+local render_input_text_with_cursor
 local input_line_selected
 
 local function redraw(state)
@@ -956,7 +961,11 @@ local function redraw(state)
       input_text = ansi.color("7", input_box_line(prefix .. text, input_width))
     else
       input_text = input_box_line(
-        style_input_prefix(prefix, line_index == 1) .. style_input_text(text),
+        style_input_prefix(prefix, line_index == 1)
+          .. (
+            line and render_input_text_with_cursor(state, line, line_index == rows.cursor_line)
+            or style_input_text(text)
+          ),
         input_width
       )
     end
@@ -975,13 +984,13 @@ local function redraw(state)
   cursor_row = clamp(cursor_row, rows.input_start_row + 1, rows.input_start_row + rows.input_rows)
   cursor_col = clamp(cursor_col, 1, math.max(1, state.width - 1))
   if type(psi.tui_render_frame) == "function" then
-    psi.tui_render_frame(table.concat(frame), cursor_row, cursor_col, true)
+    psi.tui_render_frame(table.concat(frame), cursor_row, cursor_col, false)
   else
     psi.tui_set_cursor(1, 1, false)
     for _, line in ipairs(frame) do
       psi.tui_draw_raw_line(1, line)
     end
-    psi.tui_set_cursor(cursor_row, cursor_col, true)
+    psi.tui_set_cursor(cursor_row, cursor_col, false)
     psi.tui_refresh()
   end
   state.dirty = false
@@ -1348,6 +1357,25 @@ function render_input_text(state, line)
     out[#out + 1] = state.input:sub(cursor + 1, line_finish)
   end
   return table.concat(out)
+end
+
+function render_input_text_with_cursor(state, line, draw_cursor)
+  if not draw_cursor or state.editor_mode == "visual" then
+    return style_input_text(render_input_text(state, line))
+  end
+  local text = state.input:sub(line.start + 1, line.start + line.len)
+  local offset = clamp(state.cursor - line.start, 0, line.len)
+  local before = text:sub(1, offset)
+  local cell
+  local after
+  if offset < #text then
+    cell = text:sub(offset + 1, offset + 1)
+    after = text:sub(offset + 2)
+  else
+    cell = " "
+    after = ""
+  end
+  return style_input_text(before) .. style_input_cursor(cell) .. style_input_text(after)
 end
 
 local function insert_text(state, text)
