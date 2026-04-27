@@ -119,9 +119,7 @@ function M.handle_command_action(action_value, action_context)
   end
   local ok, handled = pcall(handler, action_value.payload, action_context or {})
   if not ok then
-    io.stderr:write(
-      "psi: TUI command action handler failed: " .. tostring(handled) .. "\n"
-    )
+    io.stderr:write("psi: TUI command action handler failed: " .. tostring(handled) .. "\n")
     return true
   end
   return handled ~= false

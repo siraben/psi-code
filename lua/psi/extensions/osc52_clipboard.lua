@@ -24,8 +24,7 @@ local OSC52_SEPARATOR = ";"
 local TMUX_DCS_PREFIX = ESC .. "Ptmux;" .. ESC
 local TMUX_DCS_SUFFIX = ST
 
-local BASE64_ALPHABET =
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 local BASE64_PAD = "="
 local BYTE_BITS = 8
 local BASE64_BITS = 6
@@ -67,10 +66,8 @@ local function base64_encode(text)
     local third = byte_at(text, index + 2)
     local triple = (first << (BYTE_BITS * 2)) | (second << BYTE_BITS) | third
     local remaining = #text - index + 1
-    local first_index = ((triple >> (BASE64_BITS * 3)) & BASE64_MASK)
-      + BASE64_INDEX_OFFSET
-    local second_index = ((triple >> (BASE64_BITS * 2)) & BASE64_MASK)
-      + BASE64_INDEX_OFFSET
+    local first_index = ((triple >> (BASE64_BITS * 3)) & BASE64_MASK) + BASE64_INDEX_OFFSET
+    local second_index = ((triple >> (BASE64_BITS * 2)) & BASE64_MASK) + BASE64_INDEX_OFFSET
     local third_index = ((triple >> BASE64_BITS) & BASE64_MASK) + BASE64_INDEX_OFFSET
     local fourth_index = (triple & BASE64_MASK) + BASE64_INDEX_OFFSET
 
@@ -80,11 +77,11 @@ local function base64_encode(text)
     out[out_index] = BASE64_ALPHABET:sub(second_index, second_index)
     out_index = out_index + 1
     out[out_index] = remaining >= BASE64_SECOND_BYTE_MINIMUM
-      and BASE64_ALPHABET:sub(third_index, third_index)
+        and BASE64_ALPHABET:sub(third_index, third_index)
       or BASE64_PAD
     out_index = out_index + 1
     out[out_index] = remaining >= BASE64_THIRD_BYTE_MINIMUM
-      and BASE64_ALPHABET:sub(fourth_index, fourth_index)
+        and BASE64_ALPHABET:sub(fourth_index, fourth_index)
       or BASE64_PAD
   end
   return table.concat(out)
