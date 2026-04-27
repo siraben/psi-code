@@ -53,9 +53,14 @@ psi.tui = require("psi.tui")
 psi.tui_layout = require("psi.tui_layout")
 psi.extensions = psi.extensions or {}
 psi.extensions.osc52_clipboard = require("psi.extensions.osc52_clipboard")
-psi.extensions.osc52_clipboard.register(psi)
 psi.extensions.vim_keybindings = require("psi.extensions.vim_keybindings")
-psi.extensions.vim_keybindings.register(psi)
+
+function psi.install_builtin_extensions()
+  psi.extensions.osc52_clipboard.register(psi)
+  psi.extensions.vim_keybindings.register(psi)
+end
+
+psi.install_builtin_extensions()
 psi.modes = require("psi.modes")
 psi.markdown = require("psi.markdown")
 

@@ -1120,13 +1120,16 @@ def t_tui_reload_deduplicates_builtin_hooks(psi: Psi):
         + 'local tui = require("psi.tui")\n'
         + 'commands.handle("/reload")\n'
         + 'commands.handle("/reload")\n'
+        + 'local writes = 0\n'
+        + 'psi.stdout_write = function() writes = writes + 1 end\n'
+        + 'local copied = tostring(tui.write_clipboard("hi", {force=true}))\n'
         + 'local bar = tui.status_bar({model="m", busy=false, scroll=0, editor_mode="normal"})\n'
         + 'local _, count = bar:gsub("mode:NORMAL", "")\n'
         + 'local action = tui.handle_key({key="escape", busy=false, input_length=1, editor_mode="insert"})\n'
-        + 'return tostring(count) .. "|" .. tostring(action and action.action or "nil")',
+        + 'return tostring(count) .. "|" .. tostring(action and action.action or "nil") .. "|" .. copied .. "|" .. tostring(writes)',
         cwd=cwd,
     ).stdout.strip()
-    assert_equals(out, "1|vim-mode", "/reload should reinstall Vim hooks once")
+    assert_equals(out, "1|vim-mode|true|1", "/reload should reinstall built-in TUI hooks once")
 
 
 @test("tui/status_default_model")
@@ -1391,6 +1394,33 @@ def t_tui_raw_ansi_available_with_ansi(psi: Psi):
         env_extra={"TERM": "xterm-256color", "PSI_COLOR": "1"},
     ).stdout.strip()
     assert_equals(default_out, "true|true|true", "raw ANSI is available with ANSI terminals")
+
+
+@test("tui/sanitizes_untrusted_terminal_sequences")
+def t_tui_sanitizes_untrusted_terminal_sequences(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local esc = string.char(27)\n'
+        + 'local bel = string.char(7)\n'
+        + 'local input = "a" .. esc .. "]52;c;evil" .. bel .. "b" .. esc .. "[2Jc\\nnext"\n'
+        + 'return rt._debug_sanitize_terminal_text(input, true)'
+    )
+    assert_equals(out, "abc\nnext", "untrusted terminal control sequences are stripped")
+
+
+@test("tui/no_color_disables_input_chrome_colors")
+def t_tui_no_color_disables_input_chrome_colors(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local d = require("psi.tui_runtime")._debug_redraw_counts("hello")\n'
+        + 'local frame = d.second_frame or ""\n'
+        + 'return table.concat({\n'
+        + '  tostring(frame:find("48;5;", 1, true) == nil),\n'
+        + '  tostring(frame:find("38;5;", 1, true) == nil)\n'
+        + '}, "|")',
+        env_extra={"NO_COLOR": "1", "TERM": "xterm-256color"},
+    ).stdout.strip()
+    assert_equals(out, "true|true", "NO_COLOR disables Lua-owned input chrome colors")
 
 
 @test("tui/input_wrap_width")
@@ -1726,7 +1756,7 @@ def t_tui_input_box_background(psi: Psi):
     raw = run_pty(
         [psi.binary, "--tui"],
         [(b"", 0.5), (b"/quit\r", 1.0)],
-        env_extra={"NO_COLOR": "1", "TERM": "xterm-256color"},
+        env_extra={"NO_COLOR": "", "TERM": "xterm-256color"},
         idle_drain=1.0,
     )
     assert b"\x1b[0;7m" not in raw and b"\x1b[7m" not in raw, "input box should not use reverse-video"
