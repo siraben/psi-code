@@ -29,6 +29,17 @@ local BYTE_FF = 12
 local BYTE_CR = 13
 local BYTE_ESC = 27
 local BYTE_SPACE = 32
+local BYTE_BEL = 7
+local BYTE_BACKSLASH = 92
+local BYTE_DEL = 127
+local BYTE_CSI_FINAL_START = 64
+local BYTE_CSI_FINAL_END = 126
+local CHAR_CSI = "["
+local CHAR_DCS = "P"
+local CHAR_OSC = "]"
+local CHAR_PM = "^"
+local CHAR_APC = "_"
+local CHAR_ST = "\\"
 local UTF8_CONTINUATION_MASK = 0xC0
 local UTF8_CONTINUATION_TAG = 0x80
 
@@ -77,6 +88,68 @@ local function strip_ansi(text)
   text = text:gsub(ANSI_PATTERN_KEYPAD, EMPTY)
   text = text:gsub(ANSI_PATTERN_PRIVATE_MODE, EMPTY)
   return text
+end
+
+local function find_string_terminator(text, start)
+  local i = start
+  while i <= #text do
+    local byte = text:byte(i)
+    if byte == BYTE_BEL then
+      return i + 1
+    end
+    if byte == BYTE_ESC and text:byte(i + 1) == BYTE_BACKSLASH then
+      return i + 2
+    end
+    i = i + 1
+  end
+  return #text + 1
+end
+
+local function find_csi_terminator(text, start)
+  local i = start
+  while i <= #text do
+    local byte = text:byte(i)
+    if byte >= BYTE_CSI_FINAL_START and byte <= BYTE_CSI_FINAL_END then
+      return i + 1
+    end
+    i = i + 1
+  end
+  return #text + 1
+end
+
+local function sanitize_terminal_text(text, preserve_newlines)
+  text = tostring(text or EMPTY)
+  local out = {}
+  local i = 1
+  while i <= #text do
+    local byte = text:byte(i)
+    local next_char = text:sub(i + 1, i + 1)
+    if byte == BYTE_ESC then
+      if next_char == CHAR_CSI then
+        i = find_csi_terminator(text, i + 2)
+      elseif next_char == CHAR_OSC
+        or next_char == CHAR_DCS
+        or next_char == CHAR_PM
+        or next_char == CHAR_APC
+      then
+        i = find_string_terminator(text, i + 2)
+      elseif next_char == CHAR_ST then
+        i = i + 2
+      else
+        i = i + 2
+      end
+    elseif byte == BYTE_LF and preserve_newlines then
+      out[#out + 1] = NEWLINE
+      i = i + 1
+    elseif byte < BYTE_SPACE or byte == BYTE_DEL then
+      out[#out + 1] = " "
+      i = i + 1
+    else
+      out[#out + 1] = text:sub(i, i)
+      i = i + 1
+    end
+  end
+  return table.concat(out)
 end
 
 local function display_width(text)
@@ -563,7 +636,7 @@ local function entry_render_lines(state, entry)
 
   local lines = {}
   local first_prefix, rest_prefix = entry_prefixes(entry)
-  local trimmed = trim_trailing_newlines(entry.text or "")
+  local trimmed = sanitize_terminal_text(trim_trailing_newlines(entry.text or ""), true)
   local prefix = first_prefix
   local cursor = 1
   local fence_state = false
@@ -882,7 +955,7 @@ local function scroll_by(state, delta)
 end
 
 local function tui_chrome_color(code, text)
-  if not ansi.enabled then
+  if not ansi.enabled or not ansi.color_enabled then
     return text
   end
   return string.char(27) .. "[" .. code .. "m" .. text .. string.char(27) .. "[0m"
@@ -1397,7 +1470,7 @@ local function yank_input(state)
 end
 
 function render_input_text(state, line)
-  local text = state.input:sub(line.start + 1, line.start + line.len)
+  local text = sanitize_terminal_text(state.input:sub(line.start + 1, line.start + line.len), false)
   if state.selection_kind == "line" then
     return text
   end
@@ -1417,14 +1490,17 @@ function render_input_text(state, line)
     local finish = math.min(range.finish, line_finish)
     if start < finish then
       if cursor < start then
-        out[#out + 1] = state.input:sub(cursor + 1, start)
+        out[#out + 1] = sanitize_terminal_text(state.input:sub(cursor + 1, start), false)
       end
-      out[#out + 1] = ansi.color("7", state.input:sub(start + 1, finish))
+      out[#out + 1] = ansi.color(
+        "7",
+        sanitize_terminal_text(state.input:sub(start + 1, finish), false)
+      )
       cursor = finish
     end
   end
   if cursor < line_finish then
-    out[#out + 1] = state.input:sub(cursor + 1, line_finish)
+    out[#out + 1] = sanitize_terminal_text(state.input:sub(cursor + 1, line_finish), false)
   end
   return table.concat(out)
 end
@@ -1435,12 +1511,12 @@ function render_input_text_with_cursor(state, line, draw_cursor)
   end
   local text = state.input:sub(line.start + 1, line.start + line.len)
   local offset = clamp(state.cursor - line.start, 0, line.len)
-  local before = text:sub(1, offset)
+  local before = sanitize_terminal_text(text:sub(1, offset), false)
   local cell
   local after
   if offset < #text then
-    cell = text:sub(offset + 1, offset + 1)
-    after = text:sub(offset + 2)
+    cell = sanitize_terminal_text(text:sub(offset + 1, offset + 1), false)
+    after = sanitize_terminal_text(text:sub(offset + 2), false)
   else
     cell = " "
     after = ""
@@ -2307,6 +2383,10 @@ function M._debug_tui_capabilities()
   return detect_tui_capabilities()
 end
 
+function M._debug_sanitize_terminal_text(text, preserve_newlines)
+  return sanitize_terminal_text(text, preserve_newlines)
+end
+
 function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_options)
   debug_options = type(debug_options) == "table" and debug_options or {}
   local state = {
@@ -2510,6 +2590,8 @@ function M._debug_redraw_counts(input)
       draw_rows = #calls.draw_rows,
       cursor_sets = calls.cursor_sets,
       refreshes = calls.refreshes,
+      second_frame = second_frame,
+      stale_frame = stale_frame,
     }
   end, debug.traceback)
 
