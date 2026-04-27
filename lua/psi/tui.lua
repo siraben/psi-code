@@ -12,8 +12,12 @@ local M = {}
 local BAR_SPLIT = string.char(31)
 local busy_rng_seeded = false
 
-local DEFAULT_BUSY_LABELS = {
+local DEFAULT_PRIMARY_BUSY_LABELS = {
   "gooning",
+  "gooning fr",
+}
+
+local DEFAULT_SECONDARY_BUSY_LABELS = {
   "lowkirkuinely",
   "trolling",
   "rewriting in rust",
@@ -205,7 +209,7 @@ local function seed_busy_rng()
 end
 
 local function configured_busy_labels()
-  local configured = settings.get("tui.busy_labels", settings.get("tui.working_words", nil))
+  local configured = settings.get("tui.busy_labels", nil)
   if type(configured) == "string" and configured ~= "" then
     return { configured }
   end
@@ -220,7 +224,14 @@ local function configured_busy_labels()
       return labels
     end
   end
-  return DEFAULT_BUSY_LABELS
+  return nil
+end
+
+local function default_busy_label()
+  if math.random(10) <= 9 then
+    return DEFAULT_PRIMARY_BUSY_LABELS[math.random(#DEFAULT_PRIMARY_BUSY_LABELS)]
+  end
+  return DEFAULT_SECONDARY_BUSY_LABELS[math.random(#DEFAULT_SECONDARY_BUSY_LABELS)]
 end
 
 local function enabled_setting(path, env_name, default_value)
@@ -358,7 +369,7 @@ function M.status_line(arg_json)
     parts[#parts + 1] = "scroll:" .. tostring(scroll)
   end
   if busy then
-    parts[#parts + 1] = "working…"
+    parts[#parts + 1] = "busy…"
   end
   for _, fn in ipairs(status_hooks) do
     local ok_hook, extra = pcall(fn)
@@ -392,7 +403,7 @@ end
 function M.footer_hint(arg_json)
   local arg = type(arg_json) == "table" and arg_json or prelude.safe_json_decode(arg_json, {})
   if arg.busy then
-    local label = (type(arg.busy_label) == "string" and arg.busy_label ~= "") and arg.busy_label or "Working"
+    local label = (type(arg.busy_label) == "string" and arg.busy_label ~= "") and arg.busy_label or "gooning"
     local dots = string.rep(".", math.max(1, tonumber(arg.busy_phase) or 1))
     return string.format(
       "%s (%s  • esc to interrupt) %s",
@@ -421,10 +432,10 @@ function M.workspace_bar(cwd)
 end
 
 function M.render_busy_status(label_text, phase, elapsed_seconds)
-  local text = tostring(label_text or "working")
+  local text = tostring(label_text or "gooning")
   local dots = ({ ".", "..", "..." })[((tonumber(phase) or 0) % 3) + 1]
-  local chip = ansi.color("1;30;46", " working ")
-  return chip .. accent(" " .. text)
+  local chip = ansi.color("1;30;46", " " .. text .. " ")
+  return chip
     .. label(" (" .. format_elapsed(elapsed_seconds) .. "  • esc to interrupt)")
     .. accent(" " .. dots)
 end
@@ -432,6 +443,9 @@ end
 function M.pick_busy_status()
   local labels = configured_busy_labels()
   seed_busy_rng()
+  if labels == nil then
+    return default_busy_label()
+  end
   return labels[math.random(#labels)]
 end
 
