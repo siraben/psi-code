@@ -1312,13 +1312,14 @@ def t_tui_full_redraw_uses_single_ansi_pass(psi: Psi):
         + '  tostring(d.second_input_draws > 0),\n'
         + '  tostring(d.second_clears),\n'
         + '  tostring(d.stale_clears > 0),\n'
+        + '  tostring(d.line_clears),\n'
         + '  tostring(d.draw_rows),\n'
         + '  tostring(d.raw_draws),\n'
         + '  tostring(d.cursor_sets),\n'
         + '  tostring(d.refreshes)\n'
         + '}, "|")'
     )
-    assert_equals(out, "1|1|true|0|true|0|0|0|0", "full redraw uses one batched ANSI frame")
+    assert_equals(out, "1|1|true|0|true|0|0|0|0|0", "full redraw uses one no-clear ANSI frame")
 
 
 @test("tui/show_thinking_config")
