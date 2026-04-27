@@ -581,8 +581,8 @@ def t_commands_rainbow(psi: Psi):
     assert_equals(out, "ansi-print|true|true", "rainbow command emits ANSI bg swatches")
 
 
-@test("mode/tui_rainbow_uses_raw_ansi")
-def t_tui_rainbow_uses_raw_ansi(psi: Psi):
+@test("mode/tui_rainbow_renders_ansi")
+def t_tui_rainbow_renders_ansi(psi: Psi):
     raw = run_pty(
         [psi.binary, "--tui"],
         [(b"", 0.8), (b"/rainbow\r", 1.5), (b"/quit\r", 1.0)],
@@ -1302,20 +1302,20 @@ def t_tui_busy_status_render(psi: Psi):
     assert_contains(out, "\x1b[1;38;5;231;48;5;238m", "busy label has a glisten highlight")
 
 
-@test("tui/full_redraw_cleans_raw_rows")
-def t_tui_full_redraw_cleans_raw_rows(psi: Psi):
+@test("tui/full_redraw_uses_single_ansi_pass")
+def t_tui_full_redraw_uses_single_ansi_pass(psi: Psi):
     out = psi.eval(
         'local d = require("psi.tui_runtime")._debug_redraw_counts("hello\\nhi")\n'
         + 'return table.concat({\n'
         + '  tostring(d.second_input_draws > 0),\n'
         + '  tostring(d.second_clears),\n'
         + '  tostring(d.stale_clears > 0),\n'
-        + '  tostring(d.raw_clears_after_busy > 0),\n'
-        + '  tostring(d.raw_cursor_sets >= 2),\n'
-        + '  tostring(d.raw_refreshes >= 2)\n'
+        + '  tostring(d.raw_draws),\n'
+        + '  tostring(d.cursor_sets),\n'
+        + '  tostring(d.refreshes)\n'
         + '}, "|")'
     )
-    assert_equals(out, "true|0|true|true|true|true", "full redraw cleans raw rows")
+    assert_equals(out, "true|0|true|0|1|1", "full redraw uses one ANSI render pass")
 
 
 @test("tui/show_thinking_config")
@@ -1347,8 +1347,8 @@ def t_tui_capabilities_disable_raw_for_dumb_terminal(psi: Psi):
     assert_equals(out, "false|false|false", "dumb terminal disables ANSI/color/raw rendering")
 
 
-@test("tui/raw_ansi_is_opt_in")
-def t_tui_raw_ansi_is_opt_in(psi: Psi):
+@test("tui/raw_ansi_available_with_ansi")
+def t_tui_raw_ansi_available_with_ansi(psi: Psi):
     expr = (
         'local caps = require("psi.tui_runtime")._debug_tui_capabilities()\n'
         + 'return table.concat({tostring(caps.ansi), tostring(caps.color), tostring(caps.raw_ansi)}, "|")'
@@ -1358,13 +1358,7 @@ def t_tui_raw_ansi_is_opt_in(psi: Psi):
         expr,
         env_extra={"TERM": "xterm-256color", "PSI_COLOR": "1"},
     ).stdout.strip()
-    forced_out = psi.run(
-        "--eval",
-        expr,
-        env_extra={"TERM": "xterm-256color", "PSI_COLOR": "1", "PSI_TUI_RAW_ANSI": "1"},
-    ).stdout.strip()
-    assert_equals(default_out, "true|true|false", "raw ANSI should be off by default")
-    assert_equals(forced_out, "true|true|true", "raw ANSI should be opt-in")
+    assert_equals(default_out, "true|true|true", "raw ANSI is available with ANSI terminals")
 
 
 @test("tui/input_wrap_width")
@@ -1963,7 +1957,7 @@ def t_live_parallel_panels(psi: Psi):
     text = strip_ansi(raw)
     # Each fruit must appear in the rendered output (progress or final).
     # This is the semantic check: if all three appear, three tools ran
-    # in the same turn. Counting "╭─" substrings is too tight — ncurses
+    # in the same turn. Counting "╭─" substrings is too tight — terminal
     # repaints many frames and sometimes clobbers earlier panel headers
     # before the PTY capture window closes (model emits narration text
     # before tool calls, first-token latency eats into the 25 s budget,
