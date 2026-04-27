@@ -8,15 +8,28 @@ local prelude = require("psi.prelude")
 local M = {}
 local prompt_max_rows_override = nil
 
+local MIN_WIDTH = 40
+local DEFAULT_WIDTH = 80
+local MIN_HEIGHT = 12
+local DEFAULT_HEIGHT = 24
+local PROMPT_RESERVED_ROWS = 6
+local INPUT_BOX_ROWS = 3
+local TRANSCRIPT_START_ROW = 2
+local SINGLE_ROW = 1
+
+local TITLE = "psi coding agent"
+local PROMPT_PREFIX_FIRST = " › "
+local PROMPT_PREFIX_REST = "   "
+
 local function clamp_prompt_max_rows(rows, height)
-  local max_allowed = math.max(1, height - 6)
+  local max_allowed = math.max(SINGLE_ROW, height - PROMPT_RESERVED_ROWS)
   rows = tonumber(rows)
   if rows == nil then
     return nil
   end
   rows = math.floor(rows)
-  if rows < 1 then
-    rows = 1
+  if rows < SINGLE_ROW then
+    rows = SINGLE_ROW
   end
   if rows > max_allowed then
     rows = max_allowed
@@ -25,7 +38,7 @@ local function clamp_prompt_max_rows(rows, height)
 end
 
 local function default_prompt_max_rows(height)
-  return math.max(1, height - 6)
+  return math.max(SINGLE_ROW, height - PROMPT_RESERVED_ROWS)
 end
 
 local function resolve_prompt_max_rows(configured, height)
@@ -47,22 +60,20 @@ function M.set_prompt_max_rows(rows)
 end
 
 function M.geometry(width, height)
-  width = math.max(40, tonumber(width) or 80)
-  height = math.max(12, tonumber(height) or 24)
-  local input_h = 3
-  local footer_y = height - 1
-  local input_y = height - input_h
-  local status_y = input_y - 1
-  local transcript_y = 2
-  local transcript_h = math.max(1, status_y - transcript_y)
+  width = math.max(MIN_WIDTH, tonumber(width) or DEFAULT_WIDTH)
+  height = math.max(MIN_HEIGHT, tonumber(height) or DEFAULT_HEIGHT)
+  local footer_y = height - SINGLE_ROW
+  local input_y = height - INPUT_BOX_ROWS
+  local status_y = input_y - SINGLE_ROW
+  local transcript_h = math.max(SINGLE_ROW, status_y - TRANSCRIPT_START_ROW)
   return {
     width = width,
     height = height,
-    title = "psi coding agent",
-    transcript = { x = 1, y = transcript_y, w = width, h = transcript_h },
-    status = { x = 1, y = status_y, w = width, h = 1 },
-    input = { x = 1, y = input_y, w = width, h = input_h },
-    footer = { x = 1, y = footer_y, w = width, h = 1 },
+    title = TITLE,
+    transcript = { x = 1, y = TRANSCRIPT_START_ROW, w = width, h = transcript_h },
+    status = { x = 1, y = status_y, w = width, h = SINGLE_ROW },
+    input = { x = 1, y = input_y, w = width, h = INPUT_BOX_ROWS },
+    footer = { x = 1, y = footer_y, w = width, h = SINGLE_ROW },
   }
 end
 
@@ -71,11 +82,11 @@ end
 -- nominal visible-row cap without patching tui_mode.c.
 function M.input_layout_table(arg)
   arg = type(arg) == "table" and arg or {}
-  local height = math.max(12, tonumber(arg.height) or 24)
+  local height = math.max(MIN_HEIGHT, tonumber(arg.height) or DEFAULT_HEIGHT)
   return {
     max_rows = resolve_prompt_max_rows(arg.max_rows, height),
-    prefix_first = " › ",
-    prefix_rest = "   ",
+    prefix_first = PROMPT_PREFIX_FIRST,
+    prefix_rest = PROMPT_PREFIX_REST,
   }
 end
 
