@@ -1037,6 +1037,19 @@ def t_tui_status_context_window(psi: Psi):
                     "status line uses OpenRouter metadata and one-decimal percentage")
 
 
+@test("tui/footer_hint_hidden")
+def t_tui_footer_hint_hidden(psi: Psi):
+    out = psi.eval(
+        'local tui = require("psi.tui")\n'
+        + 'local idle = tui.footer_hint(psi.json_encode({busy=false, scroll=0}))\n'
+        + 'local busy = tui.footer_hint(psi.json_encode({\n'
+        + '  busy=true, busy_label="Working", elapsed_seconds=4, busy_phase=2, scroll=0\n'
+        + '}))\n'
+        + 'return tostring(idle) .. "|" .. tostring(busy)'
+    )
+    assert_equals(out, "|Working (0:04  • esc to interrupt) ..", "footer hint hidden when idle")
+
+
 @test("tui/layout_geometry")
 def t_tui_layout_geometry(psi: Psi):
     out = psi.eval(
