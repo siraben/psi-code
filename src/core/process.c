@@ -85,8 +85,8 @@ struct psi_process_handle {
     const struct psi_abort_signal *abort_signal;
 };
 
-int psi_process_begin(
-    const char *command,
+static int psi_process_begin_exec(
+    char *const argv[],
     const struct psi_abort_signal *abort_signal,
     struct psi_process_handle **out
 ) {
@@ -97,7 +97,7 @@ int psi_process_begin(
 
     if (out == NULL) return PSI_STATUS_ERROR;
     *out = NULL;
-    if (command == NULL) return PSI_STATUS_ERROR;
+    if (argv == NULL || argv[0] == NULL) return PSI_STATUS_ERROR;
 
     if (pipe(pipe_fds) != 0) return PSI_STATUS_ERROR;
 
@@ -119,7 +119,7 @@ int psi_process_begin(
         if (dup2(pipe_fds[1], 1) < 0) _exit(127);
         if (dup2(pipe_fds[1], 2) < 0) _exit(127);
         if (close(pipe_fds[1]) != 0) _exit(127);
-        execl("/bin/sh", "sh", "-lc", command, (char *)0);
+        execvp(argv[0], argv);
         _exit(127);
 #if defined(__GNUC__) && !defined(__clang__) && !defined(__TINYC__)
 #pragma GCC diagnostic pop
@@ -145,6 +145,28 @@ int psi_process_begin(
     h->abort_signal = abort_signal;
     *out = h;
     return PSI_STATUS_OK;
+}
+
+int psi_process_begin_argv(
+    char *const argv[],
+    const struct psi_abort_signal *abort_signal,
+    struct psi_process_handle **out
+) {
+    return psi_process_begin_exec(argv, abort_signal, out);
+}
+
+int psi_process_begin(
+    const char *command,
+    const struct psi_abort_signal *abort_signal,
+    struct psi_process_handle **out
+) {
+    char *argv[4];
+    argv[0] = (char *)"sh";
+    argv[1] = (char *)"-lc";
+    argv[2] = (char *)command;
+    argv[3] = NULL;
+    if (command == NULL) return PSI_STATUS_ERROR;
+    return psi_process_begin_exec(argv, abort_signal, out);
 }
 
 int psi_process_poll(
@@ -303,6 +325,11 @@ int psi_process_begin(const char *command, const struct psi_abort_signal *abort_
     if (out != NULL) *out = NULL;
     return PSI_STATUS_ERROR;
 }
+int psi_process_begin_argv(char *const argv[], const struct psi_abort_signal *abort_signal, struct psi_process_handle **out) {
+    PSI_UNUSED(argv); PSI_UNUSED(abort_signal);
+    if (out != NULL) *out = NULL;
+    return PSI_STATUS_ERROR;
+}
 int psi_process_poll(struct psi_process_handle *h, int timeout_ms, char **chunk, size_t *chunk_len) {
     PSI_UNUSED(h); PSI_UNUSED(timeout_ms);
     if (chunk) *chunk = NULL; if (chunk_len) *chunk_len = 0u;
@@ -375,6 +402,51 @@ int psi_process_run_shell(
         return PSI_STATUS_ERROR;
     }
     *exit_status = status;
+    *truncated = 0;
+    return PSI_STATUS_OK;
+#endif
+}
+
+int psi_process_run_argv(
+    char *const argv[],
+    char **output_text,
+    int *exit_status,
+    int *truncated,
+    const struct psi_abort_signal *abort_signal
+) {
+#ifndef _WIN32
+    struct psi_process_handle *h;
+
+    if (argv == NULL || argv[0] == NULL || output_text == NULL || exit_status == NULL || truncated == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    if (psi_process_begin_argv(argv, abort_signal, &h) != PSI_STATUS_OK || h == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+
+    for (;;) {
+        char *chunk;
+        size_t chunk_len;
+        int r;
+
+        chunk = NULL;
+        chunk_len = 0u;
+        r = psi_process_poll(h, 20, &chunk, &chunk_len);
+        free(chunk);
+        if (r == 2 || r < 0) break;
+    }
+
+    return psi_process_finish(h, output_text, exit_status, truncated);
+#else
+    PSI_UNUSED(argv);
+    PSI_UNUSED(abort_signal);
+    if (output_text == NULL || exit_status == NULL || truncated == NULL) {
+        return PSI_STATUS_ERROR;
+    }
+    *output_text = psi_strdup("");
+    if (*output_text == NULL) return PSI_STATUS_ERROR;
+    *exit_status = -1;
     *truncated = 0;
     return PSI_STATUS_OK;
 #endif

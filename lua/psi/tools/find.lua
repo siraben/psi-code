@@ -12,15 +12,8 @@ local function impl(input, meta)
   local raw_path = registry.optional_string(input, "path", ".")
   local path = path_util.resolve(raw_path) or raw_path
   local limit = registry.optional_number(input, "limit", 1000)
-  local command = "command -v fd >/dev/null 2>&1 || "
-    .. "{ echo 'fd is required for find' >&2; exit 127; }; "
-    .. "fd --hidden --max-results "
-    .. tostring(limit)
-    .. " --glob "
-    .. shell.quote(pattern)
-    .. " "
-    .. shell.quote(path)
-  return shell.run_tool("find", command, raw_path, true, meta)
+  local argv = { "fd", "--hidden", "--max-results", tostring(limit), "--glob", pattern, path }
+  return shell.run_tool_argv("find", argv, raw_path, true, meta)
 end
 
 return function()
