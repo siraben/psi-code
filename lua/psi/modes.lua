@@ -183,6 +183,10 @@ local function handle_slash_command(opts, line)
     print(action.payload or "")
     return true, false
   end
+  if kind == "ansi-print" then
+    print(action.payload or "")
+    return true, false
+  end
   if kind == "quit" then
     return true, true
   end

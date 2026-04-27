@@ -448,6 +448,29 @@ local function entry_render_lines(state, entry)
     return entry.render_cache_lines
   end
 
+  if entry.kind == "ansi" then
+    local lines = {}
+    local text = trim_trailing_newlines(entry.text or "")
+    local cursor = 1
+    while true do
+      local nl = text:find("\n", cursor, true)
+      local source_line = nl and text:sub(cursor, nl - 1) or text:sub(cursor)
+      lines[#lines + 1] = {
+        kind = entry.kind,
+        text = source_line,
+        raw = source_line,
+        entry = entry,
+      }
+      if not nl then
+        break
+      end
+      cursor = nl + 1
+    end
+    entry.render_cache_width = state.width
+    entry.render_cache_lines = lines
+    return lines
+  end
+
   local lines = {}
   local first_prefix, rest_prefix = entry_prefixes(entry)
   local trimmed = trim_trailing_newlines(entry.text or "")
@@ -675,6 +698,9 @@ local function style_line(line)
   end
   if line.kind == "error" then
     return ansi.bold(ansi.red(line.text))
+  end
+  if line.kind == "ansi" then
+    return line.text
   end
   return ansi.dim(line.text)
 end
@@ -1223,6 +1249,15 @@ local function handle_command(state, line)
     rebuild_from_session(state)
     if type(action.payload) == "string" and action.payload ~= "" then
       add_entry(state, "info", action.payload)
+    end
+    set_status(state, "", false)
+    return true
+  end
+
+  if action.kind == "ansi-print" then
+    rebuild_from_session(state)
+    if type(action.payload) == "string" and action.payload ~= "" then
+      add_entry(state, "ansi", action.payload)
     end
     set_status(state, "", false)
     return true
