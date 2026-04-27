@@ -50,6 +50,9 @@ end
 function M.yellow(text)
   return M.color("33", text)
 end
+function M.italic(text)
+  return M.color("3", text)
+end
 
 -- Autodetect environments that can't render ANSI. Called from
 -- boot.lua after psi.* primitives are available.
