@@ -82,6 +82,53 @@ local function current_size()
   return width, height
 end
 
+local function env_bool(name)
+  local value = os.getenv(name)
+  if value == nil or value == "" then
+    return nil
+  end
+  value = value:lower()
+  if value == "0" or value == "false" or value == "off" or value == "no" then
+    return false
+  end
+  if value == "1" or value == "true" or value == "on" or value == "yes" then
+    return true
+  end
+  return nil
+end
+
+local function detect_tui_capabilities()
+  local info = type(psi.runtime_info) == "function" and psi.runtime_info() or {}
+  local term = os.getenv("TERM") or ""
+  local ansi_ok = info.ansi ~= false and term ~= "" and term ~= "dumb"
+  local color_ok = ansi_ok and info.color ~= false
+  local force_ansi = env_bool("PSI_ANSI")
+  local force_color = env_bool("PSI_COLOR")
+  local force_raw = env_bool("PSI_TUI_RAW_ANSI")
+
+  if force_ansi ~= nil then
+    ansi_ok = force_ansi and info.ansi ~= false
+  end
+  if os.getenv("NO_COLOR") ~= nil and os.getenv("NO_COLOR") ~= "" then
+    color_ok = false
+  end
+  if force_color ~= nil then
+    color_ok = force_color and ansi_ok and info.color ~= false
+  end
+
+  local raw_ansi_ok = ansi_ok and type(psi.tui_draw_raw_line) == "function"
+  if force_raw ~= nil then
+    raw_ansi_ok = force_raw and ansi_ok and type(psi.tui_draw_raw_line) == "function"
+  end
+
+  return {
+    ansi = ansi_ok,
+    color = color_ok,
+    raw_ansi = raw_ansi_ok,
+    term = term,
+  }
+end
+
 local function default_input_layout(height)
   height = math.max(12, tonumber(height) or 24)
   return {
@@ -226,11 +273,9 @@ end
 
 local function new_state(opts)
   local width, height = current_size()
-  -- The TUI owns ANSI interpretation through ncurses. Do not let a
-  -- non-TTY stdout or inherited NO_COLOR strip theme sequences before
-  -- they reach psi.tui_draw_line.
-  ansi.enabled = true
-  ansi.color_enabled = true
+  local caps = detect_tui_capabilities()
+  ansi.enabled = caps.ansi
+  ansi.color_enabled = caps.color
   local state = {
     opts = opts,
     model = agent.model_descriptor(opts.model),
@@ -250,6 +295,7 @@ local function new_state(opts)
     width = width,
     height = height,
     input_layout = default_input_layout(height),
+    tui_caps = caps,
     streaming_assistant_index = nil,
     streaming_thinking_index = nil,
     entries_version = 0,
@@ -827,6 +873,7 @@ local function redraw(state)
   local status_arg
   local status_text = ""
   local cwd
+  local raw_ansi = state.tui_caps and state.tui_caps.raw_ansi
 
   state.scroll_offset = clamp(state.scroll_offset, 0, max_scroll)
 
@@ -843,7 +890,7 @@ local function redraw(state)
   for i = 0, rows.transcript_height - 1 do
     local line = transcript_lines[i + 1]
     local row = rows.transcript_start + i
-    if line and line.kind == "ansi" then
+    if raw_ansi and line and line.kind == "ansi" then
       raw_lines[#raw_lines + 1] = { row = row, text = line.text }
       psi.tui_draw_line(row, "")
     else
@@ -873,7 +920,7 @@ local function redraw(state)
       state.busy_tick
     )
   end
-  if state.busy and status_text ~= "" then
+  if raw_ansi and state.busy and status_text ~= "" then
     raw_lines[#raw_lines + 1] = { row = rows.status_row, text = status_text }
     psi.tui_draw_line(rows.status_row, "")
   else
@@ -882,11 +929,15 @@ local function redraw(state)
 
   local input_width = math.max(1, state.width - 1)
   local input_raw_lines = {}
-  input_raw_lines[#input_raw_lines + 1] = {
-    row = rows.input_start_row,
-    text = style_input_fill(input_width, "rail"),
-  }
-  psi.tui_draw_line(rows.input_start_row, "")
+  if raw_ansi then
+    input_raw_lines[#input_raw_lines + 1] = {
+      row = rows.input_start_row,
+      text = style_input_fill(input_width, "rail"),
+    }
+    psi.tui_draw_line(rows.input_start_row, "")
+  else
+    psi.tui_draw_line(rows.input_start_row, style_input_fill(input_width, "rail"))
+  end
   for i = 0, rows.input_rows - 1 do
     local line_index = rows.input_first_line + i
     local line = rows.input_lines[line_index]
@@ -896,17 +947,28 @@ local function redraw(state)
     if line ~= nil then
       text = state.input:sub(line.start + 1, line.start + line.len)
     end
-    input_raw_lines[#input_raw_lines + 1] = {
-      row = rows.input_start_row + 1 + i,
-      text = input_box_line(style_input_prefix(prefix, line_index == 1) .. style_input_text(text), input_width),
-    }
-    psi.tui_draw_line(rows.input_start_row + 1 + i, "")
+    if raw_ansi then
+      input_raw_lines[#input_raw_lines + 1] = {
+        row = rows.input_start_row + 1 + i,
+        text = input_box_line(style_input_prefix(prefix, line_index == 1) .. style_input_text(text), input_width),
+      }
+      psi.tui_draw_line(rows.input_start_row + 1 + i, "")
+    else
+      psi.tui_draw_line(
+        rows.input_start_row + 1 + i,
+        input_box_line(style_input_prefix(prefix, line_index == 1) .. style_input_text(text), input_width)
+      )
+    end
   end
-  input_raw_lines[#input_raw_lines + 1] = {
-    row = rows.input_start_row + rows.input_rows + 1,
-    text = style_input_fill(input_width, "rail"),
-  }
-  psi.tui_draw_line(rows.input_start_row + rows.input_rows + 1, "")
+  if raw_ansi then
+    input_raw_lines[#input_raw_lines + 1] = {
+      row = rows.input_start_row + rows.input_rows + 1,
+      text = style_input_fill(input_width, "rail"),
+    }
+    psi.tui_draw_line(rows.input_start_row + rows.input_rows + 1, "")
+  else
+    psi.tui_draw_line(rows.input_start_row + rows.input_rows + 1, style_input_fill(input_width, "rail"))
+  end
 
   psi.tui_draw_line(rows.footer_row, tui.compose_bar(tui.status_bar(status_arg) or "", state.width - 1))
 
@@ -1640,6 +1702,10 @@ function M._debug_resolve_input_layout(width, height, busy, scroll)
   }
   refresh_input_layout(state)
   return state.input_layout
+end
+
+function M._debug_tui_capabilities()
+  return detect_tui_capabilities()
 end
 
 return M

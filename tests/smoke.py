@@ -586,7 +586,7 @@ def t_tui_rainbow_uses_raw_ansi(psi: Psi):
     raw = run_pty(
         [psi.binary, "--tui"],
         [(b"", 0.8), (b"/rainbow\r", 1.5), (b"/quit\r", 1.0)],
-        env_extra={"NO_COLOR": "1", "TERM": "xterm-256color"},
+        env_extra={"NO_COLOR": "", "TERM": "xterm-256color"},
         idle_drain=1.5,
     )
     assert b"xterm 256 background swatches" in raw, "rainbow header did not render in TUI"
@@ -1223,6 +1223,17 @@ def t_tui_show_thinking_config(psi: Psi):
     assert_equals(out, "1", "thinking visibility pulled from settings")
 
 
+@test("tui/capabilities_disable_raw_for_dumb_terminal")
+def t_tui_capabilities_disable_raw_for_dumb_terminal(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local caps = require("psi.tui_runtime")._debug_tui_capabilities()\n'
+        + 'return table.concat({tostring(caps.ansi), tostring(caps.color), tostring(caps.raw_ansi)}, "|")',
+        env_extra={"TERM": "dumb"},
+    ).stdout.strip()
+    assert_equals(out, "false|false|false", "dumb terminal disables ANSI/color/raw rendering")
+
+
 @test("tui/input_wrap_width")
 def t_tui_input_wrap_width(psi: Psi):
     out = psi.eval(
@@ -1415,7 +1426,7 @@ def t_tui_input_box_background(psi: Psi):
     raw = run_pty(
         [psi.binary, "--tui"],
         [(b"", 0.5), (b"/quit\r", 1.0)],
-        env_extra={"NO_COLOR": "1", "TERM": "xterm-256color"},
+        env_extra={"NO_COLOR": "", "TERM": "xterm-256color"},
         idle_drain=1.0,
     )
     assert b"\x1b[0;7m" not in raw and b"\x1b[7m" not in raw, "input box should not use reverse-video"
