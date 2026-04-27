@@ -74,6 +74,7 @@ local function impl(input, meta)
   local stream = shell.run_streaming_argv(argv, tool_call_id, {
     max_bytes = DEFAULT_BYTES,
     max_lines = DEFAULT_LINES,
+    mode = "head",
     spill_to_disk = false, -- grep results are bounded by --max-count
   })
 

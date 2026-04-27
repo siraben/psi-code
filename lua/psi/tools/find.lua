@@ -20,6 +20,7 @@ local function impl(input, meta)
   local tool_call_id = meta and meta.tool_call_id or nil
   local stream = shell.run_streaming_argv(argv, tool_call_id, {
     max_bytes = DEFAULT_BYTES,
+    mode = "head",
     spill_to_disk = false,
   })
   local raw = stream.output or ""
