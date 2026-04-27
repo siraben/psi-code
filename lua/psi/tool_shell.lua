@@ -57,24 +57,44 @@ end
 local function stream(handle, tool_call_id, opts, poll_fn)
   opts = opts or {}
   local max_bytes = opts.max_bytes or truncate.DEFAULT_MAX_BYTES
+  local mode = opts.mode or "tail"
   local rolling_max = max_bytes * 4 -- enough headroom for tail truncation
   local spill_to_disk = opts.spill_to_disk
   if spill_to_disk == nil then spill_to_disk = true end
 
-  -- Rolling buffer for the in-memory tail. We keep at most `rolling_max`
-  -- bytes here; older bytes are dropped, mirroring pi's bash rolling
-  -- buffer. The full output (if it fits) is reconstructed by reading
-  -- back the temp file.
+  -- Bounded in-memory buffer. Bash uses a rolling tail because errors
+  -- usually live at the end. Search/list tools use head mode so their
+  -- later truncate_head pass still sees the beginning of the output.
   local buf = {}
   local buf_bytes = 0
+  local buf_first = 1
   local total_bytes = 0
   local temp_path = nil
   local temp_open_failed = false
 
-  local function trim_rolling()
-    while buf_bytes > rolling_max and #buf > 1 do
-      local removed = buf[1]
-      table.remove(buf, 1)
+  local function buffered_text()
+    if buf_first > #buf then return "" end
+    return table.concat(buf, "", buf_first, #buf)
+  end
+
+  local function append_buffer(chunk)
+    if mode == "head" then
+      local remaining = rolling_max - buf_bytes
+      if remaining <= 0 then return end
+      if #chunk > remaining then
+        chunk = chunk:sub(1, remaining)
+      end
+      buf[#buf + 1] = chunk
+      buf_bytes = buf_bytes + #chunk
+      return
+    end
+
+    buf[#buf + 1] = chunk
+    buf_bytes = buf_bytes + #chunk
+    while buf_bytes > rolling_max and buf_first < #buf do
+      local removed = buf[buf_first]
+      buf[buf_first] = nil
+      buf_first = buf_first + 1
       buf_bytes = buf_bytes - #removed
     end
   end
@@ -87,7 +107,7 @@ local function stream(handle, tool_call_id, opts, poll_fn)
     end
     temp_path = psi.tempfile_path("psi-bash-")
     -- Pre-flush whatever we already have buffered.
-    local existing = table.concat(buf)
+    local existing = buffered_text()
     if #existing > 0 then
       if not psi.file_append(temp_path, existing) then
         temp_open_failed = true
@@ -100,13 +120,12 @@ local function stream(handle, tool_call_id, opts, poll_fn)
     local chunk, done = poll_fn(handle, 50)
     if chunk ~= nil and #chunk > 0 then
       total_bytes = total_bytes + #chunk
-      buf[#buf + 1] = chunk
-      buf_bytes = buf_bytes + #chunk
-      trim_rolling()
+      append_buffer(chunk)
       -- Spill once the in-memory limit is exceeded.
       if total_bytes > max_bytes then
+        local already_spilling = temp_path ~= nil
         ensure_tempfile()
-        if temp_path then
+        if temp_path and already_spilling then
           if not psi.file_append(temp_path, chunk) then
             temp_open_failed = true
           end
@@ -125,7 +144,7 @@ local function stream(handle, tool_call_id, opts, poll_fn)
   -- accurate, untruncated tail.)
   local tail = records.process_result_from_alist(psi.process_finish(handle))
   return {
-    rolling = table.concat(buf),
+    rolling = buffered_text(),
     rolling_bytes = buf_bytes,
     total_bytes = total_bytes,
     status = tail.status,

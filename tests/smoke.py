@@ -1521,6 +1521,18 @@ def t_tool_bash_temp_file(psi: Psi):
                     f"bash temp-file spillover wrong: {out!r}")
 
 
+@test("tool/bash_temp_file_has_exact_output")
+def t_tool_bash_temp_file_exact(psi: Psi):
+    out = psi.eval(
+        'local r = require("psi.tools").dispatch("bash", {\n'
+        + '  command = "yes A | head -c 60000"\n'
+        + '})\n'
+        + 'local body = psi.read_file(r.extras.temp_file_path or "") or ""\n'
+        + 'return tostring(r.extras.total_bytes) .. "|" .. tostring(#body)'
+    )
+    assert_equals(out, "60000|60000", "bash spillover should not duplicate chunks")
+
+
 @test("tool/grep_clips_long_lines")
 def t_tool_grep_clips_lines(psi: Psi):
     target = psi.tmp / "long.txt"
@@ -1532,6 +1544,40 @@ def t_tool_grep_clips_lines(psi: Psi):
     )
     assert_contains(out, "... [truncated]",
                     f"long grep match line should be clipped: {out!r}")
+
+
+@test("tool/grep_head_truncation_keeps_first_matches")
+def t_tool_grep_head_keeps_first(psi: Psi):
+    target = psi.tmp / "many-long-grep-lines.txt"
+    with target.open("w") as f:
+        for i in range(700):
+            f.write(f"a{i:04d} needle {'x' * 600}\n")
+    out = psi.eval(
+        f"local r = require('psi.tools').dispatch('grep', "
+        f"{{pattern='needle', path={json.dumps(str(target))}, limit=700}})\n"
+        "local o = r.extras.output or ''\n"
+        "return tostring(o:find('a0000', 1, true) ~= nil) .. '|'\n"
+        "  .. tostring(o:find('a0699', 1, true) ~= nil) .. '|'\n"
+        "  .. tostring(r.extras.truncated)"
+    )
+    assert_equals(out, "true|false|true", "grep head truncation should preserve first matches")
+
+
+@test("tool/find_head_truncation_keeps_first_results")
+def t_tool_find_head_keeps_first(psi: Psi):
+    root = psi.tmp / "many-long-find-names"
+    root.mkdir(exist_ok=True)
+    for i in range(700):
+        (root / (f"a{i:04d}_" + "x" * 120)).write_text("")
+    out = psi.eval(
+        f"local r = require('psi.tools').dispatch('find', "
+        f"{{pattern='*', path={json.dumps(str(root))}, limit=700}})\n"
+        "local o = r.extras.output or ''\n"
+        "return tostring(o:find('a0000_', 1, true) ~= nil) .. '|'\n"
+        "  .. tostring(o:find('a0699_', 1, true) ~= nil) .. '|'\n"
+        "  .. tostring(r.extras.truncated)"
+    )
+    assert_equals(out, "true|false|true", "find head truncation should preserve first results")
 
 
 # ---------------------------------------------------------------------------
