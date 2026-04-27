@@ -2218,69 +2218,6 @@ static int lfn_set_usage(lua_State *L) {
     return 0;
 }
 
-/* psi.set_tui_theme(json)
- *
- * Stores a Lua-selected ncurses palette on the host context so TUI
- * mode can reapply it on redraw. Payload shape:
- *   { pairs = [ { fg = int, bg = int }, ... seven entries ... ] }
- *
- * The Lua theme layer owns semantic names and inheritance; C only
- * receives the final ordered pair list. Safe to call outside TUI —
- * it just updates the host-side cache for any later TUI startup. */
-static int lfn_set_tui_theme(lua_State *L) {
-    const char *payload;
-    cJSON *root;
-    cJSON *pairs;
-    int i;
-    struct psi_host_context *host;
-
-    host = PSI_VM_HOST(L);
-    payload = luaL_checkstring(L, 1);
-    if (host == NULL) {
-        lua_pushboolean(L, 0);
-        return 1;
-    }
-
-    root = cJSON_Parse(payload);
-    if (root == NULL) {
-        lua_pushboolean(L, 0);
-        return 1;
-    }
-
-    host->tui_theme.active = 0;
-    for (i = 0; i < PSI_HOST_TUI_THEME_PAIR_COUNT; i++) {
-        host->tui_theme.pairs[i].fg = -1;
-        host->tui_theme.pairs[i].bg = -1;
-        host->tui_theme.pairs[i].is_set = 0;
-    }
-
-    pairs = cJSON_GetObjectItemCaseSensitive(root, "pairs");
-    if (cJSON_IsArray(pairs)) {
-        int limit = cJSON_GetArraySize(pairs);
-        if (limit > PSI_HOST_TUI_THEME_PAIR_COUNT) {
-            limit = PSI_HOST_TUI_THEME_PAIR_COUNT;
-        }
-        for (i = 0; i < limit; i++) {
-            cJSON *entry = cJSON_GetArrayItem(pairs, i);
-            cJSON *fg;
-            cJSON *bg;
-            if (!cJSON_IsObject(entry)) {
-                continue;
-            }
-            fg = cJSON_GetObjectItemCaseSensitive(entry, "fg");
-            bg = cJSON_GetObjectItemCaseSensitive(entry, "bg");
-            host->tui_theme.pairs[i].fg = cJSON_IsNumber(fg) ? (int)fg->valuedouble : -1;
-            host->tui_theme.pairs[i].bg = cJSON_IsNumber(bg) ? (int)bg->valuedouble : -1;
-            host->tui_theme.pairs[i].is_set = 1;
-        }
-        host->tui_theme.active = 1;
-    }
-
-    cJSON_Delete(root);
-    lua_pushboolean(L, 1);
-    return 1;
-}
-
 /* Inflate an embedded entry into a caller-provided buffer. Returns
  * PSI_STATUS_OK on success (buffer filled with entry->raw_len bytes).
  * The caller owns the buffer; on error the buffer contents are
@@ -2874,7 +2811,6 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("abort_trigger",         lfn_abort_trigger);
     PSI_REG("abort_reset",           lfn_abort_reset);
     PSI_REG("set_usage",             lfn_set_usage);
-    PSI_REG("set_tui_theme",         lfn_set_tui_theme);
     PSI_REG("embedded_doc",          lfn_embedded_doc);
     PSI_REG("embedded_doc_names",    lfn_embedded_doc_names);
     PSI_REG("embedded_source",       lfn_embedded_source);
@@ -3206,87 +3142,6 @@ int psi_vm_eval_to_string(struct psi_vm *vm, const char *expression, char **outp
     return psi_vm_pop_string(vm->L, output_text);
 }
 
-int psi_vm_call_string_procedure(struct psi_vm *vm, const char *procedure_name,
-                                  const char *argument, char **output_text) {
-    if (!vm || !vm->L || !procedure_name || !output_text) return PSI_STATUS_ERROR;
-    *output_text = NULL;
-    if (psi_vm_begin_call(vm->L, procedure_name) != 0) return PSI_STATUS_ERROR;
-    lua_pushstring(vm->L, argument ? argument : "");
-    if (psi_vm_finish_call(vm->L, 1, 1, procedure_name) != PSI_STATUS_OK) return PSI_STATUS_ERROR;
-    return psi_vm_pop_string(vm->L, output_text);
-}
-
-int psi_vm_call_procedure0_to_string(struct psi_vm *vm, const char *procedure_name,
-                                      char **output_text) {
-    if (!vm || !vm->L || !procedure_name || !output_text) return PSI_STATUS_ERROR;
-    *output_text = NULL;
-    if (psi_vm_begin_call(vm->L, procedure_name) != 0) return PSI_STATUS_ERROR;
-    if (psi_vm_finish_call(vm->L, 0, 1, procedure_name) != PSI_STATUS_OK) return PSI_STATUS_ERROR;
-    return psi_vm_pop_string(vm->L, output_text);
-}
-
-int psi_vm_build_compaction_request(struct psi_vm *vm, long keep_recent,
-                                     char **system_prompt, char **user_prompt) {
-    if (!vm || !vm->L || !system_prompt || !user_prompt) return PSI_STATUS_ERROR;
-    *system_prompt = NULL;
-    *user_prompt = NULL;
-
-    if (psi_vm_begin_call(vm->L, "psi.prompt.compaction_request") != 0) return PSI_STATUS_ERROR;
-    lua_pushinteger(vm->L, (lua_Integer)keep_recent);
-    if (psi_vm_finish_call(vm->L, 1, 1, "psi.prompt.compaction_request") != PSI_STATUS_OK)
-        return PSI_STATUS_ERROR;
-    if (!lua_istable(vm->L, -1)) {
-        fprintf(stderr, "invalid Lua compaction request\n");
-        lua_pop(vm->L, 1);
-        return PSI_STATUS_ERROR;
-    }
-
-    lua_rawgeti(vm->L, -1, 1);
-    if (lua_type(vm->L, -1) != LUA_TSTRING) { lua_pop(vm->L, 2); return PSI_STATUS_ERROR; }
-    *system_prompt = psi_strdup(lua_tostring(vm->L, -1));
-    lua_pop(vm->L, 1);
-
-    lua_rawgeti(vm->L, -1, 2);
-    if (lua_type(vm->L, -1) != LUA_TSTRING) {
-        free(*system_prompt); *system_prompt = NULL;
-        lua_pop(vm->L, 2);
-        return PSI_STATUS_ERROR;
-    }
-    *user_prompt = psi_strdup(lua_tostring(vm->L, -1));
-    lua_pop(vm->L, 2);
-    return (*system_prompt && *user_prompt) ? PSI_STATUS_OK : PSI_STATUS_ERROR;
-}
-
-int psi_vm_dispatch_tool_json(struct psi_vm *vm, const char *tool_name,
-                               const char *input_json, char **output_json) {
-    cJSON *root;
-    cJSON *result;
-
-    if (!vm || !vm->L || !tool_name || !output_json) return PSI_STATUS_ERROR;
-    *output_json = NULL;
-
-    root = (input_json && input_json[0] != '\0')
-        ? cJSON_Parse(input_json)
-        : cJSON_CreateObject();
-    if (!root) return PSI_STATUS_ERROR;
-
-    if (psi_vm_begin_call(vm->L, "psi.tools.dispatch_alist") != 0) {
-        cJSON_Delete(root);
-        return PSI_STATUS_ERROR;
-    }
-    lua_pushstring(vm->L, tool_name);
-    psi_vm_push_json_value(vm->L, root);
-    cJSON_Delete(root);
-    if (psi_vm_finish_call(vm->L, 2, 1, "psi.tools.dispatch_alist") != PSI_STATUS_OK)
-        return PSI_STATUS_ERROR;
-    result = psi_vm_lua_value_to_json(vm->L, -1);
-    lua_pop(vm->L, 1);
-    if (!result) return PSI_STATUS_ERROR;
-    *output_json = cJSON_PrintUnformatted(result);
-    cJSON_Delete(result);
-    return *output_json ? PSI_STATUS_OK : PSI_STATUS_ERROR;
-}
-
 /* ------------------------------------------------------------------
  * Observer / abort trampolines for the Lua agent loop.
  *
@@ -3486,18 +3341,4 @@ int psi_vm_run_agent_compact(
         NULL, abort_signal, model, max_tokens,
         NULL, (long)keep_recent,
         summary_text);
-}
-
-int psi_vm_session_compact(struct psi_vm *vm, long keep_recent, const char *summary_text) {
-    int ok;
-    if (!vm || !vm->L || !summary_text) return PSI_STATUS_ERROR;
-
-    if (psi_vm_begin_call(vm->L, "psi.session.do_compact") != 0) return PSI_STATUS_ERROR;
-    lua_pushinteger(vm->L, (lua_Integer)keep_recent);
-    lua_pushstring(vm->L, summary_text);
-    if (psi_vm_finish_call(vm->L, 2, 1, "psi.session.do_compact") != PSI_STATUS_OK)
-        return PSI_STATUS_ERROR;
-    ok = lua_toboolean(vm->L, -1);
-    lua_pop(vm->L, 1);
-    return ok ? PSI_STATUS_OK : PSI_STATUS_ERROR;
 }
