@@ -1,6 +1,10 @@
+#include <fcntl.h>
 #include <locale.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 #if PSI_ENABLE_TUI
 #include <ncurses.h>
@@ -19,6 +23,83 @@
 #endif
 
 #if PSI_ENABLE_TUI
+
+/* Redirect fd 2 to a per-session log while curses owns the terminal.
+ *
+ * Without this, any fprintf(stderr, ...) or io.stderr:write() lands as raw
+ * bytes wherever the cursor happens to be, leaving sticky garbage on the
+ * input prompt that ncurses won't redraw over (it didn't write those bytes
+ * itself, so it doesn't track them in its line buffers).
+ *
+ * Path:
+ *   $XDG_STATE_HOME/psi/tui-stderr.log  (or $HOME/.local/state/psi/...)
+ *
+ * Returns the duplicated original fd 2 on success so the caller can restore
+ * it after endwin(). Returns -1 on any failure; in that case stderr is
+ * untouched and we silently accept the corruption (better than failing the
+ * TUI launch outright).
+ */
+static int psi_tui_redirect_stderr(void) {
+    const char *xdg;
+    const char *home;
+    char path[1024];
+    char dir[1024];
+    int fd;
+    int saved;
+    size_t n;
+
+    xdg = getenv("XDG_STATE_HOME");
+    if (xdg != NULL && xdg[0] != '\0') {
+        n = (size_t)snprintf(dir, sizeof(dir), "%s/psi", xdg);
+    } else {
+        home = getenv("HOME");
+        if (home == NULL || home[0] == '\0') return -1;
+        n = (size_t)snprintf(dir, sizeof(dir), "%s/.local/state/psi", home);
+    }
+    if (n == 0u || n >= sizeof(dir)) return -1;
+
+    /* mkdir -p the parent chain ($HOME/.local, $HOME/.local/state, then psi). */
+    {
+        size_t i;
+        for (i = 1u; i < n; i++) {
+            if (dir[i] == '/') {
+                dir[i] = '\0';
+                (void)mkdir(dir, 0700);
+                dir[i] = '/';
+            }
+        }
+        (void)mkdir(dir, 0700);
+    }
+
+    n = (size_t)snprintf(path, sizeof(path), "%s/tui-stderr.log", dir);
+    if (n == 0u || n >= sizeof(path)) return -1;
+
+    /* O_TRUNC: a fresh log per TUI session keeps it scannable.
+     * O_APPEND would defeat that on every relaunch. */
+    fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return -1;
+
+    saved = dup(STDERR_FILENO);
+    if (saved < 0) {
+        close(fd);
+        return -1;
+    }
+
+    if (dup2(fd, STDERR_FILENO) < 0) {
+        close(fd);
+        close(saved);
+        return -1;
+    }
+    close(fd);
+    return saved;
+}
+
+static void psi_tui_restore_stderr(int saved_fd) {
+    if (saved_fd < 0) return;
+    fflush(stderr);
+    (void)dup2(saved_fd, STDERR_FILENO);
+    close(saved_fd);
+}
 
 static int psi_tui_init_colors(void) {
 #if PSI_ENABLE_COLOR
@@ -108,20 +189,30 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
     vm.host.abort_signal = &abort_signal;
 
     setlocale(LC_ALL, "");
-    initscr();
-    raw();
-    nonl();
-    noecho();
-    keypad(stdscr, TRUE);
-    scrollok(stdscr, FALSE);
-    set_escdelay(25);
-    psi_tui_init_colors();
 
-    psi_vm_set_tui_active(&vm, 1);
-    status = psi_tui_run_lua(&vm, options);
-    psi_vm_set_tui_active(&vm, 0);
+    /* Redirect stderr to a log file BEFORE initscr() so even early curses
+     * setup errors don't corrupt the screen. Restore AFTER endwin() so any
+     * post-shutdown errors (Lua teardown, psi.modes.run error) reach the
+     * user's terminal as before. */
+    {
+        int saved_stderr = psi_tui_redirect_stderr();
 
-    endwin();
+        initscr();
+        raw();
+        nonl();
+        noecho();
+        keypad(stdscr, TRUE);
+        scrollok(stdscr, FALSE);
+        set_escdelay(25);
+        psi_tui_init_colors();
+
+        psi_vm_set_tui_active(&vm, 1);
+        status = psi_tui_run_lua(&vm, options);
+        psi_vm_set_tui_active(&vm, 0);
+
+        endwin();
+        psi_tui_restore_stderr(saved_stderr);
+    }
     psi_vm_destroy(&vm);
     psi_session_free(&session);
     return status;
