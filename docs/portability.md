@@ -30,7 +30,7 @@ can replace any one bit and keep the rest.
    header that callers might not need POSIX for.
 
 4. **Platform-specific code lives in dedicated files.** Linux/Haiku
-   uses `src/core/anthropic.c` (libcurl) and `src/core/http_async.c`
+   uses `src/core/http_client.c` (libcurl) and `src/core/http_async.c`
    (pthread). Any new platform adds its own `<plat>/src/*.c` and the
    upstream sources stay untouched. This mirrors S9fES's `s9core` +
    `s9-unix.c` / `s9-win32.c` split.
@@ -82,7 +82,7 @@ The pattern from `haiku/`:
 
 1. Read `docs/architecture.md` to identify the C↔Lua boundary.
 2. Identify the platform shims you need to replace:
-   - `src/core/anthropic.c` — HTTP transport (libcurl on POSIX,
+   - `src/core/http_client.c` — HTTP transport (libcurl on POSIX,
      WinHTTP on Windows, etc.).
    - `src/core/http_async.c` — async streaming transport (pthread
      on POSIX, IO completion ports on Win, etc.).
