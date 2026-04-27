@@ -590,7 +590,7 @@ def t_tui_rainbow_uses_raw_ansi(psi: Psi):
         idle_drain=1.5,
     )
     assert b"xterm 256 background swatches" in raw, "rainbow header did not render in TUI"
-    assert b"\x1b[48;5;" in raw, "rainbow did not emit raw ANSI background colors"
+    assert b"016" in raw and b"231" in raw, "rainbow swatches did not render in TUI"
 
 
 @test("commands/help_includes_prompt_templates")
@@ -919,6 +919,18 @@ def t_theme_default(psi: Psi):
     assert_equals(out, "midnight-ember|234|81", "default theme")
 
 
+@test("theme/compound_ansi_mapping")
+def t_theme_compound_ansi_mapping(psi: Psi):
+    out = psi.eval(
+        'local ansi = require("psi.ansi")\n'
+        + 'ansi.enabled = true\n'
+        + 'ansi.color_enabled = true\n'
+        + 'ansi.set_code_map({["38;5;242"] = "38;5;123"})\n'
+        + 'return ansi.gray("x")'
+    )
+    assert_contains(out, "\x1b[38;5;123mx\x1b[0m", "compound ANSI map applies")
+
+
 @test("theme/settings_selects_extension_theme")
 def t_theme_settings_select(psi: Psi):
     project = psi.tmp / "theme-project"
@@ -1060,13 +1072,16 @@ def t_theme_reload_preserves_extension_selected_theme(psi: Psi):
 def t_tui_status_hook(psi: Psi):
     out = psi.eval(
         'local tui = require("psi.tui")\n'
-        + 'tui.register_status_hook(function() return "ext:foo" end)\n'
+        + 'tui.register_status_hook(function(arg) return "ext:" .. tostring(arg.editor_mode) end)\n'
         + 'local line = tui.status_line(\n'
-        + '  psi.json_encode({model="m", busy=false, scroll=0}))\n'
+        + '  psi.json_encode({model="m", busy=false, scroll=0, editor_mode="normal"}))\n'
+        + 'local bar = tui.status_bar(\n'
+        + '  psi.json_encode({model="m", busy=false, scroll=0, editor_mode="visual"}))\n'
         + 'tui.clear_status_hooks()\n'
-        + 'return line'
+        + 'return line .. "|" .. bar'
     )
-    assert_contains(out, "ext:foo", "status hook contribution shows")
+    assert_contains(out, "ext:normal", "status hook contribution shows in status line")
+    assert_contains(out, "ext:visual", "status hook receives context in status bar")
 
 
 @test("tui/status_default_model")
@@ -1180,7 +1195,7 @@ def t_tui_footer_hint_hidden(psi: Psi):
         + '}))\n'
         + 'return tostring(idle) .. "|" .. tostring(busy)'
     )
-    assert_equals(out, "|gooning (0:04  • esc to interrupt) ..", "footer hint hidden when idle")
+    assert_equals(out, "|gooning (0:04  • Ctrl-G to interrupt) ..", "footer hint hidden when idle")
 
 
 @test("tui/layout_geometry")
@@ -1264,10 +1279,26 @@ def t_tui_busy_status_render(psi: Psi):
     plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
     assert_equals(
         plain,
-        " gooning  (0:04  • esc to interrupt) ...",
+        " gooning  (0:04  • Ctrl-G to interrupt) ...",
         "busy status renders selected label, hint, and animated dots",
     )
     assert_contains(out, "\x1b[1;38;5;231;48;5;238m", "busy label has a glisten highlight")
+
+
+@test("tui/full_redraw_cleans_raw_rows")
+def t_tui_full_redraw_cleans_raw_rows(psi: Psi):
+    out = psi.eval(
+        'local d = require("psi.tui_runtime")._debug_redraw_counts("hello\\nhi")\n'
+        + 'return table.concat({\n'
+        + '  tostring(d.second_input_draws > 0),\n'
+        + '  tostring(d.second_clears),\n'
+        + '  tostring(d.stale_clears > 0),\n'
+        + '  tostring(d.raw_clears_after_busy > 0),\n'
+        + '  tostring(d.raw_cursor_sets >= 2),\n'
+        + '  tostring(d.raw_refreshes >= 2)\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "true|0|true|true|true|true", "full redraw cleans raw rows")
 
 
 @test("tui/show_thinking_config")
@@ -1297,6 +1328,26 @@ def t_tui_capabilities_disable_raw_for_dumb_terminal(psi: Psi):
         env_extra={"TERM": "dumb"},
     ).stdout.strip()
     assert_equals(out, "false|false|false", "dumb terminal disables ANSI/color/raw rendering")
+
+
+@test("tui/raw_ansi_is_opt_in")
+def t_tui_raw_ansi_is_opt_in(psi: Psi):
+    expr = (
+        'local caps = require("psi.tui_runtime")._debug_tui_capabilities()\n'
+        + 'return table.concat({tostring(caps.ansi), tostring(caps.color), tostring(caps.raw_ansi)}, "|")'
+    )
+    default_out = psi.run(
+        "--eval",
+        expr,
+        env_extra={"TERM": "xterm-256color", "PSI_COLOR": "1"},
+    ).stdout.strip()
+    forced_out = psi.run(
+        "--eval",
+        expr,
+        env_extra={"TERM": "xterm-256color", "PSI_COLOR": "1", "PSI_TUI_RAW_ANSI": "1"},
+    ).stdout.strip()
+    assert_equals(default_out, "true|true|false", "raw ANSI should be off by default")
+    assert_equals(forced_out, "true|true|true", "raw ANSI should be opt-in")
 
 
 @test("tui/input_wrap_width")
@@ -1332,6 +1383,7 @@ def t_tui_key_policy(psi: Psi):
         + 'local function fmt(res)\n'
         + '  if not res then return "nil" end\n'
         + '  local arg = res.arg\n'
+        + '  if type(arg) == "table" then arg = arg.mode end\n'
         + '  if arg == "\\n" then arg = "\\\\n" end\n'
         + '  return (res.action or "?") .. ":" .. (arg or "-")\n'
         + 'end\n'
@@ -1342,11 +1394,73 @@ def t_tui_key_policy(psi: Psi):
         + '  fmt(tui.handle_key({key="ctrl-d", busy=false, input_length=0})),\n'
         + '  fmt(tui.handle_key({key="ctrl-d", busy=true, input_length=0})),\n'
         + '  fmt(tui.handle_key({key="escape", busy=true, input_length=0})),\n'
+        + '  fmt(tui.handle_key({key="ctrl-g", busy=true, input_length=0})),\n'
         + '  fmt(tui.handle_key({key="text", text="x"}))\n'
         + '}, "|")'
     )
-    assert_equals(out, "submit:-|nil|insert:\\n|quit:-|nil|abort:-|insert:x",
+    assert_equals(out, "submit:-|nil|insert:\\n|quit:-|nil|vim-mode:normal|abort:-|insert:x",
                   "Lua TUI key policy")
+
+
+@test("tui/vim_modal_keys")
+def t_tui_vim_modal_keys(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local function text(c) return {key="text", text=c} end\n'
+        + 'local s = rt._debug_edit_keys("alpha beta gamma", 0, {\n'
+        + '  {key="escape"}, text("w"), text("v"), text("l"), text("l"), text("l"), text("l"), text("y"), text("p")\n'
+        + '})\n'
+        + 'local b = rt._debug_edit_keys("aa\\nbb\\ncc", 0, {\n'
+        + '  {key="escape"}, {key="ctrl-v"}, text("j"), text("y")\n'
+        + '})\n'
+        + 'local g = rt._debug_edit_keys("", 0, {\n'
+        + '  {key="escape"}, {key="ctrl-u"}, text("g"), text("g"), text("G")\n'
+        + '})\n'
+        + 'local a = rt._debug_edit_keys("  aa\\nbb", 0, {\n'
+        + '  {key="escape"}, text("A"), text("!"), {key="escape"}\n'
+        + '})\n'
+        + 'local i = rt._debug_edit_keys("  aa", 4, {\n'
+        + '  {key="escape"}, text("I"), text("x"), {key="escape"}\n'
+        + '})\n'
+        + 'local o = rt._debug_edit_keys("aa\\nbb", 0, {\n'
+        + '  {key="escape"}, text("o"), text("x"), {key="escape"}\n'
+        + '})\n'
+        + 'local O = rt._debug_edit_keys("aa\\nbb", 3, {\n'
+        + '  {key="escape"}, text("O"), text("x"), {key="escape"}\n'
+        + '})\n'
+        + 'local line = rt._debug_edit_keys("  aa\\nbb", 0, {\n'
+        + '  {key="escape"}, text("$"), text("^"), {key="ctrl-e"}, {key="ctrl-a"}\n'
+        + '})\n'
+        + 'local clear = rt._debug_edit_keys("abc", 2, {\n'
+        + '  {key="escape"}, {key="ctrl-c"}\n'
+        + '})\n'
+        + 'local visual = rt._debug_edit_keys("abc", 0, {\n'
+        + '  {key="escape"}, text("v"), text("l")\n'
+        + '})\n'
+        + 'local line_visual = rt._debug_edit_keys("alpha\\n\\nbeta", 6, {\n'
+        + '  {key="escape"}, text("V")\n'
+        + '})\n'
+        + 'local block_insert = rt._debug_edit_keys("aa\\nbb\\ncc", 0, {\n'
+        + '  {key="escape"}, {key="ctrl-v"}, text("j"), text("I"), text("x"), {key="escape"}\n'
+        + '})\n'
+        + 'local block_append = rt._debug_edit_keys("aa\\nbb\\ncc", 0, {\n'
+        + '  {key="escape"}, {key="ctrl-v"}, text("l"), text("j"), text("A"), text("x"), {key="escape"}\n'
+        + '})\n'
+        + 'return table.concat({\n'
+        + '  s.editor_mode, tostring(s.cursor), s.clipboard, s.input,\n'
+        + '  b.selection_kind or "-", b.clipboard,\n'
+        + '  tostring(g.scroll_offset), g.editor_mode,\n'
+        + '  a.input, i.input, o.input, O.input,\n'
+        + '  tostring(line.cursor), clear.input, clear.editor_mode,\n'
+        + '  tostring((visual.rendered[1] or ""):find("\\27%[7m") ~= nil),\n'
+        + '  line_visual.selection_kind or "-",\n'
+        + '  tostring((line_visual.rendered[2] or ""):find("\\27%[7m") ~= nil),\n'
+        + '  block_insert.input,\n'
+        + '  block_append.input\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "normal|14|beta|alpha betabeta gamma|-|a\nb|0|normal|  aa!\nbb|  xaa|aa\nx\nbb|aa\nx\nbb|0||insert|true|line|true|xaa\nxbb\ncc|aax\nbbx\ncc",
+                  "Vim modal TUI keys")
 
 
 @test("render/replace_mode")

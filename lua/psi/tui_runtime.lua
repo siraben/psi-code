@@ -116,10 +116,7 @@ local function detect_tui_capabilities()
     color_ok = force_color and ansi_ok and info.color ~= false
   end
 
-  local raw_ansi_ok = ansi_ok and type(psi.tui_draw_raw_line) == "function"
-  if force_raw ~= nil then
-    raw_ansi_ok = force_raw and ansi_ok and type(psi.tui_draw_raw_line) == "function"
-  end
+  local raw_ansi_ok = force_raw == true and ansi_ok and type(psi.tui_draw_raw_line) == "function"
 
   return {
     ansi = ansi_ok,
@@ -226,7 +223,8 @@ local function build_input_lines(state)
   end
   if not cursor_found then
     cursor_line = #lines
-    cursor_col = display_width(input:sub(lines[#lines].start + 1, lines[#lines].start + lines[#lines].len))
+    cursor_col =
+      display_width(input:sub(lines[#lines].start + 1, lines[#lines].start + lines[#lines].len))
   end
   return lines, cursor_line, cursor_col
 end
@@ -282,6 +280,13 @@ local function new_state(opts)
     entries = {},
     input = "",
     cursor = 0,
+    editor_mode = "insert",
+    selection_anchor = nil,
+    selection_kind = nil,
+    clipboard = "",
+    pending_key = nil,
+    block_edit = nil,
+    force_physical_clear = false,
     busy = false,
     busy_label = nil,
     busy_phase = 0,
@@ -865,6 +870,9 @@ local function input_box_line(content, width)
   return content .. style_input_fill(width - display_width(content), "body")
 end
 
+local render_input_text
+local input_line_selected
+
 local function redraw(state)
   state.width, state.height = current_size()
   local rows = layout_rows(state)
@@ -874,10 +882,23 @@ local function redraw(state)
   local status_text = ""
   local cwd
   local raw_ansi = state.tui_caps and state.tui_caps.raw_ansi
+  local raw_lines = {}
+  local input_raw_lines = {}
+  local current_raw_rows = {}
+
+  local function add_raw_line(row, text, input_line)
+    local target = input_line and input_raw_lines or raw_lines
+    target[#target + 1] = { row = row, text = text }
+    current_raw_rows[row] = true
+  end
 
   state.scroll_offset = clamp(state.scroll_offset, 0, max_scroll)
 
-  psi.tui_clear()
+  if state.force_physical_clear then
+    psi.tui_clear(true)
+    state.last_raw_rows = {}
+  end
+  state.force_physical_clear = false
   cwd = psi.cwd() or "."
   psi.tui_draw_line(rows.header_row, tui.compose_bar(tui.workspace_bar(cwd), state.width - 1))
 
@@ -886,12 +907,11 @@ local function redraw(state)
     first_line = 1
   end
   local transcript_lines = build_render_window(state, first_line, rows.transcript_height)
-  local raw_lines = {}
   for i = 0, rows.transcript_height - 1 do
     local line = transcript_lines[i + 1]
     local row = rows.transcript_start + i
     if raw_ansi and line and line.kind == "ansi" then
-      raw_lines[#raw_lines + 1] = { row = row, text = line.text }
+      add_raw_line(row, line.text, false)
       psi.tui_draw_line(row, "")
     else
       psi.tui_draw_line(row, line and style_line(line) or "")
@@ -907,6 +927,8 @@ local function redraw(state)
     elapsed_seconds = state.busy_started_at and (os.time() - state.busy_started_at) or 0,
     busy_phase = state.busy_phase,
     scroll = state.scroll_offset,
+    editor_mode = state.editor_mode,
+    selection_kind = state.selection_kind,
   }
 
   if state.status_text ~= nil then
@@ -921,19 +943,15 @@ local function redraw(state)
     )
   end
   if raw_ansi and state.busy and status_text ~= "" then
-    raw_lines[#raw_lines + 1] = { row = rows.status_row, text = status_text }
+    add_raw_line(rows.status_row, status_text, false)
     psi.tui_draw_line(rows.status_row, "")
   else
     psi.tui_draw_line(rows.status_row, status_text)
   end
 
   local input_width = math.max(1, state.width - 1)
-  local input_raw_lines = {}
   if raw_ansi then
-    input_raw_lines[#input_raw_lines + 1] = {
-      row = rows.input_start_row,
-      text = style_input_fill(input_width, "rail"),
-    }
+    add_raw_line(rows.input_start_row, style_input_fill(input_width, "rail"), true)
     psi.tui_draw_line(rows.input_start_row, "")
   else
     psi.tui_draw_line(rows.input_start_row, style_input_fill(input_width, "rail"))
@@ -945,32 +963,49 @@ local function redraw(state)
       or state.input_layout.prefix_rest
     local text = ""
     if line ~= nil then
-      text = state.input:sub(line.start + 1, line.start + line.len)
+      text = render_input_text(state, line)
+    end
+    local input_text
+    if input_line_selected and input_line_selected(state, line) then
+      input_text = ansi.color("7", input_box_line(prefix .. text, input_width))
+    else
+      input_text = input_box_line(
+        style_input_prefix(prefix, line_index == 1) .. style_input_text(text),
+        input_width
+      )
     end
     if raw_ansi then
-      input_raw_lines[#input_raw_lines + 1] = {
-        row = rows.input_start_row + 1 + i,
-        text = input_box_line(style_input_prefix(prefix, line_index == 1) .. style_input_text(text), input_width),
-      }
+      add_raw_line(rows.input_start_row + 1 + i, input_text, true)
       psi.tui_draw_line(rows.input_start_row + 1 + i, "")
     else
-      psi.tui_draw_line(
-        rows.input_start_row + 1 + i,
-        input_box_line(style_input_prefix(prefix, line_index == 1) .. style_input_text(text), input_width)
-      )
+      psi.tui_draw_line(rows.input_start_row + 1 + i, input_text)
     end
   end
   if raw_ansi then
-    input_raw_lines[#input_raw_lines + 1] = {
-      row = rows.input_start_row + rows.input_rows + 1,
-      text = style_input_fill(input_width, "rail"),
-    }
+    add_raw_line(
+      rows.input_start_row + rows.input_rows + 1,
+      style_input_fill(input_width, "rail"),
+      true
+    )
     psi.tui_draw_line(rows.input_start_row + rows.input_rows + 1, "")
   else
-    psi.tui_draw_line(rows.input_start_row + rows.input_rows + 1, style_input_fill(input_width, "rail"))
+    psi.tui_draw_line(
+      rows.input_start_row + rows.input_rows + 1,
+      style_input_fill(input_width, "rail")
+    )
   end
 
-  psi.tui_draw_line(rows.footer_row, tui.compose_bar(tui.status_bar(status_arg) or "", state.width - 1))
+  psi.tui_draw_line(
+    rows.footer_row,
+    tui.compose_bar(tui.status_bar(status_arg) or "", state.width - 1)
+  )
+  if type(psi.tui_draw_raw_line) == "function" then
+    for row in pairs(state.last_raw_rows or {}) do
+      if not current_raw_rows[row] then
+        psi.tui_draw_raw_line(row, "")
+      end
+    end
+  end
 
   local visible_cursor_line = rows.cursor_line - rows.input_first_line + 1
   local cursor_prefix = rows.cursor_line == 1 and state.input_layout.prefix_first
@@ -995,6 +1030,11 @@ local function redraw(state)
       psi.tui_draw_line(raw_line.row, raw_line.text)
     end
   end
+  state.last_raw_rows = current_raw_rows
+  if #raw_lines > 0 or #input_raw_lines > 0 then
+    psi.tui_set_cursor(cursor_row, cursor_col, true)
+    psi.tui_refresh()
+  end
   state.dirty = false
 end
 
@@ -1003,6 +1043,362 @@ local function byte_at(text, pos)
     return nil
   end
   return text:byte(pos + 1)
+end
+
+local function line_bounds(text, pos)
+  text = text or ""
+  pos = clamp(tonumber(pos) or 0, 0, #text)
+  local start = pos
+  while start > 0 and text:byte(start) ~= 10 do
+    start = start - 1
+  end
+  local finish = pos
+  while finish < #text and text:byte(finish + 1) ~= 10 do
+    finish = finish + 1
+  end
+  return start, finish
+end
+
+local function line_col_at(text, pos)
+  local start = line_bounds(text, pos)
+  local line = 1
+  local scan = 1
+  while scan <= start do
+    if text:byte(scan) == 10 then
+      line = line + 1
+    end
+    scan = scan + 1
+  end
+  return line, pos - start
+end
+
+local function line_start_for(text, target_line)
+  local line = 1
+  local pos = 0
+  while line < target_line and pos < #text do
+    pos = pos + 1
+    if text:byte(pos) == 10 then
+      line = line + 1
+    end
+  end
+  return pos
+end
+
+local function line_count(text)
+  local count = 1
+  for i = 1, #(text or "") do
+    if text:byte(i) == 10 then
+      count = count + 1
+    end
+  end
+  return count
+end
+
+local clear_selection
+
+local function move_line(state, delta)
+  local line, col = line_col_at(state.input, state.cursor)
+  local target_line = clamp(line + delta, 1, line_count(state.input))
+  local line_start = line_start_for(state.input, target_line)
+  local _, line_finish = line_bounds(state.input, line_start)
+  state.cursor = math.min(line_start + col, line_finish)
+  state.dirty = true
+end
+
+local function move_line_start(state, first_nonblank)
+  local start, finish = line_bounds(state.input, state.cursor)
+  if first_nonblank then
+    while start < finish do
+      local b = byte_at(state.input, start)
+      if b == nil or not (b == 32 or b == 9) then
+        break
+      end
+      start = start + 1
+    end
+  end
+  state.cursor = start
+  state.dirty = true
+end
+
+local function move_line_end(state)
+  local _, finish = line_bounds(state.input, state.cursor)
+  state.cursor = finish
+  state.dirty = true
+end
+
+local function set_insert_mode(state)
+  clear_selection(state)
+  state.block_edit = nil
+  state.editor_mode = "insert"
+  state.pending_key = nil
+  state.dirty = true
+end
+
+local function open_line(state, above)
+  local start, finish = line_bounds(state.input, state.cursor)
+  if above then
+    state.input = state.input:sub(1, start) .. "\n" .. state.input:sub(start + 1)
+    state.cursor = start
+  else
+    state.input = state.input:sub(1, finish) .. "\n" .. state.input:sub(finish + 1)
+    state.cursor = finish + 1
+  end
+  set_insert_mode(state)
+end
+
+local function clear_buffer(state)
+  state.input = ""
+  state.cursor = 0
+  clear_selection(state)
+  state.block_edit = nil
+  state.editor_mode = "insert"
+  state.pending_key = nil
+  state.force_physical_clear = true
+  state.dirty = true
+end
+
+function clear_selection(state)
+  state.selection_anchor = nil
+  state.selection_kind = nil
+end
+
+local function apply_block_edit(state)
+  local edit = state.block_edit
+  if edit == nil then
+    return
+  end
+  state.block_edit = nil
+  local inserted = ""
+  if state.cursor >= edit.start_cursor then
+    inserted = state.input:sub(edit.start_cursor + 1, state.cursor)
+  end
+  if inserted == "" then
+    return
+  end
+  for i = #edit.targets, 1, -1 do
+    local target = edit.targets[i]
+    if target.line ~= edit.primary_line then
+      local line_start = line_start_for(state.input, target.line)
+      local _, line_finish = line_bounds(state.input, line_start)
+      local pos = math.min(line_start + target.col, line_finish)
+      state.input = state.input:sub(1, pos) .. inserted .. state.input:sub(pos + 1)
+      if pos <= state.cursor then
+        state.cursor = state.cursor + #inserted
+      end
+    end
+  end
+end
+
+local function set_editor_mode(state, mode, kind)
+  if mode ~= "insert" then
+    apply_block_edit(state)
+  end
+  state.editor_mode = mode or "insert"
+  if state.editor_mode == "visual" then
+    state.selection_kind = kind or "char"
+    if state.selection_kind == "line" then
+      state.selection_anchor = line_bounds(state.input, state.cursor)
+    else
+      state.selection_anchor = state.cursor
+    end
+  else
+    clear_selection(state)
+  end
+  state.pending_key = nil
+  state.dirty = true
+end
+
+local function block_edit_targets(state, append)
+  local text = state.input or ""
+  local anchor = tonumber(state.selection_anchor) or state.cursor
+  local start_line, start_col = line_col_at(text, anchor)
+  local end_line, end_col = line_col_at(text, state.cursor)
+  if start_line > end_line then
+    start_line, end_line = end_line, start_line
+  end
+  if start_col > end_col then
+    start_col, end_col = end_col, start_col
+  end
+  local col = append and (end_col + 1) or start_col
+  local targets = {}
+  for line = start_line, end_line do
+    targets[#targets + 1] = { line = line, col = col }
+  end
+  return targets
+end
+
+local function start_block_edit(state, append)
+  if state.editor_mode ~= "visual" or state.selection_kind ~= "block" then
+    return
+  end
+  local targets = block_edit_targets(state, append)
+  if #targets == 0 then
+    return
+  end
+  local primary = targets[1]
+  local line_start = line_start_for(state.input, primary.line)
+  local _, line_finish = line_bounds(state.input, line_start)
+  local pos = math.min(line_start + primary.col, line_finish)
+  state.cursor = pos
+  state.block_edit = {
+    targets = targets,
+    primary_line = primary.line,
+    start_cursor = pos,
+  }
+  clear_selection(state)
+  state.editor_mode = "insert"
+  state.pending_key = nil
+  state.dirty = true
+end
+
+local function char_selection_range(state)
+  local anchor = tonumber(state.selection_anchor) or state.cursor
+  local start = math.min(anchor, state.cursor)
+  local finish = math.max(anchor, state.cursor)
+  if start == finish and start < #state.input then
+    finish = finish + 1
+  end
+  return start, finish
+end
+
+local function line_selection_range(state)
+  local anchor = tonumber(state.selection_anchor) or state.cursor
+  local start = math.min(anchor, state.cursor)
+  local finish = math.max(anchor, state.cursor)
+  start = line_bounds(state.input, start)
+  local _, line_finish = line_bounds(state.input, finish)
+  if line_finish < #state.input and state.input:byte(line_finish + 1) == 10 then
+    line_finish = line_finish + 1
+  end
+  return start, line_finish
+end
+
+local function block_selection_ranges(state)
+  local text = state.input or ""
+  local anchor = tonumber(state.selection_anchor) or state.cursor
+  local start_line, start_col = line_col_at(text, anchor)
+  local end_line, end_col = line_col_at(text, state.cursor)
+  if start_line > end_line then
+    start_line, end_line = end_line, start_line
+  end
+  if start_col > end_col then
+    start_col, end_col = end_col, start_col
+  end
+  local ranges = {}
+  for line = start_line, end_line do
+    local line_start = line_start_for(text, line)
+    local _, line_finish = line_bounds(text, line_start)
+    local first = math.min(line_start + start_col, line_finish)
+    local last = math.min(line_start + end_col + 1, line_finish)
+    if first < last then
+      ranges[#ranges + 1] = { start = first, finish = last }
+    end
+  end
+  return ranges
+end
+
+local function selection_ranges(state)
+  if state.editor_mode ~= "visual" or state.selection_anchor == nil then
+    return {}
+  end
+  if state.selection_kind == "block" then
+    return block_selection_ranges(state)
+  end
+  local start, finish
+  if state.selection_kind == "line" then
+    start, finish = line_selection_range(state)
+  else
+    start, finish = char_selection_range(state)
+  end
+  if finish <= start then
+    return {}
+  end
+  return { { start = start, finish = finish } }
+end
+
+function input_line_selected(state, line)
+  if
+    state.editor_mode ~= "visual"
+    or state.selection_kind ~= "line"
+    or state.selection_anchor == nil
+    or line == nil
+  then
+    return false
+  end
+  local anchor = tonumber(state.selection_anchor) or state.cursor
+  local start_pos = math.min(anchor, state.cursor)
+  local finish_pos = math.max(anchor, state.cursor)
+  local selected_start = line_bounds(state.input, start_pos)
+  local _, selected_finish = line_bounds(state.input, finish_pos)
+  local line_start = line.start
+  local line_finish = line.start + line.len
+  if line.len == 0 then
+    return line_start >= selected_start and line_start <= selected_finish
+  end
+  return line_finish >= selected_start and line_start <= selected_finish
+end
+
+local function selected_text(state)
+  local ranges = selection_ranges(state)
+  local pieces = {}
+  for _, range in ipairs(ranges) do
+    pieces[#pieces + 1] = state.input:sub(range.start + 1, range.finish)
+  end
+  return table.concat(pieces, state.selection_kind == "block" and "\n" or "")
+end
+
+local function yank_selection(state)
+  local text = selected_text(state)
+  if text == "" and state.input ~= "" then
+    text = state.input
+  end
+  state.clipboard = text
+  set_status(state, text ~= "" and "yanked" or "nothing to yank", text == "")
+  state.block_edit = nil
+  set_editor_mode(state, "normal")
+end
+
+local function yank_input(state)
+  state.clipboard = state.input or ""
+  set_status(
+    state,
+    state.clipboard ~= "" and "yanked prompt" or "nothing to yank",
+    state.clipboard == ""
+  )
+  state.dirty = true
+end
+
+function render_input_text(state, line)
+  local text = state.input:sub(line.start + 1, line.start + line.len)
+  if state.selection_kind == "line" then
+    return text
+  end
+  if state.editor_mode ~= "visual" then
+    return text
+  end
+  local line_start = line.start
+  local line_finish = line.start + line.len
+  local ranges = selection_ranges(state)
+  if #ranges == 0 then
+    return text
+  end
+  local out = {}
+  local cursor = line_start
+  for _, range in ipairs(ranges) do
+    local start = math.max(range.start, line_start)
+    local finish = math.min(range.finish, line_finish)
+    if start < finish then
+      if cursor < start then
+        out[#out + 1] = state.input:sub(cursor + 1, start)
+      end
+      out[#out + 1] = ansi.color("7", state.input:sub(start + 1, finish))
+      cursor = finish
+    end
+  end
+  if cursor < line_finish then
+    out[#out + 1] = state.input:sub(cursor + 1, line_finish)
+  end
+  return table.concat(out)
 end
 
 local function insert_text(state, text)
@@ -1107,6 +1503,26 @@ local function move_word_forward(state)
   while pos < #state.input do
     local b = byte_at(state.input, pos)
     if b == nil or is_space_byte(b) then
+      break
+    end
+    pos = pos + 1
+  end
+  state.cursor = pos
+  state.dirty = true
+end
+
+local function move_word_start_forward(state)
+  local pos = state.cursor
+  while pos < #state.input do
+    local b = byte_at(state.input, pos)
+    if b == nil or is_space_byte(b) then
+      break
+    end
+    pos = pos + 1
+  end
+  while pos < #state.input do
+    local b = byte_at(state.input, pos)
+    if b == nil or not is_space_byte(b) then
       break
     end
     pos = pos + 1
@@ -1431,6 +1847,10 @@ local function submit(state)
   local line = state.input
   state.input = ""
   state.cursor = 0
+  clear_selection(state)
+  state.block_edit = nil
+  state.editor_mode = "insert"
+  state.pending_key = nil
 
   if line:sub(1, 1) == "/" then
     local handled, expanded = handle_command(state, line)
@@ -1452,20 +1872,31 @@ local function submit(state)
   psi.abort_reset()
   set_status(state, "", false)
   redraw(state)
-  run_turn(state, line)
+  local turn_ok = run_turn(state, line)
   state.busy = false
   state.busy_label = nil
   state.busy_phase = 0
   state.busy_tick = 0
   state.busy_started_at = nil
+  if not turn_ok then
+    state.force_physical_clear = true
+  end
   state.dirty = true
 end
 
 local function apply_action(state, action, arg)
   if action == nil or action == "" or action == "noop" then
+    state.pending_key = nil
     return
   end
+  if action ~= "vim-pending" then
+    state.pending_key = nil
+  end
   if action == "insert" then
+    if state.editor_mode == "visual" then
+      clear_selection(state)
+    end
+    state.editor_mode = "insert"
     insert_text(state, arg or "")
     return
   end
@@ -1513,12 +1944,36 @@ local function apply_action(state, action, arg)
     state.dirty = true
     return
   end
+  if action == "move-line-start" then
+    move_line_start(state, false)
+    return
+  end
+  if action == "move-line-first-nonblank" then
+    move_line_start(state, true)
+    return
+  end
+  if action == "move-line-end" then
+    move_line_end(state)
+    return
+  end
   if action == "move-word-left" then
     move_word_backward(state)
     return
   end
   if action == "move-word-right" then
     move_word_forward(state)
+    return
+  end
+  if action == "move-word-start-right" then
+    move_word_start_forward(state)
+    return
+  end
+  if action == "move-line-up" then
+    move_line(state, -1)
+    return
+  end
+  if action == "move-line-down" then
+    move_line(state, 1)
     return
   end
   if action == "kill-end" then
@@ -1529,11 +1984,21 @@ local function apply_action(state, action, arg)
     kill_to_start(state)
     return
   end
+  if action == "clear-buffer" then
+    clear_buffer(state)
+    return
+  end
   if action == "scroll" then
     if arg == "page-up" then
       scroll_by(state, math.max(4, math.floor(state.height / 2)))
     elseif arg == "page-down" then
       scroll_by(state, -math.max(4, math.floor(state.height / 2)))
+    elseif arg == "top" then
+      state.scroll_offset = max_scroll_offset(state)
+      state.dirty = true
+    elseif arg == "bottom" then
+      state.scroll_offset = 0
+      state.dirty = true
     elseif arg == "line-up" then
       scroll_by(state, 1)
     elseif arg == "line-down" then
@@ -1542,6 +2007,7 @@ local function apply_action(state, action, arg)
     return
   end
   if action == "redraw" then
+    state.force_physical_clear = true
     state.dirty = true
     return
   end
@@ -1557,6 +2023,66 @@ local function apply_action(state, action, arg)
   if action == "suspend" then
     psi.tui_suspend()
     state.dirty = true
+    return
+  end
+  if action == "vim-mode" then
+    arg = type(arg) == "table" and arg or {}
+    set_editor_mode(state, arg.mode, arg.kind)
+    return
+  end
+  if action == "vim-append" then
+    if state.cursor < #state.input then
+      state.cursor = state.cursor + 1
+    end
+    set_insert_mode(state)
+    return
+  end
+  if action == "vim-append-line" then
+    move_line_end(state)
+    set_insert_mode(state)
+    return
+  end
+  if action == "vim-insert-line" then
+    move_line_start(state, true)
+    set_insert_mode(state)
+    return
+  end
+  if action == "vim-block-insert" then
+    start_block_edit(state, false)
+    return
+  end
+  if action == "vim-block-append" then
+    start_block_edit(state, true)
+    return
+  end
+  if action == "vim-open-line-below" then
+    open_line(state, false)
+    return
+  end
+  if action == "vim-open-line-above" then
+    open_line(state, true)
+    return
+  end
+  if action == "vim-pending" then
+    state.pending_key = arg
+    state.dirty = true
+    return
+  end
+  if action == "vim-yank" then
+    if state.editor_mode == "visual" then
+      yank_selection(state)
+    else
+      yank_input(state)
+    end
+    return
+  end
+  if action == "vim-paste" then
+    if state.clipboard ~= nil and state.clipboard ~= "" then
+      insert_text(state, state.clipboard)
+    else
+      set_status(state, "clipboard empty", true)
+    end
+    return
   end
 end
 
@@ -1572,11 +2098,17 @@ local function handle_key_event(state, event)
     key = event.key,
     busy = state.busy,
     input_length = #state.input,
+    input = state.input,
     cursor = state.cursor,
+    editor_mode = state.editor_mode,
+    selection_kind = state.selection_kind,
+    selection_anchor = state.selection_anchor,
+    pending_key = state.pending_key,
     scroll = state.scroll_offset,
     text = event.text or "",
   })
   if result == nil then
+    state.pending_key = nil
     return
   end
   apply_action(state, result.action, result.arg)
@@ -1681,7 +2213,9 @@ function M._debug_input_lines(input, cursor, width, prefix_first, prefix_rest)
     cursor_col = cursor_col,
     cursor_screen_col = display_width(
       cursor_line == 1 and state.input_layout.prefix_first or state.input_layout.prefix_rest
-    ) + cursor_col + 1,
+    )
+      + cursor_col
+      + 1,
   }
 end
 
@@ -1706,6 +2240,230 @@ end
 
 function M._debug_tui_capabilities()
   return detect_tui_capabilities()
+end
+
+function M._debug_edit_keys(input, cursor, events)
+  local state = {
+    opts = {},
+    model = {},
+    entries = {},
+    input = input or "",
+    cursor = tonumber(cursor) or #(input or ""),
+    editor_mode = "insert",
+    selection_anchor = nil,
+    selection_kind = nil,
+    clipboard = "",
+    pending_key = nil,
+    block_edit = nil,
+    force_physical_clear = false,
+    busy = false,
+    running = true,
+    scroll_offset = 0,
+    status_text = nil,
+    status_is_error = false,
+    width = 80,
+    height = 24,
+    input_layout = default_input_layout(24),
+    dirty = false,
+  }
+  for _, event in ipairs(events or {}) do
+    handle_key_event(state, event)
+  end
+  local lines = build_input_lines(state)
+  local rendered = {}
+  for i, line in ipairs(lines) do
+    local prefix = i == 1 and state.input_layout.prefix_first or state.input_layout.prefix_rest
+    rendered[i] = prefix .. render_input_text(state, line)
+    if input_line_selected(state, line) then
+      rendered[i] = ansi.color("7", rendered[i] .. " ")
+    end
+  end
+  return {
+    input = state.input,
+    cursor = state.cursor,
+    editor_mode = state.editor_mode,
+    selection_anchor = state.selection_anchor,
+    selection_kind = state.selection_kind,
+    clipboard = state.clipboard,
+    pending_key = state.pending_key,
+    block_edit = state.block_edit,
+    scroll_offset = state.scroll_offset,
+    status_text = state.status_text,
+    rendered = rendered,
+  }
+end
+
+function M._debug_redraw_counts(input)
+  local names = {
+    "tui_size",
+    "tui_clear",
+    "tui_draw_line",
+    "tui_draw_raw_line",
+    "tui_set_cursor",
+    "tui_refresh",
+    "cwd",
+    "session_id",
+    "session_message_count",
+  }
+  local saved = {}
+  for _, name in ipairs(names) do
+    saved[name] = psi[name]
+  end
+  local calls = {
+    draw_rows = {},
+    raw_rows = {},
+    clears = 0,
+    cursor_sets = 0,
+    refreshes = 0,
+  }
+  local function reset_calls()
+    calls.draw_rows = {}
+    calls.raw_rows = {}
+    calls.clears = 0
+    calls.cursor_sets = 0
+    calls.refreshes = 0
+  end
+  psi.tui_size = function()
+    return { width = 80, height = 24 }
+  end
+  psi.tui_clear = function(force)
+    if force then
+      calls.clears = calls.clears + 1
+    end
+  end
+  psi.tui_draw_line = function(row, text)
+    calls.draw_rows[#calls.draw_rows + 1] = { row = row, text = text or "" }
+  end
+  psi.tui_draw_raw_line = function(row, text)
+    calls.raw_rows[#calls.raw_rows + 1] = { row = row, text = text or "" }
+  end
+  psi.tui_set_cursor = function()
+    calls.cursor_sets = calls.cursor_sets + 1
+  end
+  psi.tui_refresh = function()
+    calls.refreshes = calls.refreshes + 1
+  end
+  psi.cwd = function()
+    return "."
+  end
+  psi.session_id = function()
+    return "debug-session"
+  end
+  psi.session_message_count = function()
+    return 0
+  end
+
+  local ok, result = xpcall(function()
+    local state = {
+      opts = { model = "debug" },
+      model = { id = "debug" },
+      entries = {},
+      input = input or "hello\nhi",
+      cursor = #(input or "hello\nhi"),
+      editor_mode = "insert",
+      selection_anchor = nil,
+      selection_kind = nil,
+      clipboard = "",
+      pending_key = nil,
+      block_edit = nil,
+      force_physical_clear = false,
+      busy = true,
+      busy_label = "gooning",
+      busy_phase = 1,
+      busy_tick = 0,
+      busy_started_at = os.time(),
+      running = true,
+      scroll_offset = 0,
+      status_text = nil,
+      status_is_error = false,
+      show_thinking = false,
+      width = 80,
+      height = 24,
+      input_layout = default_input_layout(24),
+      tui_caps = { raw_ansi = false },
+      streaming_assistant_index = nil,
+      streaming_thinking_index = nil,
+      entries_version = 0,
+      total_cache_width = nil,
+      total_cache_version = nil,
+      total_cache_lines = nil,
+      dirty = true,
+    }
+    refresh_input_layout(state)
+    local rows = layout_rows(state)
+    redraw(state)
+    local first_draws = #calls.draw_rows
+    reset_calls()
+    state.busy_tick = 1
+    state.dirty = true
+    redraw(state)
+    local second_draws = #calls.draw_rows
+    local second_input_draws = 0
+    for _, call in ipairs(calls.draw_rows) do
+      if
+        call.row >= rows.input_start_row
+        and call.row <= rows.input_start_row + rows.input_rows + 1
+      then
+        second_input_draws = second_input_draws + 1
+      end
+    end
+    reset_calls()
+    state.input = ""
+    state.cursor = 0
+    state.busy_tick = 2
+    state.dirty = true
+    redraw(state)
+    local stale_clears = 0
+    for _, call in ipairs(calls.draw_rows) do
+      if call.text == "" then
+        stale_clears = stale_clears + 1
+      end
+    end
+    reset_calls()
+    state.tui_caps = { raw_ansi = true }
+    state.input = input or "hello\nhi"
+    state.cursor = #state.input
+    state.status_text = nil
+    state.busy = true
+    state.busy_tick = 3
+    state.dirty = true
+    redraw(state)
+    reset_calls()
+    state.busy_tick = 4
+    state.dirty = true
+    redraw(state)
+    local raw_cursor_sets = calls.cursor_sets
+    local raw_refreshes = calls.refreshes
+    reset_calls()
+    state.busy = false
+    state.status_text = "aborted"
+    state.dirty = true
+    redraw(state)
+    local raw_clears_after_busy = 0
+    for _, call in ipairs(calls.raw_rows) do
+      if call.text == "" then
+        raw_clears_after_busy = raw_clears_after_busy + 1
+      end
+    end
+    return {
+      first_draws = first_draws,
+      second_draws = second_draws,
+      second_input_draws = second_input_draws,
+      second_clears = calls.clears,
+      stale_clears = stale_clears,
+      raw_clears_after_busy = raw_clears_after_busy,
+      raw_cursor_sets = raw_cursor_sets,
+      raw_refreshes = raw_refreshes,
+    }
+  end, debug.traceback)
+
+  for _, name in ipairs(names) do
+    psi[name] = saved[name]
+  end
+  if not ok then
+    error(result)
+  end
+  return result
 end
 
 return M
