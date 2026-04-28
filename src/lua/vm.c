@@ -2368,18 +2368,6 @@ static int lfn_add_history(lua_State *L) {
 
 #if PSI_ENABLE_TUI
 
-static int psi_vm_tui_raw_ansi_supported(void) {
-#if PSI_ENABLE_ANSI
-    const char *term = getenv("TERM");
-    if (term == NULL || term[0] == '\0' || strcmp(term, "dumb") == 0) {
-        return 0;
-    }
-    return 1;
-#else
-    return 0;
-#endif
-}
-
 static int lfn_tui_size(lua_State *L) {
     struct winsize ws;
     int height = 24;
@@ -2463,11 +2451,6 @@ static int lfn_tui_draw_raw_line(lua_State *L) {
     psi_vm_require_tui(L);
     if (row < 1) {
         row = 1;
-    }
-
-    if (!psi_vm_tui_raw_ansi_supported()) {
-        psi_vm_tui_draw_raw_line((long)row, text);
-        return 0;
     }
 
     psi_vm_tui_draw_raw_line((long)row, text);
