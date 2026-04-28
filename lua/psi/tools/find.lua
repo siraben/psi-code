@@ -63,7 +63,7 @@ return function()
     name = "find",
     description = string.format(
       "Find files by glob pattern relative to a directory. Output is truncated to "
-      .. "%dKB. Use limit= to cap result count.",
+        .. "%dKB. Use limit= to cap result count.",
       math.floor(DEFAULT_BYTES / 1024)
     ),
     prompt_snippet = "Find files by glob pattern",

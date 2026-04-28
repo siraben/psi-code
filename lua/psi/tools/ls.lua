@@ -55,14 +55,14 @@ local function impl(input)
 
   local notices = {}
   if entry_truncated then
-    notices[#notices + 1] = string.format(
-      "[%d entries limit reached. Use a higher limit for more.]",
-      limit
-    )
+    notices[#notices + 1] =
+      string.format("[%d entries limit reached. Use a higher limit for more.]", limit)
   end
   if result.truncated then
     local n = truncate.head_notice(result)
-    if n then notices[#notices + 1] = n end
+    if n then
+      notices[#notices + 1] = n
+    end
   end
   if #notices > 0 then
     text = text .. "\n\n" .. table.concat(notices, "\n")
@@ -82,7 +82,7 @@ return function()
     name = "ls",
     description = string.format(
       "List directory contents. Returns entries sorted alphabetically, with '/' suffix "
-      .. "for directories. Includes dotfiles. Output is truncated to %dKB.",
+        .. "for directories. Includes dotfiles. Output is truncated to %dKB.",
       math.floor(DEFAULT_BYTES / 1024)
     ),
     prompt_snippet = "List directory contents",
