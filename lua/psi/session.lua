@@ -273,7 +273,11 @@ local function pi_content_from_blocks(blocks)
   local out = prelude.as_array({})
   for _, b in ipairs(blocks or {}) do
     if b.type == "text" then
-      out[#out + 1] = { type = "text", text = b.text or "" }
+      local entry = { type = "text", text = b.text or "" }
+      if type(b.textSignature) == "string" and b.textSignature ~= "" then
+        entry.textSignature = b.textSignature
+      end
+      out[#out + 1] = entry
     elseif b.type == "tool_use" then
       out[#out + 1] = { type = "toolCall", id = b.id, name = b.name, arguments = b.input or {} }
     elseif b.type == "thinking" then

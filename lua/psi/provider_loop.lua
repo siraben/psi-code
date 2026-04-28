@@ -138,6 +138,7 @@ function M.run_turn(opts, cfg)
       messages = api_messages,
       tool_specs = tool_specs,
       max_tokens = opts.max_tokens,
+      reasoning_effort = opts.reasoning_effort,
       system_prompt = system_prompt,
     })
     emit_before_request(cfg, model, request)
@@ -173,6 +174,7 @@ function M.run_turn(opts, cfg)
     end
     local status = psi.http_stream_finish(handle)
     local content, tool_calls = cfg.finalize(state)
+    local stream_error = cfg.stream_error and cfg.stream_error(state)
 
     if status < 0 then
       local aborted = abort_check()
@@ -200,6 +202,14 @@ function M.run_turn(opts, cfg)
       end
       io.stderr:write(emsg .. "\n")
       return false, emsg
+    end
+
+    if stream_error then
+      cfg.persist(state, model, content, tool_calls, "error", stream_error)
+      context.record_usage(psi.session_message_count(), state.usage, model)
+      session_mod.save()
+      io.stderr:write(stream_error .. "\n")
+      return false, stream_error
     end
 
     cfg.persist(state, model, content, tool_calls)
