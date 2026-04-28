@@ -1737,6 +1737,7 @@ local function queue_current_input(state, line)
     and state.queue_nav_index <= count
   then
     if agent.replace_pending(state.queue_nav_index, line) then
+      state.queue_nav_index = nil
       set_status(state, queue_status_text(), false)
       state.dirty = true
       return
@@ -1913,6 +1914,13 @@ local function observer_queued_user(state, text, kind)
   finish_streaming_assistant(state)
   state.streaming_thinking_index = nil
   state.streaming_assistant_index = nil
+  if state.queue_nav_index ~= nil and state.input == (text or "") then
+    state.input = ""
+    state.cursor = 0
+    clear_selection(state)
+    state.block_edit = nil
+    state.editor_mode = "insert"
+  end
   state.queue_nav_index = nil
   add_entry(state, "user", text or "")
   set_status(state, kind == "steering" and "using queued steering" or "using queued message", false)
@@ -2778,10 +2786,46 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     selection_kind = state.selection_kind,
     clipboard = state.clipboard,
     pending_key = state.pending_key,
+    queue_nav_index = state.queue_nav_index,
     block_edit = state.block_edit,
     scroll_offset = state.scroll_offset,
     status_text = state.status_text,
     rendered = rendered,
+  }
+end
+
+function M._debug_consume_queued_preview(input, queued_text)
+  local state = {
+    opts = {},
+    model = {},
+    entries = {},
+    input = input or "",
+    cursor = #(input or ""),
+    editor_mode = "insert",
+    selection_anchor = nil,
+    selection_kind = nil,
+    clipboard = "",
+    pending_key = nil,
+    queue_nav_index = 1,
+    block_edit = nil,
+    force_physical_clear = false,
+    busy = true,
+    running = true,
+    scroll_offset = 0,
+    status_text = nil,
+    status_is_error = false,
+    width = 80,
+    height = 24,
+    input_layout = default_input_layout(24),
+    dirty = false,
+  }
+  observer_queued_user(state, queued_text or "", "follow-up")
+  return {
+    input = state.input,
+    cursor = state.cursor,
+    editor_mode = state.editor_mode,
+    queue_nav_index = state.queue_nav_index,
+    status_text = state.status_text,
   }
 end
 
