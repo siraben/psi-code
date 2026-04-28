@@ -1706,6 +1706,20 @@ local function queue_status_text(extra_text)
   return "queued: " .. preview
 end
 
+local function busy_command_action(line)
+  if line == "/queue" or line == "/queue list" then
+    return {
+      kind = "print",
+      payload = queued_messages_text() ~= "" and ("queued: " .. queued_messages_text())
+        or "queue is empty",
+    }
+  end
+  if line:match("^/btw%s+") then
+    return { kind = "btw" }
+  end
+  return nil
+end
+
 local function queue_current_input(state, line)
   local count = agent.pending_message_count()
   if
@@ -2259,11 +2273,11 @@ local function submit(state)
       return
     end
     if line:sub(1, 1) == "/" then
-      local action = commands.handle(line)
+      local action = busy_command_action(line)
       if action == nil then
         state.input = line
         state.cursor = #state.input
-        set_status(state, "unknown command", true)
+        set_status(state, "command unavailable while busy", true)
         return
       end
       if action.kind == "print" then
