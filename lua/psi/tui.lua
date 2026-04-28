@@ -13,16 +13,15 @@ local BAR_SPLIT = string.char(31)
 local busy_rng_seeded = false
 local enabled_setting
 
-local DEFAULT_BUSY_LABEL_WEIGHT_TOTAL = 100
 local DEFAULT_BUSY_LABELS = {
-  { label = "gooning", weight = 20 },
-  { label = "gooning fr", weight = 15 },
-  { label = "lowkirkuinely", weight = 15 },
-  { label = "trolling", weight = 12 },
-  { label = "rewriting in rust", weight = 12 },
-  { label = "type error", weight = 9 },
-  { label = "nix building", weight = 9 },
-  { label = "hallucinating", weight = 8 },
+  { label = "working", weight = 1 },
+  { label = "thinking", weight = 1 },
+  { label = "reading", weight = 1 },
+  { label = "writing", weight = 1 },
+  { label = "editing", weight = 1 },
+  { label = "checking", weight = 1 },
+  { label = "running", weight = 1 },
+  { label = "reviewing", weight = 1 },
 }
 
 local function action(name, arg)
@@ -379,35 +378,28 @@ local function utf8_chars(text)
   return chars
 end
 
-local function busy_chip(text, phase)
-  local bg = tonumber(settings.get("tui.busy_background", 238)) or 238
-  local base_fg = tonumber(settings.get("tui.busy_foreground", 253)) or 253
-  local glisten_fg = tonumber(settings.get("tui.busy_glisten_foreground", 231)) or 231
-  local wake_fg = tonumber(settings.get("tui.busy_glisten_wake", 250)) or 250
-  local chars = utf8_chars(text)
+local function shimmer_text(text, phase)
+  if not enabled_setting("tui.busy_glisten", "PSI_BUSY_GLISTEN", true) then
+    return accent(text)
+  end
 
-  if not enabled_setting("tui.busy_glisten", "PSI_BUSY_GLISTEN", true) or #chars == 0 then
-    return ansi.color(
-      "1;38;5;" .. tostring(base_fg) .. ";48;5;" .. tostring(bg),
-      " " .. text .. " "
-    )
+  local chars = utf8_chars(text)
+  if #chars == 0 then
+    return ""
   end
 
   local sweep = ((tonumber(phase) or 0) % (#chars + 4)) - 1
-  local out = {
-    ansi.color("1;38;5;" .. tostring(base_fg) .. ";48;5;" .. tostring(bg), " "),
-  }
+  local out = {}
   for index, ch in ipairs(chars) do
     local distance = math.abs(index - sweep)
-    local fg = base_fg
     if distance == 0 then
-      fg = glisten_fg
+      out[#out + 1] = ansi.bold(ansi.color("96", ch))
     elseif distance == 1 then
-      fg = wake_fg
+      out[#out + 1] = ansi.color("96", ch)
+    else
+      out[#out + 1] = accent(ch)
     end
-    out[#out + 1] = ansi.color("1;38;5;" .. tostring(fg) .. ";48;5;" .. tostring(bg), ch)
   end
-  out[#out + 1] = ansi.color("1;38;5;" .. tostring(base_fg) .. ";48;5;" .. tostring(bg), " ")
   return table.concat(out)
 end
 
@@ -449,7 +441,14 @@ local function configured_busy_labels()
 end
 
 local function default_busy_label()
-  local roll = math.random(DEFAULT_BUSY_LABEL_WEIGHT_TOTAL)
+  local total = 0
+  for _, entry in ipairs(DEFAULT_BUSY_LABELS) do
+    total = total + (tonumber(entry.weight) or 0)
+  end
+  if total <= 0 then
+    return "working"
+  end
+  local roll = math.random(total)
   local cumulative = 0
   for _, entry in ipairs(DEFAULT_BUSY_LABELS) do
     cumulative = cumulative + entry.weight
@@ -642,7 +641,7 @@ function M.footer_hint(arg_json)
   if arg.busy then
     local busy_label = (type(arg.busy_label) == "string" and arg.busy_label ~= "")
         and arg.busy_label
-      or "gooning"
+      or "working"
     local dots = string.rep(".", math.max(1, tonumber(arg.busy_phase) or 1))
     return string.format(
       "%s (%s  • %s to interrupt) %s",
@@ -672,10 +671,9 @@ function M.workspace_bar(cwd)
 end
 
 function M.render_busy_status(label_text, phase, elapsed_seconds, glisten_phase)
-  local text = tostring(label_text or "gooning")
+  local text = tostring(label_text or "working")
   local dots = ({ ".", "..", "..." })[((tonumber(phase) or 0) % 3) + 1]
-  local chip = busy_chip(text, glisten_phase or phase)
-  return chip
+  return shimmer_text(text, glisten_phase or phase)
     .. label(
       " ("
         .. format_elapsed(elapsed_seconds)

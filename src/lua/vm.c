@@ -16,6 +16,7 @@
 
 #include <time.h>
 #include <errno.h>
+#include <sys/time.h>
 #if PSI_ENABLE_TUI
 #include <poll.h>
 #include <termios.h>
@@ -2517,14 +2518,16 @@ static int lfn_tui_render_frame(lua_State *L) {
     if (col < 1) {
         col = 1;
     }
-    printf(
-        "\033[?2026h\033[?25l%s%s\033[%ld;%ldH%s\033[?2026l",
-        frame,
-        "\033[0m",
-        (long)row,
-        (long)col,
-        visible ? "\033[?25h" : "\033[?25l"
-    );
+    if (visible) {
+        printf(
+            "\033[?2026h\033[?25l%s\033[0m\033[%ld;%ldH\033[?25h\033[?2026l",
+            frame,
+            (long)row,
+            (long)col
+        );
+    } else {
+        printf("\033[?2026h\033[?25l%s\033[0m\033[?2026l", frame);
+    }
     fflush(stdout);
     psi_vm_tui_frame_active = 0;
     return 0;
@@ -2648,6 +2651,16 @@ static int lfn_sleep_ms(lua_State *L) {
     return 0;
 }
 
+static int lfn_time_ms(lua_State *L) {
+    struct timeval tv;
+    if (gettimeofday(&tv, NULL) != 0) {
+        lua_pushinteger(L, (lua_Integer)time(NULL) * 1000);
+        return 1;
+    }
+    lua_pushinteger(L, ((lua_Integer)tv.tv_sec * 1000) + ((lua_Integer)tv.tv_usec / 1000));
+    return 1;
+}
+
 /* psi.stdout_write(text) -- raw unbuffered write to stdout. */
 static int lfn_stdout_write(lua_State *L) {
     size_t len = 0;
@@ -2724,6 +2737,7 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("mkdir_p",               lfn_mkdir_p);
     PSI_REG("mkdir_parent",          lfn_mkdir_parent);
     PSI_REG("runtime_info",          lfn_runtime_info);
+    PSI_REG("time_ms",               lfn_time_ms);
     PSI_REG("session_messages",      lfn_session_messages);
     PSI_REG("session_messages_from", lfn_session_messages_from);
     PSI_REG("session_token_estimate_from", lfn_session_token_estimate_from);
