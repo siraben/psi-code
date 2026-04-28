@@ -309,10 +309,7 @@ function M.head_notice(result, extras)
   end
   extras = extras or {}
   if result.first_line_exceeds_limit then
-    return string.format(
-      "[First line exceeds %s limit]",
-      M.format_size(result.max_bytes)
-    )
+    return string.format("[First line exceeds %s limit]", M.format_size(result.max_bytes))
   end
   local parts = {}
   if result.truncated_by == "lines" then
@@ -345,18 +342,11 @@ function M.tail_notice(result, extras)
   local end_line = result.total_lines
   local parts = {}
   if result.last_line_partial then
-    parts[#parts + 1] = string.format(
-      "Showing last %s of line %d",
-      M.format_size(result.output_bytes),
-      end_line
-    )
+    parts[#parts + 1] =
+      string.format("Showing last %s of line %d", M.format_size(result.output_bytes), end_line)
   elseif result.truncated_by == "lines" then
-    parts[#parts + 1] = string.format(
-      "Showing lines %d-%d of %d",
-      start_line,
-      end_line,
-      result.total_lines
-    )
+    parts[#parts + 1] =
+      string.format("Showing lines %d-%d of %d", start_line, end_line, result.total_lines)
   else
     parts[#parts + 1] = string.format(
       "Showing lines %d-%d of %d (%s limit)",

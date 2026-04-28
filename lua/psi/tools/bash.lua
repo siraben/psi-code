@@ -63,10 +63,11 @@ return function()
     name = "bash",
     description = string.format(
       "Execute a shell command in the current working directory and return its output. "
-      .. "Output is tail-truncated to the last %d lines or %dKB (whichever is hit first). "
-      .. "When truncated, the full output is also saved to a temp file whose path is "
-      .. "returned in the result; use the read tool with that path to inspect more.",
-      DEFAULT_LINES, math.floor(DEFAULT_BYTES / 1024)
+        .. "Output is tail-truncated to the last %d lines or %dKB (whichever is hit first). "
+        .. "When truncated, the full output is also saved to a temp file whose path is "
+        .. "returned in the result; use the read tool with that path to inspect more.",
+      DEFAULT_LINES,
+      math.floor(DEFAULT_BYTES / 1024)
     ),
     prompt_snippet = "Execute bash commands (ls, rg, find, tests, git, build commands)",
     guidelines = { "Use bash for commands such as ls, rg, find, git, and tests." },
