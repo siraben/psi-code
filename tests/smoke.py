@@ -1360,6 +1360,27 @@ def t_providers_openai_codex_http_error(psi: Psi):
     assert_contains(out, "nope", "OpenAI Codex HTTP error details should be preserved")
 
 
+@test("providers/openai_codex_http_error")
+def t_providers_openai_codex_http_error(psi: Psi):
+    auth_file = psi.tmp / "codex-auth.json"
+    out = psi.run(
+        "--eval",
+        'local a = require("psi.auth_storage")\n'
+        + 'a.set("openai-codex", {type="oauth", access="a", refresh="r", expires=9999999999999, accountId="acct"})\n'
+        + 'psi.http_stream_begin = function() return {} end\n'
+        + 'psi.http_stream_poll = function() return "{\\"error\\":{\\"message\\":\\"nope\\"}}", true end\n'
+        + 'psi.http_stream_finish = function() return 401 end\n'
+        + 'local ok, err = require("psi.sched").run(function()\n'
+        + '  return require("psi.openai_codex").run_turn({model="gpt-5.5"})\n'
+        + 'end)\n'
+        + 'return tostring(ok) .. "|" .. tostring(err)',
+        env_extra={"PSI_AUTH_FILE": str(auth_file)},
+    ).stdout.strip()
+    assert_contains(out, "false|openai-codex request failed (401)",
+                    "OpenAI Codex HTTP errors should be classified")
+    assert_contains(out, "nope", "OpenAI Codex HTTP error details should be preserved")
+
+
 @test("tui/status_context_window")
 def t_tui_status_context_window(psi: Psi):
     cache = psi.tmp / "openrouter_models_status.json"
