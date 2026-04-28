@@ -1348,6 +1348,55 @@ def t_providers_openai_codex_parser(psi: Psi):
                   "OpenAI Codex parser handles text, usage, caps, and errors")
 
 
+@test("providers/openai_codex_unresolved_tool_call")
+def t_providers_openai_codex_unresolved_tool_call(psi: Psi):
+    out = psi.eval(
+        'local s = require("psi.session")\n'
+        + 'local d = require("psi.openai_codex")._debug\n'
+        + 's.append_user("hi")\n'
+        + 's.append_assistant("", {\n'
+        + '  { type = "tool_use", id = "call_1|item_1", name = "bash",\n'
+        + '    input = { command = "pwd" } }\n'
+        + '}, {})\n'
+        + 's.append_user("continue")\n'
+        + 'local wire = d.response_input_from_session(s.messages(), "")\n'
+        + 'return table.concat({\n'
+        + '  wire[2].type,\n'
+        + '  wire[2].call_id,\n'
+        + '  wire[3].type,\n'
+        + '  wire[3].call_id,\n'
+        + '  wire[3].output,\n'
+        + '  wire[4].content[1].text,\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "function_call|call_1|function_call_output|call_1|No result provided|continue",
+                  "OpenAI Codex closes unresolved tool calls before user input")
+
+
+@test("providers/openai_codex_custom_messages")
+def t_providers_openai_codex_custom_messages(psi: Psi):
+    out = psi.eval(
+        'local s = require("psi.session")\n'
+        + 'local d = require("psi.openai_codex")._debug\n'
+        + 's.append_custom_message("visible user", { role = "user" })\n'
+        + 's.append_custom_message("hidden user", { role = "user", hidden = true })\n'
+        + 's.append_custom_message("visible assistant", { role = "assistant" })\n'
+        + 'local wire = d.response_input_from_session(s.messages(), "")\n'
+        + 'return table.concat({\n'
+        + '  tostring(#wire),\n'
+        + '  wire[1].role,\n'
+        + '  wire[1].content[1].type,\n'
+        + '  wire[1].content[1].text,\n'
+        + '  wire[2].type,\n'
+        + '  wire[2].role,\n'
+        + '  wire[2].content[1].type,\n'
+        + '  wire[2].content[1].text,\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "2|user|input_text|visible user|message|assistant|output_text|visible assistant",
+                  "OpenAI Codex preserves non-hidden custom messages")
+
+
 @test("providers/openai_codex_reasoning_config")
 def t_providers_openai_codex_reasoning_config(psi: Psi):
     project = psi.tmp / "codex-reasoning-config"
