@@ -48,6 +48,18 @@ end
 -- Reading from psi.tui.status_line picks this up automatically so
 -- the TUI footer reflects the live model string.
 local override_model = nil
+local override_reasoning_effort = nil
+
+local function normalize_reasoning_effort(value)
+  if value == nil then
+    return nil
+  end
+  value = tostring(value)
+  if value == "" then
+    return nil
+  end
+  return value
+end
 
 function M.set_model(name)
   if name == nil or name == "" then
@@ -62,6 +74,17 @@ function M.current_model(fallback)
     return override_model
   end
   return fallback
+end
+
+function M.set_reasoning_effort(value)
+  override_reasoning_effort = normalize_reasoning_effort(value)
+end
+
+function M.current_reasoning_effort(fallback)
+  if override_reasoning_effort ~= nil then
+    return override_reasoning_effort
+  end
+  return normalize_reasoning_effort(fallback)
 end
 
 function M.effective_model(fallback)
@@ -96,6 +119,7 @@ function M.run_turn(opts)
       system_prompt = system_prompt,
       model = resolved.id,
       max_tokens = opts.max_tokens,
+      reasoning_effort = M.current_reasoning_effort(opts.reasoning_effort),
       observer = opts.observer,
       abort_check = opts.abort_check,
     })
@@ -118,6 +142,7 @@ function M.run_compact(opts)
     user_text = request[2],
     model = resolved.id,
     max_tokens = context.compaction_budget(),
+    reasoning_effort = M.current_reasoning_effort(opts.reasoning_effort),
   })
   if not ok then
     return false

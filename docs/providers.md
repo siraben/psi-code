@@ -1,10 +1,11 @@
 # Providers
 
-psi currently ships with three routed providers:
+psi currently ships with four routed providers:
 
 - Anthropic, the default, via `https://api.anthropic.com`
 - Ollama, local, via `/api/chat`
 - OpenRouter, via OpenAI-compatible `/chat/completions`
+- OpenAI Codex, via ChatGPT's Codex Responses backend
 
 The chosen provider drives a single `run_turn` / `complete_text`
 contract, so sessions are provider-neutral on disk — a session started
@@ -14,7 +15,8 @@ thinking/signature/cache details may be downgraded during replay.
 
 Routing metadata lives in `lua/psi/providers.lua`. API-specific wire
 adapters live in `lua/psi/anthropic.lua`, `lua/psi/openai_compat.lua`,
-`lua/psi/openrouter.lua`, and `lua/psi/ollama.lua`.
+`lua/psi/openrouter.lua`, `lua/psi/openai_codex.lua`, and
+`lua/psi/ollama.lua`.
 
 ## Selection
 
@@ -22,10 +24,11 @@ In priority order:
 
 1. **Model prefix** — `--model=ollama/llama3.1:latest` or
    `--model=anthropic/claude-sonnet-4-6` or
-   `--model=openrouter/google/gemini-3-flash-preview`. The prefix is
-   stripped before being forwarded to the provider.
+   `--model=openrouter/google/gemini-3-flash-preview` or
+   `--model=openai-codex/gpt-5.5`. The prefix is stripped before being
+   forwarded to the provider.
 2. **`PSI_PROVIDER`** env var — `anthropic` (default), `ollama`, or
-   `openrouter`.
+   `openrouter`, or `openai-codex`.
 3. **Settings** — `defaults.provider` and `defaults.model` in
    `~/.config/psi/settings.json` or `./.psi/settings.json`.
 4. Fallback: Anthropic.
@@ -64,6 +67,28 @@ In priority order:
 - Uses the shared OpenAI-compatible adapter in
   `lua/psi/openai_compat.lua`.
 
+## OpenAI Codex
+
+- Auth: `/login openai-codex`, open the printed URL, then paste the
+  final redirect URL or authorization code back with
+  `/login openai-codex <redirect-url-or-code>`. The auth URL is also
+  copied through OSC 52 when terminal clipboard support is enabled.
+  Credentials are stored in `~/.config/psi/auth.json` with mode `0600`
+  when `chmod` is available.
+- `PSI_AUTH_FILE` — override the credential file path.
+- `PSI_OPENAI_CODEX_MODEL` — default model when none is passed (default
+  `gpt-5.5`).
+- `PSI_OPENAI_CODEX_BASE_URL` — override the ChatGPT backend host.
+- `PSI_OPENAI_CODEX_REASONING` — optional reasoning effort to include
+  in requests (`low`, `medium`, `high`, `xhigh`; unset omits it).
+  Inside a session, `/set effort <low|medium|high|xhigh|none>` changes
+  the runtime value. For a config default, set
+  `defaults.reasoning_effort` in `~/.config/psi/settings.json` or
+  `./.psi/settings.json`.
+- `PSI_OPENAI_CODEX_VERBOSITY` — optional text verbosity
+  (`low`, `medium`, `high`; default `low`).
+- Uses the Responses-shaped adapter in `lua/psi/openai_codex.lua`.
+
 ## Examples
 
 ```bash
@@ -80,6 +105,13 @@ PSI_PROVIDER=ollama PSI_OLLAMA_MODEL=llama3.2 psi --agent="..."
 OPENROUTER_API_KEY=... \
   psi --model=openrouter/google/gemini-3-flash-preview --agent="..."
 
+# OpenAI Codex
+psi
+psi> /login openai-codex
+psi> /login openai-codex http://localhost:1455/auth/callback?code=...&state=...
+psi> /model openai-codex/gpt-5.5
+psi> /set effort high
+
 # Ollama on a remote box
 PSI_OLLAMA_BASE_URL=http://workstation.local:11434 \
   psi --model=ollama/llama3.1 --agent="..."
@@ -89,8 +121,10 @@ PSI_OLLAMA_BASE_URL=http://workstation.local:11434 \
 
 - Provider registration from extensions. The registry exists in Lua,
   but public extension APIs for adding providers are not frozen yet.
-- Bedrock, Gemini native, Mistral native, Azure responses, and OAuth
-  flows from pi-mono.
+- Bedrock, Gemini native, Mistral native, and Azure responses.
+- Browser callback completion for OAuth. OpenAI Codex currently uses
+  the same manual paste fallback that pi-mono supports for headless
+  sessions.
 - Full pricing metadata. OpenRouter context-window and output-token
   metadata is cached lazily as JSON under the user cache directory; the
   first lookup for a missing OpenRouter model refreshes the cache from
