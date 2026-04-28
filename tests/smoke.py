@@ -964,6 +964,36 @@ def t_markdown_inline_code_no_backticks(psi: Psi):
     assert_contains(out, "\x1b[", "inline code should still be highlighted")
 
 
+@test("markdown/component_table_rendering")
+def t_markdown_component_table_rendering(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local c = require("psi.tui_components.markdown").new({\n'
+        + '  text = "| Verb | Weight |\\n| --- | --- |\\n| read | 1 |\\n| write | 1 |"\n'
+        + '})\n'
+        + 'return table.concat(c:render(64), "\\n")',
+    ).stdout.rstrip("\n")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_contains(plain, "┌", "markdown table should render a top border")
+    assert_contains(plain, "│ Verb", "markdown table should render the header")
+    assert_contains(plain, "│ read", "markdown table should render body rows")
+    assert_contains(plain, "└", "markdown table should render a bottom border")
+
+
+@test("markdown/component_table_wraps_cells")
+def t_markdown_component_table_wraps_cells(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local c = require("psi.tui_components.markdown").new({\n'
+        + '  text = "| Name | Notes |\\n| --- | --- |\\n| alpha | one two three four five six |"\n'
+        + '})\n'
+        + 'return table.concat(c:render(28), "\\n")',
+    ).stdout.rstrip("\n")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_contains(plain, "one two", "markdown table should keep wrapped content")
+    assert_contains(plain, "three", "markdown table should wrap wide cells onto later lines")
+
+
 @test("compaction/snaps_past_orphan_tool_result")
 def t_compact_snap(psi: Psi):
     """Regression for the Haiku session failure: do_compact must never
@@ -1863,6 +1893,42 @@ def t_tui_renderer_cursor_marker(psi: Psi):
         + 'return table.concat({lines[1], lines[2], tostring(cursor.row), tostring(cursor.col)}, "|")'
     )
     assert_equals(out, "abcd|ef|1|3", "renderer strips cursor marker and reports position")
+
+
+@test("tui/renderer_applies_cursor_marker_and_resets")
+def t_tui_renderer_applies_cursor_marker_and_resets(psi: Psi):
+    out = psi.eval(
+        'local r = require("psi.tui_renderer")\n'
+        + 'local old_frame = psi.tui_render_frame\n'
+        + 'local old_write = psi.stdout_write\n'
+        + 'local frame, row, col, visible\n'
+        + 'psi.tui_render_frame = function(f, r0, c0, v0) frame, row, col, visible = f, r0, c0, v0 end\n'
+        + 'psi.stdout_write = function() end\n'
+        + 'r.render(r.new(), {"ab" .. r.cursor_marker() .. "cd"}, {width=10, height=1, cursor_visible=true})\n'
+        + 'psi.tui_render_frame = old_frame\n'
+        + 'psi.stdout_write = old_write\n'
+        + 'return table.concat({\n'
+        + '  tostring(frame:find(r.cursor_marker(), 1, true) == nil),\n'
+        + '  tostring(frame:find("\\27]8;;\\7", 1, true) ~= nil),\n'
+        + '  tostring(row), tostring(col), tostring(visible)\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "true|true|1|3|true",
+                  "renderer strips marker, appends line reset, and uses marker cursor")
+
+
+@test("tui/hardware_cursor_uses_input_marker")
+def t_tui_hardware_cursor_uses_input_marker(psi: Psi):
+    out = psi.eval(
+        'local d = require("psi.tui_runtime")._debug_redraw_counts("hello", {show_hardware_cursor=true})\n'
+        + 'local marker = require("psi.tui_renderer").cursor_marker()\n'
+        + 'return table.concat({\n'
+        + '  tostring(d.first_visible),\n'
+        + '  tostring(d.first_col),\n'
+        + '  tostring((d.first_frame or ""):find(marker, 1, true) == nil)\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "true|9|true", "hardware cursor is positioned from input marker")
 
 
 @test("tui/show_thinking_config")

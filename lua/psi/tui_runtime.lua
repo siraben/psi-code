@@ -9,6 +9,8 @@ local sched = require("psi.sched")
 local session = require("psi.session_manager")
 local settings = require("psi.settings_manager")
 local tui = require("psi.tui_status")
+local tui_chrome = require("psi.tui_components.chrome")
+local tui_markdown = require("psi.tui_components.markdown")
 local tui_component = require("psi.tui_component")
 local tui_layout = require("psi.tui_layout")
 local tui_renderer = require("psi.tui_renderer")
@@ -52,6 +54,8 @@ local BUSY_ANIMATION_INTERVAL_MS = 600
 local ANSI_PATTERN_CSI = "\27%[[%d;?]*[A-Za-z]"
 local ANSI_PATTERN_KEYPAD = "\27[=>]"
 local ANSI_PATTERN_PRIVATE_MODE = "\27%[%?[%d]+[a-z]"
+local ANSI_PATTERN_APC = "\27_[^\7]*\7"
+local ANSI_PATTERN_OSC = "\27%][^\7]*\7"
 
 local EMPTY = ""
 local NEWLINE = "\n"
@@ -103,6 +107,8 @@ local function strip_ansi(text)
   text = text:gsub(ANSI_PATTERN_CSI, EMPTY)
   text = text:gsub(ANSI_PATTERN_KEYPAD, EMPTY)
   text = text:gsub(ANSI_PATTERN_PRIVATE_MODE, EMPTY)
+  text = text:gsub(ANSI_PATTERN_APC, EMPTY)
+  text = text:gsub(ANSI_PATTERN_OSC, EMPTY)
   return text
 end
 
@@ -435,6 +441,7 @@ local function new_state(opts)
     status_text = nil,
     status_is_error = false,
     show_thinking = tui.show_thinking() == "1",
+    show_hardware_cursor = env_bool("PSI_HARDWARE_CURSOR") == true,
     width = width,
     height = height,
     renderer = tui_renderer.new(),
@@ -673,6 +680,27 @@ local function entry_render_lines(state, entry)
         break
       end
       cursor = nl + 1
+    end
+    entry.render_cache_width = state.width
+    entry.render_cache_lines = lines
+    return lines
+  end
+
+  if entry.kind == "assistant" then
+    local first_prefix, rest_prefix = entry_prefixes(entry)
+    local trimmed = sanitize_terminal_text(trim_trailing_newlines(entry.text or ""), true)
+    entry.markdown_component = entry.markdown_component or tui_markdown.new()
+    entry.markdown_component:set_text(trimmed)
+    entry.markdown_component:set_prefixes(first_prefix, rest_prefix)
+    local rendered = entry.markdown_component:render(state.width)
+    local lines = {}
+    for _, line in ipairs(rendered) do
+      lines[#lines + 1] = {
+        kind = "ansi",
+        text = line,
+        raw = strip_ansi(line),
+        entry = entry,
+      }
     end
     entry.render_cache_width = state.width
     entry.render_cache_lines = lines
@@ -1034,15 +1062,6 @@ local function input_box_line(content, width)
   return content .. style_input_fill(width - display_width(content), "body")
 end
 
-local function style_screen_fill(width)
-  return string.rep(" ", math.max(0, width))
-end
-
-local function padded_frame_text(text, width)
-  text = text or ""
-  return text .. style_screen_fill(width - display_width(text))
-end
-
 local render_input_text
 local render_input_text_with_cursor
 local input_line_selected
@@ -1066,8 +1085,8 @@ local function redraw(state)
   end
   frame_width = math.max(1, state.width - 1)
   cwd = psi.cwd() or "."
-  components[#components + 1] = tui_component.line(function(width)
-    return padded_frame_text(tui.compose_bar(tui.workspace_bar(cwd), width), width)
+  components[#components + 1] = tui_chrome.line(function(width)
+    return tui.compose_bar(tui.workspace_bar(cwd), width)
   end)
 
   local first_line = total_lines - rows.transcript_height - state.scroll_offset + 1
@@ -1078,10 +1097,9 @@ local function redraw(state)
   local transcript_component_lines = {}
   for i = 0, rows.transcript_height - 1 do
     local line = transcript_lines[i + 1]
-    transcript_component_lines[#transcript_component_lines + 1] =
-      padded_frame_text(line and style_line(line) or "", frame_width)
+    transcript_component_lines[#transcript_component_lines + 1] = line and style_line(line) or ""
   end
-  components[#components + 1] = tui_component.fixed(transcript_component_lines)
+  components[#components + 1] = tui_chrome.transcript(transcript_component_lines)
 
   status_arg = {
     model = state.model and state.model.id or state.opts.model,
@@ -1108,14 +1126,14 @@ local function redraw(state)
     )
   end
   if rows.status_visible then
-    components[#components + 1] = tui_component.line(function(width)
-      return padded_frame_text(status_text, width)
+    components[#components + 1] = tui_chrome.line(function()
+      return status_text
     end)
   end
 
   local input_width = frame_width
   local input_component_lines = {
-    padded_frame_text(style_input_border(input_width), frame_width),
+    style_input_border(input_width),
   }
   for i = 0, rows.input_rows - 1 do
     local line_index = rows.input_first_line + i
@@ -1139,14 +1157,13 @@ local function redraw(state)
         input_width
       )
     end
-    input_component_lines[#input_component_lines + 1] = padded_frame_text(input_text, frame_width)
+    input_component_lines[#input_component_lines + 1] = input_text
   end
-  input_component_lines[#input_component_lines + 1] =
-    padded_frame_text(style_input_border(input_width), frame_width)
-  components[#components + 1] = tui_component.fixed(input_component_lines)
+  input_component_lines[#input_component_lines + 1] = style_input_border(input_width)
+  components[#components + 1] = tui_chrome.input_box(input_component_lines)
 
-  components[#components + 1] = tui_component.line(function(width)
-    return padded_frame_text(tui.compose_bar(tui.status_bar(status_arg) or "", width), width)
+  components[#components + 1] = tui_chrome.line(function(width)
+    return tui.compose_bar(tui.status_bar(status_arg) or "", width)
   end)
   local visible_cursor_line = rows.cursor_line - rows.input_first_line + 1
   local cursor_prefix = rows.cursor_line == 1 and state.input_layout.prefix_first
@@ -1162,7 +1179,7 @@ local function redraw(state)
     height = state.height,
     cursor_row = cursor_row,
     cursor_col = cursor_col,
-    cursor_visible = false,
+    cursor_visible = state.show_hardware_cursor,
     force_full = state.force_physical_clear,
   })
   state.force_physical_clear = false
@@ -1563,7 +1580,10 @@ function render_input_text_with_cursor(state, line, draw_cursor)
     cell = " "
     after = ""
   end
-  return style_input_text(before) .. style_input_cursor(cell) .. style_input_text(after)
+  return style_input_text(before)
+    .. tui_renderer.cursor_marker()
+    .. style_input_cursor(cell)
+    .. style_input_text(after)
 end
 
 local function insert_text(state, text)
@@ -2817,6 +2837,7 @@ function M._debug_busy_animation_frames(times)
       status_text = nil,
       status_is_error = false,
       show_thinking = false,
+      show_hardware_cursor = false,
       width = 80,
       height = 24,
       input_layout = default_input_layout(24),
@@ -2978,7 +2999,8 @@ function M._debug_consume_queued_preview(input, queued_text)
   }
 end
 
-function M._debug_redraw_counts(input)
+function M._debug_redraw_counts(input, debug_options)
+  debug_options = type(debug_options) == "table" and debug_options or {}
   local names = {
     "tui_size",
     "tui_clear",
@@ -3080,6 +3102,7 @@ function M._debug_redraw_counts(input)
       status_text = nil,
       status_is_error = false,
       show_thinking = false,
+      show_hardware_cursor = not not debug_options.show_hardware_cursor,
       width = 80,
       height = 24,
       renderer = tui_renderer.new(),
@@ -3097,6 +3120,9 @@ function M._debug_redraw_counts(input)
     local rows = layout_rows(state)
     redraw(state)
     local first_frames = #calls.frames
+    local first_frame = calls.frames[1] and calls.frames[1].frame or ""
+    local first_visible = calls.frames[1] and calls.frames[1].visible or false
+    local first_col = calls.frames[1] and calls.frames[1].col or nil
     reset_calls()
     state.busy_tick = 1
     state.dirty = true
@@ -3128,6 +3154,9 @@ function M._debug_redraw_counts(input)
     end
     return {
       first_frames = first_frames,
+      first_frame = first_frame,
+      first_visible = first_visible,
+      first_col = first_col,
       second_frames = second_frames,
       second_writes = #calls.writes,
       second_input_draws = second_input_draws,

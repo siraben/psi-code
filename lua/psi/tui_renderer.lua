@@ -9,12 +9,18 @@ local M = {}
 local ESC = string.char(27)
 local CSI = ESC .. "["
 local RESET = CSI .. "0m"
+local OSC_RESET = ESC .. "]8;;" .. string.char(7)
+local LINE_RESET = RESET .. OSC_RESET
 local SYNC_BEGIN = CSI .. "?2026h"
 local SYNC_END = CSI .. "?2026l"
 local HIDE_CURSOR = CSI .. "?25l"
 local SHOW_CURSOR = CSI .. "?25h"
 
 local CURSOR_MARKER = ESC .. "_psi:c" .. string.char(7)
+
+local ANSI_PATTERN_CSI = "\27%[[%d;?]*[A-Za-z]"
+local ANSI_PATTERN_APC = "\27_[^\7]*\7"
+local ANSI_PATTERN_OSC = "\27%][^\7]*\7"
 
 local function clamp(value, low, high)
   if value < low then
@@ -32,6 +38,31 @@ local function normalize_lines(lines, height)
   lines = type(lines) == "table" and lines or {}
   for row = 1, height do
     out[row] = tostring(lines[row] or "")
+  end
+  return out
+end
+
+local function visible_width(text)
+  text = tostring(text or "")
+  text = text:gsub(ANSI_PATTERN_CSI, "")
+  text = text:gsub(ANSI_PATTERN_APC, "")
+  text = text:gsub(ANSI_PATTERN_OSC, "")
+  local width = 0
+  local i = 1
+  while i <= #text do
+    local byte = text:byte(i)
+    if byte < 0x80 or byte >= 0xC0 then
+      width = width + 1
+    end
+    i = i + 1
+  end
+  return width
+end
+
+local function apply_line_resets(lines)
+  local out = {}
+  for row, line in ipairs(lines) do
+    out[row] = tostring(line or "") .. LINE_RESET
   end
   return out
 end
@@ -110,10 +141,15 @@ function M.render(renderer, lines, opts)
   local raw_lines = type(lines) == "table" and lines or {}
   local width = math.max(1, tonumber(opts.width) or 1)
   local height = math.max(1, tonumber(opts.height) or #raw_lines or 1)
-  local next_lines = normalize_lines(raw_lines, height)
+  local next_lines, marker_cursor = M.extract_cursor(normalize_lines(raw_lines, height))
+  next_lines = apply_line_resets(next_lines)
   local cursor_row = clamp(tonumber(opts.cursor_row) or 1, 1, height)
   local cursor_col = math.max(1, tonumber(opts.cursor_col) or 1)
   local cursor_visible = not not opts.cursor_visible
+  if marker_cursor ~= nil then
+    cursor_row = clamp(marker_cursor.row, 1, height)
+    cursor_col = math.max(1, marker_cursor.col)
+  end
 
   local can_diff = type(psi.stdout_write) == "function"
   local reason
@@ -180,7 +216,7 @@ function M.extract_cursor(lines)
     line = tostring(line or "")
     local start_pos, end_pos = line:find(CURSOR_MARKER, 1, true)
     if start_pos ~= nil and cursor == nil then
-      cursor = { row = row, col = start_pos }
+      cursor = { row = row, col = visible_width(line:sub(1, start_pos - 1)) + 1 }
       line = line:sub(1, start_pos - 1) .. line:sub(end_pos + 1)
     end
     out[row] = line
