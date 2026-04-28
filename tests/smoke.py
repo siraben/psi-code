@@ -1818,6 +1818,48 @@ def t_tui_queue_status_lists_all(psi: Psi):
                     "queue status should concatenate every queued message")
 
 
+@test("tui/queue_edit_then_append")
+def t_tui_queue_edit_then_append(psi: Psi):
+    out = psi.eval(
+        'local agent = require("psi.agent")\n'
+        + 'local rt = require("psi.tui_runtime")\n'
+        + 'agent.clear_queues()\n'
+        + 'agent.queue_follow_up("first queued")\n'
+        + 'agent.queue_follow_up("second queued")\n'
+        + 'local function text(s) return {key="text", text=s} end\n'
+        + 'local state = rt._debug_edit_keys("", 0, {\n'
+        + '  {key="ctrl-p"}, {key="ctrl-a"}, {key="ctrl-k"}, text("edited queued"),\n'
+        + '  {key="enter"}, text("third queued"), {key="enter"}\n'
+        + '}, false, {busy=true})\n'
+        + 'local pending = agent.pending_messages()\n'
+        + 'return table.concat({\n'
+        + '  pending[1].text,\n'
+        + '  pending[2].text,\n'
+        + '  pending[3].text,\n'
+        + '  tostring(state.queue_nav_index)\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "first queued|edited queued|third queued|nil",
+                  "editing a queued message should not make the next busy submit overwrite it")
+
+
+@test("tui/consumed_queue_preview_clears_editor")
+def t_tui_consumed_queue_preview_clears_editor(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local same = rt._debug_consume_queued_preview("queued text", "queued text")\n'
+        + 'local edited = rt._debug_consume_queued_preview("queued text edited", "queued text")\n'
+        + 'return table.concat({\n'
+        + '  same.input,\n'
+        + '  tostring(same.cursor),\n'
+        + '  tostring(same.queue_nav_index),\n'
+        + '  edited.input\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "|0|nil|queued text edited",
+                  "consuming a displayed queued preview should clear only the unmodified preview")
+
+
 @test("tui/busy_btw_not_consumed")
 def t_tui_busy_btw_not_consumed(psi: Psi):
     out = psi.eval(
