@@ -24,7 +24,7 @@ local DEFINITIONS = {
   {
     id = "tui.input.clear",
     section = "Editing",
-    default_keys = { "ctrl-u" },
+    default_keys = {},
     description = "Delete to start of prompt",
   },
   {
@@ -78,14 +78,32 @@ local DEFINITIONS = {
   {
     id = "tui.transcript.pageUp",
     section = "Navigation",
-    default_keys = { "page-up" },
+    default_keys = { "page-up", "ctrl-u" },
     description = "Scroll transcript page up",
   },
   {
     id = "tui.transcript.pageDown",
     section = "Navigation",
-    default_keys = { "page-down" },
+    default_keys = { "page-down", "ctrl-d" },
     description = "Scroll transcript page down",
+  },
+  {
+    id = "tui.queue.previous",
+    section = "Navigation",
+    default_keys = { "ctrl-p" },
+    description = "Show previous queued message",
+  },
+  {
+    id = "tui.queue.next",
+    section = "Navigation",
+    default_keys = { "ctrl-n" },
+    description = "Show next queued message",
+  },
+  {
+    id = "tui.queue.restore",
+    section = "Navigation",
+    default_keys = { "up" },
+    description = "Edit queued message",
   },
   {
     id = "tui.editor.deleteCharBackward",
@@ -96,7 +114,7 @@ local DEFINITIONS = {
   {
     id = "tui.editor.deleteCharForward",
     section = "Editing",
-    default_keys = { "delete", "ctrl-d" },
+    default_keys = { "delete" },
     description = "Delete character forward",
   },
   {
@@ -126,7 +144,7 @@ local DEFINITIONS = {
   {
     id = "app.exit",
     section = "Other",
-    default_keys = { "ctrl-d" },
+    default_keys = {},
     description = "Exit when prompt is empty",
   },
   {
@@ -177,6 +195,18 @@ local function normalize_key(key)
   end
   if key == "pageDown" or key == "pagedown" or key == "pgdn" then
     return "page-down"
+  end
+  if key == "ctrlUp" or key == "ctrlup" then
+    return "ctrl-up"
+  end
+  if key == "ctrlDown" or key == "ctrldown" then
+    return "ctrl-down"
+  end
+  if key == "altUp" or key == "altup" then
+    return "alt-up"
+  end
+  if key == "altDown" or key == "altdown" then
+    return "alt-down"
   end
   return key
 end
@@ -325,6 +355,7 @@ local DISPLAY = {
   ["alt-b"] = "Alt-B",
   ["alt-f"] = "Alt-F",
   ["alt-d"] = "Alt-D",
+  ["alt-up"] = "Alt-Up",
   ["alt-backspace"] = "Alt-Backspace",
   ["backspace"] = "Backspace",
   ["ctrl-a"] = "Ctrl-A",
@@ -335,6 +366,9 @@ local DISPLAY = {
   ["ctrl-g"] = "Ctrl-G",
   ["ctrl-k"] = "Ctrl-K",
   ["ctrl-l"] = "Ctrl-L",
+  ["ctrl-n"] = "Ctrl-N",
+  ["ctrl-p"] = "Ctrl-P",
+  ["ctrl-up"] = "Ctrl-Up",
   ["ctrl-u"] = "Ctrl-U",
   ["ctrl-v"] = "Ctrl-V",
   ["ctrl-w"] = "Ctrl-W",
@@ -388,7 +422,14 @@ end
 function M.footer_hint(arg_json)
   local arg = type(arg_json) == "table" and arg_json or prelude.safe_json_decode(arg_json, {})
   if arg.busy then
-    return M.display("app.interrupt") .. " abort current turn"
+    return table.concat({
+      M.display("tui.input.submit") .. " queue",
+      M.display("tui.queue.previous") .. "/" .. M.display("tui.queue.next") .. " queued",
+      M.display("tui.queue.restore") .. " edit",
+      M.display("app.interrupt") .. " abort",
+      "/queue",
+      "/btw",
+    }, "  ")
   end
   local submit = M.display("tui.input.submit")
   local newline = M.display("tui.input.newLine")

@@ -431,13 +431,17 @@ def t_agent_control_queues(psi: Psi):
         + 'local ok1 = agent.queue_steering("steer")\n'
         + 'local ok2 = agent.queue_follow_up({text = "follow"})\n'
         + 'local pending = agent.pending_message_count()\n'
+        + 'local item = agent.pending_message(2)\n'
+        + 'local edited = agent.replace_pending(2, "follow edited")\n'
+        + 'local removed = agent.remove_pending(1)\n'
         + 'local steering = agent.drain_steering()\n'
         + 'local follow = agent.drain_follow_ups()\n'
         + 'return tostring(ok1) .. "|" .. tostring(ok2) .. "|"\n'
-        + '  .. pending .. "|" .. steering[1] .. "|" .. follow[1] .. "|"\n'
+        + '  .. pending .. "|" .. item.kind .. "|" .. tostring(edited) .. "|"\n'
+        + '  .. removed .. "|" .. tostring(steering[1]) .. "|" .. follow[1] .. "|"\n'
         + '  .. agent.pending_message_count()'
     )
-    assert_equals(out, "true|true|2|steer|follow|0",
+    assert_equals(out, "true|true|2|follow-up|true|steer|nil|follow edited|0",
                   "agent queues should drain in FIFO order")
 
 
@@ -563,6 +567,50 @@ def t_commands_help_generated(psi: Psi):
     assert_contains(out, "extensions:", "extension help section")
     assert_contains(out, "/greet <name>", "extension argument hint")
     assert_contains(out, "Say hello", "extension description")
+    assert_contains(out, "/btw <question>", "packaged /btw extension help")
+
+
+@test("commands/queue_management")
+def t_commands_queue_management(psi: Psi):
+    out = psi.eval(
+        'local agent = require("psi.agent")\n'
+        + 'local c = require("psi.commands")\n'
+        + 'agent.clear_queues()\n'
+        + 'agent.queue_follow_up("first queued")\n'
+        + 'agent.queue_follow_up("second queued")\n'
+        + 'local list = c.handle("/queue").payload\n'
+        + 'local edit = c.handle("/queue edit 2 changed").payload\n'
+        + 'local drop = c.handle("/queue drop 1").payload\n'
+        + 'local item = agent.pending_message(1)\n'
+        + 'return tostring(list:find("first queued") ~= nil) .. "|"\n'
+        + '  .. edit .. "|" .. drop .. "|" .. item.text'
+    )
+    assert_equals(out, "true|updated queued message 2|removed queued message 1|changed",
+                  "/queue should list, edit, and drop pending messages")
+
+
+@test("commands/btw_action")
+def t_commands_btw_action(psi: Psi):
+    out = psi.eval(
+        'local c = require("psi.commands")\n'
+        + 'local action = c.handle("/btw should not call the network")\n'
+        + 'return action.kind .. "|" .. action.payload'
+    )
+    assert_equals(out, "btw|should not call the network", "/btw should return a typed action")
+
+
+@test("agent/btw_allows_local_model")
+def t_agent_btw_allows_local(psi: Psi):
+    out = psi.eval(
+        'local agent = require("psi.agent")\n'
+        + 'local ollama = require("psi.ollama")\n'
+        + 'ollama.complete_text = function(opts) return true, opts.model end\n'
+        + 'agent.configure({model = "ollama/qwen2.5"})\n'
+        + 'local ok, answer = agent.side_question("should not call the network")\n'
+        + 'return tostring(ok) .. "|" .. tostring(answer)'
+    )
+    assert_equals(out, "true|qwen2.5",
+                  "side questions should allow custom local models to reach provider execution")
 
 
 @test("commands/rainbow_prints_256_backgrounds")
@@ -664,8 +712,10 @@ def t_keybindings_generated(psi: Psi):
         + '  .. tostring(kb.conflicts()[1].key)',
         env_extra={"HOME": str(home)},
     ).stdout.strip()
-    assert_contains(out, "Ctrl-Z|Alt-D|true|Ctrl-Z abort current turn|1|ctrl-z",
+    assert_contains(out, "Ctrl-Z|Alt-D|true|Enter queue",
                     "generated keybinding help/footer didn't use overrides")
+    assert_contains(out, "Ctrl-Z abort", "busy footer should include abort key")
+    assert_contains(out, "1|ctrl-z", "keybinding conflict should be reported")
 
 
 @test("tools/set_active_filters")
@@ -921,12 +971,15 @@ def t_agent_set_model(psi: Psi):
         + 'local got = a.current_model("anthropic/fallback")\n'
         + 'a.set_model(nil)\n'
         + 'local cleared = a.current_model("anthropic/fallback")\n'
+        + 'a.configure({model = "ollama/local"})\n'
+        + 'local configured = a.current_model(nil)\n'
         + 'local effective = a.effective_model(nil)\n'
         + 'local desc = a.model_descriptor(nil)\n'
         + 'local has_effective = effective ~= nil and effective ~= ""\n'
-        + 'return got .. "|" .. cleared .. "|" .. tostring(has_effective) .. "|" .. desc.provider'
+        + 'return got .. "|" .. cleared .. "|" .. configured .. "|"\n'
+        + '  .. tostring(has_effective) .. "|" .. desc.provider'
     )
-    assert_contains(out, "openrouter/x/y|anthropic/fallback|true|anthropic",
+    assert_contains(out, "openrouter/x/y|anthropic/fallback|ollama/local|true|ollama",
                     "override then clear")
 
 
@@ -1739,15 +1792,61 @@ def t_tui_key_policy(psi: Psi):
         + '  fmt(tui.handle_key({key="enter", busy=false, input_length=1})),\n'
         + '  fmt(tui.handle_key({key="enter", busy=true, input_length=1})),\n'
         + '  fmt(tui.handle_key({key="shift-enter", busy=false, input_length=0})),\n'
+        + '  fmt(tui.handle_key({key="ctrl-u", busy=false, input_length=0})),\n'
         + '  fmt(tui.handle_key({key="ctrl-d", busy=false, input_length=0})),\n'
         + '  fmt(tui.handle_key({key="ctrl-d", busy=true, input_length=0})),\n'
+        + '  fmt(tui.handle_key({key="up", busy=true, input_length=0, queue_count=2})),\n'
+        + '  fmt(tui.handle_key({key="up", busy=true, input_length=0, queue_count=0})),\n'
+        + '  fmt(tui.handle_key({key="wheel-up", busy=false, input_length=0})),\n'
+        + '  fmt(tui.handle_key({key="wheel-down", busy=false, input_length=0})),\n'
         + '  fmt(tui.handle_key({key="escape", busy=true, input_length=0})),\n'
         + '  fmt(tui.handle_key({key="ctrl-g", busy=true, input_length=0})),\n'
         + '  fmt(tui.handle_key({key="text", text="x"}))\n'
         + '}, "|")'
     )
-    assert_equals(out, "submit:-|nil|insert:\\n|quit:-|nil|nil|abort:-|insert:x",
+    assert_equals(out, "submit:-|submit:-|insert:\\n|scroll:page-up|scroll:page-down|scroll:page-down|queue-restore:-|scroll:line-up|scroll:line-up|scroll:line-down|nil|abort:-|insert:x",
                   "Lua TUI key policy")
+
+
+@test("tui/queue_restore")
+def t_tui_queue_restore(psi: Psi):
+    out = psi.eval(
+        'local agent = require("psi.agent")\n'
+        + 'local rt = require("psi.tui_runtime")\n'
+        + 'agent.clear_queues()\n'
+        + 'agent.queue_follow_up("first queued")\n'
+        + 'agent.queue_follow_up("second queued")\n'
+        + 'local state = rt._debug_edit_keys("", 0, {{key="up"}}, false, {busy=true})\n'
+        + 'return state.input .. "|" .. tostring(agent.pending_message_count()) .. "|"\n'
+        + '  .. tostring(state.status_text)'
+    )
+    assert_equals(out, "first queued\nsecond queued|0|editing queued messages",
+                  "Up should restore all queued messages into the editor")
+
+
+@test("tui/queue_status_lists_all")
+def t_tui_queue_status_lists_all(psi: Psi):
+    out = psi.eval(
+        'local agent = require("psi.agent")\n'
+        + 'local tui = require("psi.tui")\n'
+        + 'agent.clear_queues()\n'
+        + 'agent.queue_follow_up("first queued")\n'
+        + 'agent.queue_follow_up("second queued")\n'
+        + 'return tui.status_line({busy=true, scroll=0})'
+    )
+    assert_contains(out, "queue:first queued | second queued",
+                    "queue status should concatenate every queued message")
+
+
+@test("tui/busy_btw_not_consumed")
+def t_tui_busy_btw_not_consumed(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local state = rt._debug_edit_keys("/btw keep me", 12, {{key="enter"}}, false, {busy=true})\n'
+        + 'return state.input .. "|" .. tostring(state.status_text)'
+    )
+    assert_equals(out, "/btw keep me|/btw is unavailable while a turn is running",
+                  "busy /btw should remain editable instead of being dropped")
 
 
 @test("tui/vim_modal_keys")
@@ -2223,6 +2322,24 @@ def t_process_gc_runs(psi: Psi):
         + 'return "ok"'
     )
     assert_equals(out, "ok", "gc cycle completed without error")
+
+
+@test("sched/run_all_on_done")
+def t_sched_run_all_on_done(psi: Psi):
+    out = psi.eval(
+        'local sched = require("psi.sched")\n'
+        + 'local seen = {}\n'
+        + 'local results = sched.run_all({\n'
+        + '  function() sched.sleep_ms(20); return "slow" end,\n'
+        + '  function() return "fast" end,\n'
+        + '}, { on_done = function(i, r)\n'
+        + '  seen[#seen + 1] = tostring(i) .. ":" .. tostring(r.values and r.values[1])\n'
+        + 'end })\n'
+        + 'return table.concat(seen, ",") .. "|"\n'
+        + '  .. results[1].values[1] .. "|" .. results[2].values[1]'
+    )
+    assert_equals(out, "2:fast,1:slow|slow|fast",
+                  "run_all should report tasks as they complete")
 
 
 @test("session/append_only_correctness")

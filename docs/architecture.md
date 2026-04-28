@@ -122,6 +122,11 @@ underlying subprocess or HTTP activity driven by pollable handles. There are no
 Lua data races, but there can be real-world side-effect races if two tools
 touch the same external resource.
 
+`sched.run_all(..., { on_done = fn })` reports each tool as it completes, so the
+TUI can update individual tool panels without waiting for the slowest sibling.
+Session persistence still writes the final tool-result messages after the batch
+settles, preserving the existing provider-loop transcript shape.
+
 Current discipline:
 
 - read/search/process style tools can run concurrently
