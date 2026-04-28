@@ -234,7 +234,7 @@ function M.side_question(question, opts)
 
   local excerpt = transcript_excerpt(opts.context_chars or 24000)
   if excerpt == "" then
-    return true, "The current session is empty, so there is no transcript context for /btw yet."
+    excerpt = "(empty transcript)"
   end
 
   local provider, resolved = pick_provider(M.current_model(opts.model))
