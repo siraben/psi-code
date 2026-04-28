@@ -73,7 +73,7 @@ local function render_inline(text)
   end)
   text = text:gsub("\1C(%d+)\2", function(n)
     local c = codes[tonumber(n)] or ""
-    return ansi.color("33", "`" .. c .. "`")
+    return ansi.color("33", c)
   end)
 
   return text
