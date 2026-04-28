@@ -34,10 +34,27 @@
         "type": "github"
       }
     },
+    "nixpkgs-cosmo": {
+      "locked": {
+        "lastModified": 1776552800,
+        "narHash": "sha256-eqg2yy2dWLN1bUwuC5FMZHeufqq8X+FZv0BEAszJ0as=",
+        "owner": "siraben",
+        "repo": "nixpkgs",
+        "rev": "358fd93c32f867fa8a9a04b1312c5415e3444b5e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "siraben",
+        "ref": "siraben/cosmopkgs",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "flake-utils": "flake-utils",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "nixpkgs-cosmo": "nixpkgs-cosmo"
       }
     },
     "systems": {

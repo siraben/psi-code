@@ -3,15 +3,25 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+    # Cosmopolitan cross-compiler set (siraben/cosmopkgs). Provides:
+    #   - pkgs.cosmocc (4.x)
+    #   - pkgsCosmo       — single-arch cross stdenv (host's native arch)
+    #   - pkgsCosmoFat    — fat APE cross stdenv (x86_64 + aarch64)
+    #   - pkgsCosmoAarch64
+    nixpkgs-cosmo.url = "github:siraben/nixpkgs/siraben/cosmopkgs";
+
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, nixpkgs-cosmo, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
           inherit system;
         };
+
+        cosmoBase = import nixpkgs-cosmo { inherit system; };
 
         # Build the psi derivation against an arbitrary package set.
         # Accepts:
@@ -105,6 +115,27 @@
           if (pkgs.stdenv.hostPlatform.system == "x86_64-linux")
           then mkPsi { p = pkgs.pkgsi686Linux.pkgsStatic; static = true; }
           else throw "packages.psi-static-i686 requires x86_64-linux host (got ${pkgs.stdenv.hostPlatform.system})";
+
+        # Cosmocc smoke tests — confirm we can produce static no-glibc
+        # binaries via the cosmopkgs branch's cross stdenvs. These build
+        # off `pkgsCosmo.callPackage` (single-arch) and
+        # `pkgsCosmoFat.callPackage` (fat APE — one binary that runs
+        # natively on x86_64 + aarch64). Mirrors the working
+        # `pkgsCosmo.hello` build matrix on the cosmopkgs branch.
+        #
+        # No nativeBuildInputs other than the stdenv, so we don't pull
+        # cross-glibc-nolibgcc through pkg-config (which is what stalled
+        # the full psi build earlier).
+
+        # Single-arch APE — host's native arch. Our cosmocc.nix uses
+        # `$CC` from the stdenv, which inside pkgsCosmo is a
+        # cosmocc-wrapped gcc.
+        packages.psi-cosmocc-hello =
+          cosmoBase.pkgsCosmo.callPackage ./nix/cosmocc.nix {};
+
+        # Fat APE — one binary covering both x86_64 and aarch64.
+        packages.psi-cosmocc-hello-fat =
+          cosmoBase.pkgsCosmoFat.callPackage ./nix/cosmocc.nix {};
 
         # `nix run .#valgrind` — memcheck a non-agent exercise set.
         apps.valgrind = let
