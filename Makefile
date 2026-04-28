@@ -83,6 +83,8 @@ LOCAL_LDFLAGS += $(call pkg_libs,ZLIB,zlib)
 LOCAL_LDFLAGS += $(if $(PSI_LIBS_ARGTABLE),$(PSI_LIBS_ARGTABLE),$(or $(call pkg_libs,ARGTABLE,argtable3),-largtable3))
 LOCAL_LDFLAGS += $(if $(PSI_LIBS_PTHREAD),$(PSI_LIBS_PTHREAD),-lpthread)
 LOCAL_RPATH_LDFLAGS = $(patsubst -L%,-Wl$(comma)-rpath$(comma)%,$(filter -L%,$(LOCAL_LDFLAGS)))
+CURL_SSL_BACKENDS = $(shell curl-config --ssl-backends 2>/dev/null)
+CURL_CA_BUNDLE = $(shell curl-config --ca 2>/dev/null)
 
 LUA_BOOT_FILE ?= $(abspath lua/boot.lua)
 
@@ -164,7 +166,16 @@ $(BUILD_DIR)/embedded_lua.o: $(EMBED_OUT) include/psi/embedded_lua.h
 $(BUILD_DIR)/embedded_docs.o: $(EMBED_DOCS_OUT) include/psi/embedded_lua.h
 	$(CC) $(CPPFLAGS) -Iinclude $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
-$(TARGET): $(OBJECTS) | $(BUILD_DIR)
+.PHONY: check-curl-ca
+check-curl-ca:
+	@if printf '%s\n' "$(CURL_SSL_BACKENDS)" | grep -qi 'mbedTLS' && [ -z "$(CURL_CA_BUNDLE)" ]; then \
+		echo "error: libcurl is built with mbedTLS but has no default CA bundle"; \
+		echo "       enter a fresh nix develop shell so curl picks up the flake cacert build"; \
+		echo "       or rebuild/provide libcurl with curl-config --ca set"; \
+		exit 1; \
+	fi
+
+$(TARGET): check-curl-ca $(OBJECTS) | $(BUILD_DIR)
 	$(CC) $(LDFLAGS) $(RPATH_LDFLAGS) -o $@ $(OBJECTS) $(LOCAL_LDFLAGS)
 
 $(BUILD_DIR)/main.o: src/main.c include/psi/common.h include/psi/runtime.h include/psi/session.h include/psi/vm.h
