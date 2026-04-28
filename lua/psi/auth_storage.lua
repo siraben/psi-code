@@ -54,7 +54,14 @@ local function write_all(data)
     return false, "could not write " .. path
   end
   if psi.process_run_argv then
-    pcall(psi.process_run_argv, { "chmod", "600", path })
+    local chmod = psi.process_run_argv({ "chmod", "600", path })
+    if not chmod or chmod.status ~= 0 then
+      os.remove(path)
+      return false, "could not secure " .. path
+    end
+  else
+    os.remove(path)
+    return false, "could not secure " .. path
   end
   return true
 end

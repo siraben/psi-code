@@ -151,9 +151,9 @@ extensions cannot shadow them. Full list:
 
 ```
 /help  /hotkeys  /quit (+ /q, :quit, :q)  /session  /system-prompt  /vim
-/new (alias: /clear)  /reload  /copy
+/new (alias: /clear)  /reload  /copy  /login <provider>
 /resume <path>  /import <path>
-/name <text>  /model <spec>  /thinking <level>
+/name <text>  /model <spec>  /thinking <level>  /set <setting> <value>
 /export [path]  /fork [N]  /clone [path]  /compact [N]
 ```
 
