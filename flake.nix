@@ -137,6 +137,47 @@
         packages.psi-cosmocc-hello-fat =
           cosmoBase.pkgsCosmoFat.callPackage ./nix/cosmocc.nix {};
 
+        # Real psi build via the cosmocc cross stdenv. TUI / libedit
+        # are compiled out (cosmopolitan can't satisfy ncurses and
+        # libedit's static termios init), curl is statically linked
+        # for HTTPS, and the binary is a static APE.
+        #
+        # cosmopkgs's cross overlays apply `staticOnly = true` to
+        # `lua` but not the `lua5_4` attribute, so we re-apply it
+        # here. cosmocc only supports static linkage, and lua's
+        # default Makefile builds liblua.so unless told otherwise.
+        packages.psi-cosmocc =
+          cosmoBase.pkgsCosmo.callPackage ./nix/psi-cosmocc.nix {
+            lua5_4 = cosmoBase.pkgsCosmo.lua5_4.override {
+              staticOnly = true;
+            };
+            buildCC = pkgs.stdenv.cc;
+            buildZlib = pkgs.zlib;
+          };
+
+        packages.psi-cosmocc-fat =
+          cosmoBase.pkgsCosmoFat.callPackage ./nix/psi-cosmocc.nix {
+            lua5_4 = cosmoBase.pkgsCosmoFat.lua5_4.override {
+              staticOnly = true;
+            };
+            # cosmocc-aarch64's runtime doesn't provide
+            # __stack_chk_guard. Disable both the nixpkgs hardening
+            # arm AND cjson's own CMakeLists "custom compiler flags"
+            # arm (which independently adds -fstack-protector for
+            # gcc builds). Skip the test suite too — it's built as
+            # part of `make all`.
+            cjson = cosmoBase.pkgsCosmoFat.cjson.overrideAttrs (old: {
+              hardeningDisable = (old.hardeningDisable or [])
+                ++ [ "stackprotector" ];
+              cmakeFlags = (old.cmakeFlags or []) ++ [
+                "-DENABLE_CJSON_TEST=OFF"
+                "-DENABLE_CUSTOM_COMPILER_FLAGS=OFF"
+              ];
+            });
+            buildCC = pkgs.stdenv.cc;
+            buildZlib = pkgs.zlib;
+          };
+
         # `nix run .#valgrind` — memcheck a non-agent exercise set.
         apps.valgrind = let
           vgScript = pkgs.writeShellApplication {
