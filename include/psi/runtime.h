@@ -21,6 +21,7 @@ struct psi_cli_options {
     const char *boot_file;
     const char *session_file;
     const char *model;
+    const char *thinking_level;
     long max_tokens;
     long keep_recent;
 };

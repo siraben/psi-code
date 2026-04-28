@@ -10,6 +10,7 @@ local control = require("psi.agent_control")
 local prompt = require("psi.prompt")
 local sched = require("psi.sched")
 local session = require("psi.session")
+local thinking = require("psi.thinking")
 local providers = require("psi.providers")
 
 local M = {}
@@ -54,9 +55,20 @@ local function normalize_reasoning_effort(value)
   if value == nil then
     return nil
   end
-  value = tostring(value)
+  value = tostring(value):lower()
   if value == "" then
     return nil
+  end
+  if value == "none" or value == "off" then
+    return "none"
+  end
+  return thinking.normalize(value)
+end
+
+local function effort_to_thinking(value)
+  value = normalize_reasoning_effort(value)
+  if value == "none" then
+    return "off"
   end
   return value
 end
@@ -92,6 +104,58 @@ function M.effective_model(fallback)
   return resolved and resolved.id
 end
 
+local function provider_env_thinking(model)
+  local global = os.getenv("PSI_THINKING")
+  if global and global ~= "" then
+    return global
+  end
+  if type(model) == "table" and model.provider == "openai-codex" then
+    local codex = os.getenv("PSI_OPENAI_CODEX_REASONING")
+    if codex == "none" then
+      return "off"
+    end
+    if codex and codex ~= "" then
+      return codex
+    end
+  end
+  return nil
+end
+
+local function requested_thinking(explicit, reasoning_effort, model)
+  if explicit ~= nil and explicit ~= "" then
+    return explicit
+  end
+  if override_reasoning_effort ~= nil then
+    return effort_to_thinking(override_reasoning_effort)
+  end
+  local from_effort = effort_to_thinking(reasoning_effort)
+  if from_effort ~= nil then
+    return from_effort
+  end
+  local saved = session.current_thinking_level()
+  if saved ~= nil and saved ~= "" then
+    return saved
+  end
+  return provider_env_thinking(model)
+end
+
+function M.thinking_level_for(model, explicit, reasoning_effort)
+  return thinking.clamp(requested_thinking(explicit, reasoning_effort, model), model)
+end
+
+function M.set_thinking_level(level, model_spec)
+  local normalized = thinking.normalize(level)
+  if not normalized then
+    return false, "invalid thinking level"
+  end
+  local model = M.model_descriptor(model_spec)
+  local effective = thinking.clamp(normalized, model)
+  override_reasoning_effort = effective == "off" and "none" or effective
+  session.append_thinking_level_change(effective)
+  session.save()
+  return true, effective
+end
+
 M.queue_steering = control.queue_steering
 M.queue_follow_up = control.queue_follow_up
 M.drain_steering = control.drain_steering
@@ -113,12 +177,14 @@ function M.run_turn(opts)
   session.save()
 
   local provider, resolved = pick_provider(M.current_model(opts.model))
+  local thinking_level = M.thinking_level_for(resolved, opts.thinking_level, opts.reasoning_effort)
   local system_prompt = prompt.system_prompt()
   return sched.run(function()
     return provider.run_turn({
       system_prompt = system_prompt,
       model = resolved.id,
       max_tokens = opts.max_tokens,
+      thinking_level = thinking_level,
       reasoning_effort = M.current_reasoning_effort(opts.reasoning_effort),
       observer = opts.observer,
       abort_check = opts.abort_check,
@@ -136,12 +202,14 @@ function M.run_compact(opts)
   end
 
   local provider, resolved = pick_provider(M.current_model(opts.model))
+  local thinking_level = M.thinking_level_for(resolved, opts.thinking_level, opts.reasoning_effort)
   local request = prompt.compaction_request(keep_recent)
   local ok, summary = provider.complete_text({
     system_prompt = request[1],
     user_text = request[2],
     model = resolved.id,
     max_tokens = context.compaction_budget(),
+    thinking_level = thinking_level,
     reasoning_effort = M.current_reasoning_effort(opts.reasoning_effort),
   })
   if not ok then

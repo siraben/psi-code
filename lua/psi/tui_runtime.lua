@@ -1805,6 +1805,7 @@ local function run_turn(state, line)
       user_text = line or "",
       model = state.opts.model,
       max_tokens = state.opts.max_tokens,
+      thinking_level = state.opts.thinking_level,
       reasoning_effort = state.opts.reasoning_effort,
       observer = observer,
       abort_check = psi.is_aborted,
@@ -1859,6 +1860,7 @@ local function run_compact(state, keep_recent)
       keep_recent = keep_recent,
       model = state.opts.model,
       max_tokens = state.opts.max_tokens,
+      thinking_level = state.opts.thinking_level,
       reasoning_effort = state.opts.reasoning_effort,
     })
   end, debug.traceback)
@@ -1961,7 +1963,21 @@ local function handle_command(state, line)
   if action.kind == "set-reasoning-effort" then
     agent.set_reasoning_effort(action.payload)
     state.opts.reasoning_effort = action.payload
+    state.opts.thinking_level = action.payload == "none" and "off" or action.payload
     add_entry(state, "info", "reasoning effort set to " .. tostring(action.payload or "none"))
+    set_status(state, "", false)
+    return true
+  end
+
+  if action.kind == "set-thinking" then
+    local ok, level = agent.set_thinking_level(action.payload, state.opts.model)
+    if not ok then
+      set_status(state, tostring(level), true)
+      return true
+    end
+    state.opts.thinking_level = level
+    state.opts.reasoning_effort = level == "off" and "none" or level
+    add_entry(state, "info", "thinking set to " .. tostring(level))
     set_status(state, "", false)
     return true
   end
