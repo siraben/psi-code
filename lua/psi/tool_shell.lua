@@ -71,7 +71,9 @@ local function truncate_for_mode(text, opts)
 end
 
 local function truncation_meta(result)
-  if not result then return nil end
+  if not result then
+    return nil
+  end
   return {
     truncated_by = result.truncated_by,
     total_lines = result.total_lines,
@@ -120,7 +122,9 @@ local function stream(handle, tool_call_id, opts, poll_fn)
   local mode = opts.mode or "tail"
   local rolling_max = max_bytes * 4 -- enough headroom for tail truncation
   local spill_to_disk = opts.spill_to_disk
-  if spill_to_disk == nil then spill_to_disk = true end
+  if spill_to_disk == nil then
+    spill_to_disk = true
+  end
 
   -- Bounded in-memory buffer. Bash uses a rolling tail because errors
   -- usually live at the end. Search/list tools use head mode so their
@@ -134,14 +138,18 @@ local function stream(handle, tool_call_id, opts, poll_fn)
   local last_progress_text = nil
 
   local function buffered_text()
-    if buf_first > #buf then return "" end
+    if buf_first > #buf then
+      return ""
+    end
     return table.concat(buf, "", buf_first, #buf)
   end
 
   local function append_buffer(chunk)
     if mode == "head" then
       local remaining = rolling_max - buf_bytes
-      if remaining <= 0 then return end
+      if remaining <= 0 then
+        return
+      end
       if #chunk > remaining then
         chunk = chunk:sub(1, remaining)
       end
@@ -161,7 +169,9 @@ local function stream(handle, tool_call_id, opts, poll_fn)
   end
 
   local function ensure_tempfile()
-    if temp_path or temp_open_failed or not spill_to_disk then return end
+    if temp_path or temp_open_failed or not spill_to_disk then
+      return
+    end
     if psi.tempfile_path == nil or psi.file_append == nil then
       temp_open_failed = true
       return
@@ -205,7 +215,9 @@ local function stream(handle, tool_call_id, opts, poll_fn)
         end
       end
     end
-    if done then break end
+    if done then
+      break
+    end
   end
 
   -- Drain whatever process.c buffered (it may include the head we

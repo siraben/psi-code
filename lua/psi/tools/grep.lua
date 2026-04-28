@@ -43,16 +43,22 @@ end
 -- blow the byte budget for the whole result. Mirrors pi-mono's
 -- truncateLine pass over rg output.
 local function clip_lines(text)
-  if not text or text == "" then return text, false end
+  if not text or text == "" then
+    return text, false
+  end
   local out = {}
   local clipped_any = false
   for line in (text .. "\n"):gmatch("([^\n]*)\n") do
     local clipped, was = truncate.truncate_line(line, LINE_LIMIT)
-    if was then clipped_any = true end
+    if was then
+      clipped_any = true
+    end
     out[#out + 1] = clipped
   end
   -- Drop the trailing empty entry split inserted by the gmatch trick.
-  if out[#out] == "" then out[#out] = nil end
+  if out[#out] == "" then
+    out[#out] = nil
+  end
   return table.concat(out, "\n"), clipped_any
 end
 
@@ -99,7 +105,9 @@ local function impl(input, meta)
     local notice_parts = {}
     if result.truncated then
       local n = truncate.head_notice(result)
-      if n and n ~= "" then notice_parts[#notice_parts + 1] = n end
+      if n and n ~= "" then
+        notice_parts[#notice_parts + 1] = n
+      end
     end
     if lines_clipped then
       notice_parts[#notice_parts + 1] = string.format(
@@ -128,9 +136,11 @@ return function()
     name = "grep",
     description = string.format(
       "Search file contents for a pattern and return matching lines with file paths and "
-      .. "line numbers. Output is truncated to %d lines or %dKB (whichever is hit first). "
-      .. "Long match lines are clipped to %d chars.",
-      DEFAULT_LINES, math.floor(DEFAULT_BYTES / 1024), LINE_LIMIT
+        .. "line numbers. Output is truncated to %d lines or %dKB (whichever is hit first). "
+        .. "Long match lines are clipped to %d chars.",
+      DEFAULT_LINES,
+      math.floor(DEFAULT_BYTES / 1024),
+      LINE_LIMIT
     ),
     prompt_snippet = "Search file contents for patterns (prefer this over broad shell grep)",
     guidelines = { "Prefer grep over bash when searching file contents." },
