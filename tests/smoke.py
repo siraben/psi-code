@@ -806,6 +806,76 @@ def t_session_find_by_id(psi: Psi):
     assert_contains(out, "session-messages: 3", "prefix-resume reloaded prior turns")
 
 
+@test("tui/busy_status")
+def t_tui_busy_status(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local ansi = require("psi.ansi")\n'
+        + 'ansi.color_enabled = true\n'
+        + 'return require("psi.tui_status").render_busy_status("working", 2, 4)',
+    ).stdout.rstrip("\n")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_equals(
+        plain,
+        "working (0:04  • Ctrl-G to interrupt) ...",
+        "busy status renders selected label, hint, and animated dots",
+    )
+    assert_contains(out, "\x1b[96m", "busy label has a subtle shimmer")
+
+
+@test("tui/differential_redraw_uses_changed_rows")
+def t_tui_differential_redraw_uses_changed_rows(psi: Psi):
+    out = psi.eval(
+        'local d = require("psi.tui_runtime")._debug_redraw_counts("hello\\nhi")\n'
+        + 'return table.concat({\n'
+        + '  tostring(d.first_frames),\n'
+        + '  tostring(d.second_frames),\n'
+        + '  tostring(d.second_writes),\n'
+        + '  tostring(d.second_input_draws > 0),\n'
+        + '  tostring(d.second_clears),\n'
+        + '  tostring(d.stale_clears > 0),\n'
+        + '  tostring(d.line_clears),\n'
+        + '  tostring(d.draw_rows),\n'
+        + '  tostring(d.raw_draws),\n'
+        + '  tostring(d.cursor_sets),\n'
+        + '  tostring(d.refreshes),\n'
+        + '  tostring(d.renderer_full),\n'
+        + '  tostring(d.renderer_diff >= 1),\n'
+        + '  tostring(d.renderer_last_mode)\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "1|0|1|false|0|true|1|0|0|0|0|1|true|diff",
+                  "stable-size redraw uses changed-row diff output")
+
+
+@test("tui/renderer_cursor_marker")
+def t_tui_renderer_cursor_marker(psi: Psi):
+    out = psi.eval(
+        'local r = require("psi.tui_renderer")\n'
+        + 'local lines, cursor = r.extract_cursor({"ab" .. r.cursor_marker() .. "cd", "ef"})\n'
+        + 'return table.concat({lines[1], lines[2], tostring(cursor.row), tostring(cursor.col)}, "|")'
+    )
+    assert_equals(out, "abcd|ef|1|3", "renderer strips cursor marker and reports position")
+
+
+@test("tui/show_thinking_config")
+def t_tui_show_thinking_config(psi: Psi):
+    default_out = psi.eval('return require("psi.tui_status").show_thinking()')
+    assert_equals(default_out, "0", "thinking hidden by default in TUI")
+
+    project = psi.tmp / "thinking-config-project"
+    (project / ".psi").mkdir(parents=True, exist_ok=True)
+    (project / ".psi" / "settings.json").write_text(
+        json.dumps({"tui": {"show_thinking": True}})
+    )
+    out = psi.run(
+        "--eval",
+        'return require("psi.tui_status").show_thinking()',
+        cwd=project,
+    ).stdout.strip()
+    assert_equals(out, "1", "project setting enables thinking in TUI")
+
+
 @test("session/list_sessions_includes_preview")
 def t_session_list_sessions_includes_preview(psi: Psi):
     project = psi.tmp / "project-preview"
@@ -890,6 +960,21 @@ def t_session_list_sessions_recency_scans_large_files(psi: Psi):
         env_extra=env,
     ).stdout.strip()
     assert_equals(out, "long|81", "large session recency uses tail entries")
+
+
+@test("tui/no_color_diff_frame")
+def t_tui_no_color_diff_frame(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local d = require("psi.tui_runtime")._debug_redraw_counts("hello")\n'
+        + 'local frame = d.second_output or ""\n'
+        + 'return table.concat({\n'
+        + '  tostring(frame:find("48;5;", 1, true) == nil),\n'
+        + '  tostring(frame:find("38;5;", 1, true) == nil)\n'
+        + '}, "|")',
+        env_extra={"NO_COLOR": "1", "TERM": "xterm-256color"},
+    ).stdout.strip()
+    assert_equals(out, "true|true", "diff renderer respects NO_COLOR")
 
 @test("session/cwd_scoped_dirs_do_not_collide")
 def t_session_cwd_scoped_dirs_do_not_collide(psi: Psi):
