@@ -623,6 +623,24 @@ def t_agent_btw_allows_local(psi: Psi):
                   "side questions should allow custom local models to reach provider execution")
 
 
+@test("agent/btw_openai_compat_abort_forwarded")
+def t_agent_btw_openai_compat_abort_forwarded(psi: Psi):
+    out = psi.eval(
+        'local agent = require("psi.agent")\n'
+        + 'local compat = require("psi.openai_compat")\n'
+        + 'local seen = "-"\n'
+        + 'compat.complete_text = function(opts)\n'
+        + '  seen = tostring(type(opts.abort_check) == "function" and opts.abort_check())\n'
+        + '  return true, "ok"\n'
+        + 'end\n'
+        + 'agent.configure({model = "ollama/qwen2.5"})\n'
+        + 'local ok = agent.side_question("abort?", { abort_check = function() return true end })\n'
+        + 'return tostring(ok) .. "|" .. seen'
+    )
+    assert_equals(out, "true|true",
+                  "/btw abort_check should reach OpenAI-compatible complete_text")
+
+
 @test("commands/rainbow_prints_256_backgrounds")
 def t_commands_rainbow(psi: Psi):
     out = psi.run(
@@ -1910,6 +1928,24 @@ def t_tui_busy_unavailable_command_not_consumed(psi: Psi):
     )
     assert_equals(out, "/model x|command unavailable while busy",
                   "busy unavailable slash commands should remain editable")
+
+
+@test("tui/busy_slash_command_does_not_dispatch")
+def t_tui_busy_slash_command_does_not_dispatch(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'psi.session_append("user", "keep", nil)\n'
+        + 'local before = psi.session_message_count()\n'
+        + 'local state = rt._debug_edit_keys("/new", 4, {{key="enter"}}, false, {busy=true})\n'
+        + 'return table.concat({\n'
+        + '  tostring(before),\n'
+        + '  tostring(psi.session_message_count()),\n'
+        + '  state.input,\n'
+        + '  tostring(state.status_text)\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "1|1|/new|command unavailable while busy",
+                  "busy slash commands should not dispatch side effects like /new")
 
 
 @test("tui/non_agent_busy_submit_not_queued")

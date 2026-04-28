@@ -231,6 +231,7 @@ function M.complete_text(opts)
     model = model,
     system_prompt = opts.system_prompt,
     user_text = opts.user_text,
+    abort_check = opts.abort_check,
     max_tokens = opts.max_tokens,
   }, make_config(model))
 end
