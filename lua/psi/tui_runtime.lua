@@ -14,6 +14,7 @@ local tui_markdown = require("psi.tui_components.markdown")
 local tui_component = require("psi.tui_component")
 local tui_layout = require("psi.tui_layout")
 local tui_renderer = require("psi.tui_renderer")
+local tui_text = require("psi.tui_text")
 
 local M = {}
 
@@ -46,23 +47,15 @@ local CHAR_OSC = "]"
 local CHAR_PM = "^"
 local CHAR_APC = "_"
 local CHAR_ST = "\\"
-local UTF8_CONTINUATION_MASK = 0xC0
-local UTF8_CONTINUATION_TAG = 0x80
-
 local SETTING_PROMPT_MAX_ROWS = "tui.prompt.max_rows"
 local BUSY_ANIMATION_INTERVAL_MS = 600
-
-local ANSI_PATTERN_CSI = "\27%[[%d;?]*[A-Za-z]"
-local ANSI_PATTERN_KEYPAD = "\27[=>]"
-local ANSI_PATTERN_PRIVATE_MODE = "\27%[%?[%d]+[a-z]"
-local ANSI_PATTERN_APC = "\27_[^\7]*\7"
-local ANSI_PATTERN_OSC = "\27%][^\7]*\7"
 
 local EMPTY = ""
 local NEWLINE = "\n"
 local FALLBACK_PROMPT_PREFIX_FIRST = "> "
 local FALLBACK_PROMPT_PREFIX_REST = "| "
-M._display_width_cache = { entries = 0 }
+local strip_ansi = tui_text.strip_ansi
+local display_width = tui_text.visible_width
 
 local function safe_decode(text, fallback)
   return prelude.safe_json_decode(text, fallback)
@@ -102,16 +95,6 @@ end
 local function trim_edge_newlines(text)
   text = trim_trailing_newlines(text)
   return (text:gsub("^" .. NEWLINE .. "+", EMPTY))
-end
-
-local function strip_ansi(text)
-  text = text or EMPTY
-  text = text:gsub(ANSI_PATTERN_CSI, EMPTY)
-  text = text:gsub(ANSI_PATTERN_KEYPAD, EMPTY)
-  text = text:gsub(ANSI_PATTERN_PRIVATE_MODE, EMPTY)
-  text = text:gsub(ANSI_PATTERN_APC, EMPTY)
-  text = text:gsub(ANSI_PATTERN_OSC, EMPTY)
-  return text
 end
 
 local function find_string_terminator(text, start)
@@ -183,50 +166,6 @@ local function sanitize_terminal_text(text, preserve_newlines)
     end
   end
   return table.concat(out)
-end
-
-local function display_width(text)
-  text = tostring(text or "")
-  if text:find("[^\32-\126]") == nil then
-    return #text
-  end
-  local cache = M._display_width_cache
-  if #text <= 4096 then
-    local cached = cache[text]
-    if cached ~= nil then
-      return cached
-    end
-  end
-
-  local width = 0
-  local i = 1
-  while i <= #text do
-    local ch = text:byte(i)
-    if ch == BYTE_ESC then
-      local next_byte = text:byte(i + 1)
-      if next_byte == 91 then
-        i = find_csi_terminator(text, i + 2)
-      elseif next_byte == 93 or next_byte == 80 or next_byte == 94 or next_byte == 95 then
-        i = find_string_terminator(text, i + 2)
-      else
-        i = i + 2
-      end
-    else
-      if (ch & UTF8_CONTINUATION_MASK) ~= UTF8_CONTINUATION_TAG then
-        width = width + 1
-      end
-      i = i + 1
-    end
-  end
-  if #text <= 4096 then
-    if cache.entries >= 1024 then
-      cache = { entries = 0 }
-      M._display_width_cache = cache
-    end
-    cache[text] = width
-    cache.entries = cache.entries + 1
-  end
-  return width
 end
 
 local function limit_text(text)

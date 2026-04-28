@@ -565,6 +565,37 @@ def t_markdown_component_table_wraps_cells(psi: Psi):
     assert_contains(plain, "three", "markdown table should wrap wide cells onto later lines")
 
 
+@test("markdown/component_table_escaped_pipe")
+def t_markdown_component_table_escaped_pipe(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local c = require("psi.tui_components.markdown").new({\n'
+        + '  text = "| Expr | Meaning |\\n| --- | --- |\\n| `a\\\\|b` | pipe literal |"\n'
+        + '})\n'
+        + 'return table.concat(c:render(80), "\\n")',
+    ).stdout.rstrip("\n")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_contains(plain, "a|b", "escaped pipes should stay in the table cell")
+    assert_contains(plain, "pipe literal", "escaped pipe row should keep following cells")
+    assert_true("`" not in plain, "inline code in table cells should not render backticks")
+
+
+@test("markdown/component_table_stops_before_paragraph")
+def t_markdown_component_table_stops_before_paragraph(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local c = require("psi.tui_components.markdown").new({\n'
+        + '  text = "| A | B |\\n| --- | --- |\\nNext paragraph with | character"\n'
+        + '})\n'
+        + 'return table.concat(c:render(80), "\\n")',
+    ).stdout.rstrip("\n")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_contains(plain, "Next paragraph with | character",
+                    "paragraph after table should still render")
+    assert_true("│ Next paragraph" not in plain,
+                "paragraph with a pipe should not be swallowed as a table row")
+
+
 @test("compaction/snaps_past_orphan_tool_result")
 def t_compact_snap(psi: Psi):
     """Regression for the Haiku session failure: do_compact must never

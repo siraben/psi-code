@@ -9,6 +9,7 @@ local context = require("psi.context")
 local keybindings = require("psi.keybindings")
 local prelude = require("psi.prelude")
 local settings = require("psi.settings_manager")
+local tui_text = require("psi.tui_text")
 
 local M = {}
 local BAR_SPLIT = string.char(31)
@@ -514,51 +515,6 @@ local function tilde_path(path)
   return path
 end
 
-local function visible_width(text)
-  text = tostring(text or "")
-  if text:find(NON_PRINTABLE_ASCII_PATTERN) == nil then
-    return #text
-  end
-  local cache = M._visible_width_cache
-  if #text <= 4096 then
-    local cached = cache[text]
-    if cached ~= nil then
-      return cached
-    end
-  end
-
-  local width = 0
-  local i = 1
-  while i <= #text do
-    local ch = text:byte(i)
-    if ch == BYTE_ESC and text:byte(i + 1) == 91 then
-      local j = i + 2
-      while j <= #text do
-        local byte = text:byte(j)
-        if byte >= 64 and byte <= 126 then
-          break
-        end
-        j = j + 1
-      end
-      i = j < #text and (j + 1) or (#text + 1)
-    else
-      if (ch & UTF8_CONTINUATION_MASK) ~= UTF8_CONTINUATION_TAG then
-        width = width + 1
-      end
-      i = i + 1
-    end
-  end
-  if #text <= 4096 then
-    if cache.entries >= 1024 then
-      cache = { entries = 0 }
-      M._visible_width_cache = cache
-    end
-    cache[text] = width
-    cache.entries = cache.entries + 1
-  end
-  return width
-end
-
 local function split_bar(text)
   text = tostring(text or "")
   local start_pos, end_pos = text:find(BAR_SPLIT, 1, true)
@@ -571,8 +527,8 @@ end
 function M.compose_bar(text, width)
   local left, right = split_bar(text)
   local total_width = math.max(1, tonumber(width) or 80)
-  local left_width = visible_width(left)
-  local right_width = visible_width(right)
+  local left_width = tui_text.visible_width(left)
+  local right_width = tui_text.visible_width(right)
   local gap = total_width - left_width - right_width - 1
   if right == "" then
     return left

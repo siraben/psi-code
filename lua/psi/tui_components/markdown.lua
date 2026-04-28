@@ -6,6 +6,8 @@
 
 local ansi = require("psi.ansi")
 local markdown = require("psi.markdown")
+local tui_component = require("psi.tui_component")
+local tui_text = require("psi.tui_text")
 
 local M = {}
 
@@ -13,31 +15,6 @@ local FRAME_WIDTH_MARGIN = 1
 local MIN_WIDTH = 1
 local BYTE_SPACE = 32
 local BYTE_TAB = 9
-
-local Component = {}
-Component.__index = Component
-
-local function strip_ansi(text)
-  text = tostring(text or "")
-  text = text:gsub("\27%[[%d;?]*[A-Za-z]", "")
-  text = text:gsub("\27_[^\7]*\7", "")
-  text = text:gsub("\27%][^\7]*\7", "")
-  return text
-end
-
-local function visible_width(text)
-  text = strip_ansi(text)
-  local width = 0
-  local i = 1
-  while i <= #text do
-    local byte = text:byte(i)
-    if byte < 0x80 or byte >= 0xC0 then
-      width = width + 1
-    end
-    i = i + 1
-  end
-  return width
-end
 
 local function trim(text)
   return (tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", ""))
@@ -67,7 +44,7 @@ local function split_lines(text)
 end
 
 local function display_prefix_width(prefix)
-  return visible_width(prefix or "")
+  return tui_text.visible_width(prefix or "")
 end
 
 local function wrap_width(width, prefix)
@@ -79,30 +56,11 @@ local function is_space_byte(byte)
   return byte == BYTE_SPACE or byte == BYTE_TAB
 end
 
-local function byte_index_for_width(text, width)
-  if width <= 0 then
-    return 0
-  end
-  local seen = 0
-  local i = 1
-  while i <= #text do
-    local byte = text:byte(i)
-    if byte < 0x80 or byte >= 0xC0 then
-      seen = seen + 1
-      if seen > width then
-        return i - 1
-      end
-    end
-    i = i + 1
-  end
-  return #text
-end
-
 local function find_break(text, width)
-  if visible_width(text) <= width then
+  if tui_text.visible_width(text) <= width then
     return #text
   end
-  local limit = byte_index_for_width(text, width)
+  local limit = tui_text.byte_index_for_width(text, width)
   for i = limit, 1, -1 do
     local byte = text:byte(i)
     if byte ~= nil and is_space_byte(byte) then
@@ -132,22 +90,80 @@ end
 
 local function parse_cells(line)
   line = tostring(line or "")
-  line = line:gsub("^%s*|", ""):gsub("|%s*$", "")
   local cells = {}
-  local start = 1
-  while true do
-    local sep = line:find("|", start, true)
-    cells[#cells + 1] = trim(sep and line:sub(start, sep - 1) or line:sub(start))
-    if not sep then
-      break
+  local cell = {}
+  local escaped = false
+  local in_code = false
+  local i = 1
+
+  while i <= #line do
+    local ch = line:sub(i, i)
+    if escaped then
+      if ch == "|" then
+        cell[#cell + 1] = ch
+      else
+        cell[#cell + 1] = "\\" .. ch
+      end
+      escaped = false
+    elseif ch == "\\" then
+      escaped = true
+    elseif ch == "`" then
+      in_code = not in_code
+      cell[#cell + 1] = ch
+    elseif ch == "|" and not in_code then
+      cells[#cells + 1] = trim(table.concat(cell))
+      cell = {}
+    else
+      cell[#cell + 1] = ch
     end
-    start = sep + 1
+    i = i + 1
+  end
+
+  if escaped then
+    cell[#cell + 1] = "\\"
+  end
+  cells[#cells + 1] = trim(table.concat(cell))
+
+  if cells[1] == "" then
+    table.remove(cells, 1)
+  end
+  if cells[#cells] == "" then
+    table.remove(cells)
   end
   return cells
 end
 
+local function has_table_pipe(line)
+  line = tostring(line or "")
+  local escaped = false
+  local in_code = false
+  local i = 1
+  while i <= #line do
+    local ch = line:sub(i, i)
+    if escaped then
+      escaped = false
+    elseif ch == "\\" then
+      escaped = true
+    elseif ch == "`" then
+      in_code = not in_code
+    elseif ch == "|" and not in_code then
+      return true
+    end
+    i = i + 1
+  end
+  return false
+end
+
+local function has_leading_pipe(line)
+  return tostring(line or ""):match("^%s*|") ~= nil
+end
+
+local function has_trailing_pipe(line)
+  return tostring(line or ""):match("|%s*$") ~= nil
+end
+
 local function is_table_separator(line)
-  if not tostring(line or ""):find("|", 1, true) then
+  if not has_table_pipe(line) then
     return false
   end
   local cells = parse_cells(line)
@@ -163,7 +179,32 @@ local function is_table_separator(line)
 end
 
 local function looks_like_table_header(line, next_line)
-  return tostring(line or ""):find("|", 1, true) ~= nil and is_table_separator(next_line)
+  if not has_table_pipe(line) or not is_table_separator(next_line) then
+    return nil
+  end
+  local header = parse_cells(line)
+  local separator = parse_cells(next_line)
+  if #header < 2 or #separator ~= #header then
+    return nil
+  end
+  return {
+    columns = #header,
+    leading_pipe = has_leading_pipe(line),
+    trailing_pipe = has_trailing_pipe(line),
+  }
+end
+
+local function is_table_row(line, table_info)
+  if line == "" or not has_table_pipe(line) then
+    return false
+  end
+  if table_info.leading_pipe and not has_leading_pipe(line) then
+    return false
+  end
+  if table_info.trailing_pipe and not has_trailing_pipe(line) then
+    return false
+  end
+  return #parse_cells(line) == table_info.columns
 end
 
 local function normalize_row(cells, columns)
@@ -177,7 +218,7 @@ end
 local function longest_word_width(text, max_width)
   local longest = 0
   for word in tostring(text or ""):gmatch("%S+") do
-    longest = math.max(longest, visible_width(markdown.render_inline(word)))
+    longest = math.max(longest, tui_text.visible_width(markdown.render_inline(word)))
   end
   if max_width ~= nil then
     longest = math.min(longest, max_width)
@@ -186,7 +227,7 @@ local function longest_word_width(text, max_width)
 end
 
 local function styled_cell_width(text)
-  return visible_width(markdown.render_inline(text))
+  return tui_text.visible_width(markdown.render_inline(text))
 end
 
 local function allocate_columns(header, rows, available_width)
@@ -299,6 +340,10 @@ local function border(left, join, right, widths)
 end
 
 local function wrap_cell(text, width)
+  local styled = markdown.render_inline(text)
+  if tui_text.visible_width(styled) <= width then
+    return { styled }
+  end
   local wrapped = wrap_plain(text, width)
   local out = {}
   for i, line in ipairs(wrapped) do
@@ -308,7 +353,7 @@ local function wrap_cell(text, width)
 end
 
 local function pad_cell(text, width)
-  return text .. string.rep(" ", math.max(0, width - visible_width(text)))
+  return text .. string.rep(" ", math.max(0, width - tui_text.visible_width(text)))
 end
 
 local function render_row(cells, widths, style_header)
@@ -333,6 +378,10 @@ end
 local function render_table_lines(raw_lines, available_width)
   local header = parse_cells(raw_lines[1])
   if #header < 2 then
+    return nil
+  end
+  local separator = parse_cells(raw_lines[2])
+  if not is_table_separator(raw_lines[2]) or #separator ~= #header then
     return nil
   end
   local rows = {}
@@ -395,13 +444,14 @@ local function render_text(self, width)
   while i <= #source_lines do
     local line = source_lines[i]
     local next_line = source_lines[i + 1]
-    if not fence_state and looks_like_table_header(line, next_line) then
+    local table_info = not fence_state and looks_like_table_header(line, next_line)
+      or nil
+    if table_info then
       local raw_table = { line, next_line }
       i = i + 2
       while
         i <= #source_lines
-        and source_lines[i] ~= ""
-        and tostring(source_lines[i]):find("|", 1, true) ~= nil
+        and is_table_row(source_lines[i], table_info)
       do
         raw_table[#raw_table + 1] = source_lines[i]
         i = i + 1
@@ -438,7 +488,7 @@ local function render_text(self, width)
   return out
 end
 
-function Component:set_text(text)
+local function set_text(self, text)
   text = tostring(text or "")
   if self.text ~= text then
     self.text = text
@@ -446,7 +496,7 @@ function Component:set_text(text)
   end
 end
 
-function Component:set_prefixes(first, rest)
+local function set_prefixes(self, first, rest)
   first = tostring(first or "")
   rest = tostring(rest or "")
   if self.prefix_first ~= first or self.prefix_rest ~= rest then
@@ -456,7 +506,7 @@ function Component:set_prefixes(first, rest)
   end
 end
 
-function Component:invalidate()
+local function invalidate(self)
   self.generation = (self.generation or 0) + 1
   self.cache_width = nil
   self.cache_text = nil
@@ -465,7 +515,7 @@ function Component:invalidate()
   self.cache_lines = nil
 end
 
-function Component:render(width)
+local function render_component(self, width)
   width = math.max(MIN_WIDTH, tonumber(width) or MIN_WIDTH)
   if
     self.cache_lines ~= nil
@@ -487,12 +537,15 @@ end
 
 function M.new(opts)
   opts = type(opts) == "table" and opts or {}
-  return setmetatable({
-    text = tostring(opts.text or ""),
-    prefix_first = tostring(opts.prefix_first or ""),
-    prefix_rest = tostring(opts.prefix_rest or ""),
-    generation = 0,
-  }, Component)
+  local component = tui_component.new()
+  component.text = tostring(opts.text or "")
+  component.prefix_first = tostring(opts.prefix_first or "")
+  component.prefix_rest = tostring(opts.prefix_rest or "")
+  component.set_text = set_text
+  component.set_prefixes = set_prefixes
+  component.invalidate = invalidate
+  component.render = render_component
+  return component
 end
 
 function M.render_table(lines, width)
