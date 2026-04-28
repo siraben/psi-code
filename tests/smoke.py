@@ -1344,8 +1344,8 @@ def t_providers_openai_codex_parser(psi: Psi):
         + '  .. tostring(ok) .. "|" .. tostring(e.stop_reason) .. "|" .. tostring(e.error_message) .. "|"\n'
         + '  .. tostring(classified:find("slow", 1, true) ~= nil)'
     )
-    assert_equals(out, "hi|0|7|3|123|true|error|Codex error: bad|true",
-                  "OpenAI Codex parser handles text, usage, caps, and errors")
+    assert_equals(out, "hi|0|7|3|nil|true|error|Codex error: bad|true",
+                  "OpenAI Codex parser handles text, usage, and errors without unsupported caps")
 
 
 @test("providers/openai_codex_unresolved_tool_call")
