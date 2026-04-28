@@ -453,6 +453,52 @@ local function cmd_rainbow()
   return records.new_command_action("ansi-print", table.concat(lines, "\n"))
 end
 
+local function queue_summary()
+  local agent = require("psi.agent")
+  local items = agent.pending_messages()
+  if #items == 0 then
+    return "queue is empty"
+  end
+  local lines = { "queued messages" }
+  for _, item in ipairs(items) do
+    local text = (item.text or ""):gsub("%s+", " ")
+    if #text > 72 then
+      text = text:sub(1, 69) .. "..."
+    end
+    lines[#lines + 1] = string.format("  %d. [%s] %s", item.index, item.kind, text)
+  end
+  return table.concat(lines, "\n")
+end
+
+local function cmd_queue(rest)
+  local agent = require("psi.agent")
+  rest = prelude.trim(rest or "")
+  if rest == "" or rest == "list" then
+    return records.new_command_action("print", queue_summary())
+  end
+  if rest == "clear" then
+    local n = agent.pending_message_count()
+    agent.clear_queues()
+    return records.new_command_action("print", "cleared " .. tostring(n) .. " queued message(s)")
+  end
+  local drop = rest:match("^drop%s+(%d+)$") or rest:match("^remove%s+(%d+)$")
+  if drop then
+    local removed = agent.remove_pending(tonumber(drop))
+    if removed == nil then
+      return records.new_command_action("print", "no queued message at " .. tostring(drop))
+    end
+    return records.new_command_action("print", "removed queued message " .. tostring(drop))
+  end
+  local edit_index, edit_text = rest:match("^edit%s+(%d+)%s+(.+)$")
+  if edit_index then
+    if agent.replace_pending(tonumber(edit_index), edit_text) then
+      return records.new_command_action("print", "updated queued message " .. tostring(edit_index))
+    end
+    return records.new_command_action("print", "no queued message at " .. tostring(edit_index))
+  end
+  return records.new_command_action("print", "usage: /queue [list|clear|drop N|edit N text]")
+end
+
 -- ---------- dispatcher + registry ----------
 
 local BUILTIN_COMMANDS = {
@@ -545,6 +591,11 @@ local BUILTIN_COMMANDS = {
   {
     name = "rainbow",
     description = "Show all 256 terminal background colors",
+  },
+  {
+    name = "queue",
+    argument_hint = "[list|clear|drop N|edit N text]",
+    description = "Inspect or edit queued messages",
   },
   {
     name = "system-prompt",
@@ -707,6 +758,9 @@ function M.handle(line)
   end
   if line == "/rainbow" then
     return cmd_rainbow()
+  end
+  if starts_word(line, "/queue") then
+    return cmd_queue(arg_after(line, "/queue"))
   end
   if starts_word(line, "/model") then
     local spec = arg_after(line, "/model")

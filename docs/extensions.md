@@ -154,7 +154,7 @@ extensions cannot shadow them. Full list:
 /new (alias: /clear)  /reload  /copy  /login <provider>
 /resume <path>  /import <path>
 /name <text>  /model <spec>  /thinking <level>  /set <setting> <value>
-/export [path]  /fork [N]  /clone [path]  /compact [N]
+/export [path]  /fork [N]  /clone [path]  /compact [N]  /queue [...]
 ```
 
 Canonical source: `lua/psi/commands.lua` (`BUILTIN_COMMANDS` plus the
@@ -306,6 +306,9 @@ These are part of the stable surface:
 | `psi.tools.cancel(reason)` | Shorthand for a failure `ToolResult` used in before-hooks to short-circuit dispatch. Example: `tools.add_before_hook(function(n, i) if n == "bash" and i.command:find("rm %-rf") then return tools.cancel("refused") end end)`. |
 | `psi.prompt.register_transformer(fn)` | Append a system-prompt rewriter. Receives the assembled prompt, returns a replacement (or `nil` to leave it). Runs after built-in assembly; transformers stack in registration order. |
 | `psi.agent.set_model(name)` / `psi.agent.current_model(fallback)` | Switch the default model at runtime (any prefix psi understands: `anthropic/`, `ollama/`, `openrouter/`). Picked up on the *next* turn; the TUI status line reflects it immediately. Pass `nil` to clear. |
+| `psi.agent.queue_follow_up(text)` / `queue_steering(text)` | Queue user text for the active run loop. Follow-ups run after the current task would otherwise stop; steering is injected before the next provider request. |
+| `psi.agent.pending_messages()` / `pending_message(i)` / `replace_pending(i, text)` / `remove_pending(i)` / `clear_queues()` | Inspect and edit queued messages. TUI busy-submit uses the follow-up queue. |
+| `psi.agent.side_question(question, opts)` | Ask an ephemeral `/btw`-style side question using the current transcript excerpt. Refuses local models and does not append to the session. |
 | `psi.tui.register_key_handler(fn)` | Intercept normalized TUI key events before built-in bindings. Return `{ action = "...", arg = ... }` to handle, `nil` to fall through. Returns a handler id. |
 | `psi.tui.unregister_key_handler(id)` | Remove one key handler previously returned by `register_key_handler`. |
 | `psi.tui.clear_key_handlers()` | Remove registered key handlers. Mostly useful in tests. |
@@ -444,6 +447,16 @@ What we **intentionally** do not support yet — open tickets, not bugs:
   for extension-controlled prompt rewrites.
 - pi ships ~27 events; psi starts with the 10 above. New ones will be
   added on demand.
+
+## Packaged extensions
+
+Packaged Lua extensions are bundled under `lua/psi/extensions/` and
+loaded before user/project extensions. They use the same public API as
+external extensions.
+
+- `/btw <question>` asks a non-local provider a quick side question
+  against a transcript excerpt. The answer is rendered like command
+  output and is not persisted into the conversation.
 
 ---
 

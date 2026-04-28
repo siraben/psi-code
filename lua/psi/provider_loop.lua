@@ -58,6 +58,36 @@ local function emit_turn_end(text, model)
   end
 end
 
+local function queued_user_observer(observer, kind)
+  return function(text)
+    if observer.on_queued_user then
+      observer.on_queued_user(text, kind)
+    end
+  end
+end
+
+local function normalize_tool_result(tc, r)
+  if r and r.ok and r.values and r.values.n > 0 then
+    return r.values[1]
+  end
+  return {
+    tool = tc.name,
+    ok = false,
+    error = tostring(r and r.error or "tool dispatch failed"),
+  }
+end
+
+local function tool_execution_mode(name)
+  if not (psi.tools and psi.tools.find) then
+    return "parallel"
+  end
+  local tool = psi.tools.find(name)
+  if type(tool) == "table" and tool.execution_mode == "sequential" then
+    return "sequential"
+  end
+  return "parallel"
+end
+
 local function dispatch_tools(tool_calls, observer, abort_check)
   local sched = require("psi.sched")
   if abort_check() then
@@ -77,35 +107,80 @@ local function dispatch_tools(tool_calls, observer, abort_check)
     end
   end
 
-  local tasks = {}
-  for i, tc in ipairs(tool_calls) do
-    tasks[i] = function()
-      return psi.tools.dispatch_alist(
-        tc.name,
-        tc.arguments or tc.input or {},
-        { tool_call_id = tc.id }
-      )
+  local observed = {}
+  local results = {}
+  local function observe_done(i, r)
+    local tc = tool_calls[i]
+    if tc == nil then
+      return
     end
-  end
-  local results = sched.run_all(tasks)
-
-  for i, tc in ipairs(tool_calls) do
-    local r = results[i]
-    local result_alist
-    if r.ok and r.values and r.values.n > 0 then
-      result_alist = r.values[1]
-    else
-      result_alist = {
-        tool = tc.name,
-        ok = false,
-        error = tostring(r and r.error or "tool dispatch failed"),
-      }
-    end
+    local result_alist = normalize_tool_result(tc, r)
     local result_json = psi.json_encode(result_alist)
+    observed[i] = true
     if observer.on_tool_result then
       observer.on_tool_result(tc.id, tc.name, result_json)
     end
     if psi.events then
+      psi.events.emit("tool-result", { id = tc.id, tool = tc.name, result = result_alist })
+    end
+  end
+
+  local cursor = 1
+  while cursor <= #tool_calls do
+    if tool_execution_mode(tool_calls[cursor].name) == "sequential" then
+      local tc = tool_calls[cursor]
+      local ok, value = pcall(function()
+        return psi.tools.dispatch_alist(
+          tc.name,
+          tc.arguments or tc.input or {},
+          { tool_call_id = tc.id }
+        )
+      end)
+      local r
+      if ok then
+        r = { ok = true, values = { value, n = 1 } }
+      else
+        r = { ok = false, error = value }
+      end
+      results[cursor] = r
+      observe_done(cursor, r)
+      cursor = cursor + 1
+    else
+      local start = cursor
+      local tasks = {}
+      while
+        cursor <= #tool_calls and tool_execution_mode(tool_calls[cursor].name) ~= "sequential"
+      do
+        local idx = cursor
+        local tc = tool_calls[idx]
+        tasks[#tasks + 1] = function()
+          return psi.tools.dispatch_alist(
+            tc.name,
+            tc.arguments or tc.input or {},
+            { tool_call_id = tc.id }
+          )
+        end
+        cursor = cursor + 1
+      end
+      local batch = sched.run_all(tasks, {
+        on_done = function(batch_index, r)
+          observe_done(start + batch_index - 1, r)
+        end,
+      })
+      for j, r in ipairs(batch) do
+        results[start + j - 1] = r
+      end
+    end
+  end
+
+  for i, tc in ipairs(tool_calls) do
+    local r = results[i]
+    local result_alist = normalize_tool_result(tc, r)
+    local result_json = psi.json_encode(result_alist)
+    if (not observed[i]) and observer.on_tool_result then
+      observer.on_tool_result(tc.id, tc.name, result_json)
+    end
+    if (not observed[i]) and psi.events then
       psi.events.emit("tool-result", { id = tc.id, tool = tc.name, result = result_alist })
     end
     session_mod.append_tool_result(tc.id, tc.name, result_json, not result_alist.ok)
@@ -128,7 +203,7 @@ function M.run_turn(opts, cfg)
     if abort_check() then
       return false, "aborted"
     end
-    control.append_steering()
+    control.append_steering(queued_user_observer(observer, "steering"))
 
     local api_messages = cfg.build_messages(transform.plain_session(), system_prompt, cfg)
     emit_context(cfg, model, system_prompt, api_messages)
@@ -221,7 +296,7 @@ function M.run_turn(opts, cfg)
     local text = cfg.text(state)
     if #tool_calls == 0 then
       cfg.after_iteration(model, opts)
-      if control.append_follow_ups() == 0 then
+      if control.append_follow_ups(queued_user_observer(observer, "follow-up")) == 0 then
         emit_turn_end(text, model)
         return true, text
       end
@@ -232,7 +307,7 @@ function M.run_turn(opts, cfg)
       end
       cfg.after_iteration(model, opts)
       if transform.all_results_terminate(results) then
-        if control.append_follow_ups() == 0 then
+        if control.append_follow_ups(queued_user_observer(observer, "follow-up")) == 0 then
           emit_turn_end(text, model)
           return true, text
         end
