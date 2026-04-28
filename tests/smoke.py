@@ -930,6 +930,33 @@ def t_agent_set_model(psi: Psi):
                     "override then clear")
 
 
+@test("agent/set_reasoning_effort")
+def t_agent_set_reasoning_effort(psi: Psi):
+    out = psi.eval(
+        'local a = require("psi.agent")\n'
+        + 'a.set_reasoning_effort("high")\n'
+        + 'local got = a.current_reasoning_effort("low")\n'
+        + 'a.set_reasoning_effort("none")\n'
+        + 'local none = a.current_reasoning_effort("low")\n'
+        + 'a.set_reasoning_effort(nil)\n'
+        + 'local cleared = a.current_reasoning_effort("medium")\n'
+        + 'return got .. "|" .. none .. "|" .. cleared'
+    )
+    assert_equals(out, "high|none|medium", "reasoning effort override then clear")
+
+
+@test("commands/set_reasoning_effort")
+def t_commands_set_reasoning_effort(psi: Psi):
+    out = psi.eval(
+        'local c = require("psi.commands")\n'
+        + 'local a = c.handle("/set effort xhigh")\n'
+        + 'local b = c.handle("/set reasoning_effort nope")\n'
+        + 'return a.kind .. "|" .. tostring(a.payload) .. "|" .. b.kind .. "|" .. b.payload'
+    )
+    assert_contains(out, "set-reasoning-effort|xhigh|print|usage: /set effort",
+                    "/set validates reasoning effort")
+
+
 @test("theme/default_dark")
 def t_theme_default(psi: Psi):
     out = psi.eval(
@@ -1205,8 +1232,132 @@ def t_providers_api_registry(psi: Psi):
         + '  tostring(#p.all_apis()),\n'
         + '}, "|")'
     )
-    assert_equals(out, "psi.anthropic|anthropic-messages|true|function|3",
+    assert_equals(out, "psi.anthropic|anthropic-messages|true|function|4",
                   "provider API registry should route API adapters")
+
+
+@test("providers/openai_codex_registry")
+def t_providers_openai_codex_registry(psi: Psi):
+    out = psi.eval(
+        'local p = require("psi.providers")\n'
+        + 'local desc = p.resolve_descriptor("openai-codex/gpt-5.5")\n'
+        + 'local model = p.model("openai-codex/gpt-5.5")\n'
+        + 'return table.concat({desc.provider, desc.api, desc.id,\n'
+        + '  tostring(model.context_window), tostring(model.supports_tool_use)}, "|")'
+    )
+    assert_equals(out, "openai-codex|openai-codex-responses|gpt-5.5|272000|true",
+                  "OpenAI Codex provider resolves model metadata")
+
+
+@test("oauth/openai_codex_pkce")
+def t_oauth_openai_codex_pkce(psi: Psi):
+    out = psi.eval(
+        'local d = require("psi.oauth_openai_codex")._debug\n'
+        + 'local digest = d.base64url_encode(d.sha256_bytes("abc"))\n'
+        + 'local q = d.parse_query("http://localhost:1455/auth/callback?code=abc&state=xyz")\n'
+        + 'return digest .. "|" .. q.code .. "|" .. q.state'
+    )
+    assert_equals(out, "ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0|abc|xyz",
+                  "OpenAI Codex PKCE helpers match SHA-256/base64url")
+
+
+@test("commands/openai_codex_login_starts")
+def t_commands_openai_codex_login_starts(psi: Psi):
+    out = psi.eval(
+        'local copied = ""\n'
+        + 'psi.stdout_write = function(s) copied = copied .. s end\n'
+        + 'local action = require("psi.commands").handle("/login openai-codex")\n'
+        + 'return table.concat({\n'
+        + '  action.kind,\n'
+        + '  tostring(action.payload:find("https://auth.openai.com/oauth/authorize", 1, true) ~= nil),\n'
+        + '  tostring(action.payload:find("/login openai-codex <redirect-url-or-code>", 1, true) ~= nil),\n'
+        + '  tostring(action.payload:find("Copied auth URL to clipboard via OSC 52.", 1, true) ~= nil),\n'
+        + '  tostring(copied:find("\\27]52;", 1, true) ~= nil),\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "print|true|true|true|true",
+                  "OpenAI Codex login should start without blocking and copy auth URL")
+
+
+@test("auth/storage_roundtrip")
+def t_auth_storage_roundtrip(psi: Psi):
+    auth_file = psi.tmp / "auth.json"
+    out = psi.run(
+        "--eval",
+        'local a = require("psi.auth_storage")\n'
+        + 'local ok = a.set("openai-codex", {type="oauth", access="a", refresh="r", expires=123, accountId="acct"})\n'
+        + 'local c = a.get("openai-codex")\n'
+        + 'return tostring(ok) .. "|" .. c.type .. "|" .. c.access .. "|" .. c.accountId',
+        env_extra={"PSI_AUTH_FILE": str(auth_file)},
+    ).stdout.strip()
+    assert_equals(out, "true|oauth|a|acct", "auth storage persists provider credentials")
+
+
+@test("providers/openai_codex_parser")
+def t_providers_openai_codex_parser(psi: Psi):
+    out = psi.eval(
+        'local d = require("psi.openai_codex")._debug\n'
+        + 'local s, p = d.new_state(), d.parser_new()\n'
+        + 'local seen = ""\n'
+        + 'local obs = { on_assistant_text_delta = function(t) seen = seen .. t end }\n'
+        + 'd.parser_push(p, "data: {\\"type\\":\\"response.output_item.added\\",\\"item\\":{\\"type\\":\\"message\\",\\"id\\":\\"msg_1\\"}}\\n\\n", s, obs)\n'
+        + 'd.parser_push(p, "data: {\\"type\\":\\"response.output_text.delta\\",\\"delta\\":\\"hi\\"}\\n\\n", s, obs)\n'
+        + 'd.parser_push(p, "data: {\\"type\\":\\"response.output_item.done\\",\\"item\\":{\\"type\\":\\"message\\",\\"id\\":\\"msg_1\\",\\"content\\":[{\\"type\\":\\"output_text\\",\\"text\\":\\"hi\\"}]}}\\n\\n", s, obs)\n'
+        + 'd.parser_push(p, "data: {\\"type\\":\\"response.completed\\",\\"response\\":{\\"status\\":\\"completed\\",\\"usage\\":{\\"input_tokens\\":10,\\"output_tokens\\":2,\\"total_tokens\\":12,\\"input_tokens_details\\":{\\"cached_tokens\\":3}}}}\\n\\n", s, obs)\n'
+        + 'local _, calls = d.finalize(s)\n'
+        + 'local body = d.request_body({model="gpt-5.5", messages={}, max_tokens=123})\n'
+        + 'local e, ep = d.new_state(), d.parser_new()\n'
+        + 'local ok = pcall(d.parser_push, ep, "data: {\\"type\\":\\"error\\",\\"message\\":\\"bad\\"}\\n\\n", e, {})\n'
+        + 'local classified = d.classify_http_error(429, "{\\"error\\":{\\"message\\":\\"slow\\"}}", "openai-codex")\n'
+        + 'return seen .. "|" .. tostring(#calls) .. "|" .. tostring(s.usage.input_tokens) .. "|"\n'
+        + '  .. tostring(s.usage.cache_read_input_tokens) .. "|" .. tostring(body.max_output_tokens) .. "|"\n'
+        + '  .. tostring(ok) .. "|" .. tostring(e.stop_reason) .. "|" .. tostring(e.error_message) .. "|"\n'
+        + '  .. tostring(classified:find("slow", 1, true) ~= nil)'
+    )
+    assert_equals(out, "hi|0|7|3|123|true|error|Codex error: bad|true",
+                  "OpenAI Codex parser handles text, usage, caps, and errors")
+
+
+@test("providers/openai_codex_reasoning_config")
+def t_providers_openai_codex_reasoning_config(psi: Psi):
+    project = psi.tmp / "codex-reasoning-config"
+    (project / ".psi").mkdir(parents=True, exist_ok=True)
+    (project / ".psi" / "settings.json").write_text(
+        json.dumps({"defaults": {"reasoning_effort": "medium"}})
+    )
+    out = psi.run(
+        "--eval",
+        'local d = require("psi.openai_codex")._debug\n'
+        + 'local a = d.request_body({model="gpt-5.5", messages={}, reasoning_effort="xhigh"})\n'
+        + 'local b = d.request_body({model="gpt-5.5", messages={}, reasoning_effort="none"})\n'
+        + 'local c = d.request_body({model="gpt-5.5", messages={}})\n'
+        + 'return a.reasoning.effort .. "|" .. tostring(b.reasoning) .. "|" .. c.reasoning.effort',
+        cwd=project,
+        env_extra={"PSI_OPENAI_CODEX_REASONING": ""},
+    ).stdout.strip()
+    assert_equals(out, "xhigh|nil|medium",
+                  "OpenAI Codex reasoning effort uses runtime override then config")
+
+
+@test("providers/openai_codex_http_error")
+def t_providers_openai_codex_http_error(psi: Psi):
+    auth_file = psi.tmp / "codex-auth.json"
+    out = psi.run(
+        "--eval",
+        'local a = require("psi.auth_storage")\n'
+        + 'a.set("openai-codex", {type="oauth", access="a", refresh="r", expires=9999999999999, accountId="acct"})\n'
+        + 'psi.http_stream_begin = function() return {} end\n'
+        + 'psi.http_stream_poll = function() return "{\\"error\\":{\\"message\\":\\"nope\\"}}", true end\n'
+        + 'psi.http_stream_finish = function() return 401 end\n'
+        + 'local ok, err = require("psi.sched").run(function()\n'
+        + '  return require("psi.openai_codex").run_turn({model="gpt-5.5"})\n'
+        + 'end)\n'
+        + 'return tostring(ok) .. "|" .. tostring(err)',
+        env_extra={"PSI_AUTH_FILE": str(auth_file)},
+    ).stdout.strip()
+    assert_contains(out, "false|openai-codex request failed (401)",
+                    "OpenAI Codex HTTP errors should be classified")
+    assert_contains(out, "nope", "OpenAI Codex HTTP error details should be preserved")
 
 
 @test("tui/status_context_window")

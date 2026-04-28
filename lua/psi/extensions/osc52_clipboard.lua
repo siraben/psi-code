@@ -136,6 +136,7 @@ function M.register(psi_state)
 end
 
 M.install = M.enable
+M.write_clipboard = write_clipboard
 M._debug_base64_encode = base64_encode
 M._debug_osc52_sequence = osc52_sequence
 
