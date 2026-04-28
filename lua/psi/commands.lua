@@ -57,6 +57,54 @@ local function parse_fork_count(line)
   return tonumber(rest) or psi.session_message_count()
 end
 
+local function split_first_word(text)
+  text = prelude.trim(text or "")
+  local first, rest = text:match("^(%S+)%s*(.*)$")
+  return first or "", rest or ""
+end
+
+local VALID_REASONING_EFFORTS = {
+  low = true,
+  medium = true,
+  high = true,
+  xhigh = true,
+  none = true,
+}
+
+local function normalize_reasoning_effort(value)
+  value = prelude.trim(value or "")
+  if value == "" then
+    return nil
+  end
+  value = value:lower()
+  return VALID_REASONING_EFFORTS[value] and value or nil
+end
+
+local function cmd_set(rest)
+  local key, value = split_first_word(rest)
+  key = key:lower():gsub("_", "-")
+  if key == "" then
+    return records.new_command_action("print", "usage: /set effort <low|medium|high|xhigh|none>")
+  end
+  if key == "effort" or key == "reasoning" or key == "reasoning-effort" then
+    local effort = normalize_reasoning_effort(value)
+    if not effort then
+      return records.new_command_action("print", "usage: /set effort <low|medium|high|xhigh|none>")
+    end
+    return records.new_command_action("set-reasoning-effort", effort)
+  end
+  return records.new_command_action("print", "unknown setting: " .. key)
+end
+
+local function copy_auth_url(url)
+  local ok, osc52 = pcall(require, "psi.extensions.osc52_clipboard")
+  if not ok or type(osc52) ~= "table" or type(osc52.write_clipboard) ~= "function" then
+    return false
+  end
+  local copied = osc52.write_clipboard(url, { source = "openai-codex-login" })
+  return copied and true or false
+end
+
 local function fork_output_path()
   local id = psi.session_id() or tostring(os.time())
   return "sessions/fork-" .. id .. "-" .. tostring(os.time()) .. ".jsonl"
@@ -432,6 +480,16 @@ local BUILTIN_COMMANDS = {
     description = "Switch model mid-session",
   },
   {
+    name = "set",
+    argument_hint = "<setting> <value>",
+    description = "Set runtime options",
+  },
+  {
+    name = "login",
+    argument_hint = "<provider>",
+    description = "Authenticate an OAuth provider",
+  },
+  {
     name = "copy",
     description = "Copy the last assistant message to the clipboard",
   },
@@ -634,6 +692,44 @@ function M.handle(line)
       )
     end
     return records.new_command_action("set-model", spec)
+  end
+  if starts_word(line, "/set") then
+    return cmd_set(arg_after(line, "/set"))
+  end
+  if starts_word(line, "/login") then
+    local provider, input = split_first_word(arg_after(line, "/login"))
+    if provider == "" then
+      provider = "openai-codex"
+    end
+    if provider ~= "openai-codex" then
+      return records.new_command_action("print", "unsupported OAuth provider: " .. provider)
+    end
+    local oauth = require("psi.oauth_openai_codex")
+    local ok, result
+    if input ~= "" then
+      ok, result = oauth.finish_login(input)
+    else
+      local flow = oauth.begin_login()
+      local copied = copy_auth_url(flow.url)
+      ok = true
+      local lines = {
+        "Open this URL in your browser:",
+        "",
+        flow.url,
+        "",
+      }
+      if copied then
+        lines[#lines + 1] = "Copied auth URL to clipboard via OSC 52."
+        lines[#lines + 1] = ""
+      end
+      lines[#lines + 1] = "Then paste the final redirect URL or authorization code with:"
+      lines[#lines + 1] = "/login openai-codex <redirect-url-or-code>"
+      result = table.concat(lines, "\n")
+    end
+    return records.new_command_action(
+      "print",
+      ok and result or ("login failed: " .. tostring(result))
+    )
   end
   if starts_word(line, "/resume") then
     local path = arg_after(line, "/resume")

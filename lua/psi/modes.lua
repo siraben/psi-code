@@ -71,6 +71,7 @@ local function run_agent_turn(opts, user_text)
     user_text = user_text or "",
     model = opts.model,
     max_tokens = opts.max_tokens,
+    reasoning_effort = opts.reasoning_effort,
     observer = observer,
     abort_check = psi.is_aborted,
   })
@@ -153,6 +154,7 @@ function M.run_compact(opts)
     keep_recent = opts.keep_recent,
     model = opts.model,
     max_tokens = opts.max_tokens,
+    reasoning_effort = opts.reasoning_effort,
   })
   if not ok then
     io.stderr:write("failed to compact session\n")
@@ -195,6 +197,7 @@ local function handle_slash_command(opts, line)
       keep_recent = action.payload,
       model = opts.model,
       max_tokens = opts.max_tokens,
+      reasoning_effort = opts.reasoning_effort,
     })
     if not ok then
       io.stderr:write("failed to compact session\n")
@@ -213,6 +216,13 @@ local function handle_slash_command(opts, line)
   if kind == "set-model" then
     opts.model = action.payload
     print("model set to " .. tostring(opts.model))
+    return true, false
+  end
+  if kind == "set-reasoning-effort" then
+    local value = action.payload
+    opts.reasoning_effort = value
+    agent.set_reasoning_effort(value)
+    print("reasoning effort set to " .. tostring(value or "none"))
     return true, false
   end
   -- "new-session" / "reload" are now handled inside commands.lua and

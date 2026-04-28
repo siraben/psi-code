@@ -184,6 +184,15 @@ M.register_api("openrouter-chat-completions", {
   },
 })
 
+M.register_api("openai-codex-responses", {
+  module = "psi.openai_codex",
+  compat = {
+    supports_tool_use = true,
+    supports_reasoning_effort = true,
+    thinking_format = "openai-responses",
+  },
+})
+
 M.register_provider("anthropic", {
   api = "anthropic-messages",
   model_env = "PSI_ANTHROPIC_MODEL",
@@ -200,6 +209,12 @@ M.register_provider("openrouter", {
   api = "openrouter-chat-completions",
   model_env = "PSI_OPENROUTER_MODEL",
   default_model = "google/gemini-3-flash-preview",
+})
+
+M.register_provider("openai-codex", {
+  api = "openai-codex-responses",
+  model_env = "PSI_OPENAI_CODEX_MODEL",
+  default_model = "gpt-5.5",
 })
 
 M.register_model("anthropic/claude-opus-4-7", {
@@ -221,6 +236,51 @@ M.register_model("openrouter/google/gemini-3-flash-preview", {
   api = "openrouter-chat-completions",
   context_window = 1048576,
   max_output_tokens = 65536,
+  reasoning = true,
+  supports_tool_use = true,
+})
+
+M.register_model("openai-codex/gpt-5.5", {
+  provider = "openai-codex",
+  api = "openai-codex-responses",
+  context_window = 272000,
+  max_output_tokens = 128000,
+  reasoning = true,
+  supports_tool_use = true,
+})
+
+M.register_model("openai-codex/gpt-5.4", {
+  provider = "openai-codex",
+  api = "openai-codex-responses",
+  context_window = 272000,
+  max_output_tokens = 128000,
+  reasoning = true,
+  supports_tool_use = true,
+})
+
+M.register_model("openai-codex/gpt-5.4-mini", {
+  provider = "openai-codex",
+  api = "openai-codex-responses",
+  context_window = 272000,
+  max_output_tokens = 128000,
+  reasoning = true,
+  supports_tool_use = true,
+})
+
+M.register_model("openai-codex/gpt-5.3-codex", {
+  provider = "openai-codex",
+  api = "openai-codex-responses",
+  context_window = 272000,
+  max_output_tokens = 128000,
+  reasoning = true,
+  supports_tool_use = true,
+})
+
+M.register_model("openai-codex/gpt-5.3-codex-spark", {
+  provider = "openai-codex",
+  api = "openai-codex-responses",
+  context_window = 128000,
+  max_output_tokens = 128000,
   reasoning = true,
   supports_tool_use = true,
 })
