@@ -2345,6 +2345,17 @@ def t_print_text(psi: Psi):
     assert_contains(out, "session-messages: 1", "session count")
 
 
+@test("mode/print_without_state_home")
+def t_print_without_state_home(psi: Psi):
+    res = psi.run(
+        "--print",
+        "no state",
+        env_extra={"XDG_STATE_HOME": "", "HOME": ""},
+    )
+    assert_contains(res.stdout, "prompt: no state", "print runs without autosave path")
+    assert_equals(res.returncode, 0, "print succeeds when autosave is unavailable")
+
+
 @test("mode/repl_quit")
 def t_repl_quit(psi: Psi):
     # `:quit` should cleanly exit the REPL; psi also accepts this from

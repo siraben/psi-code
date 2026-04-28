@@ -53,16 +53,21 @@ local function bootstrap_session(opts)
     return session.load(selected)
   end
   local path = session.ensure_default_path()
+  opts.session_autosave_optional = true
   if not path then
-    return false, "could not determine default session path"
+    session.announce_start()
+    return true
   end
   session.announce_start()
   return true
 end
 
-local function save_current_session()
+local function save_current_session(opts)
   local ok, err = session.save()
   if not ok then
+    if opts and opts.session_autosave_optional then
+      return true
+    end
     io.stderr:write("failed to save session file: " .. tostring(err) .. "\n")
     return false
   end
@@ -142,7 +147,7 @@ function M.run_print(opts)
   session.append_user(opts.payload or "")
   local reply = prompt.handle_print(opts.payload or "")
   session.append_assistant(reply, { { type = "text", text = reply } }, {})
-  if not save_current_session() then
+  if not save_current_session(opts) then
     session.announce_shutdown()
     return false
   end
@@ -184,7 +189,7 @@ function M.run_agent(opts)
     session.announce_shutdown()
     return false
   end
-  if not save_current_session() then
+  if not save_current_session(opts) then
     session.announce_shutdown()
     return false
   end
@@ -277,7 +282,7 @@ local function handle_slash_command(opts, line)
       io.stderr:write("failed to compact session\n")
       return false, false
     end
-    if not save_current_session() then
+    if not save_current_session(opts) then
       return false, false
     end
     print("compaction summary:\n" .. (summary or ""))
@@ -333,7 +338,7 @@ local function handle_slash_command(opts, line)
     -- actually sent (templates can be opaque for new users).
     print("> " .. (action.payload or ""))
     local ok = run_agent_turn(opts, action.payload or "")
-    if ok and not save_current_session() then
+    if ok and not save_current_session(opts) then
       return false, false
     end
     return true, false
@@ -369,7 +374,7 @@ function M.run_repl(opts)
       end
       local ok = run_agent_turn(opts, line)
       if ok then
-        if not save_current_session() then
+        if not save_current_session(opts) then
           session.announce_shutdown()
           return false
         end
