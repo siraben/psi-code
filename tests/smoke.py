@@ -1500,6 +1500,22 @@ def t_tui_layout_geometry(psi: Psi):
     assert_equals(out, "psi coding agent|18|21", "shared TUI layout")
 
 
+@test("tui/layout_reclaims_empty_status_row")
+def t_tui_layout_reclaims_empty_status_row(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local idle = rt._debug_layout_rows(80, 24, false, nil)\n'
+        + 'local busy = rt._debug_layout_rows(80, 24, true, nil)\n'
+        + 'local status = rt._debug_layout_rows(80, 24, false, "saved")\n'
+        + 'return table.concat({\n'
+        + '  tostring(idle.status_visible), tostring(idle.transcript_height),\n'
+        + '  tostring(busy.status_visible), tostring(busy.transcript_height), tostring(busy.status_row),\n'
+        + '  tostring(status.status_visible), tostring(status.transcript_height)\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "false|19|true|18|20|true|18", "idle TUI reclaims the empty status row")
+
+
 @test("tui/input_layout")
 def t_tui_input_layout(psi: Psi):
     out = psi.eval(
@@ -1651,6 +1667,20 @@ def t_tui_sanitizes_untrusted_terminal_sequences(psi: Psi):
         + 'return rt._debug_sanitize_terminal_text(input, true)'
     )
     assert_equals(out, "abc\nnext", "untrusted terminal control sequences are stripped")
+
+
+@test("tui/live_tool_progress_is_bounded")
+def t_tui_live_tool_progress_is_bounded(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local text = rt._debug_limit_live_tool_progress_text(string.rep("a", 9000) .. "TAIL")\n'
+        + 'return table.concat({\n'
+        + '  tostring(#text <= 8192),\n'
+        + '  tostring(text:find("earlier output truncated", 1, true) ~= nil),\n'
+        + '  text:sub(-4)\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "true|true|TAIL", "live tool output is kept to a bounded rolling tail")
 
 
 @test("tui/no_color_disables_input_chrome_colors")
