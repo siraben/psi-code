@@ -79,6 +79,8 @@ local function render_inline(text)
   return text
 end
 
+M.render_inline = render_inline
+
 -- ---------- line-level renderer ----------
 
 local function render_line(line, state)
