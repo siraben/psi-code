@@ -1,8 +1,10 @@
 -- psi.session: session accessors, append wrappers, and compaction.
 --
--- Disk format is the v3 pi-style schema (ported from pi-mono). In memory
--- we still use psi's minimal (role, text, data) triple exposed by the C
--- FFI; `data` is a JSON string encoding the entry body minus `type`.
+-- Disk format is the v3 pi-style schema (ported from pi-mono). The JSONL
+-- entries form the durable session tree via id/parentId. In memory we keep
+-- only the active branch path in psi's minimal (role, text, data) triple
+-- exposed by the C FFI; `data` is a JSON string encoding the entry body
+-- minus `type`.
 -- Example `data` decoded for an assistant message:
 --
 --   { id = "...", parentId = "...", timestamp = "...",
@@ -44,17 +46,31 @@ function M.set_display_name(n)
   end
 end
 
--- ---------- Entry metadata (id/parent threading) ----------
+-- ---------- Entry metadata / branch tree ----------
 
--- The in-memory entry chain is strictly linear, so we only need the id
--- of the most recently appended entry as the parent for the next one.
+-- C keeps a linear active path. Lua keeps the file's full entry tree and
+-- treats leaf_id as the current cursor; appending creates a child of that
+-- cursor, and branch navigation rebuilds the active C path from parentId
+-- links without dropping sibling branches from the JSONL file.
 local last_entry_id = nil
+local leaf_id = nil
+local file_entries = {}
+local entry_by_id = {}
+local children_by_parent = {}
+local suppress_tree_tracking = false
 
 function M.reset_entry_chain()
   last_entry_id = nil
+  leaf_id = nil
+  file_entries = {}
+  entry_by_id = {}
+  children_by_parent = {}
 end
 function M.last_entry_id()
   return last_entry_id
+end
+function M.leaf_id()
+  return leaf_id
 end
 
 -- Make sure the host session has a stable UUID before the first
@@ -163,9 +179,10 @@ local function stamp_entry(body)
   body.id = body.id or prelude.uuid_short()
   body.timestamp = body.timestamp or prelude.iso_timestamp()
   if body.parentId == nil then
-    body.parentId = last_entry_id
+    body.parentId = leaf_id or last_entry_id
   end
   last_entry_id = body.id
+  leaf_id = body.id
   -- Every appended entry is an observable event for extensions,
   -- so the session id must be stable by now.
   M.ensure_id()
@@ -269,6 +286,8 @@ local function estimate_tokens(in_mem_role, text, body)
   return calibrate_tokens(pi_tokens_for_body(in_mem_role, text, body))
 end
 
+local track_memory_append
+
 local function append_body(in_mem_role, text, body)
   psi.session_append(
     in_mem_role,
@@ -276,12 +295,22 @@ local function append_body(in_mem_role, text, body)
     psi.json_encode(body),
     estimate_tokens(in_mem_role, text, body)
   )
+  if track_memory_append and not suppress_tree_tracking then
+    track_memory_append(in_mem_role, text, body)
+  end
 end
 
 function append_raw(in_mem_role, text, data)
   local body = prelude.safe_json_decode(data, nil)
   local estimate = estimate_tokens(in_mem_role, text, body)
   psi.session_append(in_mem_role, text or "", data, estimate)
+  if type(body) == "table" and body.id then
+    last_entry_id = body.id
+    leaf_id = body.id
+  end
+  if track_memory_append and not suppress_tree_tracking then
+    track_memory_append(in_mem_role, text, body)
+  end
 end
 
 -- pi normalizes Anthropic's verbose usage keys.
@@ -887,6 +916,28 @@ local function write_session_file(path, header, messages, count)
   return true
 end
 
+local function write_entry_file(path, header, entries, count)
+  if not psi.mkdir_parent(path) then
+    return false, "failed to create parent directory"
+  end
+  local f, err = io.open(path, "w")
+  if not f then
+    return false, err
+  end
+  local n = count or #entries
+  local ok, werr = pcall(function()
+    write_line(f, header)
+    for i = 1, n do
+      write_line(f, entries[i])
+    end
+  end)
+  f:close()
+  if not ok then
+    return false, werr
+  end
+  return true
+end
+
 -- Append-only companion to write_session_file. Called on every save
 -- after the first when the message count has only grown — writes
 -- messages[from_idx..#messages] to the existing file without
@@ -910,11 +961,29 @@ local function append_session_file(path, messages)
   return true
 end
 
+local function append_entry_file(path, entries, from_idx)
+  local f, err = io.open(path, "a")
+  if not f then
+    return false, err
+  end
+  local ok, werr = pcall(function()
+    for i = from_idx or 1, #entries do
+      write_line(f, entries[i])
+    end
+  end)
+  f:close()
+  if not ok then
+    return false, werr
+  end
+  return true
+end
+
 -- Last-save state for append-only optimisation. Invalidated to
 -- force a full rewrite when: the path changes, the file is gone,
 -- or the message count shrinks (compaction / clear).
 local last_saved_path = nil
 local last_saved_count = 0
+local register_file_entry
 
 -- Persist the current session to disk.
 --
@@ -948,7 +1017,15 @@ function M.save(path)
   if not path or path == "" then
     return false, "no session path set"
   end
-  local count = psi.session_message_count()
+  local count = #file_entries
+  if count == 0 and psi.session_message_count() > 0 then
+    local messages = psi.session_messages()
+    for _, message in ipairs(messages) do
+      local entry = to_disk_entry(message)
+      register_file_entry(entry)
+    end
+    count = #file_entries
+  end
 
   local force_full = (path ~= last_saved_path)
     or (count < last_saved_count)
@@ -956,8 +1033,7 @@ function M.save(path)
     or (not psi.file_exists(path))
 
   if force_full then
-    local messages = psi.session_messages()
-    local ok, err = write_session_file(path, session_header(), messages, count)
+    local ok, err = write_entry_file(path, session_header(), file_entries, count)
     if ok then
       last_saved_path = path
       last_saved_count = count
@@ -975,13 +1051,7 @@ function M.save(path)
   end
 
   local ok, err
-  if psi.session_append_jsonl then
-    ok, err = psi.session_append_jsonl(path, last_saved_count + 1)
-  end
-  if ok == nil or (ok == false and err == "message has no structured data") then
-    local messages = psi.session_messages_from(last_saved_count + 1)
-    ok, err = append_session_file(path, messages)
-  end
+  ok, err = append_entry_file(path, file_entries, last_saved_count + 1)
   if ok then
     last_saved_count = count
   else
@@ -1064,6 +1134,7 @@ local function append_v2_message(parsed)
     message = msg,
   }
   last_entry_id = body.id or last_entry_id
+  leaf_id = body.id or leaf_id
   local role = msg.role
   local text = ""
   if type(msg.content) == "table" then
@@ -1098,6 +1169,7 @@ local function append_v2_compaction(parsed)
     end
   end
   last_entry_id = body.id or last_entry_id
+  leaf_id = body.id or leaf_id
   append_body("compaction-summary", body.summary, body)
 end
 
@@ -1114,6 +1186,7 @@ local function append_v3_custom(parsed)
     thinkingLevel = parsed.thinkingLevel,
   }
   last_entry_id = body.id or last_entry_id
+  leaf_id = body.id or leaf_id
   local text = ""
   if parsed.type == "custom_message" and type(parsed.message) == "table" then
     for _, b in ipairs(parsed.message.content or {}) do
@@ -1123,6 +1196,186 @@ local function append_v3_custom(parsed)
     end
   end
   append_body("custom", text, body)
+end
+
+local function parent_key(parent_id)
+  return parent_id or ""
+end
+
+function register_file_entry(entry)
+  if type(entry) ~= "table" then
+    return
+  end
+  entry.id = entry.id or prelude.uuid_short()
+  entry.timestamp = entry.timestamp or prelude.iso_timestamp()
+  if entry.parentId == nil and last_entry_id ~= nil then
+    entry.parentId = last_entry_id
+  end
+  file_entries[#file_entries + 1] = entry
+  if type(entry.id) == "string" and entry.id ~= "" then
+    entry_by_id[entry.id] = entry
+    local key = parent_key(entry.parentId)
+    local children = children_by_parent[key]
+    if not children then
+      children = {}
+      children_by_parent[key] = children
+    end
+    children[#children + 1] = entry.id
+    leaf_id = entry.id
+    last_entry_id = entry.id
+  end
+end
+
+track_memory_append = function(in_mem_role, text, body)
+  if type(body) ~= "table" then
+    return
+  end
+  local entry = to_disk_entry({
+    role = in_mem_role,
+    text = text or "",
+    data = psi.json_encode(body),
+  })
+  register_file_entry(entry)
+end
+
+local function active_entries_for_leaf(id)
+  local out = {}
+  local seen = {}
+  while type(id) == "string" and id ~= "" do
+    if seen[id] then
+      break
+    end
+    seen[id] = true
+    local entry = entry_by_id[id]
+    if not entry then
+      break
+    end
+    out[#out + 1] = entry
+    id = entry.parentId
+  end
+  local reversed = {}
+  for i = #out, 1, -1 do
+    reversed[#reversed + 1] = out[i]
+  end
+  return reversed
+end
+
+local function append_disk_entry_to_memory(entry)
+  if entry.type == "message" then
+    append_v2_message(entry)
+  elseif entry.type == "compaction" then
+    append_v2_compaction(entry)
+  elseif
+    entry.type == "custom"
+    or entry.type == "custom_message"
+    or entry.type == "model_change"
+    or entry.type == "thinking_level_change"
+  then
+    append_v3_custom(entry)
+  end
+end
+
+local function rebuild_active_path()
+  psi.session_clear()
+  last_entry_id = nil
+  local active = active_entries_for_leaf(leaf_id)
+  suppress_tree_tracking = true
+  for _, entry in ipairs(active) do
+    append_disk_entry_to_memory(entry)
+  end
+  suppress_tree_tracking = false
+  if active[#active] and active[#active].id then
+    last_entry_id = active[#active].id
+    leaf_id = active[#active].id
+  else
+    last_entry_id = nil
+    leaf_id = nil
+  end
+end
+
+local function resolve_entry_id(id_or_prefix)
+  if type(id_or_prefix) ~= "string" or id_or_prefix == "" then
+    return nil, "entry id required"
+  end
+  if entry_by_id[id_or_prefix] then
+    return id_or_prefix
+  end
+  local matched
+  for id, _ in pairs(entry_by_id) do
+    if id:sub(1, #id_or_prefix) == id_or_prefix then
+      if matched then
+        return nil, "ambiguous entry id: " .. id_or_prefix
+      end
+      matched = id
+    end
+  end
+  if not matched then
+    return nil, "entry not found: " .. id_or_prefix
+  end
+  return matched
+end
+
+function M.branch(id_or_prefix)
+  local id, err = resolve_entry_id(id_or_prefix)
+  if not id then
+    return false, err
+  end
+  leaf_id = id
+  rebuild_active_path()
+  return true, id
+end
+
+local function branch_entry_label(entry)
+  local role = entry.type or "entry"
+  if entry.type == "message" and type(entry.message) == "table" then
+    role = entry.message.role or "message"
+  elseif entry.type == "compaction" then
+    role = "compaction"
+  end
+  local text = entry_text(entry)
+  if (not text or text == "") and entry.type == "compaction" then
+    text = entry.summary
+  end
+  text = tostring(text or ""):gsub("%s+", " ")
+  if #text > 70 then
+    text = text:sub(1, 67) .. "..."
+  end
+  return string.format("%s %s", role, text)
+end
+
+local function render_branch_lines(parent_id, prefix, lines, seen)
+  local children = children_by_parent[parent_key(parent_id)] or {}
+  for i, child_id in ipairs(children) do
+    if not seen[child_id] then
+      seen[child_id] = true
+      local entry = entry_by_id[child_id]
+      local last = i == #children
+      local marker = child_id == leaf_id and "*" or " "
+      local elbow = last and "`- " or "|- "
+      local child_prefix = prefix .. (last and "   " or "|  ")
+      lines[#lines + 1] = string.format(
+        "%s%s%s%s  %s",
+        marker,
+        prefix,
+        elbow,
+        child_id:sub(1, 8),
+        branch_entry_label(entry)
+      )
+      render_branch_lines(child_id, child_prefix, lines, seen)
+    end
+  end
+end
+
+function M.branch_tree_text()
+  if #file_entries == 0 then
+    return "(empty session tree)"
+  end
+  local lines = {
+    "session tree (* current leaf)",
+    "use /branch <id> to switch branches; new messages append below the selected leaf",
+  }
+  render_branch_lines(nil, "", lines, {})
+  return table.concat(lines, "\n")
 end
 
 function M.load(path)
@@ -1167,23 +1420,27 @@ function M.load(path)
         display_name = type(parsed.name) == "string" and parsed.name or nil
       elseif parsed.type == "message" then
         if version >= 2 and parsed.message then
-          append_v2_message(parsed)
+          register_file_entry(parsed)
         else
           append_v1_entry(parsed)
         end
       elseif parsed.type == "compaction" then
-        append_v2_compaction(parsed)
+        register_file_entry(parsed)
       elseif
         parsed.type == "custom"
         or parsed.type == "custom_message"
         or parsed.type == "model_change"
         or parsed.type == "thinking_level_change"
       then
-        append_v3_custom(parsed)
+        register_file_entry(parsed)
       end
     end
   end
   f:close()
+
+  if psi.session_message_count() == 0 and #file_entries > 0 then
+    rebuild_active_path()
+  end
 
   if not psi.session_id() or psi.session_id() == "" then
     psi.session_set_id(prelude.uuid_short())
@@ -1192,13 +1449,13 @@ function M.load(path)
   -- entries. The on-disk file already has exactly these messages,
   -- so this is the correct starting point.
   last_saved_path = path
-  last_saved_count = psi.session_message_count()
+  last_saved_count = #file_entries
   if psi.events and psi.events.emit then
     psi.events.emit("session-start", {
       id = psi.session_id(),
       path = path,
       source = "load",
-      message_count = last_saved_count,
+      message_count = psi.session_message_count(),
     })
   end
   return true
@@ -1365,6 +1622,11 @@ function M.do_compact(keep_recent, summary_text)
     firstKeptEntryId = first_kept_id,
   })
   for _, m in ipairs(tail) do
+    local body = prelude.safe_json_decode(m.data, nil)
+    if type(body) == "table" then
+      body.parentId = last_entry_id
+      m.data = psi.json_encode(body)
+    end
     M.append_message(m)
   end
   M.reset_file_ops()
