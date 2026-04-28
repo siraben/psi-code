@@ -178,7 +178,13 @@ local function is_table_separator(line)
   return true
 end
 
-local function looks_like_table_header(line, next_line)
+local is_table_row
+
+local function parse_gfm_table_block(lines, start_index)
+  lines = type(lines) == "table" and lines or {}
+  start_index = tonumber(start_index) or 1
+  local line = lines[start_index]
+  local next_line = lines[start_index + 1]
   if not has_table_pipe(line) or not is_table_separator(next_line) then
     return nil
   end
@@ -187,14 +193,24 @@ local function looks_like_table_header(line, next_line)
   if #header < 2 or #separator ~= #header then
     return nil
   end
-  return {
+  local info = {
     columns = #header,
     leading_pipe = has_leading_pipe(line),
     trailing_pipe = has_trailing_pipe(line),
   }
+  local raw_table = { line, next_line }
+  local index = start_index + 2
+  while index <= #lines and is_table_row(lines[index], info) do
+    raw_table[#raw_table + 1] = lines[index]
+    index = index + 1
+  end
+  return {
+    raw_lines = raw_table,
+    next_index = index,
+  }
 end
 
-local function is_table_row(line, table_info)
+function is_table_row(line, table_info)
   if line == "" or not has_table_pipe(line) then
     return false
   end
@@ -443,29 +459,19 @@ local function render_text(self, width)
 
   while i <= #source_lines do
     local line = source_lines[i]
-    local next_line = source_lines[i + 1]
-    local table_info = not fence_state and looks_like_table_header(line, next_line)
+    local table_block = not fence_state and parse_gfm_table_block(source_lines, i)
       or nil
-    if table_info then
-      local raw_table = { line, next_line }
-      i = i + 2
-      while
-        i <= #source_lines
-        and is_table_row(source_lines[i], table_info)
-      do
-        raw_table[#raw_table + 1] = source_lines[i]
-        i = i + 1
-      end
-
+    if table_block then
+      i = table_block.next_index
       local table_width = wrap_width(width, prefix)
-      local rendered = render_table_lines(raw_table, table_width)
+      local rendered = render_table_lines(table_block.raw_lines, table_width)
       if rendered ~= nil then
         for _, table_line in ipairs(rendered) do
           out[#out + 1] = (prefix or "") .. table_line
           prefix = rest_prefix
         end
       else
-        for _, raw_line in ipairs(raw_table) do
+        for _, raw_line in ipairs(table_block.raw_lines) do
           render_wrapped_line(out, raw_line, prefix or "", rest_prefix, width, false)
           prefix = rest_prefix
         end

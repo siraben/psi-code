@@ -596,6 +596,35 @@ def t_markdown_component_table_stops_before_paragraph(psi: Psi):
                 "paragraph with a pipe should not be swallowed as a table row")
 
 
+@test("markdown/component_table_without_outer_pipes")
+def t_markdown_component_table_without_outer_pipes(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local c = require("psi.tui_components.markdown").new({\n'
+        + '  text = "Verb | Weight\\n--- | ---\\nread | 1"\n'
+        + '})\n'
+        + 'return table.concat(c:render(64), "\\n")',
+    ).stdout.rstrip("\n")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_contains(plain, "│ Verb", "tables without outer pipes should render")
+    assert_contains(plain, "│ read", "tables without outer pipes should keep rows")
+
+
+@test("markdown/component_table_too_narrow_falls_back")
+def t_markdown_component_table_too_narrow_falls_back(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local c = require("psi.tui_components.markdown").new({\n'
+        + '  text = "| A | B | C |\\n| --- | --- | --- |\\n| one | two | three |"\n'
+        + '})\n'
+        + 'return table.concat(c:render(8), "\\n")',
+    ).stdout.rstrip("\n")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_contains(plain, "| A |", "narrow tables should fall back to raw markdown")
+    assert_contains(plain, "| ---", "narrow fallback should include the separator row")
+    assert_true("┌" not in plain, "narrow fallback should not render a boxed table")
+
+
 @test("compaction/snaps_past_orphan_tool_result")
 def t_compact_snap(psi: Psi):
     """Regression for the Haiku session failure: do_compact must never
