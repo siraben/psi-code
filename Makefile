@@ -6,6 +6,13 @@ SHAREDIR = $(PREFIX)/share/psi
 CC ?= cc
 HOST_CC ?= $(CC)
 PKG_CONFIG ?= pkg-config
+# embed_lua links zlib at host build time. On a native build it shares
+# pkg-config with the target; on cross builds the caller must override
+# HOST_CFLAGS_ZLIB / HOST_LIBS_ZLIB (or HOST_PKG_CONFIG) so the host
+# helper doesn't accidentally link against the target's zlib.
+HOST_PKG_CONFIG ?= $(PKG_CONFIG)
+HOST_CFLAGS_ZLIB ?= $(shell $(HOST_PKG_CONFIG) --cflags zlib)
+HOST_LIBS_ZLIB ?= $(shell $(HOST_PKG_CONFIG) --libs zlib)
 comma := ,
 
 CFLAGS ?= -O2
@@ -143,7 +150,7 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 $(EMBED_TOOL): scripts/embed_lua.c | $(BUILD_DIR)
-	$(HOST_CC) -O2 $(shell $(PKG_CONFIG) --cflags zlib) -o $@ $< $(shell $(PKG_CONFIG) --libs zlib)
+	$(HOST_CC) -O2 $(HOST_CFLAGS_ZLIB) -o $@ $< $(HOST_LIBS_ZLIB)
 
 $(EMBED_OUT): $(EMBED_TOOL) $(LUA_SOURCES)
 	$(EMBED_TOOL) $(LUA_SOURCES) > $@
