@@ -26,14 +26,30 @@
         # LDFLAGS. Works cleanly only on musl-based pkgsStatic because
         # glibc cannot be fully statically linked in general (NSS
         # modules, dlopen).
-        mkPsi = { p, static ? false, extraMakeFlags ? [], extraNativeBuildInputs ? [] }: p.stdenv.mkDerivation {
+        mkPsi = { p, static ? false, extraMakeFlags ? [], extraNativeBuildInputs ? [] }:
+          let
+            # When cross-compiling, embed_lua (the host helper that bakes
+            # Lua/doc files into a .c) must run on the build machine, so
+            # HOST_CC and the zlib it links against must come from the
+            # outer (native) pkgs — not the cross/target package set.
+            # We also use the outer pkg-config + gnumake unconditionally
+            # so that pkgsCross.* and pkgsStatic don't accidentally pull
+            # in target-arch tools that can't run on the build host.
+            isCross = p.stdenv.buildPlatform != p.stdenv.hostPlatform;
+            hostCC = "${pkgs.stdenv.cc}/bin/cc";
+          in p.stdenv.mkDerivation {
           pname = if static then "psi-static" else "psi";
           version = "0.1.0";
           src = ./.;
 
           nativeBuildInputs = [
-            p.gnumake
-            p.pkg-config
+            pkgs.gnumake
+            pkgs.pkg-config
+          ] ++ p.lib.optionals isCross [
+            # embed_lua.c #includes <zlib.h> and links -lz at host build
+            # time. Native zlib in nativeBuildInputs propagates headers
+            # and libs through NIX_CFLAGS_COMPILE_FOR_BUILD / LDFLAGS.
+            pkgs.zlib
           ] ++ extraNativeBuildInputs;
 
           buildInputs = [
@@ -48,11 +64,23 @@
           makeFlags = [
             "PREFIX=$(out)"
             "CC=${p.stdenv.cc.targetPrefix}cc"
-            "PKG_CONFIG=${p.pkg-config}/bin/pkg-config"
+            "HOST_CC=${hostCC}"
+            "PKG_CONFIG=pkg-config"
             "LUA_BOOT_FILE=$(out)/share/psi/boot.lua"
           ]
           ++ (if static then [ "STATIC=1" ] else [])
           ++ extraMakeFlags;
+
+          # Cross builds: target pkg-config returns target-arch zlib
+          # flags, which break the build-host helper. Hardcode paths to
+          # the build-host's zlib via makeFlagsArray (it preserves
+          # spaces in a single value, unlike the makeFlags string list).
+          preBuild = p.lib.optionalString isCross ''
+            makeFlagsArray+=(
+              "HOST_CFLAGS_ZLIB=-I${pkgs.zlib.dev}/include"
+              "HOST_LIBS_ZLIB=-L${pkgs.zlib.out}/lib -lz"
+            )
+          '';
 
           # pkgsStatic sometimes misses transitive static libs at link
           # time (curl pulls zlib/openssl/nghttp2/brotli/...); include
@@ -105,6 +133,13 @@
           if (pkgs.stdenv.hostPlatform.system == "x86_64-linux")
           then mkPsi { p = pkgs.pkgsi686Linux.pkgsStatic; static = true; }
           else throw "packages.psi-static-i686 requires x86_64-linux host (got ${pkgs.stdenv.hostPlatform.system})";
+
+        # Fully static RISC-V 64-bit binary, musl-based. Cross-compiled
+        # via pkgsCross.riscv64-musl + pkgsStatic — the resulting ELF
+        # is a single self-contained rv64gc/lp64d image with no ld.so.
+        # Run it on a RISC-V Linux host or via qemu-user.
+        packages.psi-static-riscv64 =
+          mkPsi { p = pkgs.pkgsCross.riscv64-musl.pkgsStatic; static = true; };
 
         # `nix run .#valgrind` — memcheck a non-agent exercise set.
         apps.valgrind = let
