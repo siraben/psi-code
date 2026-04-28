@@ -560,6 +560,15 @@ local BUILTIN_COMMANDS = {
     description = "Duplicate the current session at its current position",
   },
   {
+    name = "branch",
+    argument_hint = "[entry-id]",
+    description = "Show the session tree or switch the active branch leaf",
+  },
+  {
+    name = "branches",
+    description = "Show the session tree",
+  },
+  {
     name = "reload",
     description = "Reload extensions, prompt templates, and keybindings",
   },
@@ -830,6 +839,23 @@ function M.handle(line)
     local ok = session.fork(total, out)
     local msg = ok and string.format("cloned %d entries to %s", total, out) or "clone failed"
     return records.new_command_action("print", msg)
+  end
+  if starts_word(line, "/branch") then
+    local rest = arg_after(line, "/branch")
+    if rest == "" then
+      return records.new_command_action("print", session.branch_tree_text())
+    end
+    local ok, result = session.branch(rest)
+    if not ok then
+      return records.new_command_action("print", "branch failed: " .. tostring(result))
+    end
+    return records.new_command_action(
+      "print",
+      "active branch leaf: " .. tostring(result) .. "\n" .. session.branch_tree_text()
+    )
+  end
+  if line == "/branches" then
+    return records.new_command_action("print", session.branch_tree_text())
   end
   local registered_action = dispatch_registered(line)
   if registered_action ~= nil then

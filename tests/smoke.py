@@ -2915,6 +2915,41 @@ def t_session_round_trip(psi: Psi):
     assert_contains(text, '"text":"two"', "second user text")
 
 
+@test("session/branch_tree_loads_active_leaf")
+def t_session_branch_tree_loads_active_leaf(psi: Psi):
+    sess = psi.tmp / "branch.jsonl"
+    out = psi.eval(
+        'local s = require("psi.session")\n'
+        + 'local path = "' + str(sess) + '"\n'
+        + 'psi.session_set_path(path)\n'
+        + 's.append_user("root")\n'
+        + 'local root = s.leaf_id()\n'
+        + 's.append_assistant("first", {{type="text", text="first"}}, {})\n'
+        + 'local first = s.leaf_id()\n'
+        + 'local ok, err = s.branch(root)\n'
+        + 'if not ok then return "branch-root-failed:" .. tostring(err) end\n'
+        + 's.append_user("second")\n'
+        + 's.save()\n'
+        + 's.load(path)\n'
+        + 'local loaded = psi.session_messages()\n'
+        + 'local saw_first = false\n'
+        + 'local saw_second = false\n'
+        + 'for _, m in ipairs(loaded) do\n'
+        + '  if m.text == "first" then saw_first = true end\n'
+        + '  if m.text == "second" then saw_second = true end\n'
+        + 'end\n'
+        + 'local ok2, err2 = s.branch(first)\n'
+        + 'if not ok2 then return "branch-first-failed:" .. tostring(err2) end\n'
+        + 'local branched = psi.session_messages()\n'
+        + 'return string.format("loaded=%d first=%s second=%s branched=%d leaf=%s",\n'
+        + '  #loaded, tostring(saw_first), tostring(saw_second), #branched, tostring(s.leaf_id() == first))'
+    )
+    assert_equals(out, "loaded=2 first=false second=true branched=2 leaf=true",
+                  "load follows the last JSONL leaf and /branch restores sibling path")
+    text = sess.read_text()
+    assert_equals(text.count('"type":"message"'), 3, "branched file preserves sibling entries")
+
+
 # ---------------------------------------------------------------------------
 # Truncation tests — port of pi-mono's truncate.ts behaviour.
 # ---------------------------------------------------------------------------
