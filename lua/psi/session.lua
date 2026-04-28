@@ -985,6 +985,23 @@ local last_saved_path = nil
 local last_saved_count = 0
 local register_file_entry
 
+local function reconcile_memory_entries()
+  local parent_id = nil
+  for _, message in ipairs(psi.session_messages()) do
+    local entry = to_disk_entry(message)
+    local id = entry.id
+    if type(id) == "string" and id ~= "" and entry_by_id[id] then
+      parent_id = id
+    else
+      if entry.parentId == nil then
+        entry.parentId = parent_id
+      end
+      register_file_entry(entry)
+      parent_id = entry.id
+    end
+  end
+end
+
 -- Persist the current session to disk.
 --
 -- Return contract:
@@ -1017,15 +1034,8 @@ function M.save(path)
   if not path or path == "" then
     return false, "no session path set"
   end
+  reconcile_memory_entries()
   local count = #file_entries
-  if count == 0 and psi.session_message_count() > 0 then
-    local messages = psi.session_messages()
-    for _, message in ipairs(messages) do
-      local entry = to_disk_entry(message)
-      register_file_entry(entry)
-    end
-    count = #file_entries
-  end
 
   local force_full = (path ~= last_saved_path)
     or (count < last_saved_count)
@@ -1208,9 +1218,6 @@ function register_file_entry(entry)
   end
   entry.id = entry.id or prelude.uuid_short()
   entry.timestamp = entry.timestamp or prelude.iso_timestamp()
-  if entry.parentId == nil and last_entry_id ~= nil then
-    entry.parentId = last_entry_id
-  end
   file_entries[#file_entries + 1] = entry
   if type(entry.id) == "string" and entry.id ~= "" then
     entry_by_id[entry.id] = entry
