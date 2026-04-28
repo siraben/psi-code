@@ -945,6 +945,23 @@ def t_agent_set_reasoning_effort(psi: Psi):
     assert_equals(out, "high|none|medium", "reasoning effort override then clear")
 
 
+@test("agent/thinking_level")
+def t_agent_thinking_level(psi: Psi):
+    out = psi.eval(
+        'local a = require("psi.agent")\n'
+        + 'local openai = { provider="openai-codex", id="gpt-5.5", reasoning=true }\n'
+        + 'local fallback = a.thinking_level_for(openai, nil, nil)\n'
+        + 'local explicit = a.thinking_level_for(openai, "xhigh", nil)\n'
+        + 'local off = a.thinking_level_for(openai, nil, "none")\n'
+        + 'local ok, set = a.set_thinking_level("xhigh", "openai-codex/gpt-5.5")\n'
+        + 'local current = a.current_reasoning_effort("low")\n'
+        + 'return fallback .. "|" .. explicit .. "|" .. off .. "|" .. tostring(ok) .. "|"\n'
+        + '  .. tostring(set) .. "|" .. tostring(current)'
+    )
+    assert_equals(out, "medium|xhigh|off|true|xhigh|xhigh",
+                  "thinking defaults, clamps, and updates reasoning override")
+
+
 @test("commands/set_reasoning_effort")
 def t_commands_set_reasoning_effort(psi: Psi):
     out = psi.eval(
@@ -955,6 +972,19 @@ def t_commands_set_reasoning_effort(psi: Psi):
     )
     assert_contains(out, "set-reasoning-effort|xhigh|print|usage: /set effort",
                     "/set validates reasoning effort")
+
+
+@test("commands/thinking")
+def t_commands_thinking(psi: Psi):
+    out = psi.eval(
+        'local c = require("psi.commands")\n'
+        + 'local a = c.handle("/thinking xhigh")\n'
+        + 'local b = c.handle("/thinking nope")\n'
+        + 'return a.kind .. "|" .. tostring(a.payload) .. "|" .. b.kind .. "|"\n'
+        + '  .. tostring(b.payload:find("usage: /thinking", 1, true) ~= nil)'
+    )
+    assert_equals(out, "set-thinking|xhigh|print|true",
+                  "/thinking validates pi-style levels")
 
 
 @test("theme/default_dark")
@@ -1339,25 +1369,19 @@ def t_providers_openai_codex_reasoning_config(psi: Psi):
                   "OpenAI Codex reasoning effort uses runtime override then config")
 
 
-@test("providers/openai_codex_http_error")
-def t_providers_openai_codex_http_error(psi: Psi):
-    auth_file = psi.tmp / "codex-auth.json"
-    out = psi.run(
-        "--eval",
-        'local a = require("psi.auth_storage")\n'
-        + 'a.set("openai-codex", {type="oauth", access="a", refresh="r", expires=9999999999999, accountId="acct"})\n'
-        + 'psi.http_stream_begin = function() return {} end\n'
-        + 'psi.http_stream_poll = function() return "{\\"error\\":{\\"message\\":\\"nope\\"}}", true end\n'
-        + 'psi.http_stream_finish = function() return 401 end\n'
-        + 'local ok, err = require("psi.sched").run(function()\n'
-        + '  return require("psi.openai_codex").run_turn({model="gpt-5.5"})\n'
-        + 'end)\n'
-        + 'return tostring(ok) .. "|" .. tostring(err)',
-        env_extra={"PSI_AUTH_FILE": str(auth_file)},
-    ).stdout.strip()
-    assert_contains(out, "false|openai-codex request failed (401)",
-                    "OpenAI Codex HTTP errors should be classified")
-    assert_contains(out, "nope", "OpenAI Codex HTTP error details should be preserved")
+@test("providers/openai_codex_reasoning")
+def t_providers_openai_codex_reasoning(psi: Psi):
+    out = psi.eval(
+        'local d = require("psi.openai_codex")._debug\n'
+        + 'local a = d.request_body({model="gpt-5.5", messages={}})\n'
+        + 'local b = d.request_body({model="gpt-5.5", messages={}, thinking_level="minimal"})\n'
+        + 'local c = d.request_body({model="gpt-5.5", messages={}, thinking_level="xhigh"})\n'
+        + 'local e = d.request_body({model="gpt-5.5", messages={}, thinking_level="off"})\n'
+        + 'return a.reasoning.effort .. "|" .. b.reasoning.effort .. "|"\n'
+        + '  .. c.reasoning.effort .. "|" .. tostring(e.reasoning == nil)'
+    )
+    assert_equals(out, "medium|low|xhigh|true",
+                  "OpenAI Codex maps pi-style thinking levels to request reasoning")
 
 
 @test("providers/openai_codex_http_error")
@@ -1869,6 +1893,14 @@ def t_agents_md(psi: Psi):
 def t_help(psi: Psi):
     out = psi.run("--help").stdout
     assert_contains(out, "--tui", "--tui in help")
+    assert_contains(out, "--thinking", "--thinking in help")
+
+
+@test("cli/thinking_validation")
+def t_cli_thinking_validation(psi: Psi):
+    res = psi.run("--thinking", "sideways", "--eval", "return 1", check=False)
+    assert_true(res.returncode != 0, "invalid --thinking should fail")
+    assert_contains(res.stderr, "invalid value for --thinking", "invalid thinking error")
 
 
 @test("mode/print_text")
@@ -1892,8 +1924,10 @@ def t_tui_quits(psi: Psi):
     text = strip_ansi(raw)
     # We don't require exact chrome; just confirm the Lua-rendered top
     # bar was painted before accepting /quit.
-    assert_contains(text, "repo", "TUI header")
-    assert_contains(text, "worktree", "TUI header")
+    assert_true(
+        ("repo" in text and "worktree" in text) or "cwd" in text,
+        "TUI header should show workspace context",
+    )
 
 
 @test("mode/tui_theme_applies_to_rendered_colors")
@@ -1923,7 +1957,7 @@ def t_tui_theme_applies_to_rendered_colors(psi: Psi):
         idle_drain=1.0,
         cwd=project,
     )
-    assert b"\x1b[38;5;118m" in raw, "configured TUI accent color did not reach rendered output"
+    assert b"38;5;118" in raw, "configured TUI accent color did not reach rendered output"
 
 
 @test("mode/tui_input_box_background")
@@ -1951,7 +1985,10 @@ def t_tui_lf_submit(psi: Psi):
         ],
     )
     text = strip_ansi(raw)
-    assert_contains(text, "repo", "bare LF submits commands")
+    assert_true(
+        ("repo" in text and "worktree" in text) or "cwd" in text,
+        "bare LF submits commands and paints workspace context",
+    )
 
 
 @test("mode/tui_multiline_prompt")

@@ -14,12 +14,23 @@ struct psi_cli_argtable {
     struct arg_lit *system_prompt;
     struct arg_str *agent;
     struct arg_str *model;
+    struct arg_str *thinking;
     struct arg_int *max_tokens;
     struct arg_int *compact;
     struct arg_str *session;
     struct arg_end *end;
-    void *table[13];
+    void *table[14];
 };
+
+static int psi_cli_valid_thinking(const char *level) {
+    if (level == NULL) return 0;
+    return strcmp(level, "off") == 0 ||
+           strcmp(level, "minimal") == 0 ||
+           strcmp(level, "low") == 0 ||
+           strcmp(level, "medium") == 0 ||
+           strcmp(level, "high") == 0 ||
+           strcmp(level, "xhigh") == 0;
+}
 
 static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
     args->help = arg_lit0("h", "help", "show help");
@@ -31,6 +42,7 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
     args->system_prompt = arg_lit0(NULL, "system-prompt", "print the default coding-agent system prompt");
     args->agent = arg_str0(NULL, "agent", "TEXT", "run a single Anthropic-backed coding-agent turn");
     args->model = arg_str0(NULL, "model", "MODEL", "model to use with --agent");
+    args->thinking = arg_str0(NULL, "thinking", "LEVEL", "thinking level: off, minimal, low, medium, high, xhigh");
     args->max_tokens = arg_int0(NULL, "max-tokens", "N", "max output tokens for --agent");
     args->compact = arg_int0(NULL, "compact", "N", "compact the current session, keeping the most recent N messages");
     args->session = arg_str0(NULL, "session", "FILE", "load and save a JSONL session file");
@@ -45,10 +57,11 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
     args->table[6] = args->system_prompt;
     args->table[7] = args->agent;
     args->table[8] = args->model;
-    args->table[9] = args->max_tokens;
-    args->table[10] = args->compact;
-    args->table[11] = args->session;
-    args->table[12] = args->end;
+    args->table[9] = args->thinking;
+    args->table[10] = args->max_tokens;
+    args->table[11] = args->compact;
+    args->table[12] = args->session;
+    args->table[13] = args->end;
 
     return arg_nullcheck(args->table) == 0 ? PSI_STATUS_OK : PSI_STATUS_ERROR;
 }
@@ -114,6 +127,7 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     options->boot_file = PSI_LUA_BOOT_FILE;
     options->session_file = NULL;
     options->model = NULL;
+    options->thinking_level = NULL;
     options->max_tokens = 16384l;
     options->keep_recent = 12l;
 
@@ -180,6 +194,14 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     }
     if (args.model->count > 0) {
         options->model = args.model->sval[0];
+    }
+    if (args.thinking->count > 0) {
+        if (!psi_cli_valid_thinking(args.thinking->sval[0])) {
+            fprintf(stderr, "invalid value for --thinking\n");
+            psi_cli_free_argtable(&args);
+            return PSI_STATUS_ERROR;
+        }
+        options->thinking_level = args.thinking->sval[0];
     }
     if (args.max_tokens->count > 0) {
         options->max_tokens = (long)args.max_tokens->ival[0];
