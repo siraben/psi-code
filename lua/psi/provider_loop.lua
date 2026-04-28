@@ -138,6 +138,7 @@ function M.run_turn(opts, cfg)
       messages = api_messages,
       tool_specs = tool_specs,
       max_tokens = opts.max_tokens,
+      thinking_level = opts.thinking_level,
       reasoning_effort = opts.reasoning_effort,
       system_prompt = system_prompt,
     })
