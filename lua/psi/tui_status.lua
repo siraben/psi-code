@@ -9,6 +9,7 @@ local context = require("psi.context")
 local keybindings = require("psi.keybindings")
 local prelude = require("psi.prelude")
 local settings = require("psi.settings_manager")
+local tui_text = require("psi.tui_text")
 
 local M = {}
 local BAR_SPLIT = string.char(31)
@@ -506,28 +507,6 @@ local function tilde_path(path)
   return path
 end
 
-local function visible_width(text)
-  local width = 0
-  local i = 1
-  text = tostring(text or "")
-  while i <= #text do
-    local ch = text:byte(i)
-    if ch == 27 and text:sub(i + 1, i + 1) == "[" then
-      local j = i + 2
-      while j <= #text and text:sub(j, j) ~= "m" do
-        j = j + 1
-      end
-      i = j < #text and (j + 1) or (#text + 1)
-    else
-      if (ch & 0xC0) ~= 0x80 then
-        width = width + 1
-      end
-      i = i + 1
-    end
-  end
-  return width
-end
-
 local function split_bar(text)
   text = tostring(text or "")
   local start_pos, end_pos = text:find(BAR_SPLIT, 1, true)
@@ -540,8 +519,8 @@ end
 function M.compose_bar(text, width)
   local left, right = split_bar(text)
   local total_width = math.max(1, tonumber(width) or 80)
-  local left_width = visible_width(left)
-  local right_width = visible_width(right)
+  local left_width = tui_text.visible_width(left)
+  local right_width = tui_text.visible_width(right)
   local gap = total_width - left_width - right_width - 1
   if right == "" then
     return left

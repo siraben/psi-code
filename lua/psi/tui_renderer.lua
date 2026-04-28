@@ -4,6 +4,8 @@
 -- It keeps full redraw as the conservative fallback and uses changed-row writes
 -- only when the terminal dimensions are stable.
 
+local tui_text = require("psi.tui_text")
+
 local M = {}
 
 local ESC = string.char(27)
@@ -17,10 +19,6 @@ local HIDE_CURSOR = CSI .. "?25l"
 local SHOW_CURSOR = CSI .. "?25h"
 
 local CURSOR_MARKER = ESC .. "_psi:c" .. string.char(7)
-
-local ANSI_PATTERN_CSI = "\27%[[%d;?]*[A-Za-z]"
-local ANSI_PATTERN_APC = "\27_[^\7]*\7"
-local ANSI_PATTERN_OSC = "\27%][^\7]*\7"
 
 local function clamp(value, low, high)
   if value < low then
@@ -40,23 +38,6 @@ local function normalize_lines(lines, height)
     out[row] = tostring(lines[row] or "")
   end
   return out
-end
-
-local function visible_width(text)
-  text = tostring(text or "")
-  text = text:gsub(ANSI_PATTERN_CSI, "")
-  text = text:gsub(ANSI_PATTERN_APC, "")
-  text = text:gsub(ANSI_PATTERN_OSC, "")
-  local width = 0
-  local i = 1
-  while i <= #text do
-    local byte = text:byte(i)
-    if byte < 0x80 or byte >= 0xC0 then
-      width = width + 1
-    end
-    i = i + 1
-  end
-  return width
 end
 
 local function apply_line_resets(lines)
@@ -216,7 +197,7 @@ function M.extract_cursor(lines)
     line = tostring(line or "")
     local start_pos, end_pos = line:find(CURSOR_MARKER, 1, true)
     if start_pos ~= nil and cursor == nil then
-      cursor = { row = row, col = visible_width(line:sub(1, start_pos - 1)) + 1 }
+      cursor = { row = row, col = tui_text.visible_width(line:sub(1, start_pos - 1)) + 1 }
       line = line:sub(1, start_pos - 1) .. line:sub(end_pos + 1)
     end
     out[row] = line
