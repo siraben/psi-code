@@ -156,7 +156,7 @@ end
 local function display_width(text)
   local width = 0
   local i = 1
-  text = tostring(text or "")
+  text = strip_ansi(tostring(text or ""))
   while i <= #text do
     local ch = text:byte(i)
     if ch == BYTE_ESC and text:sub(i + 1, i + 1) == "[" then
@@ -181,6 +181,16 @@ local function limit_text(text)
     return text
   end
   return text:sub(1, MAX_RENDER_TEXT) .. MAX_RENDER_TRUNCATION_SUFFIX
+end
+
+local function limit_live_tool_progress_text(text)
+  text = text or EMPTY
+  if #text <= MAX_RENDER_TEXT then
+    return text
+  end
+  local prefix = "[earlier output truncated]\n\n"
+  local keep = math.max(0, MAX_RENDER_TEXT - #prefix)
+  return prefix .. text:sub(#text - keep + 1)
 end
 
 local function current_size()
@@ -458,16 +468,24 @@ local function add_entry(state, kind, text, title, is_error, tool_call_id)
   return #state.entries
 end
 
+local function set_entry_text(state, index, text)
+  if index == nil or not state.entries[index] then
+    return
+  end
+  local entry = state.entries[index]
+  entry.text = text or ""
+  entry.render_cache_width = nil
+  entry.render_cache_lines = nil
+  invalidate_render_totals(state)
+  state.dirty = true
+end
+
 local function append_entry_text(state, index, text)
   if index == nil or not state.entries[index] or text == nil then
     return
   end
   local entry = state.entries[index]
-  entry.text = (entry.text or "") .. text
-  entry.render_cache_width = nil
-  entry.render_cache_lines = nil
-  invalidate_render_totals(state)
-  state.dirty = true
+  set_entry_text(state, index, (entry.text or "") .. text)
 end
 
 local function remove_entry(state, index)
@@ -924,9 +942,11 @@ local function layout_rows(state)
   local footer_row = state.height
   local input_box_rows = input_rows + 2
   local input_start_row = footer_row - input_box_rows
-  local status_row = input_start_row - 1
+  local status_visible = state.busy or state.status_text ~= nil
+  local status_row = status_visible and (input_start_row - 1) or nil
   local transcript_start = 2
-  local transcript_height = math.max(1, status_row - transcript_start)
+  local transcript_end = status_visible and (status_row - 1) or (input_start_row - 1)
+  local transcript_height = math.max(1, transcript_end - transcript_start + 1)
 
   return {
     header_row = 1,
@@ -938,6 +958,7 @@ local function layout_rows(state)
     input_first_line = input_first_line,
     transcript_start = transcript_start,
     transcript_height = transcript_height,
+    status_visible = status_visible,
     status_row = status_row,
     footer_row = footer_row,
     input_start_row = input_start_row,
@@ -1068,7 +1089,9 @@ local function redraw(state)
       state.busy_tick
     )
   end
-  frame[#frame + 1] = frame_line(rows.status_row, status_text, frame_width)
+  if rows.status_visible then
+    frame[#frame + 1] = frame_line(rows.status_row, status_text, frame_width)
+  end
 
   local input_width = frame_width
   frame[#frame + 1] =
@@ -1729,12 +1752,11 @@ local function observer_tool_progress(state, tool_call_id, chunk)
   if type(payload) == "table" and payload.psi_progress_replace == true then
     local entry = state.entries[index]
     if entry then
-      entry.text = tostring(payload.text or "")
-      entry.render_cache_width = nil
-      entry.render_cache_lines = nil
+      set_entry_text(state, index, limit_live_tool_progress_text(tostring(payload.text or "")))
     end
   else
-    append_entry_text(state, index, chunk)
+    local entry = state.entries[index]
+    set_entry_text(state, index, limit_live_tool_progress_text((entry and entry.text or "") .. chunk))
   end
   scroll_anchor_after(state, before)
 end
@@ -1748,10 +1770,8 @@ local function observer_tool_result(state, tool_call_id, tool_name, output_json)
   if index ~= nil and state.entries[index] then
     local entry = state.entries[index]
     entry.title = tool_name
-    entry.text = text or ""
     entry.is_error = not not is_error
-    entry.render_cache_width = nil
-    entry.render_cache_lines = nil
+    set_entry_text(state, index, text or "")
   else
     add_entry(state, "tool_result", text or "", tool_name, is_error, tool_call_id)
   end
@@ -2417,12 +2437,30 @@ function M._debug_resolve_input_layout(width, height, busy, scroll)
   return state.input_layout
 end
 
+function M._debug_layout_rows(width, height, busy, status_text)
+  local state = {
+    width = tonumber(width) or 80,
+    height = tonumber(height) or 24,
+    busy = not not busy,
+    status_text = status_text,
+    input = "",
+    cursor = 0,
+    scroll_offset = 0,
+    input_layout = default_input_layout(tonumber(height) or 24),
+  }
+  return layout_rows(state)
+end
+
 function M._debug_tui_capabilities()
   return detect_tui_capabilities()
 end
 
 function M._debug_sanitize_terminal_text(text, preserve_newlines)
   return sanitize_terminal_text(text, preserve_newlines)
+end
+
+function M._debug_limit_live_tool_progress_text(text)
+  return limit_live_tool_progress_text(text)
 end
 
 function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_options)
