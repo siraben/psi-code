@@ -13,6 +13,19 @@
           inherit system;
         };
 
+        curlWithMbedtls = p: (p.curl.override {
+          opensslSupport = false;
+          http3Support = false; # mbedTLS does not support curl's QUIC backend.
+          scpSupport = false;   # libssh2 pulls OpenSSL back into the closure.
+          gssSupport = false;   # Kerberos pulls OpenSSL back into the closure.
+        }).overrideAttrs (old: {
+          configureFlags = p.lib.remove "--without-ssl" old.configureFlags
+            ++ [ "--with-mbedtls=${p.lib.getDev p.mbedtls}" ];
+          propagatedBuildInputs = old.propagatedBuildInputs ++ [ p.mbedtls ];
+          nativeCheckInputs = p.lib.remove p.openssl (old.nativeCheckInputs or []);
+        });
+        curl = curlWithMbedtls pkgs;
+
         # Build the psi derivation against an arbitrary package set.
         # Accepts:
         #   - native pkgs                                  (x86_64 dynamic)
@@ -37,6 +50,7 @@
             # in target-arch tools that can't run on the build host.
             isCross = p.stdenv.buildPlatform != p.stdenv.hostPlatform;
             hostCC = "${pkgs.stdenv.cc}/bin/cc";
+            curlMbedtls = curlWithMbedtls p;
           in p.stdenv.mkDerivation {
           pname = if static then "psi-static" else "psi";
           version = "0.1.0";
@@ -55,7 +69,7 @@
           buildInputs = [
             p.argtable
             p.cjson
-            p.curl
+            curlMbedtls
             p.libedit
             p.lua5_4
             p.zlib
@@ -83,7 +97,7 @@
           '';
 
           # pkgsStatic sometimes misses transitive static libs at link
-          # time (curl pulls zlib/openssl/nghttp2/brotli/...); include
+          # time (curl pulls zlib/mbedtls/nghttp2/brotli/...); include
           # them explicitly so pkg-config --static --libs resolves.
           # Most are picked up by pkg-config; we just need their .pc
           # files visible, which buildInputs already arranges.
@@ -173,7 +187,7 @@
               pkgs.gcc
               pkgs.argtable
               pkgs.cjson
-              pkgs.curl
+              curl
               pkgs.libedit
               pkgs.lua5_4
             ];
@@ -206,7 +220,7 @@
               pkgs.lua54Packages.luacheck
               pkgs.argtable
               pkgs.cjson
-              pkgs.curl
+              curl
               pkgs.libedit
               pkgs.lua5_4
             ];
@@ -241,7 +255,7 @@
               pkgs.tinycc
               pkgs.argtable
               pkgs.cjson
-              pkgs.curl
+              curl
               pkgs.libedit
               pkgs.lua5_4
               pkgs.zlib
@@ -270,7 +284,7 @@
             pkgs.clang-tools
             pkgs.cppcheck
             pkgs.cjson
-            pkgs.curl
+            curl
             pkgs.gdb
             pkgs.libedit
             pkgs.lua5_4
