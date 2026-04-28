@@ -20,8 +20,11 @@
           gssSupport = false;   # Kerberos pulls OpenSSL back into the closure.
         }).overrideAttrs (old: {
           configureFlags = p.lib.remove "--without-ssl" old.configureFlags
-            ++ [ "--with-mbedtls=${p.lib.getDev p.mbedtls}" ];
-          propagatedBuildInputs = old.propagatedBuildInputs ++ [ p.mbedtls ];
+            ++ [
+              "--with-mbedtls=${p.lib.getDev p.mbedtls}"
+              "--with-ca-bundle=${p.cacert}/etc/ssl/certs/ca-bundle.crt"
+            ];
+          propagatedBuildInputs = old.propagatedBuildInputs ++ [ p.mbedtls p.cacert ];
           nativeCheckInputs = p.lib.remove p.openssl (old.nativeCheckInputs or []);
         });
         curl = curlWithMbedtls pkgs;
