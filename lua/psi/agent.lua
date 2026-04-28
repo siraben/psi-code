@@ -232,6 +232,11 @@ function M.side_question(question, opts)
     return false, "missing question"
   end
 
+  local excerpt = transcript_excerpt(opts.context_chars or 24000)
+  if excerpt == "" then
+    return true, "The current session is empty, so there is no transcript context for /btw yet."
+  end
+
   local provider, resolved = pick_provider(M.current_model(opts.model))
   local side_system = prompt.system_prompt()
     .. "\n\n"
@@ -239,7 +244,7 @@ function M.side_question(question, opts)
     .. "Do not call tools, do not modify files, and do not add anything to the main transcript. "
     .. "Answer concisely from the supplied transcript excerpt and say when the excerpt is insufficient."
   local user_text = "Current transcript excerpt:\n\n"
-    .. transcript_excerpt(opts.context_chars or 24000)
+    .. excerpt
     .. "\n\nSide question:\n"
     .. question
 
