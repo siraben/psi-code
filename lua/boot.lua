@@ -64,6 +64,32 @@ psi.install_builtin_extensions()
 psi.modes = require("psi.modes")
 psi.markdown = require("psi.markdown")
 
+local function load_packaged_extension(module_name)
+  local ok, ext = pcall(require, module_name)
+  if not ok then
+    io.stderr:write(
+      "psi: packaged extension " .. module_name .. " failed to load: " .. tostring(ext) .. "\n"
+    )
+  elseif type(ext) == "function" then
+    local inv_ok, inv_err = pcall(ext, psi)
+    if not inv_ok then
+      io.stderr:write(
+        "psi: packaged extension "
+          .. module_name
+          .. " failed during init: "
+          .. tostring(inv_err)
+          .. "\n"
+      )
+    end
+  end
+end
+
+for _, module_name in ipairs({
+  "psi.extensions.btw",
+}) do
+  load_packaged_extension(module_name)
+end
+
 -- Default event-hook registrations.
 --
 -- Assistant text flows through a line-buffered markdown stream when

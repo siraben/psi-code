@@ -220,7 +220,7 @@ function M.handle_key(arg)
   end
 
   if keybindings.matches(key, "tui.input.submit") then
-    if not busy and input_length > 0 then
+    if input_length > 0 then
       return action("submit")
     end
     return nil
@@ -228,6 +228,15 @@ function M.handle_key(arg)
 
   if keybindings.matches(key, "tui.input.newLine") then
     return action("insert", "\n")
+  end
+  if (tonumber(arg.queue_count) or 0) > 0 and keybindings.matches(key, "tui.queue.restore") then
+    return action("queue-restore")
+  end
+  if busy and keybindings.matches(key, "tui.queue.previous") then
+    return action("queue-navigate", "previous")
+  end
+  if busy and keybindings.matches(key, "tui.queue.next") then
+    return action("queue-navigate", "next")
   end
   if keybindings.matches(key, "tui.editor.deleteCharBackward") then
     return action("delete-backward")
@@ -270,6 +279,12 @@ function M.handle_key(arg)
   end
   if keybindings.matches(key, "tui.editor.cursorLineEnd") then
     return action("move-end")
+  end
+  if key == "wheel-up" then
+    return action("scroll", "line-up")
+  end
+  if key == "wheel-down" then
+    return action("scroll", "line-down")
   end
   if keybindings.matches(key, "tui.transcript.lineUp") then
     return action("scroll", "line-up")
@@ -323,6 +338,26 @@ local function format_elapsed(total_seconds)
   return string.format("%d:%02d", minutes, seconds)
 end
 
+local function queue_preview(text)
+  text = tostring(text or "")
+  text = text:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+  return text
+end
+
+local function queue_preview_all(agent)
+  if type(agent.pending_messages) ~= "function" then
+    return ""
+  end
+  local pieces = {}
+  for _, item in ipairs(agent.pending_messages() or {}) do
+    local text = queue_preview(item and item.text or "")
+    if text ~= "" then
+      pieces[#pieces + 1] = text
+    end
+  end
+  return table.concat(pieces, " | ")
+end
+
 local function label(text)
   return ansi.color("2", tostring(text or ""))
 end
@@ -332,7 +367,7 @@ local function value(text)
 end
 
 local function accent(text)
-  return ansi.color("1;36", tostring(text or ""))
+  return ansi.color("36", tostring(text or ""))
 end
 
 local function utf8_chars(text)
@@ -558,6 +593,17 @@ function M.status_line(arg_json)
 
   if scroll > 0 then
     parts[#parts + 1] = "scroll:" .. tostring(scroll)
+  end
+  if ok and agent.pending_message_count then
+    local queued = agent.pending_message_count()
+    if queued > 0 then
+      local preview = queue_preview_all(agent)
+      if preview ~= "" then
+        parts[#parts + 1] = "queue:" .. preview
+      else
+        parts[#parts + 1] = "queue:" .. tostring(queued)
+      end
+    end
   end
   if busy then
     parts[#parts + 1] = "busy…"

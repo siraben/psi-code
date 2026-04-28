@@ -86,5 +86,6 @@ return function()
       edits = { type = "array", items = edit_item_schema },
     }, { "path", "edits" }),
     impl = impl,
+    opts = { execution_mode = "sequential" },
   })
 end

@@ -608,6 +608,9 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
     unsigned int first;
     unsigned int second;
     unsigned int third;
+    unsigned int button;
+    unsigned int column;
+    unsigned int row;
     char final;
 
     if (sequence == NULL || sequence[0] == '\0') {
@@ -656,6 +659,50 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
     }
     if (strcmp(sequence, "[6~") == 0) {
         return "page-down";
+    }
+    if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 &&
+        first == 1u && second == 5u) {
+        if (final == 'A') {
+            return "ctrl-up";
+        }
+        if (final == 'B') {
+            return "ctrl-down";
+        }
+        if (final == 'C') {
+            return "ctrl-right";
+        }
+        if (final == 'D') {
+            return "ctrl-left";
+        }
+    }
+    if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 &&
+        first == 1u && second == 3u) {
+        if (final == 'A') {
+            return "alt-up";
+        }
+        if (final == 'B') {
+            return "alt-down";
+        }
+        if (final == 'C') {
+            return "alt-right";
+        }
+        if (final == 'D') {
+            return "alt-left";
+        }
+    }
+    if (sscanf(sequence, "[<%u;%u;%u%c", &button, &column, &row, &final) == 4 &&
+        (final == 'M' || final == 'm')) {
+        PSI_UNUSED(column);
+        PSI_UNUSED(row);
+        if (final == 'M' && (button & 64u) != 0u) {
+            if ((button & 3u) == 0u) {
+                return "wheel-up";
+            }
+            if ((button & 3u) == 1u) {
+                return "wheel-down";
+            }
+        }
+        return NULL;
     }
     if (sscanf(sequence, "[%u;%u;%u%c", &first, &second, &third, &final) == 4 &&
         final == '~' && first == 27u && third == 13u && second >= 2u) {

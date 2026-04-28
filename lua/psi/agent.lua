@@ -7,6 +7,7 @@
 
 local context = require("psi.context")
 local control = require("psi.agent_control")
+local transform = require("psi.message_transform")
 local prompt = require("psi.prompt")
 local sched = require("psi.sched")
 local session = require("psi.session")
@@ -50,6 +51,7 @@ end
 -- the TUI footer reflects the live model string.
 local override_model = nil
 local override_reasoning_effort = nil
+local configured_model = nil
 
 local function normalize_reasoning_effort(value)
   if value == nil then
@@ -73,6 +75,11 @@ local function effort_to_thinking(value)
   return value
 end
 
+function M.configure(opts)
+  opts = opts or {}
+  configured_model = opts.model
+end
+
 function M.set_model(name)
   if name == nil or name == "" then
     override_model = nil
@@ -84,6 +91,12 @@ end
 function M.current_model(fallback)
   if override_model ~= nil then
     return override_model
+  end
+  if fallback ~= nil and fallback ~= "" then
+    return fallback
+  end
+  if configured_model ~= nil and configured_model ~= "" then
+    return configured_model
   end
   return fallback
 end
@@ -161,7 +174,28 @@ M.queue_follow_up = control.queue_follow_up
 M.drain_steering = control.drain_steering
 M.drain_follow_ups = control.drain_follow_ups
 M.pending_message_count = control.pending_count
+M.pending_messages = control.pending_messages
+M.pending_message = control.pending_message
+M.replace_pending = control.replace_pending
+M.remove_pending = control.remove_pending
 M.clear_queues = control.clear_queues
+
+local function transcript_excerpt(max_chars)
+  max_chars = tonumber(max_chars) or 24000
+  local entries = {}
+  for _, m in ipairs(transform.plain_session()) do
+    local role = m.role or "message"
+    local text = m.text or ""
+    if text ~= "" then
+      entries[#entries + 1] = role .. ":\n" .. text
+    end
+  end
+  local out = table.concat(entries, "\n\n")
+  if #out <= max_chars then
+    return out
+  end
+  return out:sub(#out - max_chars + 1)
+end
 
 -- Append the user's turn, build the system prompt, and drive the
 -- streaming tool loop via the chosen provider's run_turn.
@@ -190,6 +224,32 @@ function M.run_turn(opts)
       abort_check = opts.abort_check,
     })
   end)
+end
+
+function M.side_question(question, opts)
+  opts = opts or {}
+  if type(question) ~= "string" or question == "" then
+    return false, "missing question"
+  end
+
+  local provider, resolved = pick_provider(M.current_model(opts.model))
+  local side_system = prompt.system_prompt()
+    .. "\n\n"
+    .. "You are answering an ephemeral /btw side question. "
+    .. "Do not call tools, do not modify files, and do not add anything to the main transcript. "
+    .. "Answer concisely from the supplied transcript excerpt and say when the excerpt is insufficient."
+  local user_text = "Current transcript excerpt:\n\n"
+    .. transcript_excerpt(opts.context_chars or 24000)
+    .. "\n\nSide question:\n"
+    .. question
+
+  return provider.complete_text({
+    system_prompt = side_system,
+    user_text = user_text,
+    model = resolved.id,
+    max_tokens = opts.max_tokens or 1024,
+    abort_check = opts.abort_check,
+  })
 end
 
 -- Summarize the older half of the session using a one-shot completion

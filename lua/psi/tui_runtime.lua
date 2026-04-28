@@ -5,6 +5,7 @@ local context = require("psi.context")
 local markdown = require("psi.markdown")
 local prelude = require("psi.prelude")
 local render = require("psi.render")
+local sched = require("psi.sched")
 local session = require("psi.session")
 local settings = require("psi.settings")
 local tui = require("psi.tui")
@@ -413,6 +414,7 @@ local function new_state(opts)
     tui_caps = caps,
     streaming_assistant_index = nil,
     streaming_thinking_index = nil,
+    queue_nav_index = nil,
     entries_version = 0,
     total_cache_width = nil,
     total_cache_version = nil,
@@ -837,6 +839,9 @@ local function style_line(line)
     return ansi.bold(ansi.cyan(line.text))
   end
   if line.kind == "tool_call" then
+    return ansi.yellow(line.text)
+  end
+  if line.kind == "btw" then
     return ansi.yellow(line.text)
   end
   if line.kind == "tool_result" then
@@ -1667,6 +1672,123 @@ local function kill_to_start(state)
   state.dirty = true
 end
 
+local function compact_status_text(text, max_len)
+  text = tostring(text or "")
+  text = text:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+  max_len = tonumber(max_len) or 80
+  if #text > max_len then
+    return text:sub(1, math.max(1, max_len - 3)) .. "..."
+  end
+  return text
+end
+
+local function queued_messages_text()
+  local pieces = {}
+  for _, item in ipairs(agent.pending_messages() or {}) do
+    local text = compact_status_text(item and item.text or "", 96)
+    if text ~= "" then
+      pieces[#pieces + 1] = text
+    end
+  end
+  return table.concat(pieces, " | ")
+end
+
+local function queue_status_text(extra_text)
+  local preview = queued_messages_text()
+  extra_text = compact_status_text(extra_text or "", 96)
+  if extra_text ~= "" then
+    preview = preview ~= "" and (preview .. " | " .. extra_text) or extra_text
+  end
+  if preview == "" then
+    return "queue empty"
+  end
+  return "queued: " .. preview
+end
+
+local function queue_current_input(state, line)
+  local count = agent.pending_message_count()
+  if
+    state.queue_nav_index ~= nil
+    and state.queue_nav_index >= 1
+    and state.queue_nav_index <= count
+  then
+    if agent.replace_pending(state.queue_nav_index, line) then
+      set_status(state, queue_status_text(), false)
+      state.dirty = true
+      return
+    end
+  end
+  if agent.queue_follow_up(line) then
+    state.queue_nav_index = nil
+    set_status(state, queue_status_text(), false)
+  else
+    set_status(state, "failed to queue message", true)
+  end
+  state.dirty = true
+end
+
+local function navigate_queue(state, direction)
+  local count = agent.pending_message_count()
+  if count == 0 then
+    state.queue_nav_index = nil
+    set_status(state, "queue is empty", false)
+    return
+  end
+  local index = state.queue_nav_index
+  if index == nil or index < 1 or index > count then
+    index = direction == "previous" and count or 1
+  elseif direction == "previous" then
+    index = index - 1
+    if index < 1 then
+      index = count
+    end
+  else
+    index = index + 1
+    if index > count then
+      index = 1
+    end
+  end
+
+  local item = agent.pending_message(index)
+  if item == nil then
+    return
+  end
+  state.queue_nav_index = index
+  state.input = item.text or ""
+  state.cursor = #state.input
+  set_status(state, queue_status_text(), false)
+  state.dirty = true
+end
+
+local function restore_queued_message(state)
+  local count = agent.pending_message_count()
+  if count == 0 then
+    state.queue_nav_index = nil
+    set_status(state, "queue is empty", false)
+    return
+  end
+  local messages = {}
+  for _, item in ipairs(agent.pending_messages() or {}) do
+    messages[#messages + 1] = item.text or ""
+  end
+  if #messages == 0 then
+    state.queue_nav_index = nil
+    set_status(state, "queue is empty", false)
+    return
+  end
+  for i = count, 1, -1 do
+    agent.remove_pending(i)
+  end
+  state.queue_nav_index = nil
+  state.input = table.concat(messages, "\n")
+  state.cursor = #state.input
+  clear_selection(state)
+  state.block_edit = nil
+  state.editor_mode = "insert"
+  set_status(state, "editing queued messages", false)
+  state.dirty = true
+end
+
 local function observer_text_delta(state, text)
   if type(text) ~= "string" or text == "" then
     return
@@ -1759,6 +1881,17 @@ local function observer_tool_result(state, tool_call_id, tool_name, output_json)
   scroll_anchor_after(state, before)
 end
 
+local function observer_queued_user(state, text, kind)
+  local before = scroll_anchor_before(state)
+  finish_streaming_assistant(state)
+  state.streaming_thinking_index = nil
+  state.streaming_assistant_index = nil
+  state.queue_nav_index = nil
+  add_entry(state, "user", text or "")
+  set_status(state, kind == "steering" and "using queued steering" or "using queued message", false)
+  scroll_anchor_after(state, before)
+end
+
 local function fire_turn_event(state, event, payload)
   local rendered = render_event_plain(event, payload)
   if rendered ~= nil and rendered ~= "" then
@@ -1796,6 +1929,9 @@ local function run_turn(state, line)
     end,
     on_thinking_delta = function(text)
       observer_thinking_delta(state, text)
+    end,
+    on_queued_user = function(text, kind)
+      observer_queued_user(state, text, kind)
     end,
   }
 
@@ -1889,6 +2025,65 @@ local function run_compact(state, keep_recent)
   redraw(state)
 end
 
+local function reset_busy(state)
+  state.busy = false
+  state.busy_label = nil
+  state.busy_phase = 0
+  state.busy_tick = 0
+  state.busy_started_at = nil
+end
+
+local function run_btw(state, question)
+  question = tostring(question or "")
+  if question == "" then
+    add_entry(state, "btw", "/btw")
+    append_entry_text(state, #state.entries, "\nusage: /btw <question>")
+    return true
+  end
+
+  local entry_index = add_entry(state, "btw", "/btw " .. question .. "\n")
+  state.scroll_offset = 0
+  state.busy = true
+  state.busy_label = "btw"
+  state.busy_phase = 0
+  state.busy_tick = 0
+  state.busy_started_at = os.time()
+  psi.abort_reset()
+  set_status(state, "", false)
+  redraw(state)
+
+  local ran, ok, answer = xpcall(function()
+    return sched.run(function()
+      return agent.side_question(question, {
+        model = state.opts.model,
+        max_tokens = 1024,
+        context_chars = 24000,
+        abort_check = psi.is_aborted,
+      })
+    end)
+  end, debug.traceback)
+
+  if not ran then
+    append_entry_text(state, entry_index, "btw failed: " .. tostring(ok or "side question failed"))
+    set_status(state, "btw failed", true)
+  elseif not ok then
+    append_entry_text(
+      state,
+      entry_index,
+      "btw failed: " .. tostring(answer or "side question failed")
+    )
+    set_status(state, "btw failed", true)
+  else
+    append_entry_text(state, entry_index, answer or "")
+    set_status(state, "", false)
+  end
+
+  reset_busy(state)
+  state.dirty = true
+  redraw(state)
+  return true
+end
+
 local function handle_command(state, line)
   if line == "/quit" or line == "/q" or line == ":quit" or line == ":q" then
     state.running = false
@@ -1916,6 +2111,11 @@ local function handle_command(state, line)
       add_entry(state, "ansi", action.payload)
     end
     set_status(state, "", false)
+    return true
+  end
+
+  if action.kind == "btw" then
+    run_btw(state, action.payload)
     return true
   end
 
@@ -2019,7 +2219,7 @@ local function handle_command(state, line)
 end
 
 local function submit(state)
-  if state.busy or state.input == "" then
+  if state.input == "" then
     return
   end
 
@@ -2030,6 +2230,37 @@ local function submit(state)
   state.block_edit = nil
   state.editor_mode = "insert"
   state.pending_key = nil
+
+  if state.busy then
+    if line:sub(1, 1) == "/" then
+      local action = commands.handle(line)
+      if action == nil then
+        set_status(state, "unknown command", true)
+        return
+      end
+      if action.kind == "print" then
+        if type(action.payload) == "string" and action.payload ~= "" then
+          add_entry(state, "info", action.payload)
+        end
+        set_status(state, "", false)
+        return
+      end
+      if action.kind == "btw" then
+        state.input = line
+        state.cursor = #state.input
+        set_status(state, "/btw is unavailable while a turn is running", true)
+        return
+      end
+      if action.kind == "expand" then
+        line = action.payload or ""
+      else
+        set_status(state, "command unavailable while busy", true)
+        return
+      end
+    end
+    queue_current_input(state, line)
+    return
+  end
 
   if line:sub(1, 1) == "/" then
     local handled, expanded = handle_command(state, line)
@@ -2081,6 +2312,14 @@ local function apply_action(state, action, arg)
   end
   if action == "submit" then
     submit(state)
+    return
+  end
+  if action == "queue-navigate" then
+    navigate_queue(state, arg)
+    return
+  end
+  if action == "queue-restore" then
+    restore_queued_message(state)
     return
   end
   if action == "delete-backward" then
@@ -2284,6 +2523,7 @@ local function handle_key_event(state, event)
     selection_anchor = state.selection_anchor,
     pending_key = state.pending_key,
     scroll = state.scroll_offset,
+    queue_count = agent.pending_message_count(),
     text = event.text or "",
   })
   if result == nil then
@@ -2328,6 +2568,7 @@ local function bootstrap_session(opts)
 end
 
 function M.run(opts)
+  agent.configure(opts)
   local ok, err = bootstrap_session(opts)
   if not ok then
     io.stderr:write("failed to load session file: " .. tostring(err) .. "\n")
@@ -2441,7 +2682,7 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     pending_key = nil,
     block_edit = nil,
     force_physical_clear = false,
-    busy = false,
+    busy = not not debug_options.busy,
     running = true,
     scroll_offset = 0,
     status_text = nil,
