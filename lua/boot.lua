@@ -50,6 +50,7 @@ psi.agent = require("psi.agent_session")
 psi.render = require("psi.render")
 psi.commands = require("psi.slash_commands")
 psi.prompt_templates = require("psi.prompt_templates")
+psi.skills = require("psi.skills")
 psi.tui = require("psi.tui_status")
 psi.tui_layout = require("psi.tui_layout")
 psi.extensions = psi.extensions or {}
@@ -246,3 +247,4 @@ end
 psi.load_extensions()
 psi.theme.apply_configured({ preserve_current = true })
 psi.prompt_templates.load()
+psi.skills.load()

@@ -4,6 +4,7 @@ local prelude = require("psi.prelude")
 local session = require("psi.session_manager")
 local tools = require("psi.tools")
 local resources = require("psi.resource_loader")
+local skills = require("psi.skills")
 
 local M = {}
 
@@ -111,6 +112,7 @@ function M.system_prompt()
     "- docs/architecture.md      — architecture overview\n",
     "- docs/port-status.md       — port audit against pi\n",
     "- docs/extensions.md        — extension / event / slash-command API\n",
+    "- docs/skills.md            — skill discovery and /skill:name flow\n",
     "- docs/providers.md         — Anthropic + Ollama provider routing\n",
     "- Read only when the user asks about psi itself, its architecture, ",
     "Lua modules, or host layer. Always read the target .md file ",
@@ -122,6 +124,12 @@ function M.system_prompt()
     buf[#buf + 1] = "\n\n# Project Context\n\nProject-specific instructions and guidelines:\n\n"
     for _, f in ipairs(context_files) do
       buf[#buf + 1] = "## " .. f.path .. "\n\n" .. f.content .. "\n\n"
+    end
+  end
+  if have.read then
+    local skill_block = skills.prompt_section()
+    if skill_block ~= "" then
+      buf[#buf + 1] = skill_block
     end
   end
   buf[#buf + 1] = "\nCurrent date: " .. psi.current_date()

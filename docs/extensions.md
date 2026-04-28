@@ -144,7 +144,7 @@ session state.
 | `psi.commands.unregister(name)` | Remove a previously registered command. |
 | `psi.commands.builtin_commands()` | Built-in command metadata used to generate `/help`. |
 | `psi.commands.registered_commands()` | Extension command metadata currently registered. |
-| `psi.commands.help_text()` | Generated help text for built-ins, extensions, and prompt templates. |
+| `psi.commands.help_text()` | Generated help text for built-ins, extensions, prompt templates, and skills. |
 
 Built-in commands take precedence over registered ones —
 extensions cannot shadow them. Full list:
@@ -327,6 +327,7 @@ These are part of the stable surface:
 | `psi.settings.get(path, default)` / `reload()` | Read layered JSON settings from `~/.config/psi/settings.json` and `./.psi/settings.json`. |
 | `psi.resources.context_files()` | Discover global/project context files. Emits `resources_discover`. |
 | `psi.prompt_templates.load()` / `list()` / `find(name)` / `expand(text)` | Loader + lookup + runtime expansion for user-authored slash-command templates. `/reload` reloads them. See "Prompt templates" below. |
+| `psi.skills.load()` / `list()` / `find(name)` / `expand(text)` / `prompt_section()` | Loader + lookup + `/skill:name` expansion for `SKILL.md` bundles. `/reload` reloads them. See [docs/skills.md](skills.md). |
 
 The built-in Vim keybinding layer (`lua/psi/extensions/vim_keybindings.lua`)
 is a core-bundled extension. It is disabled by default, enabled at

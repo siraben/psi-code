@@ -368,13 +368,19 @@ local function cmd_reload()
   if psi.prompt_templates and psi.prompt_templates.load then
     pcall(psi.prompt_templates.load)
   end
+  if psi.skills and psi.skills.load then
+    pcall(psi.skills.load)
+  end
   if keybindings.reload then
     pcall(keybindings.reload)
   end
   if psi.tui and psi.tui.run_startup_hooks then
     pcall(psi.tui.run_startup_hooks, { reason = "reload" })
   end
-  return records.new_command_action("print", "extensions reloaded")
+  return records.new_command_action(
+    "print",
+    "extensions, skills, prompts, keybindings, and themes reloaded"
+  )
 end
 
 local function rainbow_fg(bg)
@@ -559,7 +565,7 @@ local BUILTIN_COMMANDS = {
   },
   {
     name = "reload",
-    description = "Reload extensions, prompt templates, and keybindings",
+    description = "Reload extensions, skills, prompt templates, and keybindings",
   },
   {
     name = "rainbow",
@@ -676,6 +682,15 @@ function M.help_text()
     if type(template_help) == "string" and template_help ~= "" then
       lines[#lines + 1] = "\n"
       lines[#lines + 1] = template_help
+    end
+  end
+
+  local ok_skills, skills = pcall(require, "psi.skills")
+  if ok_skills and skills and skills.help_lines then
+    local skill_help = skills.help_lines()
+    if type(skill_help) == "string" and skill_help ~= "" then
+      lines[#lines + 1] = "\n"
+      lines[#lines + 1] = skill_help
     end
   end
 
@@ -832,6 +847,13 @@ function M.handle(line)
   local registered_action = dispatch_registered(line)
   if registered_action ~= nil then
     return registered_action
+  end
+
+  if psi.skills and psi.skills.expand then
+    local expanded = psi.skills.expand(line)
+    if type(expanded) == "string" and expanded ~= "" then
+      return records.new_command_action("expand", expanded)
+    end
   end
 
   -- Prompt template fallback: `/foo args…` where foo.md was loaded

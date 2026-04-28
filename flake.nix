@@ -562,6 +562,8 @@
             pkgs.ripgrep
             pkgs.stylua
             pkgs.tinycc
+            pkgs.ncurses
+            (pkgs.python3.withPackages (ps: [ ps.pyyaml ]))
             pkgs.valgrind
           ];
           shellHook = devShellHook;

@@ -858,6 +858,69 @@ def t_commands_help_templates(psi: Psi):
     assert_contains(out, "Review staged changes", "template description")
 
 
+@test("skills/load_prompt_and_expand")
+def t_skills_load_prompt_expand(psi: Psi):
+    project = psi.tmp / "skill-project"
+    skill_dir = project / ".psi" / "skills" / "web-search"
+    home = psi.tmp / "skill-home"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (home / ".config" / "psi").mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: web-search\n"
+        "description: Search the web for current facts.\n"
+        "---\n"
+        "# Web Search\n\n"
+        "Use ./scripts/search.sh.\n"
+    )
+    out = psi.run(
+        "--eval",
+        'local s = require("psi.skills")\n'
+        + 'local c = require("psi.commands")\n'
+        + 's.load()\n'
+        + 'local list = s.list()\n'
+        + 'local prompt = require("psi.prompt").system_prompt()\n'
+        + 'local action = c.handle("/skill:web-search brave api docs")\n'
+        + 'return tostring(#list == 1) .. "|"\n'
+        + '  .. tostring(list[1].name == "web-search") .. "|"\n'
+        + '  .. tostring(prompt:find("<name>web%-search</name>", 1) ~= nil) .. "|"\n'
+        + '  .. tostring(action.kind == "expand") .. "|"\n'
+        + '  .. tostring(action.payload:find("brave api docs", 1, true) ~= nil)',
+        cwd=project,
+        env_extra={"HOME": str(home)},
+    ).stdout.strip()
+    assert_equals(out, "true|true|true|true|true", "skills load/prompt/expand")
+
+
+@test("skills/prompt_hides_disable_model_invocation")
+def t_skills_hidden_from_prompt(psi: Psi):
+    project = psi.tmp / "hidden-skill-project"
+    home = psi.tmp / "hidden-skill-home"
+    shown = project / ".psi" / "skills" / "visible-skill"
+    hidden = project / ".psi" / "skills" / "hidden-skill"
+    shown.mkdir(parents=True, exist_ok=True)
+    hidden.mkdir(parents=True, exist_ok=True)
+    (home / ".config" / "psi").mkdir(parents=True, exist_ok=True)
+    (shown / "SKILL.md").write_text(
+        "---\n"
+        "name: visible-skill\n"
+        "description: Visible in the system prompt.\n"
+        "---\n"
+        "Visible.\n"
+    )
+    (hidden / "SKILL.md").write_text(
+        "---\n"
+        "name: hidden-skill\n"
+        "description: Only invokable explicitly.\n"
+        "disable-model-invocation: true\n"
+        "---\n"
+        "Hidden.\n"
+    )
+    out = psi.run("--system-prompt", cwd=project, env_extra={"HOME": str(home)}).stdout
+    assert_contains(out, "<name>visible-skill</name>", "visible skill prompt entry")
+    assert_true("<name>hidden-skill</name>" not in out, "hidden skill leaked into prompt")
+
+
 @test("keybindings/hotkeys_and_footer_are_generated")
 def t_keybindings_generated(psi: Psi):
     home = psi.tmp / "keybindings-home"
@@ -2382,6 +2445,7 @@ def t_system_prompt_tools(psi: Psi):
     assert_regex(out, r"^Available tools:$", "available-tools heading")
     assert_contains(out, "lua: Inspect or evaluate the embedded Lua runtime",
                     "lua tool description")
+    assert_contains(out, "docs/skills.md", "skills docs pointer")
 
 
 @test("prompt/agents_md_picked_up")

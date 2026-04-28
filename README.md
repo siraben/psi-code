@@ -18,6 +18,7 @@ This repository currently contains:
 - an architecture document in [docs/architecture.md](docs/architecture.md)
 - a port audit in [docs/port-status.md](docs/port-status.md)
 - an extension authoring guide in [docs/extensions.md](docs/extensions.md)
+- a skills guide in [docs/skills.md](docs/skills.md)
 - a provider catalogue in [docs/providers.md](docs/providers.md)
 - a Nix flake that builds `psi` and its dependencies, plus cross-
   compile targets (`packages.psi-i686`, `packages.psi-static`,
@@ -35,7 +36,8 @@ This repository currently contains:
   provider/model routing, settings/resource discovery, provider loops,
   slash commands, and an extension loader
 - a default coding-agent system prompt assembled from tools, cwd,
-  date, global/project `AGENTS.md` / `CLAUDE.md`, and active tool scope
+  date, global/project `AGENTS.md` / `CLAUDE.md`, discovered skills,
+  and active tool scope
 - a streamed Anthropic-backed `--agent` mode with host tool
   execution, prompt caching, dynamic token-accounting, and session
   logging in a pi-compatible v3 JSONL format
@@ -60,6 +62,10 @@ This repository currently contains:
   a Lua coroutine on the TUI thread, pumping input and
   ANSI redraws between every cooperative yield
 - manual session compaction through `--compact` and `/compact`
+- cooperative abort plumbing (Ctrl-C for non-TUI, Ctrl-G in TUI)
+- lightweight skill discovery plus `/skill:name` expansion for
+  `SKILL.md` bundles under `.psi/skills`, `.agents/skills`, and
+  compatible global locations
 - cooperative abort plumbing (Ctrl-C for non-TUI, Ctrl-G in TUI)
   that cancels the current curl transfer, kills any child
   process, and persists a truncated tool result
@@ -202,11 +208,18 @@ for the authoring guide.
 - `~/.config/psi/extensions/`
 - `./.psi/extensions/`
 
+## Skills
+
+psi also supports lightweight `SKILL.md` bundles. See
+[docs/skills.md](docs/skills.md) for discovery rules and `/skill:name`
+usage.
+
 ## Layout
 
 - `docs/architecture.md`: planned runtime architecture
 - `docs/port-status.md`: audit against `pi-mono`
 - `docs/extensions.md`: extension API surface and authoring guide
+- `docs/skills.md`: skill discovery, prompt exposure, and `/skill:name`
 - `docs/providers.md`: provider catalogue and configuration
 - `include/psi/`: public project headers (`abort`, `agent`,
   `anthropic`, `common`, `embedded_lua`, `host_ops`, `message`,
