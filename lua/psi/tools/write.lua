@@ -40,6 +40,5 @@ return function()
       content = helpers.schema_type("string"),
     }, { "path", "content" }),
     impl = impl,
-    opts = { execution_mode = "sequential" },
   })
 end
