@@ -89,7 +89,54 @@ end
 local function response_input_from_session(session, _system_prompt)
   local out = prelude.as_array({})
   local known_tool_calls = {}
+  local pending_tool_calls = {}
+  local seen_result_ids = {}
   local msg_index = 0
+
+  local function user_input(text)
+    return {
+      role = "user",
+      content = prelude.as_array({
+        { type = "input_text", text = text or "" },
+      }),
+    }
+  end
+
+  local function assistant_text(text)
+    local entry = {
+      type = "message",
+      role = "assistant",
+      status = "completed",
+      id = "msg_" .. tostring(msg_index),
+      content = prelude.as_array({
+        {
+          type = "output_text",
+          text = text or "",
+          annotations = prelude.as_array({}),
+        },
+      }),
+    }
+    msg_index = msg_index + 1
+    return entry
+  end
+
+  local function tool_output(call_id, output)
+    return {
+      type = "function_call_output",
+      call_id = call_id,
+      output = output or "",
+    }
+  end
+
+  local function flush_synthetic_results()
+    for _, tc in ipairs(pending_tool_calls) do
+      if not seen_result_ids[tc.id] then
+        out[#out + 1] = tool_output(tc.id, "No result provided")
+      end
+    end
+    pending_tool_calls = {}
+    seen_result_ids = {}
+  end
 
   local i, n = 1, #session
   while i <= n do
@@ -98,15 +145,12 @@ local function response_input_from_session(session, _system_prompt)
     local role = m.role
 
     if role == "user" and message then
-      out[#out + 1] = {
-        role = "user",
-        content = prelude.as_array({
-          { type = "input_text", text = transform.text_from_content(message.content) },
-        }),
-      }
+      flush_synthetic_results()
+      out[#out + 1] = user_input(transform.text_from_content(message.content))
       i = i + 1
     elseif role == "assistant" and message then
       if not transform.skip_assistant(message) then
+        flush_synthetic_results()
         for _, block in ipairs(message.content or {}) do
           if type(block) == "table" then
             if block.type == "thinking" and type(block.thinkingSignature) == "string" then
@@ -115,23 +159,15 @@ local function response_input_from_session(session, _system_prompt)
                 out[#out + 1] = item
               end
             elseif block.type == "text" then
-              out[#out + 1] = {
-                type = "message",
-                role = "assistant",
-                status = "completed",
-                id = "msg_" .. tostring(msg_index),
-                content = prelude.as_array({
-                  {
-                    type = "output_text",
-                    text = block.text or "",
-                    annotations = prelude.as_array({}),
-                  },
-                }),
-              }
+              out[#out + 1] = assistant_text(block.text or "")
             elseif block.type == "toolCall" then
               local call_id, item_id = split_tool_id(block.id)
               if call_id ~= "" then
                 known_tool_calls[call_id] = true
+                pending_tool_calls[#pending_tool_calls + 1] = {
+                  id = call_id,
+                  name = block.name,
+                }
                 out[#out + 1] = {
                   type = "function_call",
                   id = item_id,
@@ -144,7 +180,6 @@ local function response_input_from_session(session, _system_prompt)
           end
         end
       end
-      msg_index = msg_index + 1
       i = i + 1
     elseif role == "tool-result" then
       while i <= n and session[i].role == "tool-result" do
@@ -153,26 +188,37 @@ local function response_input_from_session(session, _system_prompt)
         if type(tm) == "table" then
           local call_id = split_tool_id(tm.toolCallId)
           if call_id ~= "" and known_tool_calls[call_id] then
-            out[#out + 1] = {
-              type = "function_call_output",
-              call_id = call_id,
-              output = transform.tool_result_text(tm),
-            }
+            out[#out + 1] = tool_output(call_id, transform.tool_result_text(tm))
+            seen_result_ids[call_id] = true
           end
         end
         i = i + 1
       end
     elseif role == "compaction-summary" then
+      flush_synthetic_results()
       local summary = (type(body) == "table" and body.summary) or m.text or ""
-      out[#out + 1] = {
-        role = "user",
-        content = prelude.as_array({ { type = "input_text", text = summary } }),
-      }
+      out[#out + 1] = user_input(summary)
+      i = i + 1
+    elseif
+      role == "custom"
+      and type(body) == "table"
+      and body.__entry_type == "custom_message"
+      and type(body.message) == "table"
+      and not body.message.hidden
+    then
+      flush_synthetic_results()
+      local text = transform.text_from_content(body.message.content)
+      if body.message.role == "assistant" then
+        out[#out + 1] = assistant_text(text)
+      else
+        out[#out + 1] = user_input(text)
+      end
       i = i + 1
     else
       i = i + 1
     end
   end
+  flush_synthetic_results()
   return out
 end
 
