@@ -1830,13 +1830,14 @@ def t_tui_busy_status_render(psi: Psi):
     assert_contains(out, "\x1b[96m", "busy label has a subtle shimmer")
 
 
-@test("tui/full_redraw_uses_single_ansi_pass")
-def t_tui_full_redraw_uses_single_ansi_pass(psi: Psi):
+@test("tui/differential_redraw_uses_changed_rows")
+def t_tui_differential_redraw_uses_changed_rows(psi: Psi):
     out = psi.eval(
         'local d = require("psi.tui_runtime")._debug_redraw_counts("hello\\nhi")\n'
         + 'return table.concat({\n'
         + '  tostring(d.first_frames),\n'
         + '  tostring(d.second_frames),\n'
+        + '  tostring(d.second_writes),\n'
         + '  tostring(d.second_input_draws > 0),\n'
         + '  tostring(d.second_clears),\n'
         + '  tostring(d.stale_clears > 0),\n'
@@ -1844,10 +1845,24 @@ def t_tui_full_redraw_uses_single_ansi_pass(psi: Psi):
         + '  tostring(d.draw_rows),\n'
         + '  tostring(d.raw_draws),\n'
         + '  tostring(d.cursor_sets),\n'
-        + '  tostring(d.refreshes)\n'
+        + '  tostring(d.refreshes),\n'
+        + '  tostring(d.renderer_full),\n'
+        + '  tostring(d.renderer_diff >= 1),\n'
+        + '  tostring(d.renderer_last_mode)\n'
         + '}, "|")'
     )
-    assert_equals(out, "1|1|true|0|true|0|0|0|0|0", "full redraw uses one no-clear ANSI frame")
+    assert_equals(out, "1|0|1|false|0|true|1|0|0|0|0|1|true|diff",
+                  "stable-size redraw uses changed-row diff output")
+
+
+@test("tui/renderer_cursor_marker")
+def t_tui_renderer_cursor_marker(psi: Psi):
+    out = psi.eval(
+        'local r = require("psi.tui_renderer")\n'
+        + 'local lines, cursor = r.extract_cursor({"ab" .. r.cursor_marker() .. "cd", "ef"})\n'
+        + 'return table.concat({lines[1], lines[2], tostring(cursor.row), tostring(cursor.col)}, "|")'
+    )
+    assert_equals(out, "abcd|ef|1|3", "renderer strips cursor marker and reports position")
 
 
 @test("tui/show_thinking_config")
@@ -1924,7 +1939,7 @@ def t_tui_no_color_disables_input_chrome_colors(psi: Psi):
     out = psi.run(
         "--eval",
         'local d = require("psi.tui_runtime")._debug_redraw_counts("hello")\n'
-        + 'local frame = d.second_frame or ""\n'
+        + 'local frame = d.second_output or ""\n'
         + 'return table.concat({\n'
         + '  tostring(frame:find("48;5;", 1, true) == nil),\n'
         + '  tostring(frame:find("38;5;", 1, true) == nil)\n'

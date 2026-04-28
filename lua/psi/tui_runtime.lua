@@ -9,7 +9,9 @@ local sched = require("psi.sched")
 local session = require("psi.session_manager")
 local settings = require("psi.settings_manager")
 local tui = require("psi.tui_status")
+local tui_component = require("psi.tui_component")
 local tui_layout = require("psi.tui_layout")
+local tui_renderer = require("psi.tui_renderer")
 
 local M = {}
 
@@ -435,6 +437,7 @@ local function new_state(opts)
     show_thinking = tui.show_thinking() == "1",
     width = width,
     height = height,
+    renderer = tui_renderer.new(),
     input_layout = default_input_layout(height),
     tui_caps = caps,
     streaming_assistant_index = nil,
@@ -1040,10 +1043,6 @@ local function padded_frame_text(text, width)
   return text .. style_screen_fill(width - display_width(text))
 end
 
-local function frame_line(row, text, width)
-  return "\27[" .. tostring(row) .. ";1H" .. padded_frame_text(text, width)
-end
-
 local render_input_text
 local render_input_text_with_cursor
 local input_line_selected
@@ -1056,30 +1055,33 @@ local function redraw(state)
   local status_arg
   local status_text = ""
   local cwd
-  local frame = {}
+  local components = {}
   local frame_width
 
   state.scroll_offset = clamp(state.scroll_offset, 0, max_scroll)
 
   if state.force_physical_clear then
     psi.tui_clear(true)
+    tui_renderer.reset(state.renderer)
   end
-  state.force_physical_clear = false
   frame_width = math.max(1, state.width - 1)
   cwd = psi.cwd() or "."
-  frame[#frame + 1] =
-    frame_line(rows.header_row, tui.compose_bar(tui.workspace_bar(cwd), frame_width), frame_width)
+  components[#components + 1] = tui_component.line(function(width)
+    return padded_frame_text(tui.compose_bar(tui.workspace_bar(cwd), width), width)
+  end)
 
   local first_line = total_lines - rows.transcript_height - state.scroll_offset + 1
   if first_line < 1 then
     first_line = 1
   end
   local transcript_lines = build_render_window(state, first_line, rows.transcript_height)
+  local transcript_component_lines = {}
   for i = 0, rows.transcript_height - 1 do
     local line = transcript_lines[i + 1]
-    local row = rows.transcript_start + i
-    frame[#frame + 1] = frame_line(row, line and style_line(line) or "", frame_width)
+    transcript_component_lines[#transcript_component_lines + 1] =
+      padded_frame_text(line and style_line(line) or "", frame_width)
   end
+  components[#components + 1] = tui_component.fixed(transcript_component_lines)
 
   status_arg = {
     model = state.model and state.model.id or state.opts.model,
@@ -1106,11 +1108,15 @@ local function redraw(state)
     )
   end
   if rows.status_visible then
-    frame[#frame + 1] = frame_line(rows.status_row, status_text, frame_width)
+    components[#components + 1] = tui_component.line(function(width)
+      return padded_frame_text(status_text, width)
+    end)
   end
 
   local input_width = frame_width
-  frame[#frame + 1] = frame_line(rows.input_start_row, style_input_border(input_width), frame_width)
+  local input_component_lines = {
+    padded_frame_text(style_input_border(input_width), frame_width),
+  }
   for i = 0, rows.input_rows - 1 do
     local line_index = rows.input_first_line + i
     local line = rows.input_lines[line_index]
@@ -1133,19 +1139,15 @@ local function redraw(state)
         input_width
       )
     end
-    frame[#frame + 1] = frame_line(rows.input_start_row + 1 + i, input_text, frame_width)
+    input_component_lines[#input_component_lines + 1] = padded_frame_text(input_text, frame_width)
   end
-  frame[#frame + 1] = frame_line(
-    rows.input_start_row + rows.input_rows + 1,
-    style_input_border(input_width),
-    frame_width
-  )
+  input_component_lines[#input_component_lines + 1] =
+    padded_frame_text(style_input_border(input_width), frame_width)
+  components[#components + 1] = tui_component.fixed(input_component_lines)
 
-  frame[#frame + 1] = frame_line(
-    rows.footer_row,
-    tui.compose_bar(tui.status_bar(status_arg) or "", frame_width),
-    frame_width
-  )
+  components[#components + 1] = tui_component.line(function(width)
+    return padded_frame_text(tui.compose_bar(tui.status_bar(status_arg) or "", width), width)
+  end)
   local visible_cursor_line = rows.cursor_line - rows.input_first_line + 1
   local cursor_prefix = rows.cursor_line == 1 and state.input_layout.prefix_first
     or state.input_layout.prefix_rest
@@ -1153,16 +1155,17 @@ local function redraw(state)
   local cursor_col = display_width(cursor_prefix) + rows.cursor_col + 1
   cursor_row = clamp(cursor_row, rows.input_start_row + 1, rows.input_start_row + rows.input_rows)
   cursor_col = clamp(cursor_col, 1, math.max(1, state.width - 1))
-  if type(psi.tui_render_frame) == "function" then
-    psi.tui_render_frame(table.concat(frame), cursor_row, cursor_col, false)
-  else
-    psi.tui_set_cursor(1, 1, false)
-    for _, line in ipairs(frame) do
-      psi.tui_draw_raw_line(1, line)
-    end
-    psi.tui_set_cursor(cursor_row, cursor_col, false)
-    psi.tui_refresh()
-  end
+
+  local root = tui_component.stack(components)
+  state.renderer = tui_renderer.render(state.renderer, root:render(frame_width), {
+    width = frame_width,
+    height = state.height,
+    cursor_row = cursor_row,
+    cursor_col = cursor_col,
+    cursor_visible = false,
+    force_full = state.force_physical_clear,
+  })
+  state.force_physical_clear = false
   state.dirty = false
 end
 
@@ -2755,6 +2758,7 @@ function M._debug_busy_animation_frames(times)
     "tui_poll_key",
     "tui_size",
     "tui_render_frame",
+    "stdout_write",
     "tui_clear",
     "cwd",
     "session_id",
@@ -2776,6 +2780,7 @@ function M._debug_busy_animation_frames(times)
     return { width = 80, height = 24 }
   end
   psi.tui_render_frame = function() end
+  psi.stdout_write = function() end
   psi.tui_clear = function() end
   psi.cwd = function()
     return "."
@@ -2982,6 +2987,7 @@ function M._debug_redraw_counts(input)
     "tui_render_frame",
     "tui_set_cursor",
     "tui_refresh",
+    "stdout_write",
     "cwd",
     "session_id",
     "session_message_count",
@@ -2994,6 +3000,7 @@ function M._debug_redraw_counts(input)
     draw_rows = {},
     raw_rows = {},
     frames = {},
+    writes = {},
     clears = 0,
     cursor_sets = 0,
     refreshes = 0,
@@ -3002,6 +3009,7 @@ function M._debug_redraw_counts(input)
     calls.draw_rows = {}
     calls.raw_rows = {}
     calls.frames = {}
+    calls.writes = {}
     calls.clears = 0
     calls.cursor_sets = 0
     calls.refreshes = 0
@@ -3027,6 +3035,9 @@ function M._debug_redraw_counts(input)
       col = col,
       visible = visible,
     }
+  end
+  psi.stdout_write = function(text)
+    calls.writes[#calls.writes + 1] = text or ""
   end
   psi.tui_set_cursor = function()
     calls.cursor_sets = calls.cursor_sets + 1
@@ -3071,6 +3082,7 @@ function M._debug_redraw_counts(input)
       show_thinking = false,
       width = 80,
       height = 24,
+      renderer = tui_renderer.new(),
       input_layout = default_input_layout(24),
       tui_caps = { raw_ansi = false },
       streaming_assistant_index = nil,
@@ -3091,9 +3103,11 @@ function M._debug_redraw_counts(input)
     redraw(state)
     local second_frames = #calls.frames
     local second_frame = calls.frames[1] and calls.frames[1].frame or ""
+    local second_write = calls.writes[1] or ""
+    local second_output = second_frame ~= "" and second_frame or second_write
     local second_input_draws = 0
     for row = rows.input_start_row, rows.input_start_row + rows.input_rows + 1 do
-      if second_frame:find("\27%[" .. tostring(row) .. ";1H", 1, false) ~= nil then
+      if second_output:find("\27%[" .. tostring(row) .. ";1H", 1, false) ~= nil then
         second_input_draws = second_input_draws + 1
       end
     end
@@ -3105,14 +3119,17 @@ function M._debug_redraw_counts(input)
     redraw(state)
     local stale_clears = 0
     local stale_frame = calls.frames[1] and calls.frames[1].frame or ""
-    local line_clears = stale_frame:find("\27%[2K", 1, false) ~= nil and 1 or 0
+    local stale_write = calls.writes[1] or ""
+    local stale_output = stale_frame ~= "" and stale_frame or stale_write
+    local line_clears = stale_output:find("\27%[2K", 1, false) ~= nil and 1 or 0
     for row = rows.transcript_start, rows.input_start_row - 1 do
       stale_clears = stale_clears
-        + (stale_frame:find("\27%[" .. tostring(row) .. ";1H", 1, false) ~= nil and 1 or 0)
+        + (stale_output:find("\27%[" .. tostring(row) .. ";1H", 1, false) ~= nil and 1 or 0)
     end
     return {
       first_frames = first_frames,
       second_frames = second_frames,
+      second_writes = #calls.writes,
       second_input_draws = second_input_draws,
       second_clears = calls.clears,
       stale_clears = stale_clears,
@@ -3122,7 +3139,14 @@ function M._debug_redraw_counts(input)
       cursor_sets = calls.cursor_sets,
       refreshes = calls.refreshes,
       second_frame = second_frame,
+      second_write = second_write,
+      second_output = second_output,
       stale_frame = stale_frame,
+      stale_write = stale_write,
+      stale_output = stale_output,
+      renderer_full = state.renderer and state.renderer.full_redraws or 0,
+      renderer_diff = state.renderer and state.renderer.diff_redraws or 0,
+      renderer_last_mode = state.renderer and state.renderer.last_mode or "",
     }
   end, debug.traceback)
 
