@@ -1796,12 +1796,12 @@ def t_tui_queue_restore(psi: Psi):
         + 'agent.clear_queues()\n'
         + 'agent.queue_follow_up("first queued")\n'
         + 'agent.queue_follow_up("second queued")\n'
-        + 'local state = rt._debug_edit_keys("", 0, {{key="up"}}, false, {busy=true})\n'
+        + 'local state = rt._debug_edit_keys("draft", 5, {{key="up"}}, false, {busy=true})\n'
         + 'return state.input .. "|" .. tostring(agent.pending_message_count()) .. "|"\n'
         + '  .. tostring(state.status_text)'
     )
-    assert_equals(out, "first queued\nsecond queued|0|editing queued messages",
-                  "Up should restore all queued messages into the editor")
+    assert_equals(out, "first queued\n\nsecond queued\n\ndraft|0|editing queued messages",
+                  "Up should restore queued messages without dropping current input")
 
 
 @test("tui/queue_status_lists_all")
@@ -1827,6 +1827,30 @@ def t_tui_busy_btw_not_consumed(psi: Psi):
     )
     assert_equals(out, "/btw keep me|/btw is unavailable while a turn is running",
                   "busy /btw should remain editable instead of being dropped")
+
+
+@test("tui/busy_unavailable_command_not_consumed")
+def t_tui_busy_unavailable_command_not_consumed(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local state = rt._debug_edit_keys("/model x", 8, {{key="enter"}}, false, {busy=true})\n'
+        + 'return state.input .. "|" .. tostring(state.status_text)'
+    )
+    assert_equals(out, "/model x|command unavailable while busy",
+                  "busy unavailable slash commands should remain editable")
+
+
+@test("tui/non_agent_busy_submit_not_queued")
+def t_tui_non_agent_busy_submit_not_queued(psi: Psi):
+    out = psi.eval(
+        'local agent = require("psi.agent")\n'
+        + 'local rt = require("psi.tui_runtime")\n'
+        + 'agent.clear_queues()\n'
+        + 'local state = rt._debug_edit_keys("draft", 5, {{key="enter"}}, false, {busy=true, busy_kind="compact"})\n'
+        + 'return state.input .. "|" .. tostring(agent.pending_message_count()) .. "|" .. tostring(state.status_text)'
+    )
+    assert_equals(out, "draft|0|busy",
+                  "non-agent busy states should preserve input instead of queueing follow-ups")
 
 
 @test("tui/vim_modal_keys")
