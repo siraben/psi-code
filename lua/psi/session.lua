@@ -58,13 +58,10 @@ local file_entries = {}
 local entry_by_id = {}
 local children_by_parent = {}
 local suppress_tree_tracking = false
+local reset_branch_tree
 
 function M.reset_entry_chain()
-  last_entry_id = nil
-  leaf_id = nil
-  file_entries = {}
-  entry_by_id = {}
-  children_by_parent = {}
+  reset_branch_tree()
 end
 function M.last_entry_id()
   return last_entry_id
@@ -985,7 +982,19 @@ local last_saved_path = nil
 local last_saved_count = 0
 local register_file_entry
 
+function reset_branch_tree()
+  last_entry_id = nil
+  leaf_id = nil
+  file_entries = {}
+  entry_by_id = {}
+  children_by_parent = {}
+end
+
 local function reconcile_memory_entries()
+  if psi.session_message_count() == 0 then
+    reset_branch_tree()
+    return
+  end
   local parent_id = nil
   for _, message in ipairs(psi.session_messages()) do
     local entry = to_disk_entry(message)
