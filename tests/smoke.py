@@ -2972,6 +2972,27 @@ def t_session_direct_append_after_tracked_entry_persists(psi: Psi):
                   "save reconciles low-level psi.session_append entries")
 
 
+@test("session/direct_clear_rewrites_saved_file")
+def t_session_direct_clear_rewrites_saved_file(psi: Psi):
+    sess = psi.tmp / "clear.jsonl"
+    out = psi.eval(
+        'local s = require("psi.session")\n'
+        + 'local path = "' + str(sess) + '"\n'
+        + 'psi.session_set_path(path)\n'
+        + 's.append_user("stale")\n'
+        + 's.save()\n'
+        + 'psi.session_clear()\n'
+        + 'local ok, err = s.save()\n'
+        + 'if not ok then return "save-failed:" .. tostring(err) end\n'
+        + 'local body = psi.read_file(path) or ""\n'
+        + 'local msgs = 0\n'
+        + 'for _ in body:gmatch([["type":"message"]]) do msgs = msgs + 1 end\n'
+        + 'return string.format("msgs=%d stale=%s", msgs, tostring(body:find("stale", 1, true) ~= nil))'
+    )
+    assert_equals(out, "msgs=0 stale=false",
+                  "save respects direct low-level psi.session_clear")
+
+
 # ---------------------------------------------------------------------------
 # Truncation tests — port of pi-mono's truncate.ts behaviour.
 # ---------------------------------------------------------------------------
