@@ -234,9 +234,6 @@ local function request_body(args)
     tool_choice = "auto",
     parallel_tool_calls = true,
   }
-  if args.max_tokens then
-    body.max_output_tokens = args.max_tokens
-  end
   local effort = args.thinking_level
   if effort == nil or effort == "" then
     effort = args.reasoning_effort
