@@ -413,6 +413,7 @@ local function new_state(opts)
     busy_phase = 0,
     busy_tick = 0,
     busy_started_at = nil,
+    busy_kind = nil,
     running = true,
     scroll_offset = 0,
     status_text = nil,
@@ -1802,8 +1803,14 @@ local function restore_queued_message(state)
   for i = count, 1, -1 do
     agent.remove_pending(i)
   end
+  local current = tostring(state.input or "")
+  local queued_text = table.concat(messages, "\n\n")
+  local combined = queued_text
+  if current:gsub("%s+", "") ~= "" then
+    combined = queued_text .. "\n\n" .. current
+  end
   state.queue_nav_index = nil
-  state.input = table.concat(messages, "\n")
+  state.input = combined
   state.cursor = #state.input
   clear_selection(state)
   state.block_edit = nil
@@ -2003,6 +2010,7 @@ end
 
 local function run_compact(state, keep_recent)
   state.busy = true
+  state.busy_kind = "compact"
   state.busy_label = "compacting"
   state.busy_phase = 0
   state.busy_tick = 0
@@ -2037,6 +2045,7 @@ local function run_compact(state, keep_recent)
   end
 
   state.busy = false
+  state.busy_kind = nil
   state.busy_label = nil
   state.busy_phase = 0
   state.busy_tick = 0
@@ -2047,6 +2056,7 @@ end
 
 local function reset_busy(state)
   state.busy = false
+  state.busy_kind = nil
   state.busy_label = nil
   state.busy_phase = 0
   state.busy_tick = 0
@@ -2064,6 +2074,7 @@ local function run_btw(state, question)
   local entry_index = add_entry(state, "btw", "/btw " .. question .. "\n")
   state.scroll_offset = 0
   state.busy = true
+  state.busy_kind = "btw"
   state.busy_label = "btw"
   state.busy_phase = 0
   state.busy_tick = 0
@@ -2252,9 +2263,18 @@ local function submit(state)
   state.pending_key = nil
 
   if state.busy then
+    if state.busy_kind ~= "agent" then
+      state.input = line
+      state.cursor = #state.input
+      set_status(state, "busy", true)
+      state.dirty = true
+      return
+    end
     if line:sub(1, 1) == "/" then
       local action = commands.handle(line)
       if action == nil then
+        state.input = line
+        state.cursor = #state.input
         set_status(state, "unknown command", true)
         return
       end
@@ -2274,6 +2294,8 @@ local function submit(state)
       if action.kind == "expand" then
         line = action.payload or ""
       else
+        state.input = line
+        state.cursor = #state.input
         set_status(state, "command unavailable while busy", true)
         return
       end
@@ -2295,6 +2317,7 @@ local function submit(state)
   state.show_thinking = tui.show_thinking() == "1"
   state.scroll_offset = 0
   state.busy = true
+  state.busy_kind = "agent"
   state.busy_label = tui.pick_busy_status() or "gooning"
   state.busy_phase = 0
   state.busy_tick = 0
@@ -2304,6 +2327,7 @@ local function submit(state)
   redraw(state)
   local turn_ok = run_turn(state, line)
   state.busy = false
+  state.busy_kind = nil
   state.busy_label = nil
   state.busy_phase = 0
   state.busy_tick = 0
@@ -2721,6 +2745,7 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     block_edit = nil,
     force_physical_clear = false,
     busy = not not debug_options.busy,
+    busy_kind = debug_options.busy_kind or (debug_options.busy and "agent" or nil),
     running = true,
     scroll_offset = 0,
     status_text = nil,
