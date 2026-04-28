@@ -128,6 +128,7 @@ function M.run_system_prompt(_opts)
 end
 
 function M.run_agent(opts)
+  agent.configure(opts)
   if opts.session_file and opts.session_file ~= "" then
     session.load(opts.session_file)
   end
@@ -146,6 +147,7 @@ function M.run_agent(opts)
 end
 
 function M.run_compact(opts)
+  agent.configure(opts)
   if not opts.session_file or opts.session_file == "" then
     io.stderr:write("--compact requires --session FILE\n")
     return false
@@ -189,6 +191,21 @@ local function handle_slash_command(opts, line)
   end
   if kind == "ansi-print" then
     print(action.payload or "")
+    return true, false
+  end
+  if kind == "btw" then
+    local question = tostring(action.payload or "")
+    print("/btw " .. question)
+    local ok, answer = agent.side_question(question, {
+      model = opts.model,
+      max_tokens = 1024,
+      context_chars = 24000,
+    })
+    if not ok then
+      print("btw failed: " .. tostring(answer))
+    else
+      print(answer or "")
+    end
     return true, false
   end
   if kind == "quit" then
@@ -282,6 +299,7 @@ local function handle_slash_command(opts, line)
 end
 
 function M.run_repl(opts)
+  agent.configure(opts)
   if opts.session_file and opts.session_file ~= "" then
     session.load(opts.session_file)
   else

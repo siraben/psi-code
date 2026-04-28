@@ -162,7 +162,8 @@ local function short_wait(k)
   return per
 end
 
-function M.run_all(fns)
+function M.run_all(fns, opts)
+  opts = opts or {}
   local tasks = {}
   for i, fn in ipairs(fns) do
     tasks[i] = {
@@ -178,7 +179,7 @@ function M.run_all(fns)
 
   local remaining = #tasks
   while remaining > 0 do
-    for _, t in ipairs(tasks) do
+    for i, t in ipairs(tasks) do
       if not t.done then
         local res = table.pack(coroutine.resume(t.co, table.unpack(t.next_args, 1, t.next_n)))
         if res[1] == false then
@@ -186,6 +187,9 @@ function M.run_all(fns)
           t.ok = false
           t.error_msg = res[2]
           remaining = remaining - 1
+          if type(opts.on_done) == "function" then
+            opts.on_done(i, { ok = false, error = t.error_msg })
+          end
         elseif coroutine.status(t.co) == "dead" then
           local vals = { n = res.n - 1 }
           for j = 2, res.n do
@@ -195,6 +199,9 @@ function M.run_all(fns)
           t.ok = true
           t.values = vals
           remaining = remaining - 1
+          if type(opts.on_done) == "function" then
+            opts.on_done(i, { ok = true, values = vals })
+          end
         else
           -- Yielded: res[2] is the request. Resolve it with a
           -- short timeout so the round-robin stays fair even if
