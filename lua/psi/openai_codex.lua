@@ -8,6 +8,7 @@ local prelude = require("psi.prelude")
 local provider_loop = require("psi.provider_loop")
 local settings = require("psi.settings")
 local session_mod = require("psi.session")
+local thinking = require("psi.thinking")
 local tools = require("psi.tools")
 local transform = require("psi.message_transform")
 
@@ -190,15 +191,25 @@ local function request_body(args)
   if args.max_tokens then
     body.max_output_tokens = args.max_tokens
   end
-  local effort = args.reasoning_effort
+  local effort = args.thinking_level
+  if effort == nil or effort == "" then
+    effort = args.reasoning_effort
+  end
   if effort == nil or effort == "" then
     effort = os.getenv("PSI_OPENAI_CODEX_REASONING")
   end
   if effort == nil or effort == "" then
     effort = settings.get("defaults.reasoning_effort", nil)
   end
-  if effort and effort ~= "" and effort ~= "none" then
-    body.reasoning = { effort = effort, summary = "auto" }
+  if effort == nil or effort == "" then
+    effort = thinking.DEFAULT
+  end
+  if effort == "none" then
+    effort = "off"
+  end
+  local request_effort = thinking.request_effort(effort, { id = args.model, reasoning = true })
+  if request_effort then
+    body.reasoning = { effort = request_effort, summary = "auto" }
   end
   if args.tool_specs and #args.tool_specs > 0 then
     body.tools = args.tool_specs
@@ -493,6 +504,7 @@ function M.run_turn(opts)
   return provider_loop.run_turn({
     model = model,
     max_tokens = opts.max_tokens,
+    thinking_level = opts.thinking_level,
     reasoning_effort = opts.reasoning_effort,
     system_prompt = opts.system_prompt or "",
     tool_specs = opts.tool_specs,
@@ -557,6 +569,7 @@ function M.complete_text(opts)
     }),
     tool_specs = prelude.as_array({}),
     max_tokens = opts.max_tokens,
+    thinking_level = opts.thinking_level,
     reasoning_effort = opts.reasoning_effort,
   })
   body.stream = false

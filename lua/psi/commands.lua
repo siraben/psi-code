@@ -15,6 +15,7 @@ local records = require("psi.records")
 local prelude = require("psi.prelude")
 local keybindings = require("psi.keybindings")
 local session = require("psi.session")
+local thinking = require("psi.thinking")
 
 local M = {}
 
@@ -64,6 +65,8 @@ local function split_first_word(text)
 end
 
 local VALID_REASONING_EFFORTS = {
+  off = true,
+  minimal = true,
   low = true,
   medium = true,
   high = true,
@@ -84,16 +87,33 @@ local function cmd_set(rest)
   local key, value = split_first_word(rest)
   key = key:lower():gsub("_", "-")
   if key == "" then
-    return records.new_command_action("print", "usage: /set effort <low|medium|high|xhigh|none>")
+    return records.new_command_action(
+      "print",
+      "usage: /set effort <off|minimal|low|medium|high|xhigh|none>"
+    )
   end
   if key == "effort" or key == "reasoning" or key == "reasoning-effort" then
     local effort = normalize_reasoning_effort(value)
     if not effort then
-      return records.new_command_action("print", "usage: /set effort <low|medium|high|xhigh|none>")
+      return records.new_command_action(
+        "print",
+        "usage: /set effort <off|minimal|low|medium|high|xhigh|none>"
+      )
     end
     return records.new_command_action("set-reasoning-effort", effort)
   end
   return records.new_command_action("print", "unknown setting: " .. key)
+end
+
+local function cmd_thinking(rest)
+  local level = thinking.normalize(rest)
+  if not level then
+    return records.new_command_action(
+      "print",
+      "usage: /thinking <off|minimal|low|medium|high|xhigh>"
+    )
+  end
+  return records.new_command_action("set-thinking", level)
 end
 
 local function copy_auth_url(url)
@@ -485,6 +505,11 @@ local BUILTIN_COMMANDS = {
     description = "Set runtime options",
   },
   {
+    name = "thinking",
+    argument_hint = "<level>",
+    description = "Set reasoning level",
+  },
+  {
     name = "login",
     argument_hint = "<provider>",
     description = "Authenticate an OAuth provider",
@@ -695,6 +720,9 @@ function M.handle(line)
   end
   if starts_word(line, "/set") then
     return cmd_set(arg_after(line, "/set"))
+  end
+  if starts_word(line, "/thinking") then
+    return cmd_thinking(arg_after(line, "/thinking"))
   end
   if starts_word(line, "/login") then
     local provider, input = split_first_word(arg_after(line, "/login"))

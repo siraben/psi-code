@@ -44,7 +44,7 @@ This repository currently contains:
 - a default interactive coding-agent shell backed by the same
   streamed agent loop, with slash commands (`/help`, `/hotkeys`,
   `/session`, `/new`, `/clear`, `/resume`, `/import`, `/name`,
-  `/model`, `/copy`, `/export`, `/compact`, `/fork`, `/clone`,
+  `/model`, `/thinking`, `/copy`, `/export`, `/compact`, `/fork`, `/clone`,
   `/reload`, `/vim`, `/system-prompt`, `/quit`). Extensions add their own
   via `psi.commands.register`.
 - a full-screen `--tui` mode with rich status (cwd / model /
@@ -82,6 +82,7 @@ nix build
 ./result/bin/psi --eval 'psi.tool_call("lua", {mode = "summary"})'
 ./result/bin/psi --system-prompt
 ANTHROPIC_API_KEY=... ./result/bin/psi --agent 'Read README.md and summarize this repository.'
+./result/bin/psi --model openai-codex/gpt-5.5 --thinking xhigh --agent 'Read README.md and summarize this repository.'
 ANTHROPIC_API_KEY=... ./result/bin/psi --session /tmp/psi-session.jsonl
 ANTHROPIC_API_KEY=... ./result/bin/psi --tui --session /tmp/psi-session.jsonl
 ANTHROPIC_API_KEY=... ./result/bin/psi --session /tmp/psi-session.jsonl --compact 12
@@ -100,6 +101,7 @@ make
 ./build/psi --eval 'psi.tool_call("lua", {mode = "eval", expression = "#psi.tools.specs()"})'
 ./build/psi --system-prompt
 set -a && . ./.env.local && ./build/psi --agent 'Say exactly: psi streaming test'
+./build/psi --model openai-codex/gpt-5.5 --thinking xhigh --agent 'Say exactly: psi Codex test'
 set -a && . ./.env.local && ./build/psi --session .psi/session.jsonl
 set -a && . ./.env.local && ./build/psi --tui --session .psi/session.jsonl
 set -a && . ./.env.local && ./build/psi --session .psi/session.jsonl --compact 12
