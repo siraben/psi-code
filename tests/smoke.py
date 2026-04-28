@@ -809,6 +809,19 @@ def t_render_thinking(psi: Psi):
                     "after-turn resets the one-shot label")
 
 
+@test("markdown/inline_code_no_backticks")
+def t_markdown_inline_code_no_backticks(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local ansi = require("psi.ansi")\n'
+        + 'ansi.color_enabled = true\n'
+        + 'return require("psi.markdown").render_line("Use `psi` here")',
+    ).stdout.rstrip("\n")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_equals(plain, "Use psi here", "inline code should not render literal backticks")
+    assert_contains(out, "\x1b[", "inline code should still be highlighted")
+
+
 @test("compaction/snaps_past_orphan_tool_result")
 def t_compact_snap(psi: Psi):
     """Regression for the Haiku session failure: do_compact must never
@@ -1565,11 +1578,11 @@ def t_tui_footer_hint_hidden(psi: Psi):
         'local tui = require("psi.tui")\n'
         + 'local idle = tui.footer_hint(psi.json_encode({busy=false, scroll=0}))\n'
         + 'local busy = tui.footer_hint(psi.json_encode({\n'
-        + '  busy=true, busy_label="gooning", elapsed_seconds=4, busy_phase=2, scroll=0\n'
+        + '  busy=true, busy_label="working", elapsed_seconds=4, busy_phase=2, scroll=0\n'
         + '}))\n'
         + 'return tostring(idle) .. "|" .. tostring(busy)'
     )
-    assert_equals(out, "|gooning (0:04  • Ctrl-G to interrupt) ..", "footer hint hidden when idle")
+    assert_equals(out, "|working (0:04  • Ctrl-G to interrupt) ..", "footer hint hidden when idle")
 
 
 @test("tui/layout_geometry")
@@ -1664,15 +1677,15 @@ def t_tui_busy_status_render(psi: Psi):
         "--eval",
         'local ansi = require("psi.ansi")\n'
         + 'ansi.color_enabled = true\n'
-        + 'return require("psi.tui").render_busy_status("gooning", 2, 4, 3)',
+        + 'return require("psi.tui").render_busy_status("working", 2, 4)',
     ).stdout.rstrip("\n")
     plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
     assert_equals(
         plain,
-        " gooning  (0:04  • Ctrl-G to interrupt) ...",
+        "working (0:04  • Ctrl-G to interrupt) ...",
         "busy status renders selected label, hint, and animated dots",
     )
-    assert_contains(out, "\x1b[1;38;5;231;48;5;238m", "busy label has a glisten highlight")
+    assert_contains(out, "\x1b[96m", "busy label has a subtle shimmer")
 
 
 @test("tui/full_redraw_uses_single_ansi_pass")
@@ -1805,6 +1818,35 @@ def t_tui_input_cursor_prefix_width(psi: Psi):
     assert_equals(out, "4", "cursor column uses display width for unicode prompt prefix")
 
 
+@test("tui/busy_input_clears_transient_error")
+def t_tui_busy_input_clears_transient_error(psi: Psi):
+    out = psi.eval(
+        'local d = require("psi.tui_runtime")._debug_edit_keys("/btw later", 10, '\
+        + '{{key="enter"}, {key="text", text="x"}}, false, {busy=true, busy_kind="agent"})\n'
+        + 'return tostring(d.status_text) .. "|" .. d.input'
+    )
+    assert_equals(out, "nil|/btw laterx",
+                  "typing while busy should restore the busy status line after transient /btw error")
+
+
+@test("tui/tool_call_text_has_no_leading_blank")
+def t_tui_tool_call_text_has_no_leading_blank(psi: Psi):
+    out = psi.eval(
+        'return require("psi.tui_runtime")._debug_tool_call_text_after_assistant()'
+    )
+    assert not out.startswith("\n"), "TUI tool calls should not add an extra blank after assistant text"
+    assert_contains(out, "read README.md", "tool call text still renders")
+
+
+@test("tui/busy_animation_uses_wall_clock")
+def t_tui_busy_animation_uses_wall_clock(psi: Psi):
+    out = psi.eval(
+        'return require("psi.tui_runtime")._debug_busy_animation_frames({0, 599, 600, 1199, 1200})'
+    )
+    assert_equals(out, "0:0|0:0|1:1|1:1|2:2",
+                  "busy animation should advance on wall-clock time")
+
+
 @test("tui/key_policy")
 def t_tui_key_policy(psi: Psi):
     out = psi.eval(
@@ -1832,8 +1874,17 @@ def t_tui_key_policy(psi: Psi):
         + '  fmt(tui.handle_key({key="text", text="x"}))\n'
         + '}, "|")'
     )
-    assert_equals(out, "submit:-|submit:-|insert:\\n|scroll:page-up|scroll:page-down|scroll:page-down|queue-restore:-|scroll:line-up|scroll:line-up|scroll:line-down|nil|abort:-|insert:x",
+    assert_equals(out, "submit:-|submit:-|insert:\\n|scroll:page-up|quit:-|nil|queue-restore:-|scroll:line-up|scroll:line-up|scroll:line-down|nil|abort:-|insert:x",
                   "Lua TUI key policy")
+
+
+@test("tui/ctrl_d_empty_prompt_exits")
+def t_tui_ctrl_d_empty_prompt_exits(psi: Psi):
+    out = psi.eval(
+        'local d = require("psi.tui_runtime")._debug_edit_keys("", 0, {{key="ctrl-d"}}, false)\n'
+        + 'return tostring(d.running) .. "|" .. d.input'
+    )
+    assert_equals(out, "false|", "Ctrl-D exits from an empty TUI prompt")
 
 
 @test("tui/queue_restore")
@@ -2261,8 +2312,9 @@ def t_tui_input_box_background(psi: Psi):
     assert b"\x1b[0;7m" not in raw and b"\x1b[7m" not in raw, "input box should not use reverse-video"
     assert b"\x1b[?25l" in raw, "redraw should keep the hardware cursor hidden"
     assert b"\x1b[?2026h" in raw and b"\x1b[?2026l" in raw, "redraw should use synchronized terminal output"
-    assert b"\x1b[1;38;5;16;48;5;253m" in raw, "input box should render a Lua-owned cursor cell"
-    assert b"\x1b[48;5;238m" in raw, "input box background color did not reach rendered output"
+    assert b"\x1b[4m" in raw, "input box should render a Lua-owned cursor cell"
+    assert b"\x1b[48;5;238m" not in raw, "input box should not paint a filled background"
+    assert b"\x1b[38;5;245m" in raw, "input box border color did not reach rendered output"
 
 
 @test("mode/tui_lf_submit")
