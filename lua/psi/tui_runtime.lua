@@ -1805,6 +1805,7 @@ local function run_turn(state, line)
       user_text = line or "",
       model = state.opts.model,
       max_tokens = state.opts.max_tokens,
+      reasoning_effort = state.opts.reasoning_effort,
       observer = observer,
       abort_check = psi.is_aborted,
     })
@@ -1858,6 +1859,7 @@ local function run_compact(state, keep_recent)
       keep_recent = keep_recent,
       model = state.opts.model,
       max_tokens = state.opts.max_tokens,
+      reasoning_effort = state.opts.reasoning_effort,
     })
   end, debug.traceback)
 
@@ -1952,6 +1954,14 @@ local function handle_command(state, line)
     state.opts.model = action.payload
     state.model = agent.model_descriptor(action.payload)
     add_entry(state, "info", "model set to " .. tostring(action.payload))
+    set_status(state, "", false)
+    return true
+  end
+
+  if action.kind == "set-reasoning-effort" then
+    agent.set_reasoning_effort(action.payload)
+    state.opts.reasoning_effort = action.payload
+    add_entry(state, "info", "reasoning effort set to " .. tostring(action.payload or "none"))
     set_status(state, "", false)
     return true
   end
