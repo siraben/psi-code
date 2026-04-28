@@ -267,6 +267,16 @@ def t_eval_tool_registry(psi: Psi):
     assert_equals(out, "read", "first tool")
 
 
+@test("tool/mutation_tools_keep_parallel_mode")
+def t_mutation_tools_keep_parallel_mode(psi: Psi):
+    out = psi.eval(
+        'local tools = require("psi.tools")\n'
+        'return tools.find("edit").execution_mode .. "|" .. tools.find("write").execution_mode'
+    )
+    assert_equals(out, "parallel|parallel",
+                  "edit/write should rely on per-path mutation queues instead of serializing every batch")
+
+
 @test("tool/read")
 def t_tool_read(psi: Psi):
     out = psi.eval(
