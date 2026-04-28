@@ -45,6 +45,7 @@ local UTF8_CONTINUATION_MASK = 0xC0
 local UTF8_CONTINUATION_TAG = 0x80
 
 local SETTING_PROMPT_MAX_ROWS = "tui.prompt.max_rows"
+local BUSY_ANIMATION_INTERVAL_MS = 600
 
 local ANSI_PATTERN_CSI = "\27%[[%d;?]*[A-Za-z]"
 local ANSI_PATTERN_KEYPAD = "\27[=>]"
@@ -81,6 +82,18 @@ end
 local function trim_trailing_newlines(text)
   text = text or EMPTY
   return (text:gsub(NEWLINE .. "+$", EMPTY))
+end
+
+local function now_ms()
+  if type(psi) == "table" and type(psi.time_ms) == "function" then
+    return tonumber(psi.time_ms()) or (os.time() * 1000)
+  end
+  return os.time() * 1000
+end
+
+local function trim_edge_newlines(text)
+  text = trim_trailing_newlines(text)
+  return (text:gsub("^" .. NEWLINE .. "+", EMPTY))
 end
 
 local function strip_ansi(text)
@@ -412,6 +425,7 @@ local function new_state(opts)
     busy_label = nil,
     busy_phase = 0,
     busy_tick = 0,
+    busy_next_frame_at = nil,
     busy_started_at = nil,
     busy_kind = nil,
     running = true,
@@ -455,6 +469,12 @@ function set_status(state, text, is_error)
     state.status_is_error = not not is_error
   end
   state.dirty = true
+end
+
+local function clear_busy_input_error(state)
+  if state.busy and state.status_is_error then
+    set_status(state, "", false)
+  end
 end
 
 local function add_entry(state, kind, text, title, is_error, tool_call_id)
@@ -544,7 +564,7 @@ local function render_event_plain(event, payload)
   if not ok then
     return nil
   end
-  text = limit_text(strip_ansi(text or ""))
+  text = limit_text(trim_edge_newlines(strip_ansi(text or "")))
   if text == "" then
     return nil
   end
@@ -982,37 +1002,27 @@ local function scroll_by(state, delta)
   state.dirty = true
 end
 
-local function tui_chrome_color(code, text)
-  if not ansi.enabled or not ansi.color_enabled then
-    return text
-  end
-  return string.char(27) .. "[" .. code .. "m" .. text .. string.char(27) .. "[0m"
-end
-
 local function style_input_prefix(prefix, is_first)
-  local bg = tonumber(settings.get("tui.input.background", 238)) or 238
   if is_first then
-    local chip_bg = tonumber(settings.get("tui.input.prefix_background", 245)) or 245
-    return tui_chrome_color("1;38;5;16;48;5;" .. tostring(chip_bg), prefix)
+    return ansi.cyan(prefix)
   end
-  return tui_chrome_color("38;5;242;48;5;" .. tostring(bg), prefix)
+  return ansi.dim(prefix)
 end
 
 local function style_input_text(text)
-  local bg = tonumber(settings.get("tui.input.background", 238)) or 238
-  local fg = tonumber(settings.get("tui.input.foreground", 253)) or 253
-  return tui_chrome_color("38;5;" .. tostring(fg) .. ";48;5;" .. tostring(bg), text)
+  return text
 end
 
 local function style_input_cursor(text)
-  return tui_chrome_color("1;38;5;16;48;5;253", text == "" and " " or text)
+  return ansi.color("4", text == "" and " " or text)
 end
 
-local function style_input_fill(width, slot)
-  local default_bg = tonumber(settings.get("tui.input.background", 238)) or 238
-  local setting = slot == "rail" and "tui.input.rail_background" or "tui.input.background"
-  local bg = tonumber(settings.get(setting, default_bg)) or default_bg
-  return tui_chrome_color("48;5;" .. tostring(bg), string.rep(" ", math.max(0, width)))
+local function style_input_fill(width)
+  return string.rep(" ", math.max(0, width))
+end
+
+local function style_input_border(width)
+  return ansi.gray(string.rep("─", math.max(0, width)))
 end
 
 local function input_box_line(content, width)
@@ -1089,7 +1099,7 @@ local function redraw(state)
       or ansi.dim(state.status_text)
   elseif state.busy then
     status_text = tui.render_busy_status(
-      state.busy_label or "gooning",
+      state.busy_label or "working",
       state.busy_phase,
       status_arg.elapsed_seconds,
       state.busy_tick
@@ -1100,8 +1110,7 @@ local function redraw(state)
   end
 
   local input_width = frame_width
-  frame[#frame + 1] =
-    frame_line(rows.input_start_row, style_input_fill(input_width, "rail"), frame_width)
+  frame[#frame + 1] = frame_line(rows.input_start_row, style_input_border(input_width), frame_width)
   for i = 0, rows.input_rows - 1 do
     local line_index = rows.input_first_line + i
     local line = rows.input_lines[line_index]
@@ -1128,7 +1137,7 @@ local function redraw(state)
   end
   frame[#frame + 1] = frame_line(
     rows.input_start_row + rows.input_rows + 1,
-    style_input_fill(input_width, "rail"),
+    style_input_border(input_width),
     frame_width
   )
 
@@ -1252,6 +1261,7 @@ local function set_insert_mode(state)
 end
 
 local function open_line(state, above)
+  clear_busy_input_error(state)
   local start, finish = line_bounds(state.input, state.cursor)
   if above then
     state.input = state.input:sub(1, start) .. "\n" .. state.input:sub(start + 1)
@@ -1264,6 +1274,7 @@ local function open_line(state, above)
 end
 
 local function clear_buffer(state)
+  clear_busy_input_error(state)
   state.input = ""
   state.cursor = 0
   clear_selection(state)
@@ -1553,6 +1564,7 @@ function render_input_text_with_cursor(state, line, draw_cursor)
 end
 
 local function insert_text(state, text)
+  clear_busy_input_error(state)
   state.input = state.input:sub(1, state.cursor) .. text .. state.input:sub(state.cursor + 1)
   state.cursor = state.cursor + #text
   state.dirty = true
@@ -1562,6 +1574,7 @@ local function delete_backward(state)
   if state.cursor == 0 or #state.input == 0 then
     return
   end
+  clear_busy_input_error(state)
   state.input = state.input:sub(1, state.cursor - 1) .. state.input:sub(state.cursor + 1)
   state.cursor = state.cursor - 1
   state.dirty = true
@@ -1571,6 +1584,7 @@ local function delete_forward(state)
   if state.cursor >= #state.input then
     return
   end
+  clear_busy_input_error(state)
   state.input = state.input:sub(1, state.cursor) .. state.input:sub(state.cursor + 2)
   state.dirty = true
 end
@@ -1594,6 +1608,7 @@ local function delete_word_backward(state)
     end
     start = start - 1
   end
+  clear_busy_input_error(state)
   state.input = state.input:sub(1, start) .. state.input:sub(state.cursor + 1)
   state.cursor = start
   state.dirty = true
@@ -1618,6 +1633,7 @@ local function delete_word_forward(state)
     end
     finish = finish + 1
   end
+  clear_busy_input_error(state)
   state.input = state.input:sub(1, state.cursor) .. state.input:sub(finish + 1)
   state.dirty = true
 end
@@ -1683,6 +1699,7 @@ local function move_word_start_forward(state)
 end
 
 local function kill_to_end(state)
+  clear_busy_input_error(state)
   state.input = state.input:sub(1, state.cursor)
   state.dirty = true
 end
@@ -1691,6 +1708,7 @@ local function kill_to_start(state)
   if state.cursor == 0 then
     return
   end
+  clear_busy_input_error(state)
   state.input = state.input:sub(state.cursor + 1)
   state.cursor = 0
   state.dirty = true
@@ -1900,7 +1918,11 @@ local function observer_tool_progress(state, tool_call_id, chunk)
     end
   else
     local entry = state.entries[index]
-    set_entry_text(state, index, limit_live_tool_progress_text((entry and entry.text or "") .. chunk))
+    set_entry_text(
+      state,
+      index,
+      limit_live_tool_progress_text((entry and entry.text or "") .. chunk)
+    )
   end
   scroll_anchor_after(state, before)
 end
@@ -2036,6 +2058,7 @@ local function run_compact(state, keep_recent)
   state.busy_label = "compacting"
   state.busy_phase = 0
   state.busy_tick = 0
+  state.busy_next_frame_at = now_ms() + BUSY_ANIMATION_INTERVAL_MS
   state.busy_started_at = os.time()
   psi.abort_reset()
   set_status(state, "", false)
@@ -2071,6 +2094,7 @@ local function run_compact(state, keep_recent)
   state.busy_label = nil
   state.busy_phase = 0
   state.busy_tick = 0
+  state.busy_next_frame_at = nil
   state.busy_started_at = nil
   state.dirty = true
   redraw(state)
@@ -2082,6 +2106,7 @@ local function reset_busy(state)
   state.busy_label = nil
   state.busy_phase = 0
   state.busy_tick = 0
+  state.busy_next_frame_at = nil
   state.busy_started_at = nil
 end
 
@@ -2100,6 +2125,7 @@ local function run_btw(state, question)
   state.busy_label = "btw"
   state.busy_phase = 0
   state.busy_tick = 0
+  state.busy_next_frame_at = now_ms() + BUSY_ANIMATION_INTERVAL_MS
   state.busy_started_at = os.time()
   psi.abort_reset()
   set_status(state, "", false)
@@ -2340,9 +2366,10 @@ local function submit(state)
   state.scroll_offset = 0
   state.busy = true
   state.busy_kind = "agent"
-  state.busy_label = tui.pick_busy_status() or "gooning"
+  state.busy_label = tui.pick_busy_status() or "working"
   state.busy_phase = 0
   state.busy_tick = 0
+  state.busy_next_frame_at = now_ms() + BUSY_ANIMATION_INTERVAL_MS
   state.busy_started_at = os.time()
   psi.abort_reset()
   set_status(state, "", false)
@@ -2353,6 +2380,7 @@ local function submit(state)
   state.busy_label = nil
   state.busy_phase = 0
   state.busy_tick = 0
+  state.busy_next_frame_at = nil
   state.busy_started_at = nil
   if not turn_ok then
     state.force_physical_clear = true
@@ -2608,10 +2636,12 @@ local function tick(state)
     handle_key_event(state, event)
   end
   if state.busy then
-    state.busy_tick = (state.busy_tick or 0) + 1
-    state.dirty = true
-    if state.busy_tick % 4 == 0 then
+    local now = now_ms()
+    if state.busy_next_frame_at == nil or now >= state.busy_next_frame_at then
+      state.busy_tick = (state.busy_tick or 0) + 1
       state.busy_phase = ((state.busy_phase or 0) % 3) + 1
+      state.busy_next_frame_at = now + BUSY_ANIMATION_INTERVAL_MS
+      state.dirty = true
     end
   end
   if state.dirty then
@@ -2713,6 +2743,105 @@ function M._debug_after_turn_payload(reply, assistant_streamed)
   return after_turn_payload(reply, assistant_streamed)
 end
 
+function M._debug_tool_call_text_after_assistant()
+  render.handle_event("before-turn", {})
+  render.handle_event("assistant-text", { text = "assistant text" })
+  return tool_call_text("toolu_debug", "read", { path = "README.md" })
+end
+
+function M._debug_busy_animation_frames(times)
+  local names = {
+    "time_ms",
+    "tui_poll_key",
+    "tui_size",
+    "tui_render_frame",
+    "tui_clear",
+    "cwd",
+    "session_id",
+    "session_message_count",
+  }
+  local saved = {}
+  for _, name in ipairs(names) do
+    saved[name] = psi[name]
+  end
+
+  local fake_now = 0
+  psi.time_ms = function()
+    return fake_now
+  end
+  psi.tui_poll_key = function()
+    return nil
+  end
+  psi.tui_size = function()
+    return { width = 80, height = 24 }
+  end
+  psi.tui_render_frame = function() end
+  psi.tui_clear = function() end
+  psi.cwd = function()
+    return "."
+  end
+  psi.session_id = function()
+    return "debug-session"
+  end
+  psi.session_message_count = function()
+    return 0
+  end
+
+  local ok, result = xpcall(function()
+    local state = {
+      opts = { model = "debug" },
+      model = { id = "debug" },
+      entries = {},
+      input = "",
+      cursor = 0,
+      editor_mode = "insert",
+      selection_anchor = nil,
+      selection_kind = nil,
+      clipboard = "",
+      pending_key = nil,
+      block_edit = nil,
+      force_physical_clear = false,
+      busy = true,
+      busy_label = "thinking",
+      busy_phase = 0,
+      busy_tick = 0,
+      busy_next_frame_at = 600,
+      busy_started_at = os.time(),
+      running = true,
+      scroll_offset = 0,
+      status_text = nil,
+      status_is_error = false,
+      show_thinking = false,
+      width = 80,
+      height = 24,
+      input_layout = default_input_layout(24),
+      tui_caps = { raw_ansi = false },
+      streaming_assistant_index = nil,
+      streaming_thinking_index = nil,
+      entries_version = 0,
+      total_cache_width = nil,
+      total_cache_version = nil,
+      total_cache_lines = nil,
+      dirty = false,
+    }
+    local out = {}
+    for _, value in ipairs(times or {}) do
+      fake_now = value
+      tick(state)
+      out[#out + 1] = tostring(state.busy_tick) .. ":" .. tostring(state.busy_phase)
+    end
+    return table.concat(out, "|")
+  end, debug.traceback)
+
+  for _, name in ipairs(names) do
+    psi[name] = saved[name]
+  end
+  if not ok then
+    error(result)
+  end
+  return result
+end
+
 function M._debug_resolve_input_layout(width, height, busy, scroll)
   local state = {
     width = tonumber(width) or 80,
@@ -2770,8 +2899,8 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     busy_kind = debug_options.busy_kind or (debug_options.busy and "agent" or nil),
     running = true,
     scroll_offset = 0,
-    status_text = nil,
-    status_is_error = false,
+    status_text = debug_options.status_text,
+    status_is_error = not not debug_options.status_is_error,
     width = 80,
     height = 24,
     input_layout = default_input_layout(24),
@@ -2795,6 +2924,7 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
   return {
     input = state.input,
     cursor = state.cursor,
+    running = state.running,
     editor_mode = state.editor_mode,
     selection_anchor = state.selection_anchor,
     selection_kind = state.selection_kind,
@@ -2929,9 +3059,10 @@ function M._debug_redraw_counts(input)
       block_edit = nil,
       force_physical_clear = false,
       busy = true,
-      busy_label = "gooning",
+      busy_label = "working",
       busy_phase = 1,
       busy_tick = 0,
+      busy_next_frame_at = nil,
       busy_started_at = os.time(),
       running = true,
       scroll_offset = 0,
