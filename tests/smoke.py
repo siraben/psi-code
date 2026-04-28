@@ -2924,6 +2924,8 @@ def t_session_branch_tree_loads_active_leaf(psi: Psi):
         + 'psi.session_set_path(path)\n'
         + 's.append_user("root")\n'
         + 'local root = s.leaf_id()\n'
+        + 'local root_tree = s.branch_tree_text()\n'
+        + 'if not root_tree:find(root:sub(1, 8), 1, true) then return "missing-root" end\n'
         + 's.append_assistant("first", {{type="text", text="first"}}, {})\n'
         + 'local first = s.leaf_id()\n'
         + 'local ok, err = s.branch(root)\n'
@@ -2948,6 +2950,26 @@ def t_session_branch_tree_loads_active_leaf(psi: Psi):
                   "load follows the last JSONL leaf and /branch restores sibling path")
     text = sess.read_text()
     assert_equals(text.count('"type":"message"'), 3, "branched file preserves sibling entries")
+
+
+@test("session/direct_append_after_tracked_entry_persists")
+def t_session_direct_append_after_tracked_entry_persists(psi: Psi):
+    sess = psi.tmp / "direct.jsonl"
+    out = psi.eval(
+        'local s = require("psi.session")\n'
+        + 'local path = "' + str(sess) + '"\n'
+        + 'psi.session_set_path(path)\n'
+        + 's.append_user("tracked")\n'
+        + 's.save()\n'
+        + 'psi.session_append("assistant", "raw direct", nil, 1)\n'
+        + 's.save()\n'
+        + 'local body = psi.read_file(path) or ""\n'
+        + 'local msgs = 0\n'
+        + 'for _ in body:gmatch([["type":"message"]]) do msgs = msgs + 1 end\n'
+        + 'return string.format("msgs=%d raw=%s", msgs, tostring(body:find("raw direct", 1, true) ~= nil))'
+    )
+    assert_equals(out, "msgs=2 raw=true",
+                  "save reconciles low-level psi.session_append entries")
 
 
 # ---------------------------------------------------------------------------
