@@ -153,7 +153,7 @@ extensions cannot shadow them. Full list:
 /help  /hotkeys  /quit (+ /q, :quit, :q)  /session  /system-prompt  /vim
 /new (alias: /clear)  /reload  /copy
 /resume <path>  /import <path>
-/name <text>  /model <spec>
+/name <text>  /model <spec>  /thinking <level>
 /export [path]  /fork [N]  /clone [path]  /compact [N]
 ```
 

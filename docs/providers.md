@@ -79,12 +79,17 @@ In priority order:
 - `PSI_OPENAI_CODEX_MODEL` — default model when none is passed (default
   `gpt-5.5`).
 - `PSI_OPENAI_CODEX_BASE_URL` — override the ChatGPT backend host.
-- `PSI_OPENAI_CODEX_REASONING` — optional reasoning effort to include
-  in requests (`low`, `medium`, `high`, `xhigh`; unset omits it).
-  Inside a session, `/set effort <low|medium|high|xhigh|none>` changes
-  the runtime value. For a config default, set
-  `defaults.reasoning_effort` in `~/.config/psi/settings.json` or
-  `./.psi/settings.json`.
+- Thinking/reasoning level follows pi-mono naming:
+  `off`, `minimal`, `low`, `medium`, `high`, `xhigh`. The default is
+  `medium`; `off`/`none` omits the reasoning block. Use
+  `--thinking <level>` at startup or `/thinking <level>` inside a
+  session. `/set effort <off|minimal|low|medium|high|xhigh|none>` is
+  also accepted for compatibility with the lower-level setting name.
+  `minimal` is sent as `low` for current OpenAI Codex models.
+- `PSI_THINKING` — optional global default thinking level.
+- `PSI_OPENAI_CODEX_REASONING` — optional legacy Codex-specific
+  default. For a config default, set `defaults.reasoning_effort` in
+  `~/.config/psi/settings.json` or `./.psi/settings.json`.
 - `PSI_OPENAI_CODEX_VERBOSITY` — optional text verbosity
   (`low`, `medium`, `high`; default `low`).
 - Uses the Responses-shaped adapter in `lua/psi/openai_codex.lua`.
@@ -110,7 +115,7 @@ psi
 psi> /login openai-codex
 psi> /login openai-codex http://localhost:1455/auth/callback?code=...&state=...
 psi> /model openai-codex/gpt-5.5
-psi> /set effort high
+psi> /thinking xhigh
 
 # Ollama on a remote box
 PSI_OLLAMA_BASE_URL=http://workstation.local:11434 \

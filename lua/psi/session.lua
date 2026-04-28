@@ -418,6 +418,17 @@ function M.append_thinking_level_change(level)
   append_body("custom", "", body)
 end
 
+function M.current_thinking_level()
+  local msgs = psi.session_messages()
+  for i = #msgs, 1, -1 do
+    local body = prelude.safe_json_decode(msgs[i].data, nil)
+    if type(body) == "table" and body.__entry_type == "thinking_level_change" then
+      return body.thinkingLevel
+    end
+  end
+  return nil
+end
+
 -- ---------- JSONL persistence ----------
 
 local function write_line(file, obj)

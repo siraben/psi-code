@@ -128,6 +128,10 @@ static int psi_tui_run_lua(struct psi_vm *vm, const struct psi_cli_options *opti
         lua_pushstring(vm->L, options->model);
         lua_setfield(vm->L, -2, "model");
     }
+    if (options->thinking_level != NULL) {
+        lua_pushstring(vm->L, options->thinking_level);
+        lua_setfield(vm->L, -2, "thinking_level");
+    }
     lua_pushinteger(vm->L, (lua_Integer)options->max_tokens);
     lua_setfield(vm->L, -2, "max_tokens");
     lua_pushinteger(vm->L, (lua_Integer)options->keep_recent);
