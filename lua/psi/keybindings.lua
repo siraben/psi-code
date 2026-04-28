@@ -84,7 +84,7 @@ local DEFINITIONS = {
   {
     id = "tui.transcript.pageDown",
     section = "Navigation",
-    default_keys = { "page-down", "ctrl-d" },
+    default_keys = { "page-down" },
     description = "Scroll transcript page down",
   },
   {
@@ -144,7 +144,7 @@ local DEFINITIONS = {
   {
     id = "app.exit",
     section = "Other",
-    default_keys = {},
+    default_keys = { "ctrl-d" },
     description = "Exit when prompt is empty",
   },
   {
