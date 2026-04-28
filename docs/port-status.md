@@ -49,7 +49,10 @@ architecture it is porting.
 ## Next porting priority
 
 The biggest remaining user-visible gaps are around session management
-and extension richness:
+and extension richness. The current TUI is functional, but it should move
+toward a pi-mono-style component tree plus differential renderer before adding
+larger interactive surfaces; see
+[docs/tui-differential-rendering-plan.md](tui-differential-rendering-plan.md).
 
 1. **Session tree navigation.** Walk the `parentSession` pointers
    in session headers; add `/tree` and branch-aware forks that
