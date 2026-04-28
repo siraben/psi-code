@@ -29,7 +29,6 @@ local path_util = require("psi.path")
 local M = {}
 
 local SESSION_VERSION = 3
-local MAX_SESSION_SCAN_BYTES = 262144
 local MAX_SESSION_DIR_COMPONENT_BYTES = 180
 
 -- Optional display name set via /name; persisted into the session header
@@ -627,10 +626,8 @@ local function build_session_info(path)
   local preview = {}
   local modified_key = 0
   local name = nil
-  local bytes = 0
 
   for line in f:lines() do
-    bytes = bytes + #line + 1
     local parsed = prelude.safe_json_decode(line, nil)
     if type(parsed) == "table" then
       if not header then
@@ -655,9 +652,6 @@ local function build_session_info(path)
       else
         modified_key = math.max(modified_key, parse_time_key(parsed.timestamp))
       end
-    end
-    if bytes > MAX_SESSION_SCAN_BYTES and first_message then
-      break
     end
   end
   f:close()
