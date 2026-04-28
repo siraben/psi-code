@@ -24,12 +24,11 @@
 
 local records = require("psi.records")
 local prelude = require("psi.prelude")
-local path_util = require("psi.path")
+local path_util = require("psi.path_utils")
 
 local M = {}
 
 local SESSION_VERSION = 3
-local MAX_SESSION_SCAN_BYTES = 262144
 local MAX_SESSION_DIR_COMPONENT_BYTES = 180
 
 -- Optional display name set via /name; persisted into the session header
@@ -627,10 +626,8 @@ local function build_session_info(path)
   local preview = {}
   local modified_key = 0
   local name = nil
-  local bytes = 0
 
   for line in f:lines() do
-    bytes = bytes + #line + 1
     local parsed = prelude.safe_json_decode(line, nil)
     if type(parsed) == "table" then
       if not header then
@@ -656,9 +653,6 @@ local function build_session_info(path)
         modified_key = math.max(modified_key, parse_time_key(parsed.timestamp))
       end
     end
-    if bytes > MAX_SESSION_SCAN_BYTES and first_message then
-      break
-    end
   end
   f:close()
 
@@ -681,18 +675,17 @@ local function build_session_info(path)
 end
 
 local function collect_jsonl_files(dir, out)
-  local entries = dir and psi.list_dir_typed(dir) or nil
+  local entries = dir and psi.list_dir(dir) or nil
   if type(entries) ~= "table" then
     return
   end
   for _, entry in ipairs(entries) do
-    if type(entry) == "table" and type(entry.name) == "string" then
-      local full = prelude.path_join(dir, entry.name)
-      if entry.type == "file" and entry.name:match("%.jsonl$") then
+    local name = type(entry) == "table" and entry.name or entry
+    if type(name) == "string" then
+      local full = prelude.path_join(dir, name)
+      if name:match("%.jsonl$") and psi.file_type(full) == "file" then
         out[#out + 1] = full
       end
-    elseif type(entry) == "string" and entry:match("%.jsonl$") then
-      out[#out + 1] = prelude.path_join(dir, entry)
     end
   end
 end
@@ -720,11 +713,12 @@ function M.list_sessions(cwd)
   -- Backward compatibility with the previous flat
   -- $STATE/psi/sessions/<id>.jsonl layout: include files whose header
   -- cwd matches the requested directory.
-  local root_entries = root and psi.list_dir_typed(root) or nil
+  local root_entries = root and psi.list_dir(root) or nil
   if type(root_entries) == "table" then
     for _, entry in ipairs(root_entries) do
-      if type(entry) == "table" and entry.type == "file" and entry.name:match("%.jsonl$") then
-        local full = prelude.path_join(root, entry.name)
+      local name = type(entry) == "table" and entry.name or entry
+      if type(name) == "string" and name:match("%.jsonl$") then
+        local full = prelude.path_join(root, name)
         local header = read_first_json_line(full)
         local header_cwd = header and header.cwd
         if
@@ -947,30 +941,6 @@ local function write_entry_file(path, header, entries, count)
   f:close()
   if not ok then
     return false, werr
-  end
-  return true
-end
-
--- Append-only companion to write_session_file. Called on every save
--- after the first when the message count has only grown — writes
--- messages[from_idx..#messages] to the existing file without
--- rewriting the header or earlier entries. A 100-entry session
--- with a 5-entry delta drops from 105-line rewrite to 5-line
--- append; on iSH this turns a ~50ms save into a ~2ms append.
--- The full delta goes out as one fwrite; psi.file_append fsyncs
--- before close, so a successful return means it's on disk.
-local function append_session_file(path, messages)
-  local parts = prelude.array(#messages * 2)
-  for i = 1, #messages do
-    parts[#parts + 1] = psi.json_encode(to_disk_entry(messages[i]))
-    parts[#parts + 1] = "\n"
-  end
-  local content = table.concat(parts)
-  if #content == 0 then
-    return true
-  end
-  if not psi.file_append(path, content) then
-    return false, "file_append failed"
   end
   return true
 end

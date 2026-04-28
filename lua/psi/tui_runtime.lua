@@ -2957,8 +2957,6 @@ local function choose_session_tui(infos)
       selected = math.max(1, selected - list_rows)
     elseif key == "page-down" then
       selected = math.min(#infos, selected + list_rows)
-    elseif key == "resize" then
-      -- redraw on next loop
     end
   end
 end

@@ -1122,7 +1122,7 @@ def t_session_default_path_cwd_scoped(psi: Psi):
     state = psi.tmp / "state"
     out = psi.run(
         "--eval",
-        'local s = require("psi.session")\n'
+        'local s = require("psi.session_manager")\n'
         + 'local path = s.ensure_default_path()\n'
         + 'return s.encode_session_dir(psi.cwd()) .. "|" .. path',
         cwd=project,
@@ -1144,7 +1144,7 @@ def t_session_default_path_bounds_long_cwd_component(psi: Psi):
     state = psi.tmp / "state-long-cwd"
     out = psi.run(
         "--eval",
-        'local s = require("psi.session")\n'
+        'local s = require("psi.session_manager")\n'
         + 'local path = s.ensure_default_path()\n'
         + 's.append_user("long path save")\n'
         + 'local ok, err = s.save()\n'
@@ -1172,7 +1172,7 @@ def t_session_list_sessions_for_cwd(psi: Psi):
     psi.run("--print", "two", cwd=other, env_extra=env)
     out = psi.run(
         "--eval",
-        'local s = require("psi.session")\n'
+        'local s = require("psi.session_manager")\n'
         + 'local xs = s.list_sessions(psi.cwd())\n'
         + 'return tostring(#xs) .. "|" .. (xs[1] and xs[1].cwd or "") .. "|"\n'
         + '  .. (xs[1] and xs[1].first_message or "")',
@@ -1194,13 +1194,82 @@ def t_session_list_sessions_includes_preview(psi: Psi):
     psi.run("--print", "preview user prompt", cwd=project, env_extra=env)
     out = psi.run(
         "--eval",
-        'local s = require("psi.session")\n'
+        'local s = require("psi.session_manager")\n'
         + "local xs = s.list_sessions(psi.cwd())\n"
         + "return table.concat(xs[1] and xs[1].preview or {}, '\\n')",
         cwd=project,
         env_extra=env,
     ).stdout.strip()
     assert_contains(out, "You: preview user prompt", "session preview")
+
+
+@test("session/list_sessions_recency_scans_large_files")
+def t_session_list_sessions_recency_scans_large_files(psi: Psi):
+    project = psi.tmp / "project-large-recency"
+    project.mkdir()
+    state = psi.tmp / "state-large-recency"
+    env = {"XDG_STATE_HOME": str(state)}
+    enc = psi.eval(
+        'local s = require("psi.session_manager")\n'
+        + 'return s.encode_session_dir("' + str(project) + '")'
+    )
+    sess_dir = state / "psi" / "sessions" / enc
+    sess_dir.mkdir(parents=True)
+
+    old_path = sess_dir / "2020-01-01T00-00-00_old.jsonl"
+    newer_path = sess_dir / "2020-01-02T00-00-00_newer.jsonl"
+    long_path = sess_dir / "2020-01-01T00-00-01_long.jsonl"
+
+    def header(session_id: str, ts: str):
+        return {
+            "type": "session",
+            "version": 3,
+            "id": session_id,
+            "timestamp": ts,
+            "cwd": str(project),
+        }
+
+    def msg(entry_id: str, ts: str, text: str, parent: str | None = None):
+        entry = {
+            "type": "message",
+            "id": entry_id,
+            "timestamp": ts,
+            "message": {
+                "role": "user",
+                "content": [{"type": "text", "text": text}],
+            },
+        }
+        if parent is not None:
+            entry["parentId"] = parent
+        return entry
+
+    old_path.write_text(
+        json.dumps(header("old", "2020-01-01T00:00:00Z")) + "\n"
+        + json.dumps(msg("old-1", "2020-01-01T00:00:01Z", "old")) + "\n"
+    )
+    newer_path.write_text(
+        json.dumps(header("newer", "2020-01-02T00:00:00Z")) + "\n"
+        + json.dumps(msg("newer-1", "2020-01-02T00:00:01Z", "newer")) + "\n"
+    )
+    filler = "x" * 4096
+    with long_path.open("w") as f:
+        f.write(json.dumps(header("long", "2020-01-01T00:00:00Z")) + "\n")
+        parent = None
+        for i in range(80):
+            entry_id = f"long-{i}"
+            f.write(json.dumps(msg(entry_id, "2020-01-01T00:00:01Z", filler, parent)) + "\n")
+            parent = entry_id
+        f.write(json.dumps(msg("long-last", "2020-01-03T00:00:01Z", "latest", parent)) + "\n")
+
+    out = psi.run(
+        "--eval",
+        'local s = require("psi.session_manager")\n'
+        + 'local xs = s.list_sessions(psi.cwd())\n'
+        + 'return (xs[1] and xs[1].id or "") .. "|" .. tostring(xs[1] and xs[1].message_count or 0)',
+        cwd=project,
+        env_extra=env,
+    ).stdout.strip()
+    assert_equals(out, "long|81", "large session recency uses tail entries")
 
 
 @test("session/cwd_scoped_dirs_do_not_collide")
@@ -1216,7 +1285,7 @@ def t_session_cwd_scoped_dirs_do_not_collide(psi: Psi):
     psi.run("--print", "from nested", cwd=nested, env_extra=env)
     out = psi.run(
         "--eval",
-        'local s = require("psi.session")\n'
+        'local s = require("psi.session_manager")\n'
         + f"local a = {json.dumps(str(hyphen))}\n"
         + f"local b = {json.dumps(str(nested))}\n"
         + "local xs = s.list_sessions(a)\n"
@@ -2930,7 +2999,7 @@ def t_session_round_trip(psi: Psi):
 def t_session_branch_tree_loads_active_leaf(psi: Psi):
     sess = psi.tmp / "branch.jsonl"
     out = psi.eval(
-        'local s = require("psi.session")\n'
+        'local s = require("psi.session_manager")\n'
         + 'local path = "' + str(sess) + '"\n'
         + 'psi.session_set_path(path)\n'
         + 's.append_user("root")\n'
@@ -2967,7 +3036,7 @@ def t_session_branch_tree_loads_active_leaf(psi: Psi):
 def t_session_direct_append_after_tracked_entry_persists(psi: Psi):
     sess = psi.tmp / "direct.jsonl"
     out = psi.eval(
-        'local s = require("psi.session")\n'
+        'local s = require("psi.session_manager")\n'
         + 'local path = "' + str(sess) + '"\n'
         + 'psi.session_set_path(path)\n'
         + 's.append_user("tracked")\n'
@@ -2987,7 +3056,7 @@ def t_session_direct_append_after_tracked_entry_persists(psi: Psi):
 def t_session_direct_clear_rewrites_saved_file(psi: Psi):
     sess = psi.tmp / "clear.jsonl"
     out = psi.eval(
-        'local s = require("psi.session")\n'
+        'local s = require("psi.session_manager")\n'
         + 'local path = "' + str(sess) + '"\n'
         + 'psi.session_set_path(path)\n'
         + 's.append_user("stale")\n'
