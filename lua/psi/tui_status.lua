@@ -227,6 +227,10 @@ function M.handle_key(arg)
     return nil
   end
 
+  if key == "ctrl-c" and not busy then
+    return action("clear-buffer")
+  end
+
   if keybindings.matches(key, "tui.input.submit") then
     if input_length > 0 or image_count > 0 then
       return action("submit")

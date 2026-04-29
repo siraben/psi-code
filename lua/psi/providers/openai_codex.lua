@@ -125,7 +125,7 @@ local function response_input_from_session(session, _system_prompt)
 
   transform.replay_session(session, {
     user = function(message)
-      local content = transform.responses_input_from_content(message.content)
+      local content = transform.codex_responses_input_from_content(message.content)
       if type(content) == "table" then
         out[#out + 1] = { type = "message", role = "user", content = content }
       else
@@ -180,7 +180,7 @@ local function response_input_from_session(session, _system_prompt)
       if message.role == "assistant" then
         out[#out + 1] = assistant_text(text)
       else
-        local content = transform.responses_input_from_content(message.content)
+        local content = transform.codex_responses_input_from_content(message.content)
         if type(content) == "table" then
           out[#out + 1] = { type = "message", role = "user", content = content }
         else

@@ -98,6 +98,32 @@ function M.responses_input_from_content(content)
   return M.text_from_content(content)
 end
 
+function M.codex_responses_input_from_content(content)
+  local out = prelude.array(#(content or {}))
+  local has_images = false
+  for _, block in ipairs(content or {}) do
+    if type(block) == "table" then
+      if block.type == "text" and type(block.text) == "string" and block.text ~= "" then
+        out[#out + 1] = { type = "input_text", text = block.text }
+      elseif block.type == "image" and type(block.data) == "string" and block.data ~= "" then
+        has_images = true
+        local mime = block.mimeType or block.mime or "image/png"
+        out[#out + 1] = { type = "input_text", text = "<image>" }
+        out[#out + 1] = {
+          type = "input_image",
+          image_url = "data:" .. mime .. ";base64," .. block.data,
+          detail = "high",
+        }
+        out[#out + 1] = { type = "input_text", text = "</image>" }
+      end
+    end
+  end
+  if has_images then
+    return prelude.as_array(out)
+  end
+  return M.text_from_content(content)
+end
+
 function M.tool_result_text(message)
   if type(message) ~= "table" or type(message.content) ~= "table" then
     return ""

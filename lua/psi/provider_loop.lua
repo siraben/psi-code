@@ -230,7 +230,7 @@ function M.run_turn(opts, cfg)
         cfg.save_failed_partial(state, model, "error", tostring(begin_err))
       end
       io.stderr:write(cfg.provider_name .. ": " .. tostring(begin_err) .. "\n")
-      return false, "error"
+      return false, tostring(begin_err or "error")
     end
 
     while true do

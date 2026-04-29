@@ -759,6 +759,124 @@ local function add_image_debug(state, title, image, extra)
   add_entry(state, "image_debug", table.concat(lines, "\n"))
 end
 
+function M._provider_debug_text_preview(text, max_len)
+  text = tostring(text or "")
+  max_len = tonumber(max_len) or 80
+  text = text:gsub("\27", "<ESC>")
+  text = text:gsub("\r", "<CR>")
+  text = text:gsub("\n", "<LF>")
+  if #text > max_len then
+    return text:sub(1, max_len) .. "..."
+  end
+  return text
+end
+
+function M._codex_request_debug_text(payload)
+  payload = type(payload) == "table" and payload or {}
+  local body = type(payload.body) == "table" and payload.body or {}
+  local input = type(body.input) == "table" and body.input or {}
+  local body_json = ""
+  local encoded_ok, encoded = pcall(psi.json_encode, body)
+  if encoded_ok and type(encoded) == "string" then
+    body_json = encoded
+  end
+
+  local lines = {
+    "",
+    "codex debug: provider request",
+    "  provider=" .. tostring(payload.provider or ""),
+    "  model=" .. tostring(body.model or payload.model or ""),
+    "  input_items=" .. tostring(#input),
+    "  body_bytes=" .. tostring(#body_json),
+    "  stream=" .. tostring(body.stream),
+    "  store=" .. tostring(body.store),
+    "  tool_count=" .. tostring(type(body.tools) == "table" and #body.tools or 0),
+    "  reasoning.effort="
+      .. tostring(type(body.reasoning) == "table" and body.reasoning.effort or ""),
+  }
+  local image_count = 0
+  local text_count = 0
+
+  for i, item in ipairs(input) do
+    if type(item) == "table" then
+      local content = item.content
+      local item_type = item.type or (item.role and "message" or "")
+      lines[#lines + 1] = "  input["
+        .. tostring(i)
+        .. "].type="
+        .. tostring(item_type)
+        .. " role="
+        .. tostring(item.role or "")
+      if type(content) == "string" then
+        text_count = text_count + 1
+        lines[#lines + 1] = "    content=string len="
+          .. tostring(#content)
+          .. " text="
+          .. M._provider_debug_text_preview(content, 80)
+      elseif type(content) == "table" then
+        lines[#lines + 1] = "    content_spans=" .. tostring(#content)
+        for j, span in ipairs(content) do
+          if type(span) == "table" then
+            if span.type == "input_text" then
+              text_count = text_count + 1
+              lines[#lines + 1] = "    span["
+                .. tostring(j)
+                .. "]=input_text len="
+                .. tostring(#tostring(span.text or ""))
+                .. " text="
+                .. M._provider_debug_text_preview(span.text, 80)
+            elseif span.type == "input_image" then
+              image_count = image_count + 1
+              local url = tostring(span.image_url or "")
+              local mime, b64 = url:match("^data:([^;]+);base64,(.*)$")
+              local prev = type(content[j - 1]) == "table" and content[j - 1].text or nil
+              local next_text = type(content[j + 1]) == "table" and content[j + 1].text or nil
+              lines[#lines + 1] = "    span["
+                .. tostring(j)
+                .. "]=input_image"
+                .. " mime="
+                .. tostring(mime or "")
+                .. " detail="
+                .. tostring(span.detail or "")
+                .. " base64_len="
+                .. tostring(b64 and #b64 or 0)
+                .. " wrapped="
+                .. tostring(prev == "<image>" and next_text == "</image>")
+                .. " url_prefix="
+                .. M._provider_debug_text_preview(url:sub(1, 80), 80)
+            else
+              lines[#lines + 1] = "    span["
+                .. tostring(j)
+                .. "]="
+                .. tostring(span.type or "table")
+            end
+          end
+        end
+      end
+    end
+  end
+
+  lines[#lines + 1] = "  text_spans=" .. tostring(text_count)
+  lines[#lines + 1] = "  input_images=" .. tostring(image_count)
+  lines[#lines + 1] = ""
+  return table.concat(lines, "\n"), image_count
+end
+
+function M._add_provider_request_debug(state, payload)
+  payload = type(payload) == "table" and payload or {}
+  if payload.provider ~= "openai-codex" then
+    return
+  end
+  local text, image_count = M._codex_request_debug_text(payload)
+  local enabled = setting_bool("providers.openai_codex.debug", false)
+    or (image_count > 0 and setting_bool("tui.images.debug", false))
+  if not enabled then
+    return
+  end
+  add_entry(state, "provider_debug", text)
+  state.dirty = true
+end
+
 local function finish_streaming_assistant(state)
   local index = state.streaming_assistant_index
   if index ~= nil and state.entries[index] and state.entries[index].text == "" then
@@ -1232,6 +1350,9 @@ local function style_line(line)
     return ansi.yellow(line.text)
   end
   if line.kind == "image_debug" then
+    return ansi.yellow(line.text)
+  end
+  if line.kind == "provider_debug" then
     return ansi.yellow(line.text)
   end
   if line.kind == "tool_result" then
@@ -1710,6 +1831,7 @@ local function clear_buffer(state)
   clear_busy_input_error(state)
   state.input = ""
   state.cursor = 0
+  state.pending_images = {}
   clear_selection(state)
   state.block_edit = nil
   state.editor_mode = "insert"
@@ -2650,6 +2772,9 @@ end
 
 local function run_turn(state, line, images)
   local assistant_streamed = false
+  local before_provider_request = function(payload)
+    M._add_provider_request_debug(state, payload)
+  end
   local observer = {
     on_assistant_text_delta = function(text)
       observer_text_delta(state, text)
@@ -2678,6 +2803,9 @@ local function run_turn(state, line, images)
   }
 
   fire_turn_event(state, "before-turn", { text = line or "" })
+  if psi.events and psi.events.on then
+    psi.events.on("before-provider-request", before_provider_request)
+  end
   local ran, ok, reply = xpcall(function()
     return agent.run_turn({
       user_text = line or "",
@@ -2690,6 +2818,9 @@ local function run_turn(state, line, images)
       abort_check = psi.is_aborted,
     })
   end, debug.traceback)
+  if psi.events and psi.events.off then
+    psi.events.off("before-provider-request", before_provider_request)
+  end
 
   finish_streaming_assistant(state)
   state.streaming_thinking_index = nil
@@ -3588,6 +3719,10 @@ end
 
 function M._debug_sanitize_terminal_text(text, preserve_newlines)
   return sanitize_terminal_text(text, preserve_newlines)
+end
+
+function M._debug_codex_request_debug_text(payload)
+  return M._codex_request_debug_text(payload)
 end
 
 function M._debug_limit_live_tool_progress_text(text)

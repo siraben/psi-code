@@ -396,14 +396,38 @@ def t_images_session_and_provider_blocks(psi: Psi):
         'local content = body.message.content\n'
         'local openai = transform.openai_content_from_content(content)\n'
         'local responses = transform.responses_input_from_content(content)\n'
+        'local codex = transform.codex_responses_input_from_content(content)\n'
         'return content[2].type .. "|" .. content[2].mimeType .. "|"\n'
-        '  .. openai[2].image_url.url .. "|" .. responses[2].image_url'
+        '  .. openai[2].image_url.url .. "|" .. responses[2].image_url .. "|"\n'
+        '  .. codex[3].type .. ":" .. codex[3].detail .. ":" .. codex[2].text .. ":" .. codex[4].text'
     )
     assert_equals(
         out,
-        "image|image/png|data:image/png;base64,QUJD|data:image/png;base64,QUJD",
+        "image|image/png|data:image/png;base64,QUJD|data:image/png;base64,QUJD|input_image:high:<image>:</image>",
         "image session/provider blocks",
     )
+
+
+@test("images/codex_request_debug_summary")
+def t_images_codex_request_debug_summary(psi: Psi):
+    out = psi.eval(
+        'local session = require("psi.session")\n'
+        'local transform = require("psi.message_transform")\n'
+        'local prelude = require("psi.prelude")\n'
+        'local rt = require("psi.tui_runtime")\n'
+        'psi.session_clear()\n'
+        'session.append_user_blocks("look", {{data="QUJD", mimeType="image/png", width=2, height=3}})\n'
+        'local msg = require("psi.records").messages_from_alists(psi.session_messages())[1]\n'
+        'local body = require("psi.prelude").safe_json_decode(msg.data)\n'
+        'local content = transform.codex_responses_input_from_content(body.message.content)\n'
+        'local request = {model="gpt-5.5", stream=true, store=false, input=prelude.as_array({{type="message", role="user", content=content}})}\n'
+        'return rt._debug_codex_request_debug_text({provider="openai-codex", body=request})'
+    )
+    assert_contains(out, "codex debug: provider request", "Codex debug should identify request")
+    assert_contains(out, "input_images=1", "Codex debug should count images")
+    assert_contains(out, "detail=high", "Codex debug should show image detail")
+    assert_contains(out, "wrapped=true", "Codex debug should show image markers")
+    assert_contains(out, "base64_len=4", "Codex debug should show redacted image length")
 
 
 @test("images/ollama_message_images")
@@ -2198,6 +2222,17 @@ def t_tui_backspace_removes_pending_image(psi: Psi):
         + 'return tostring(d.pending_images) .. "|" .. d.input .. "|" .. tostring(d.status_text)'
     )
     assert_equals(out, "0||removed image", "Backspace should remove a pending image")
+
+
+@test("tui/ctrl_c_clears_pending_image")
+def t_tui_ctrl_c_clears_pending_image(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local header = string.char(137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1)\n'
+        + 'local d = rt._debug_edit_keys("draft", 5, {{key="paste", text=header}, {key="escape"}, {key="ctrl-c"}}, true)\n'
+        + 'return tostring(d.pending_images) .. "|" .. d.input .. "|" .. tostring(d.cursor)'
+    )
+    assert_equals(out, "0||0", "Ctrl-C should clear text and pending images")
 
 
 @test("mode/tui_ctrl_v_kitty_clipboard_image")
