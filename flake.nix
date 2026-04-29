@@ -79,7 +79,6 @@
           ];
 
           makeFlags = [
-            "PREFIX=$(out)"
             "CC=${p.stdenv.cc.targetPrefix}cc"
             "HOST_CC=${hostCC}"
             "PKG_CONFIG=pkg-config"
@@ -87,6 +86,10 @@
           ]
           ++ (if static then [ "STATIC=1" ] else [])
           ++ extraMakeFlags;
+
+          installFlags = [
+            "PREFIX=$(out)"
+          ];
 
           # Cross builds: target pkg-config returns target-arch zlib
           # flags, which break the build-host helper. Hardcode paths to
@@ -104,12 +107,6 @@
           # them explicitly so pkg-config --static --libs resolves.
           # Most are picked up by pkg-config; we just need their .pc
           # files visible, which buildInputs already arranges.
-
-          installPhase = ''
-            runHook preInstall
-            make "''${makeFlagsArray[@]}" PREFIX=$out install
-            runHook postInstall
-          '';
 
           # Keep the binary stripped only for dynamic builds. For
           # static/musl builds we want to preserve debug symbols so
