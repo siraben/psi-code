@@ -2907,6 +2907,8 @@ def main() -> int:
                     help="path to psi binary")
     ap.add_argument("--filter", default=None,
                     help="only run tests whose name contains this substring")
+    ap.add_argument("--exclude", action="append", default=[],
+                    help="skip tests whose name contains this substring; may be repeated")
     ap.add_argument("--no-live", action="store_true",
                     help="skip live-agent tests even if ANTHROPIC_API_KEY is set")
     ap.add_argument("--list", action="store_true",
@@ -2919,6 +2921,7 @@ def main() -> int:
             print(f"{name} {tag}".rstrip())
         return 0
 
+    args.psi = str(Path(args.psi).resolve())
     if not Path(args.psi).exists():
         print(f"psi binary not found at {args.psi}; build it or pass --psi", file=sys.stderr)
         return 1
@@ -2933,6 +2936,10 @@ def main() -> int:
 
     for name, fn, meta in TESTS:
         if args.filter and args.filter not in name:
+            continue
+        if any(excluded in name for excluded in args.exclude):
+            skipped += 1
+            print(f"SKIP  {name}")
             continue
         if meta["live"] and not run_live:
             skipped += 1
