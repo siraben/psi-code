@@ -15,6 +15,7 @@ local M = {}
 
 local MAX_RENDER_TEXT = 8192
 local MAX_RENDER_TRUNCATION_SUFFIX = "\n\n[output truncated]"
+local MAX_COMMAND_COMPLETION_ROWS = 6
 
 local DEFAULT_WIDTH = 80
 local DEFAULT_HEIGHT = 24
@@ -207,6 +208,18 @@ local function limit_live_tool_progress_text(text)
   return prefix .. text:sub(#text - keep + 1)
 end
 
+local function fit_text(text, width)
+  text = tostring(text or "")
+  width = math.max(0, tonumber(width) or 0)
+  if #text <= width then
+    return text
+  end
+  if width <= 3 then
+    return text:sub(1, width)
+  end
+  return text:sub(1, width - 3) .. "..."
+end
+
 local function current_size()
   local size = psi.tui_size()
   local width = math.max(MIN_SIZE, tonumber(size and size.width) or DEFAULT_WIDTH)
@@ -360,6 +373,72 @@ local function build_input_lines(state)
   return lines, cursor_line, cursor_col
 end
 
+local function active_command_completions(state)
+  if state.busy or state.cursor ~= #(state.input or "") then
+    state.command_completion_index = 1
+    state.command_completion_input = nil
+    return {}
+  end
+  if not state.input:match("^/[%w%-%_]*$") then
+    state.command_completion_index = 1
+    state.command_completion_input = nil
+    return {}
+  end
+  if state.command_completion_input ~= state.input then
+    state.command_completion_input = state.input
+    state.command_completion_index = 1
+  end
+
+  local items = commands.command_suggestions(state.input, 128)
+  if #items == 0 then
+    state.command_completion_index = 1
+    return items
+  end
+  state.command_completion_index = clamp(state.command_completion_index or 1, 1, #items)
+  return items
+end
+
+local function accept_command_completion(state)
+  local items = active_command_completions(state)
+  local item = items[state.command_completion_index or 1]
+  if not item then
+    return false
+  end
+  local next_input = "/" .. item.name
+  if item.argument_hint and item.argument_hint ~= "" then
+    next_input = next_input .. " "
+  end
+  state.input = next_input
+  state.cursor = #state.input
+  state.command_completion_input = state.input
+  state.dirty = true
+  return true
+end
+
+local function format_command_completion(item, selected, width)
+  local marker = selected and "> " or "  "
+  local label = "/" .. tostring(item.name or "")
+  if item.argument_hint and item.argument_hint ~= "" then
+    label = label .. " " .. item.argument_hint
+  end
+
+  local desc = item.description or ""
+  if item.alias_of and item.alias_of ~= item.name then
+    desc = "alias for /" .. item.alias_of .. (desc ~= "" and (" - " .. desc) or "")
+  end
+
+  local label_width = math.min(28, math.max(12, math.floor((tonumber(width) or 80) * 0.36)))
+  label = fit_text(label, label_width)
+  local padded = label .. string.rep(" ", math.max(1, label_width - #label + 1))
+  local desc_width = math.max(0, (tonumber(width) or 80) - #marker - label_width - 2)
+  desc = fit_text(desc, desc_width)
+
+  if selected then
+    return ansi.bold(ansi.cyan(marker .. padded)) .. ansi.dim(desc)
+  end
+  return ansi.dim(marker) .. ansi.cyan(padded) .. ansi.dim(desc)
+end
+
 local function entry_prefixes(entry)
   local kind = entry.kind
   if kind == "user" then
@@ -451,6 +530,8 @@ local function new_state(opts)
     history_search_query = "",
     history_search_draft = "",
     history_search_index = nil,
+    command_completion_index = 1,
+    command_completion_input = nil,
     dirty = true,
   }
   refresh_input_layout(state)
@@ -1139,7 +1220,22 @@ local function layout_rows(state)
   local status_visible = state.busy or state.status_text ~= nil
   local status_row = status_visible and (input_start_row - 1) or nil
   local transcript_start = 2
-  local transcript_end = status_visible and (status_row - 1) or (input_start_row - 1)
+  local command_completions = active_command_completions(state)
+  local completion_anchor_row = status_visible and (status_row - 1) or (input_start_row - 1)
+  local max_completion_rows = math.max(0, completion_anchor_row - transcript_start)
+  local command_completion_rows =
+    math.min(#command_completions, MAX_COMMAND_COMPLETION_ROWS, max_completion_rows)
+  local command_completion_first = 1
+  if command_completion_rows > 0 then
+    command_completion_first = (state.command_completion_index or 1) - command_completion_rows + 1
+    command_completion_first = clamp(
+      command_completion_first,
+      1,
+      math.max(1, #command_completions - command_completion_rows + 1)
+    )
+  end
+  local command_completion_start = completion_anchor_row - command_completion_rows + 1
+  local transcript_end = completion_anchor_row - command_completion_rows
   local transcript_height = math.max(1, transcript_end - transcript_start + 1)
 
   return {
@@ -1156,6 +1252,10 @@ local function layout_rows(state)
     status_row = status_row,
     footer_row = footer_row,
     input_start_row = input_start_row,
+    command_completions = command_completions,
+    command_completion_rows = command_completion_rows,
+    command_completion_first = command_completion_first,
+    command_completion_start = command_completion_start,
   }
 end
 
@@ -1247,6 +1347,17 @@ local function redraw(state)
     local line = transcript_lines[i + 1]
     local row = rows.transcript_start + i
     frame[#frame + 1] = frame_line(row, line and style_line(line) or "", frame_width)
+  end
+
+  for i = 1, rows.command_completion_rows do
+    local item_index = (rows.command_completion_first or 1) + i - 1
+    local item = rows.command_completions[item_index]
+    local selected = item_index == (state.command_completion_index or 1)
+    frame[#frame + 1] = frame_line(
+      rows.command_completion_start + i - 1,
+      item and format_command_completion(item, selected, frame_width) or "",
+      frame_width
+    )
   end
 
   status_arg = {
@@ -2816,6 +2927,32 @@ local function handle_key_event(state, event)
       history_search_accept(state)
     end
   end
+
+  local completions = active_command_completions(state)
+  if #completions > 0 then
+    if event.key == "up" then
+      state.command_completion_index = (state.command_completion_index or 1) - 1
+      if state.command_completion_index < 1 then
+        state.command_completion_index = #completions
+      end
+      state.dirty = true
+      return
+    end
+    if event.key == "down" then
+      state.command_completion_index = (state.command_completion_index or 1) + 1
+      if state.command_completion_index > #completions then
+        state.command_completion_index = 1
+      end
+      state.dirty = true
+      return
+    end
+    if event.key == "right" and state.cursor == #state.input then
+      if accept_command_completion(state) then
+        return
+      end
+    end
+  end
+
   local result = tui.handle_key({
     key = event.key,
     busy = state.busy,

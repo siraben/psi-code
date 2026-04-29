@@ -646,6 +646,80 @@ function M.registered_commands()
   return out
 end
 
+local function append_suggestion(out, seen, cmd, source, name, alias_of)
+  if type(cmd) ~= "table" or type(name) ~= "string" or name == "" or seen[name] then
+    return
+  end
+  seen[name] = true
+  out[#out + 1] = {
+    name = name,
+    description = cmd.description,
+    argument_hint = cmd.argument_hint,
+    source = source,
+    alias_of = alias_of,
+  }
+end
+
+local function command_matches(name, prefix)
+  return prefix == "" or name:sub(1, #prefix) == prefix
+end
+
+function M.command_suggestions(text, limit)
+  if type(text) ~= "string" or text:sub(1, 1) ~= "/" then
+    return {}
+  end
+  local prefix = text:sub(2)
+  if prefix:find("%s") then
+    return {}
+  end
+
+  limit = tonumber(limit) or 32
+  local out = {}
+  local seen = {}
+
+  for _, cmd in ipairs(BUILTIN_COMMANDS) do
+    if command_matches(cmd.name, prefix) then
+      append_suggestion(out, seen, cmd, "built-in", cmd.name)
+    end
+    for _, alias in ipairs(cmd.aliases or {}) do
+      if alias:sub(1, 1) ~= ":" and command_matches(alias, prefix) then
+        append_suggestion(out, seen, cmd, "built-in", alias, cmd.name)
+      end
+    end
+  end
+
+  for _, cmd in ipairs(M.registered_commands()) do
+    if command_matches(cmd.name, prefix) then
+      append_suggestion(out, seen, cmd, "extension", cmd.name)
+    end
+  end
+
+  local ok, templates = pcall(require, "psi.prompt_templates")
+  if ok and templates and templates.list then
+    for _, tmpl in ipairs(templates.list()) do
+      if command_matches(tmpl.name, prefix) then
+        append_suggestion(out, seen, tmpl, "prompt", tmpl.name)
+      end
+    end
+  end
+
+  table.sort(out, function(a, b)
+    if a.name == b.name then
+      return (a.source or "") < (b.source or "")
+    end
+    return a.name < b.name
+  end)
+
+  if #out > limit then
+    local trimmed = {}
+    for i = 1, limit do
+      trimmed[i] = out[i]
+    end
+    return trimmed
+  end
+  return out
+end
+
 local function command_invocation(cmd)
   local hint = cmd.argument_hint and (" " .. cmd.argument_hint) or ""
   return "/" .. cmd.name .. hint

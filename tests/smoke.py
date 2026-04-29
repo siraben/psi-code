@@ -860,6 +860,41 @@ def t_commands_help_templates(psi: Psi):
     assert_contains(out, "Review staged changes", "template description")
 
 
+@test("commands/slash_command_suggestions")
+def t_commands_slash_command_suggestions(psi: Psi):
+    tmpdir = psi.tmp / "suggest-prompts"
+    tmpdir.mkdir(exist_ok=True)
+    (tmpdir / "draft.md").write_text(
+        "---\n"
+        "description: Draft a response\n"
+        "argument-hint: <topic>\n"
+        "---\n"
+        "Draft $@.\n"
+    )
+    out = psi.run(
+        "--eval",
+        'local pt = require("psi.prompt_templates")\n'
+        + 'local c = require("psi.slash_commands")\n'
+        + 'pt.load()\n'
+        + 'c.register("debug", {\n'
+        + '  description = "Debug a problem",\n'
+        + '  argument_hint = "<issue>",\n'
+        + '  handler = function() return nil end,\n'
+        + '})\n'
+        + 'local matches = c.command_suggestions("/d")\n'
+        + 'local pieces = {}\n'
+        + 'for _, item in ipairs(matches) do\n'
+        + '  pieces[#pieces + 1] = item.name .. ":" .. tostring(item.source) .. ":" .. tostring(item.argument_hint or "")\n'
+        + 'end\n'
+        + 'return table.concat(pieces, "|")',
+        env_extra={"PSI_PROMPTS_DIR": str(tmpdir)},
+    ).stdout.strip()
+    assert_contains(out, "debug:extension:<issue>",
+                    "extension command suggestion missing")
+    assert_contains(out, "draft:prompt:<topic>",
+                    "prompt template suggestion missing")
+
+
 @test("keybindings/hotkeys_and_footer_are_generated")
 def t_keybindings_generated(psi: Psi):
     home = psi.tmp / "keybindings-home"
