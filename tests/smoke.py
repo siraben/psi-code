@@ -1833,6 +1833,34 @@ def t_providers_openai_codex_http_error(psi: Psi):
     assert_contains(out, "nope", "OpenAI Codex HTTP error details should be preserved")
 
 
+@test("providers/openai_codex_image_error_debug")
+def t_providers_openai_codex_image_error_debug(psi: Psi):
+    auth_file = psi.tmp / "codex-auth-image.json"
+    out = psi.run(
+        "--eval",
+        'local a = require("psi.auth_storage")\n'
+        + 'local session = require("psi.session")\n'
+        + 'a.set("openai-codex", {type="oauth", access="a", refresh="r", expires=9999999999999, accountId="acct"})\n'
+        + 'psi.session_clear()\n'
+        + 'session.append_user_blocks("look", {{data="QUJD", mimeType="image/png", width=2, height=3}})\n'
+        + 'psi.http_stream_begin = function() return {} end\n'
+        + 'psi.http_stream_poll = function() return "{\\"error\\":{\\"message\\":\\"bad image\\"}}", true end\n'
+        + 'psi.http_stream_finish = function() return 400 end\n'
+        + 'local ok, err = require("psi.sched").run(function()\n'
+        + '  return require("psi.openai_codex").run_turn({model="gpt-5.5"})\n'
+        + 'end)\n'
+        + 'return tostring(ok) .. "\\n" .. tostring(err)',
+        env_extra={"PSI_AUTH_FILE": str(auth_file)},
+    ).stdout.strip()
+    assert_contains(out, "false", "OpenAI Codex image errors should fail")
+    assert_contains(out, "bad image", "OpenAI Codex image error should include provider detail")
+    assert_contains(out, "codex debug: failed provider request",
+                    "OpenAI Codex image errors should include request debug")
+    assert_contains(out, "span[3]=input_image", "OpenAI Codex image debug should show image span")
+    assert_contains(out, "detail=high", "OpenAI Codex image debug should show detail")
+    assert_contains(out, "wrapped=true", "OpenAI Codex image debug should show wrappers")
+
+
 @test("tui/status_context_window")
 def t_tui_status_context_window(psi: Psi):
     cache = psi.tmp / "openrouter_models_status.json"

@@ -230,6 +230,101 @@ local function request_body(args)
   return body
 end
 
+local function debug_preview(text, max_len)
+  text = tostring(text or "")
+  max_len = tonumber(max_len) or 120
+  text = text:gsub("\27", "<ESC>")
+  text = text:gsub("\r", "<CR>")
+  text = text:gsub("\n", "<LF>")
+  if #text > max_len then
+    return text:sub(1, max_len) .. "..."
+  end
+  return text
+end
+
+local function request_debug_summary(body)
+  body = type(body) == "table" and body or {}
+  local input = type(body.input) == "table" and body.input or {}
+  local ok, encoded = pcall(psi.json_encode, body)
+  local body_bytes = ok and type(encoded) == "string" and #encoded or 0
+  local lines = {
+    "codex debug: failed provider request",
+    "  model=" .. tostring(body.model or ""),
+    "  input_items=" .. tostring(#input),
+    "  body_bytes=" .. tostring(body_bytes),
+    "  stream=" .. tostring(body.stream),
+    "  store=" .. tostring(body.store),
+    "  tool_count=" .. tostring(type(body.tools) == "table" and #body.tools or 0),
+    "  reasoning.effort="
+      .. tostring(type(body.reasoning) == "table" and body.reasoning.effort or ""),
+  }
+  local image_count = 0
+  local text_count = 0
+  for i, item in ipairs(input) do
+    if type(item) == "table" then
+      local content = item.content
+      lines[#lines + 1] = "  input["
+        .. tostring(i)
+        .. "].type="
+        .. tostring(item.type or (item.role and "message" or ""))
+        .. " role="
+        .. tostring(item.role or "")
+      if type(content) == "string" then
+        text_count = text_count + 1
+        lines[#lines + 1] = "    content=string len="
+          .. tostring(#content)
+          .. " text="
+          .. debug_preview(content, 120)
+      elseif type(content) == "table" then
+        lines[#lines + 1] = "    content_spans=" .. tostring(#content)
+        for j, span in ipairs(content) do
+          if type(span) == "table" then
+            if span.type == "input_text" then
+              text_count = text_count + 1
+              lines[#lines + 1] = "    span["
+                .. tostring(j)
+                .. "]=input_text len="
+                .. tostring(#tostring(span.text or ""))
+                .. " text="
+                .. debug_preview(span.text, 120)
+            elseif span.type == "input_image" then
+              image_count = image_count + 1
+              local url = tostring(span.image_url or "")
+              local mime, b64 = url:match("^data:([^;]+);base64,(.*)$")
+              local prev = type(content[j - 1]) == "table" and content[j - 1].text or nil
+              local next_text = type(content[j + 1]) == "table" and content[j + 1].text or nil
+              lines[#lines + 1] = "    span["
+                .. tostring(j)
+                .. "]=input_image"
+                .. " mime="
+                .. tostring(mime or "")
+                .. " detail="
+                .. tostring(span.detail or "")
+                .. " base64_len="
+                .. tostring(b64 and #b64 or 0)
+                .. " wrapped="
+                .. tostring(prev == "<image>" and next_text == "</image>")
+                .. " url_prefix="
+                .. debug_preview(url:sub(1, 96), 96)
+            else
+              lines[#lines + 1] = "    span["
+                .. tostring(j)
+                .. "]="
+                .. tostring(span.type or "table")
+            end
+          end
+        end
+      end
+    end
+  end
+  lines[#lines + 1] = "  text_spans=" .. tostring(text_count)
+  lines[#lines + 1] = "  input_images=" .. tostring(image_count)
+  if image_count == 0 and settings.get("providers.openai_codex.debug", false) ~= true then
+    return ""
+  end
+  return table.concat(lines, "\n")
+end
+
 local function new_state()
   return {
     blocks = {},
@@ -518,6 +613,7 @@ function M.run_turn(opts)
       return response_input_from_session(session, system_prompt)
     end,
     request_body = request_body,
+    request_debug = request_debug_summary,
     parser_new = stream_parser.sse_parser,
     parser_push = parser_push,
     new_state = new_state,
@@ -597,6 +693,7 @@ end
 M._debug = {
   response_input_from_session = response_input_from_session,
   request_body = request_body,
+  request_debug_summary = request_debug_summary,
   handle_event = handle_event,
   new_state = new_state,
   parser_new = stream_parser.sse_parser,

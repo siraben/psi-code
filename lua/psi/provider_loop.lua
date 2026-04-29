@@ -59,6 +59,18 @@ local function emit_turn_end(text, model)
   end
 end
 
+local function append_request_debug(cfg, request, message)
+  message = tostring(message or "provider request failed")
+  if type(cfg.request_debug) ~= "function" then
+    return message
+  end
+  local ok, debug_text = pcall(cfg.request_debug, request)
+  if not ok or type(debug_text) ~= "string" or debug_text == "" then
+    return message
+  end
+  return message .. "\n\n" .. debug_text
+end
+
 local function queued_user_observer(observer, kind)
   return function(text, _, images)
     if observer.on_queued_user then
@@ -226,11 +238,12 @@ function M.run_turn(opts, cfg)
     local raw_body_len = 0
     local handle, begin_err = psi.http_stream_begin(cfg.url, cfg.headers, psi.json_encode(request))
     if handle == nil then
+      local emsg = append_request_debug(cfg, request, tostring(begin_err or "error"))
       if cfg.save_failed_partial then
-        cfg.save_failed_partial(state, model, "error", tostring(begin_err))
+        cfg.save_failed_partial(state, model, "error", emsg)
       end
       io.stderr:write(cfg.provider_name .. ": " .. tostring(begin_err) .. "\n")
-      return false, tostring(begin_err or "error")
+      return false, emsg
     end
 
     while true do
@@ -258,6 +271,9 @@ function M.run_turn(opts, cfg)
       local reason = aborted and "aborted" or "error"
       local emsg = aborted and "Request was aborted"
         or ("http transport error: " .. tostring(transport_error or "unknown error"))
+      if not aborted then
+        emsg = append_request_debug(cfg, request, emsg)
+      end
       if cfg.save_failed_partial then
         cfg.save_failed_partial(state, model, reason, emsg)
       elseif cfg.has_partial(state, tool_calls) then
@@ -268,11 +284,15 @@ function M.run_turn(opts, cfg)
       if not aborted then
         io.stderr:write(cfg.provider_name .. ": " .. emsg .. "\n")
       end
-      return false, reason
+      return false, aborted and reason or emsg
     end
 
     if status < 200 or status >= 300 then
-      local emsg = cfg.classify_http_error(status, table.concat(raw_body), cfg.provider_name)
+      local emsg = append_request_debug(
+        cfg,
+        request,
+        cfg.classify_http_error(status, table.concat(raw_body), cfg.provider_name)
+      )
       if cfg.save_failed_partial then
         cfg.save_failed_partial(state, model, "error", emsg)
       elseif cfg.has_partial(state, tool_calls) then
@@ -283,11 +303,12 @@ function M.run_turn(opts, cfg)
     end
 
     if stream_error then
-      cfg.persist(state, model, content, tool_calls, "error", stream_error)
+      local emsg = append_request_debug(cfg, request, stream_error)
+      cfg.persist(state, model, content, tool_calls, "error", emsg)
       context.record_usage(psi.session_message_count(), state.usage, model)
       session_mod.save()
-      io.stderr:write(stream_error .. "\n")
-      return false, stream_error
+      io.stderr:write(emsg .. "\n")
+      return false, emsg
     end
 
     cfg.persist(state, model, content, tool_calls)
