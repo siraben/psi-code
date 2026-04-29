@@ -12,18 +12,22 @@ env:
   LANG: C.UTF-8
   LC_ALL: C.UTF-8
   TERM: xterm-256color
+  # Docker-backed Forgejo runners should use host networking for this
+  # self-hosted instance so checkout can reach the local Forgejo service.
+  FORGEJO_CI_URL: http://127.0.0.1:3010
+  FORGEJO_CI_REPOSITORY: siraben/psi-coding-agent
 
 jobs:
   style:
     name: Style and static analysis
-    runs-on: native
+    runs-on: docker
     steps:
       - name: Checkout
         run: |
           token="${FORGEJO_TOKEN:-$GITHUB_TOKEN}"
           auth_header="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
           git init .
-          git remote add origin http://127.0.0.1:3010/siraben/psi-coding-agent
+          git remote add origin "${FORGEJO_CI_URL%/}/${FORGEJO_CI_REPOSITORY}"
           GIT_TERMINAL_PROMPT=0 git -c "http.extraHeader=Authorization: Basic $auth_header" fetch --quiet --depth=1 origin "$GITHUB_SHA"
           git checkout --detach FETCH_HEAD
 
@@ -40,7 +44,7 @@ jobs:
 
   feature-matrix:
     name: Build and smoke (${{ matrix.name }})
-    runs-on: native
+    runs-on: docker
     strategy:
       fail-fast: false
       matrix:
@@ -69,7 +73,7 @@ jobs:
           token="${FORGEJO_TOKEN:-$GITHUB_TOKEN}"
           auth_header="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
           git init .
-          git remote add origin http://127.0.0.1:3010/siraben/psi-coding-agent
+          git remote add origin "${FORGEJO_CI_URL%/}/${FORGEJO_CI_REPOSITORY}"
           GIT_TERMINAL_PROMPT=0 git -c "http.extraHeader=Authorization: Basic $auth_header" fetch --quiet --depth=1 origin "$GITHUB_SHA"
           git checkout --detach FETCH_HEAD
 
@@ -106,14 +110,14 @@ jobs:
 
   valgrind:
     name: Valgrind
-    runs-on: native
+    runs-on: docker
     steps:
       - name: Checkout
         run: |
           token="${FORGEJO_TOKEN:-$GITHUB_TOKEN}"
           auth_header="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
           git init .
-          git remote add origin http://127.0.0.1:3010/siraben/psi-coding-agent
+          git remote add origin "${FORGEJO_CI_URL%/}/${FORGEJO_CI_REPOSITORY}"
           GIT_TERMINAL_PROMPT=0 git -c "http.extraHeader=Authorization: Basic $auth_header" fetch --quiet --depth=1 origin "$GITHUB_SHA"
           git checkout --detach FETCH_HEAD
 
