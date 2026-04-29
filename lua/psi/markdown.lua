@@ -23,10 +23,89 @@ local function underline(text)
   return ansi.color("4", text)
 end
 
+local function sgr(code)
+  if not ansi.enabled then
+    return ""
+  end
+  return string.char(27) .. "[" .. code .. "m"
+end
+
+local function active_sgr(state)
+  if not state then
+    return ""
+  end
+  local out = {}
+  if state.bold then
+    out[#out + 1] = sgr("1")
+  end
+  if state.italic then
+    out[#out + 1] = sgr("3")
+  end
+  return table.concat(out)
+end
+
+local function reset_then_active(state)
+  if not ansi.enabled then
+    return ""
+  end
+  return sgr("0") .. active_sgr(state)
+end
+
+local function toggle_style(state, key)
+  state[key] = not state[key]
+  return state[key] and active_sgr({ [key] = true }) or reset_then_active(state)
+end
+
+local function render_emphasis(text, state)
+  state = state or {}
+  local out = {}
+  local i = 1
+  if state.bold or state.italic then
+    out[#out + 1] = active_sgr(state)
+  end
+  while i <= #text do
+    local three = text:sub(i, i + 2)
+    local two = text:sub(i, i + 1)
+    local one = text:sub(i, i)
+    if three == "***" then
+      if state.bold and state.italic then
+        state.bold = false
+        state.italic = false
+        out[#out + 1] = reset_then_active(state)
+      elseif not state.bold and not state.italic then
+        state.bold = true
+        state.italic = true
+        out[#out + 1] = active_sgr(state)
+      else
+        state.bold = not state.bold
+        state.italic = not state.italic
+        out[#out + 1] = reset_then_active(state)
+      end
+      i = i + 3
+    elseif two == "**" then
+      out[#out + 1] = toggle_style(state, "bold")
+      i = i + 2
+    elseif one == "*" then
+      out[#out + 1] = toggle_style(state, "italic")
+      i = i + 1
+    elseif two == "__" then
+      out[#out + 1] = toggle_style(state, "bold")
+      i = i + 2
+    else
+      out[#out + 1] = one
+      i = i + 1
+    end
+  end
+  if state.bold or state.italic then
+    out[#out + 1] = sgr("0")
+  end
+  return table.concat(out)
+end
+
 -- Render inline markdown spans inside a single line.
--- Order: protect inline code, then links, then bold, then italic.
+-- Order: protect inline code and links, then render emphasis spans.
 -- Placeholders use \1...\2 sentinels (never appear in normal text).
-local function render_inline(text)
+local function render_inline(text, state)
   local codes = {}
   text = text:gsub("`([^`]+)`", function(c)
     codes[#codes + 1] = c
@@ -39,28 +118,17 @@ local function render_inline(text)
     return "\1L" .. #links .. "\2"
   end)
 
-  -- Bold: **text** or __text__
-  text = text:gsub("%*%*(.-)%*%*", function(c)
-    return ansi.bold(c)
-  end)
-  text = text:gsub("__(.-)__", function(c)
-    return ansi.bold(c)
-  end)
-
-  -- Italic: *text* (no inner *). Avoid matching bold leftovers.
-  text = text:gsub("%*([^%*\n]+)%*", function(c)
-    return italic(c)
-  end)
-
   -- Italic with underscores — only with word boundaries so snake_case
-  -- variables don't get mangled. Handled in two sweeps: mid-string
-  -- (boundary-prefixed) and start-of-string.
+  -- variables don't get mangled. This stays line-local; the stateful
+  -- emphasis scanner below handles '*' and '**' spans across newlines.
   text = text:gsub("([%s%p])_([^_\n]+)_", function(p, c)
     return p .. italic(c)
   end)
   text = text:gsub("^_([^_\n]+)_", function(c)
     return italic(c)
   end)
+
+  text = render_emphasis(text, state)
 
   -- Strikethrough ~~text~~ → dim.
   text = text:gsub("~~(.-)~~", function(c)
@@ -95,7 +163,7 @@ local function render_line(line, state)
   -- Headers: # ... ######
   local hashes, rest = line:match("^(#+)%s+(.*)$")
   if hashes and #hashes <= 6 then
-    local body = render_inline(rest)
+    local body = render_inline(rest, state)
     if #hashes == 1 then
       return ansi.bold(ansi.cyan("# " .. body))
     elseif #hashes == 2 then
@@ -117,23 +185,23 @@ local function render_line(line, state)
   -- Bullet list: -, *, + (but not horizontal-rule-like)
   local indent, body = line:match("^(%s*)[%-%*%+]%s+(.*)$")
   if indent and body then
-    return indent .. ansi.cyan("•") .. " " .. render_inline(body)
+    return indent .. ansi.cyan("•") .. " " .. render_inline(body, state)
   end
 
   -- Numbered list
   local num_indent, num, num_body = line:match("^(%s*)(%d+%.)%s+(.*)$")
   if num then
-    return num_indent .. ansi.cyan(num) .. " " .. render_inline(num_body)
+    return num_indent .. ansi.cyan(num) .. " " .. render_inline(num_body, state)
   end
 
   -- Blockquote
   local bq = line:match("^>%s?(.*)$")
   if bq then
-    return ansi.dim("│ ") .. render_inline(bq)
+    return ansi.dim("│ ") .. render_inline(bq, state)
   end
 
   -- Plain paragraph line
-  return render_inline(line)
+  return render_inline(line, state)
 end
 
 -- ---------- public API ----------
