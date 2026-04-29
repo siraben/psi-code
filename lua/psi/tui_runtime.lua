@@ -877,6 +877,51 @@ function M._add_provider_request_debug(state, payload)
   state.dirty = true
 end
 
+function M._image_turn_failure_text(state, line, images, reply)
+  images = type(images) == "table" and images or {}
+  if #images == 0 then
+    return nil
+  end
+  state = type(state) == "table" and state or {}
+  local ok, model = pcall(agent.model_descriptor, state.opts and state.opts.model or nil)
+  if not ok or type(model) ~= "table" then
+    model = {}
+  end
+  local lines = {
+    "image turn debug: provider failure",
+    "  requested_model=" .. tostring(state.opts and state.opts.model or ""),
+    "  resolved_provider=" .. tostring(model.provider or ""),
+    "  resolved_model=" .. tostring(model.id or ""),
+    "  resolved_api=" .. tostring(model.api or ""),
+    "  reply_type=" .. type(reply),
+    "  reply=" .. M._provider_debug_text_preview(reply, 180),
+    "  prompt_text_len=" .. tostring(#tostring(line or "")),
+    "  image_count=" .. tostring(#images),
+  }
+  if model.provider ~= "openai-codex" then
+    lines[#lines + 1] =
+      "  note=active provider is not openai-codex; use --model=openai-codex/gpt-5.5 for Codex image testing"
+  end
+  for i, image in ipairs(images) do
+    if type(image) == "table" then
+      local data = type(image.data) == "string" and image.data or ""
+      lines[#lines + 1] = "  image["
+        .. tostring(i)
+        .. "].mime="
+        .. tostring(image.mimeType or image.mime or "")
+        .. " width="
+        .. tostring(image.width or "")
+        .. " height="
+        .. tostring(image.height or "")
+        .. " bytes="
+        .. tostring(image.bytes or "")
+        .. " base64_len="
+        .. tostring(#data)
+    end
+  end
+  return table.concat(lines, "\n")
+end
+
 local function finish_streaming_assistant(state)
   local index = state.streaming_assistant_index
   if index ~= nil and state.entries[index] and state.entries[index].text == "" then
@@ -2839,7 +2884,13 @@ local function run_turn(state, line, images)
     if reply == "aborted" then
       set_status(state, "aborted", false)
     else
-      add_entry(state, "error", reply ~= "" and reply or "provider request failed")
+      local error_text = type(reply) == "string" and reply ~= "" and reply
+        or "provider request failed"
+      local image_debug = M._image_turn_failure_text(state, line, images, reply)
+      if image_debug ~= nil and error_text:find("image turn debug:", 1, true) == nil then
+        error_text = error_text .. "\n\n" .. image_debug
+      end
+      add_entry(state, "error", error_text)
       set_status(state, "agent turn failed", true)
     end
     session.save()
@@ -3723,6 +3774,10 @@ end
 
 function M._debug_codex_request_debug_text(payload)
   return M._codex_request_debug_text(payload)
+end
+
+function M._debug_image_turn_failure_text(state, line, images, reply)
+  return M._image_turn_failure_text(state, line, images, reply)
 end
 
 function M._debug_limit_live_tool_progress_text(text)

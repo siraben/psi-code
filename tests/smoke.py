@@ -430,6 +430,28 @@ def t_images_codex_request_debug_summary(psi: Psi):
     assert_contains(out, "base64_len=4", "Codex debug should show redacted image length")
 
 
+@test("images/tui_failure_debug_shows_provider")
+def t_images_tui_failure_debug_shows_provider(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        'local text = rt._debug_image_turn_failure_text(\n'
+        '  {opts={model=""}},\n'
+        '  "look",\n'
+        '  {{data="QUJD", mimeType="image/png", width=2, height=3, bytes=3}},\n'
+        '  nil\n'
+        ')\n'
+        'return text'
+    )
+    assert_contains(out, "image turn debug: provider failure",
+                    "image failure debug should identify itself")
+    assert_contains(out, "resolved_provider=anthropic",
+                    "image failure debug should show active provider")
+    assert_contains(out, "reply_type=nil", "image failure debug should show nil replies")
+    assert_contains(out, "active provider is not openai-codex",
+                    "image failure debug should call out wrong provider routing")
+    assert_contains(out, "base64_len=4", "image failure debug should summarize image data")
+
+
 @test("images/ollama_message_images")
 def t_images_ollama_message_images(psi: Psi):
     out = psi.eval(

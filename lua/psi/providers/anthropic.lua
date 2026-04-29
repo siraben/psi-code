@@ -580,7 +580,7 @@ function M.complete_text(opts)
   end
   if not api_key or api_key == "" then
     io.stderr:write("ANTHROPIC_API_KEY is not set\n")
-    return false
+    return false, "ANTHROPIC_API_KEY is not set"
   end
   local request = {
     model = resolve_model(opts.model),
@@ -629,7 +629,7 @@ function M.run_turn(opts)
   end
   if not api_key or api_key == "" then
     io.stderr:write("ANTHROPIC_API_KEY is not set\n")
-    return false
+    return false, "ANTHROPIC_API_KEY is not set"
   end
 
   local model = resolve_model(opts.model)
