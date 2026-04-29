@@ -1009,6 +1009,22 @@ local function entry_render_lines(state, entry)
   local lines = {}
   local first_prefix, rest_prefix = entry_prefixes(entry)
   local trimmed = sanitize_terminal_text(trim_trailing_newlines(entry_text(entry)), true)
+
+  if entry.kind == "assistant" then
+    local rendered = markdown.render(trimmed)
+    for _, wrapped in ipairs(markdown.wrap_ansi(rendered, input_wrap_width(state.width, ""))) do
+      lines[#lines + 1] = {
+        kind = "ansi",
+        text = wrapped,
+        raw = wrapped,
+        entry = entry,
+      }
+    end
+    entry.render_cache_width = state.width
+    entry.render_cache_lines = lines
+    return lines
+  end
+
   local prefix = first_prefix
   local cursor = 1
   local fence_state = false
