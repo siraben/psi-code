@@ -287,11 +287,14 @@
             pkgs.clang-tools
             pkgs.cppcheck
             pkgs.cjson
+            pkgs.fd
             curl
             pkgs.gdb
             pkgs.libedit
             pkgs.lua5_4
             pkgs.lua54Packages.luacheck
+            pkgs.python3
+            pkgs.ripgrep
             pkgs.stylua
             pkgs.tinycc
             pkgs.valgrind
