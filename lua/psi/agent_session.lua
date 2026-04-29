@@ -173,6 +173,8 @@ M.queue_steering = control.queue_steering
 M.queue_follow_up = control.queue_follow_up
 M.drain_steering = control.drain_steering
 M.drain_follow_ups = control.drain_follow_ups
+M.append_steering = control.append_steering
+M.append_follow_ups = control.append_follow_ups
 M.pending_message_count = control.pending_count
 M.pending_messages = control.pending_messages
 M.pending_message = control.pending_message
@@ -207,7 +209,7 @@ end
 -- own tick hook so its main loop keeps redrawing.
 function M.run_turn(opts)
   local user_text = opts.user_text or ""
-  session.append_user(user_text)
+  session.append_user_blocks(user_text, opts.user_images)
   session.save()
 
   local provider, resolved = pick_provider(M.current_model(opts.model))

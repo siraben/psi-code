@@ -276,6 +276,10 @@ Current gates:
 - `COLOR`: color SGR emission
 - `REPL_EDITLINE`: libedit-backed REPL input/history; falls back to plain
   `fgets` input when disabled
+- Kitty OSC 5522 image clipboard reads: built into TUI builds and used before
+  optional native clipboard backends
+- `CLIPBOARD_SDL`: SDL3-backed MIME clipboard reads for TUI screenshot paste;
+  defaults off so small/portable builds do not carry SDL3
 
 Every feature-gate combination must compile. `make check-build-configs`
 builds the complete `TUI` / `ANSI` / `COLOR` / `REPL_EDITLINE` matrix into

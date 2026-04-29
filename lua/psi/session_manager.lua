@@ -136,6 +136,25 @@ local function text_block(s)
   return { type = "text", text = s or "" }
 end
 
+local function image_block(img)
+  img = type(img) == "table" and img or {}
+  local block = {
+    type = "image",
+    data = img.data or "",
+    mimeType = img.mimeType or img.mime or "image/png",
+  }
+  if img.width ~= nil then
+    block.width = tonumber(img.width) or 0
+  end
+  if img.height ~= nil then
+    block.height = tonumber(img.height) or 0
+  end
+  if img.bytes ~= nil then
+    block.bytes = tonumber(img.bytes) or 0
+  end
+  return block
+end
+
 local function ceil_div(n, d)
   return math.floor((n + d - 1) / d)
 end
@@ -288,20 +307,39 @@ local function pi_content_from_blocks(blocks)
         entry.thinkingSignature = b.signature
       end
       out[#out + 1] = entry
+    elseif b.type == "image" then
+      out[#out + 1] = image_block(b)
     end
   end
   return out
 end
 
-function M.append_user(text)
+function M.append_user_blocks(text, images)
+  local content = prelude.as_array({})
+  text = text or ""
+  if text ~= "" then
+    content[#content + 1] = text_block(text)
+  end
+  for _, img in ipairs(images or {}) do
+    if type(img) == "table" and type(img.data) == "string" and img.data ~= "" then
+      content[#content + 1] = image_block(img)
+    end
+  end
+  if #content == 0 then
+    content[#content + 1] = text_block("")
+  end
   local body = stamp_entry({
     message = {
       role = "user",
-      content = prelude.as_array({ text_block(text) }),
+      content = content,
       timestamp = unix_ms(),
     },
   })
   append_body("user", text, body)
+end
+
+function M.append_user(text)
+  M.append_user_blocks(text, nil)
 end
 
 -- Public extension API: inject a message into the in-memory session

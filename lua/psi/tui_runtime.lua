@@ -45,6 +45,11 @@ local UTF8_CONTINUATION_MASK = 0xC0
 local UTF8_CONTINUATION_TAG = 0x80
 
 local SETTING_PROMPT_MAX_ROWS = "tui.prompt.max_rows"
+local SETTING_IMAGES_ENABLED = "tui.images.enabled"
+local SETTING_IMAGES_KITTY_CLIPBOARD = "tui.images.kitty_clipboard"
+local SETTING_IMAGES_PASTE = "tui.images.paste"
+local SETTING_IMAGES_RENDER = "tui.images.render"
+local SETTING_IMAGES_TMUX_PASSTHROUGH = "tui.images.tmux_passthrough"
 local BUSY_ANIMATION_INTERVAL_MS = 600
 
 local ANSI_PATTERN_CSI = "\27%[[%d;?]*[A-Za-z]"
@@ -229,9 +234,20 @@ local function env_bool(name)
   return nil
 end
 
+local function setting_bool(name, default)
+  return settings.get(name, default) ~= false
+end
+
 local function detect_tui_capabilities()
   local info = type(psi.runtime_info) == "function" and psi.runtime_info() or {}
   local term = os.getenv("TERM") or ""
+  local term_lower = term:lower()
+  local kitty_window = os.getenv("KITTY_WINDOW_ID") or ""
+  local tmux = os.getenv("TMUX") or ""
+  local kitty_clipboard_terminal = term_lower:find("kitty", 1, true) ~= nil
+    or term_lower:find("ghostty", 1, true) ~= nil
+    or kitty_window ~= ""
+    or (tmux ~= "" and setting_bool(SETTING_IMAGES_TMUX_PASSTHROUGH, false))
   local ansi_ok = info.ansi ~= false and term ~= "" and term ~= "dumb"
   local color_ok = ansi_ok and info.color ~= false
   local force_ansi = env_bool("PSI_ANSI")
@@ -253,6 +269,12 @@ local function detect_tui_capabilities()
     ansi = ansi_ok,
     color = color_ok,
     raw_ansi = raw_ansi_ok,
+    kitty_images = info["kitty-images"] ~= false and type(psi.kitty_image_sequence) == "function",
+    kitty_clipboard = info["kitty-clipboard"] == true
+      and type(psi.kitty_clipboard_read_image) == "function"
+      and kitty_clipboard_terminal,
+    clipboard_images = info["clipboard-images"] == true
+      and type(psi.clipboard_read_image) == "function",
     term = term,
   }
 end
@@ -414,6 +436,7 @@ local function new_state(opts)
     entries = {},
     input = "",
     cursor = 0,
+    pending_images = {},
     editor_mode = "insert",
     selection_anchor = nil,
     selection_kind = nil,
@@ -444,6 +467,7 @@ local function new_state(opts)
     total_cache_width = nil,
     total_cache_version = nil,
     total_cache_lines = nil,
+    next_kitty_image_id = ((now_ms() % 0xffffff) + 1),
     dirty = true,
   }
   refresh_input_layout(state)
@@ -541,6 +565,198 @@ local function find_entry_by_tool_id(state, kind, tool_call_id)
     end
   end
   return nil
+end
+
+local function image_label(image)
+  image = type(image) == "table" and image or {}
+  local mime = image.mimeType or image.mime or "image"
+  local width = tonumber(image.width) or 0
+  local height = tonumber(image.height) or 0
+  if width > 0 and height > 0 then
+    return string.format("[Image: %s %dx%d]", mime, width, height)
+  end
+  return string.format("[Image: %s]", mime)
+end
+
+local function image_render_enabled(state)
+  if not setting_bool(SETTING_IMAGES_ENABLED, true) then
+    return false
+  end
+  if not setting_bool(SETTING_IMAGES_RENDER, true) then
+    return false
+  end
+  return state.tui_caps and state.tui_caps.kitty_images
+end
+
+local function image_paste_enabled(state)
+  if not setting_bool(SETTING_IMAGES_ENABLED, true) then
+    return false
+  end
+  if not setting_bool(SETTING_IMAGES_PASTE, true) then
+    return false
+  end
+  return state.tui_caps and state.tui_caps.clipboard_images
+end
+
+local function image_kitty_clipboard_enabled(state)
+  if not setting_bool(SETTING_IMAGES_ENABLED, true) then
+    return false
+  end
+  if not setting_bool(SETTING_IMAGES_PASTE, true) then
+    return false
+  end
+  if not setting_bool(SETTING_IMAGES_KITTY_CLIPBOARD, true) then
+    return false
+  end
+  return state.tui_caps and state.tui_caps.kitty_clipboard
+end
+
+local function tmux_passthrough_enabled()
+  if not setting_bool(SETTING_IMAGES_TMUX_PASSTHROUGH, false) then
+    return false
+  end
+  return (os.getenv("TMUX") or "") ~= ""
+end
+
+function M._kitty_delete_visible_sequence(tmux_passthrough)
+  if type(psi.kitty_image_delete_sequence) == "function" then
+    local sequence = psi.kitty_image_delete_sequence(tmux_passthrough)
+    if type(sequence) == "string" and sequence ~= "" then
+      return sequence
+    end
+  end
+  if not tmux_passthrough then
+    return "\27_Ga=d,d=A\27\\"
+  end
+  return "\27Ptmux;\27\27_Ga=d,d=A\27\27\\\27\\"
+end
+
+function M._ensure_kitty_image_id(state, image)
+  image = type(image) == "table" and image or {}
+  local id = tonumber(image.kitty_image_id)
+  if id ~= nil and id >= 1 and id <= 0xffffff then
+    return math.floor(id)
+  end
+  state.next_kitty_image_id = tonumber(state.next_kitty_image_id) or ((now_ms() % 0xffffff) + 1)
+  id = math.floor(state.next_kitty_image_id)
+  if id < 1 or id > 0xffffff then
+    id = 1
+  end
+  image.kitty_image_id = id
+  state.next_kitty_image_id = (id % 0xffffff) + 1
+  return id
+end
+
+local function image_rows_for_width(image, max_width)
+  image = type(image) == "table" and image or {}
+  local width = tonumber(image.width) or 0
+  local height = tonumber(image.height) or 0
+  max_width = math.max(1, tonumber(max_width) or 1)
+  if width <= 0 or height <= 0 then
+    return 1
+  end
+  local cell_width_px = 9
+  local cell_height_px = 18
+  local target_width_px = max_width * cell_width_px
+  local scale = target_width_px / width
+  return math.max(1, math.ceil((height * scale) / cell_height_px))
+end
+
+local function add_image_debug(state, title, image, extra)
+  if not setting_bool("tui.images.debug", false) then
+    return
+  end
+  local function debug_bool(value)
+    return value and "true" or "false"
+  end
+  local function debug_escape(text)
+    text = tostring(text or "")
+    text = text:gsub("\27", "<ESC>")
+    text = text:gsub("\r", "<CR>")
+    text = text:gsub("\n", "<LF>")
+    return text
+  end
+  state.tui_caps = detect_tui_capabilities()
+  image = type(image) == "table" and image or {}
+  local data = type(image.data) == "string" and image.data or ""
+  local mime = image.mimeType or image.mime or ""
+  local max_width = math.max(1, math.min((state.width or 80) - 4, tonumber(image.max_width) or 60))
+  local rows = image_rows_for_width(image, max_width)
+  local tmux_active = tmux_passthrough_enabled()
+  local mode = "fallback"
+  local image_id = nil
+  local placeholder = nil
+  local seq, seq_err
+  if
+    image_render_enabled(state)
+    and data ~= ""
+    and (mime == "image/png" or mime == "")
+    and tmux_active
+    and type(psi.kitty_image_virtual_sequence) == "function"
+    and type(psi.kitty_image_placeholder_line) == "function"
+  then
+    image_id = M._ensure_kitty_image_id(state, image)
+    mode = "kitty-placeholder"
+    seq, seq_err = psi.kitty_image_virtual_sequence(
+      data,
+      max_width,
+      rows,
+      tonumber(image.width) or 0,
+      tonumber(image.height) or 0,
+      image_id,
+      true
+    )
+    placeholder = psi.kitty_image_placeholder_line(image_id, 0, math.min(max_width, 4))
+  elseif type(psi.kitty_image_sequence) == "function" and data ~= "" then
+    mode = "kitty-direct"
+    seq, seq_err = psi.kitty_image_sequence(data, max_width, rows, tmux_active)
+  else
+    seq_err = "psi.kitty_image_sequence unavailable or image data empty"
+  end
+
+  local lines = {
+    "",
+    "image debug: " .. tostring(title or "event"),
+    "  term=" .. tostring(os.getenv("TERM") or ""),
+    "  tmux=" .. tostring(os.getenv("TMUX") or ""),
+    "  kitty_window=" .. tostring(os.getenv("KITTY_WINDOW_ID") or ""),
+    "  settings.enabled=" .. debug_bool(setting_bool(SETTING_IMAGES_ENABLED, true)),
+    "  settings.render=" .. debug_bool(setting_bool(SETTING_IMAGES_RENDER, true)),
+    "  settings.paste=" .. debug_bool(setting_bool(SETTING_IMAGES_PASTE, true)),
+    "  settings.kitty_clipboard=" .. debug_bool(setting_bool(SETTING_IMAGES_KITTY_CLIPBOARD, true)),
+    "  settings.tmux_passthrough="
+      .. debug_bool(setting_bool(SETTING_IMAGES_TMUX_PASSTHROUGH, false)),
+    "  settings.debug=" .. debug_bool(setting_bool("tui.images.debug", false)),
+    "  caps.kitty_images=" .. debug_bool(state.tui_caps and state.tui_caps.kitty_images),
+    "  caps.kitty_clipboard=" .. debug_bool(state.tui_caps and state.tui_caps.kitty_clipboard),
+    "  caps.clipboard_images=" .. debug_bool(state.tui_caps and state.tui_caps.clipboard_images),
+    "  caps.raw_ansi=" .. debug_bool(state.tui_caps and state.tui_caps.raw_ansi),
+    "  tmux_passthrough_active=" .. debug_bool(tmux_active),
+    "  image.mime=" .. tostring(mime),
+    "  image.width=" .. tostring(image.width),
+    "  image.height=" .. tostring(image.height),
+    "  image.bytes=" .. tostring(image.bytes),
+    "  image.complete=" .. debug_bool(image.complete),
+    "  image.base64_len=" .. tostring(#data),
+    "  clipboard.chunks=" .. tostring(image.clipboardChunks or ""),
+    "  clipboard.base64_len=" .. tostring(image.clipboardBase64Len or ""),
+    "  render.max_width=" .. tostring(max_width),
+    "  render.rows=" .. tostring(rows),
+    "  render.enabled=" .. debug_bool(image_render_enabled(state)),
+    "  render.mode=" .. tostring(mode),
+    "  kitty.image_id=" .. tostring(image_id or ""),
+    "  kitty.seq_len=" .. tostring(type(seq) == "string" and #seq or 0),
+    "  kitty.seq_prefix=" .. debug_escape(type(seq) == "string" and seq:sub(1, 180) or seq_err),
+    "  kitty.placeholder_prefix="
+      .. debug_escape(type(placeholder) == "string" and placeholder:sub(1, 80) or ""),
+    "  kitty.delete_prefix="
+      .. debug_escape(M._kitty_delete_visible_sequence(tmux_active):sub(1, 80)),
+  }
+  if extra ~= nil and extra ~= "" then
+    lines[#lines + 1] = "  note=" .. tostring(extra)
+  end
+  lines[#lines + 1] = ""
+  add_entry(state, "image_debug", table.concat(lines, "\n"))
 end
 
 local function finish_streaming_assistant(state)
@@ -648,9 +864,83 @@ local function tool_result_text(tool_call_id, tool_name, result)
   return format_tool_result(tool_name or "tool", result)
 end
 
+local pending_image_render_lines
+
 local function entry_render_lines(state, entry)
   if entry.render_cache_width == state.width and entry.render_cache_lines ~= nil then
     return entry.render_cache_lines
+  end
+
+  if entry.kind == "image" then
+    local image = entry.image or {}
+    local max_width = math.max(1, math.min(state.width - 4, tonumber(image.max_width) or 60))
+    local rows = image_rows_for_width(image, max_width)
+    if tonumber(image.max_rows) ~= nil then
+      rows = math.max(1, math.min(rows, math.floor(tonumber(image.max_rows) or rows)))
+    end
+    local lines = {}
+    if
+      image_render_enabled(state)
+      and (image.mimeType == "image/png" or image.mime == "image/png")
+      and type(image.data) == "string"
+      and image.data ~= ""
+    then
+      local tmux_passthrough = tmux_passthrough_enabled()
+      if
+        tmux_passthrough
+        and type(psi.kitty_image_virtual_sequence) == "function"
+        and type(psi.kitty_image_placeholder_line) == "function"
+      then
+        local image_id = M._ensure_kitty_image_id(state, image)
+        local sequence = psi.kitty_image_virtual_sequence(
+          image.data,
+          max_width,
+          rows,
+          tonumber(image.width) or 0,
+          tonumber(image.height) or 0,
+          image_id,
+          true
+        )
+        if type(sequence) == "string" and sequence ~= "" then
+          local pad = string.rep(" ", math.max(0, (tonumber(state.width) or 80) - max_width - 1))
+          for row = 0, rows - 1 do
+            local placeholder = psi.kitty_image_placeholder_line(image_id, row, max_width)
+            if type(placeholder) ~= "string" or placeholder == "" then
+              lines = {}
+              break
+            end
+            lines[#lines + 1] = {
+              kind = "image_placeholder",
+              text = (row == 0 and sequence or "") .. placeholder .. pad,
+              entry = entry,
+            }
+          end
+        end
+      else
+        local sequence = psi.kitty_image_sequence(image.data, max_width, rows, tmux_passthrough)
+        if type(sequence) == "string" and sequence ~= "" then
+          lines[#lines + 1] = {
+            kind = "image_sequence",
+            text = sequence,
+            entry = entry,
+          }
+          for _ = 1, math.max(0, rows - 1) do
+            lines[#lines + 1] = { kind = "image_blank", text = "", entry = entry }
+          end
+        end
+      end
+    end
+    if #lines == 0 then
+      lines[#lines + 1] = {
+        kind = "image_fallback",
+        text = ansi.dim(image_label(image)),
+        raw = image_label(image),
+        entry = entry,
+      }
+    end
+    entry.render_cache_width = state.width
+    entry.render_cache_lines = lines
+    return lines
   end
 
   if entry.kind == "ansi" then
@@ -729,6 +1019,33 @@ local function entry_render_lines(state, entry)
   return lines
 end
 
+pending_image_render_lines = function(state, image, width, max_rows)
+  M._ensure_kitty_image_id(state, image)
+  local render_state = {}
+  for k, v in pairs(state or {}) do
+    render_state[k] = v
+  end
+  render_state.width = math.max(1, tonumber(width) or tonumber(state and state.width) or 80)
+  local preview = {}
+  for k, v in pairs(type(image) == "table" and image or {}) do
+    preview[k] = v
+  end
+  local max_width = math.max(1, math.min(render_state.width - 4, tonumber(preview.max_width) or 60))
+  local row_limit = tonumber(max_rows)
+  local image_width = tonumber(preview.width) or 0
+  local image_height = tonumber(preview.height) or 0
+  if row_limit ~= nil and row_limit > 0 and image_width > 0 and image_height > 0 then
+    row_limit = math.max(1, math.floor(row_limit))
+    preview.max_rows = row_limit
+    local row_limited_width = math.floor((row_limit * image_width * 2) / image_height)
+    if row_limited_width > 0 then
+      max_width = math.min(max_width, row_limited_width)
+    end
+  end
+  preview.max_width = max_width
+  return entry_render_lines(render_state, { kind = "image", image = preview })
+end
+
 local function count_entry_lines(state, entry)
   return #entry_render_lines(state, entry)
 end
@@ -778,10 +1095,41 @@ local function scroll_anchor_after(state, before_lines)
   end
 end
 
+local function add_user_entries(state, text, images)
+  text = text or ""
+  images = images or {}
+  if text ~= "" or #images == 0 then
+    add_entry(state, "user", text)
+  end
+  for _, image in ipairs(images) do
+    local index = add_entry(state, "image", "", nil, false, nil)
+    state.entries[index].image = image
+  end
+end
+
+local function add_pending_image(state, image)
+  M._ensure_kitty_image_id(state, image)
+  state.pending_images[#state.pending_images + 1] = image
+end
+
 local function add_session_entry(state, msg)
   local body = safe_decode(msg.data, {})
   if msg.role == "user" then
-    add_entry(state, "user", msg.text or "")
+    local images = {}
+    local parts = {}
+    local content = body and body.message and body.message.content
+    if type(content) == "table" then
+      for _, block in ipairs(content) do
+        if type(block) == "table" then
+          if block.type == "text" and type(block.text) == "string" then
+            parts[#parts + 1] = block.text
+          elseif block.type == "image" then
+            images[#images + 1] = block
+          end
+        end
+      end
+    end
+    add_user_entries(state, #parts > 0 and table.concat(parts) or (msg.text or ""), images)
     return
   end
 
@@ -883,6 +1231,9 @@ local function style_line(line)
   if line.kind == "btw" then
     return ansi.yellow(line.text)
   end
+  if line.kind == "image_debug" then
+    return ansi.yellow(line.text)
+  end
   if line.kind == "tool_result" then
     local title = line.entry.title
     if title == "write" or title == "edit" then
@@ -908,6 +1259,14 @@ local function style_line(line)
     return ansi.bold(ansi.red(line.text))
   end
   if line.kind == "ansi" then
+    return line.text
+  end
+  if
+    line.kind == "image_sequence"
+    or line.kind == "image_placeholder"
+    or line.kind == "image_blank"
+    or line.kind == "image_fallback"
+  then
     return line.text
   end
   return ansi.dim(line.text)
@@ -954,6 +1313,14 @@ local function build_render_window(state, first_line, count)
   return lines
 end
 
+local function pending_image_line_count(state, width)
+  local total = 0
+  for _, image in ipairs(state.pending_images or {}) do
+    total = total + #pending_image_render_lines(state, image, width)
+  end
+  return total
+end
+
 local function layout_rows(state)
   refresh_input_layout(state)
   local input_lines, cursor_line, cursor_col = build_input_lines(state)
@@ -966,7 +1333,12 @@ local function layout_rows(state)
     input_first_line = #input_lines - input_rows + 1
   end
   local footer_row = state.height
-  local input_box_rows = input_rows + 2
+  local pending_rows = pending_image_line_count(state, math.max(1, state.width - 1))
+  local max_input_box_rows = math.max(3, footer_row - 3)
+  if pending_rows + input_rows + 2 > max_input_box_rows then
+    pending_rows = math.max(0, max_input_box_rows - input_rows - 2)
+  end
+  local input_box_rows = pending_rows + input_rows + 2
   local input_start_row = footer_row - input_box_rows
   local status_visible = state.busy or state.status_text ~= nil
   local status_row = status_visible and (input_start_row - 1) or nil
@@ -980,6 +1352,7 @@ local function layout_rows(state)
     cursor_line = cursor_line,
     cursor_col = cursor_col,
     input_rows = input_rows,
+    pending_rows = pending_rows,
     input_box_rows = input_box_rows,
     input_first_line = input_first_line,
     transcript_start = transcript_start,
@@ -1057,6 +1430,8 @@ local function redraw(state)
   local status_text = ""
   local cwd
   local frame = prelude.array(state.height)
+  local graphics = {}
+  local visible_kitty_images = false
   local frame_width
 
   state.scroll_offset = clamp(state.scroll_offset, 0, max_scroll)
@@ -1078,7 +1453,16 @@ local function redraw(state)
   for i = 0, rows.transcript_height - 1 do
     local line = transcript_lines[i + 1]
     local row = rows.transcript_start + i
-    frame[#frame + 1] = frame_line(row, line and style_line(line) or "", frame_width)
+    if line and line.kind == "image_sequence" then
+      frame[#frame + 1] = frame_line(row, "", frame_width)
+      graphics[#graphics + 1] = { row = row, text = style_line(line) }
+      visible_kitty_images = true
+    elseif line and line.kind == "image_placeholder" then
+      frame[#frame + 1] = frame_line(row, style_line(line), frame_width)
+      visible_kitty_images = true
+    else
+      frame[#frame + 1] = frame_line(row, line and style_line(line) or "", frame_width)
+    end
   end
 
   status_arg = {
@@ -1092,6 +1476,7 @@ local function redraw(state)
     scroll = state.scroll_offset,
     editor_mode = state.editor_mode,
     selection_kind = state.selection_kind,
+    pending_images = #(state.pending_images or {}),
   }
 
   if state.status_text ~= nil then
@@ -1110,7 +1495,36 @@ local function redraw(state)
   end
 
   local input_width = frame_width
+  local pending_image_lines = {}
+  local pending_limit = math.max(0, tonumber(rows.pending_rows) or 0)
+  if pending_limit > 0 then
+    for _, image in ipairs(state.pending_images or {}) do
+      if #pending_image_lines >= pending_limit then
+        break
+      end
+      local remaining = pending_limit - #pending_image_lines
+      for _, line in ipairs(pending_image_render_lines(state, image, input_width, remaining)) do
+        if #pending_image_lines >= pending_limit then
+          break
+        end
+        pending_image_lines[#pending_image_lines + 1] = line
+      end
+    end
+  end
   frame[#frame + 1] = frame_line(rows.input_start_row, style_input_border(input_width), frame_width)
+  for i, line in ipairs(pending_image_lines) do
+    local row = rows.input_start_row + i
+    if line.kind == "image_sequence" then
+      frame[#frame + 1] = frame_line(row, "", frame_width)
+      graphics[#graphics + 1] = { row = row, text = style_line(line) }
+      visible_kitty_images = true
+    elseif line.kind == "image_placeholder" then
+      frame[#frame + 1] = frame_line(row, style_line(line), frame_width)
+      visible_kitty_images = true
+    else
+      frame[#frame + 1] = frame_line(row, style_line(line), frame_width)
+    end
+  end
   for i = 0, rows.input_rows - 1 do
     local line_index = rows.input_first_line + i
     local line = rows.input_lines[line_index]
@@ -1133,10 +1547,11 @@ local function redraw(state)
         input_width
       )
     end
-    frame[#frame + 1] = frame_line(rows.input_start_row + 1 + i, input_text, frame_width)
+    frame[#frame + 1] =
+      frame_line(rows.input_start_row + 1 + #pending_image_lines + i, input_text, frame_width)
   end
   frame[#frame + 1] = frame_line(
-    rows.input_start_row + rows.input_rows + 1,
+    rows.input_start_row + #pending_image_lines + rows.input_rows + 1,
     style_input_border(input_width),
     frame_width
   )
@@ -1149,20 +1564,38 @@ local function redraw(state)
   local visible_cursor_line = rows.cursor_line - rows.input_first_line + 1
   local cursor_prefix = rows.cursor_line == 1 and state.input_layout.prefix_first
     or state.input_layout.prefix_rest
-  local cursor_row = rows.input_start_row + visible_cursor_line
+  local cursor_row = rows.input_start_row + #pending_image_lines + visible_cursor_line
   local cursor_col = display_width(cursor_prefix) + rows.cursor_col + 1
-  cursor_row = clamp(cursor_row, rows.input_start_row + 1, rows.input_start_row + rows.input_rows)
+  cursor_row = clamp(
+    cursor_row,
+    rows.input_start_row + #pending_image_lines + 1,
+    rows.input_start_row + #pending_image_lines + rows.input_rows
+  )
   cursor_col = clamp(cursor_col, 1, math.max(1, state.width - 1))
+  if visible_kitty_images or state.kitty_images_visible then
+    frame[1] = M._kitty_delete_visible_sequence(tmux_passthrough_enabled()) .. (frame[1] or "")
+  end
   if type(psi.tui_render_frame) == "function" then
     psi.tui_render_frame(table.concat(frame), cursor_row, cursor_col, false)
+    if #graphics > 0 then
+      for _, graphic in ipairs(graphics) do
+        psi.tui_draw_raw_line(graphic.row, graphic.text)
+      end
+      psi.tui_set_cursor(cursor_row, cursor_col, false)
+      psi.tui_refresh()
+    end
   else
     psi.tui_set_cursor(1, 1, false)
     for _, line in ipairs(frame) do
       psi.tui_draw_raw_line(1, line)
     end
+    for _, graphic in ipairs(graphics) do
+      psi.tui_draw_raw_line(graphic.row, graphic.text)
+    end
     psi.tui_set_cursor(cursor_row, cursor_col, false)
     psi.tui_refresh()
   end
+  state.kitty_images_visible = visible_kitty_images
   state.dirty = false
 end
 
@@ -1510,6 +1943,198 @@ local function yank_input(state)
   state.dirty = true
 end
 
+local function paste_image(state)
+  local kitty_err = nil
+  clear_busy_input_error(state)
+  state.tui_caps = detect_tui_capabilities()
+  if image_kitty_clipboard_enabled(state) then
+    local image, err = psi.kitty_clipboard_read_image(tmux_passthrough_enabled(), 1200)
+    if type(image) == "table" then
+      if type(image.data) ~= "string" or image.data == "" then
+        set_status(state, "Kitty clipboard image was empty", true)
+        return
+      end
+      add_pending_image(state, image)
+      add_image_debug(state, "kitty clipboard paste", image, "attached to prompt")
+      set_status(state, "attached " .. image_label(image), false)
+      state.dirty = true
+      return
+    end
+    kitty_err = err
+  end
+  if not image_paste_enabled(state) then
+    local info = type(psi.runtime_info) == "function" and psi.runtime_info() or {}
+    if info["clipboard-images"] ~= true then
+      set_status(
+        state,
+        tostring(
+          kitty_err or "image clipboard unavailable; paste a path or use /attach-image <path>"
+        ),
+        true
+      )
+    else
+      set_status(
+        state,
+        tostring(
+          kitty_err or "image clipboard unavailable; paste a path or use /attach-image <path>"
+        ),
+        true
+      )
+    end
+    return
+  end
+  local image, err = psi.clipboard_read_image()
+  if type(image) ~= "table" then
+    set_status(state, tostring(err or "clipboard does not contain an image"), true)
+    return
+  end
+  if type(image.data) ~= "string" or image.data == "" then
+    set_status(state, "clipboard image was empty", true)
+    return
+  end
+  add_pending_image(state, image)
+  add_image_debug(state, "SDL clipboard paste", image, "attached to prompt")
+  set_status(state, "attached " .. image_label(image), false)
+  state.dirty = true
+end
+
+local function read_image_file(path)
+  local resolved = psi.path_resolve(path) or path
+  if type(psi.image_read_file) ~= "function" then
+    return nil, "image file support is not compiled in", resolved
+  end
+  local image, err = psi.image_read_file(resolved)
+  if type(image) ~= "table" then
+    return nil, err or "failed to read image file", resolved
+  end
+  image.path = resolved
+  return image, nil, resolved
+end
+
+local function attach_image_file(state, path)
+  clear_busy_input_error(state)
+  if not setting_bool(SETTING_IMAGES_ENABLED, true) then
+    set_status(state, "image attach is disabled", true)
+    return
+  end
+  if type(path) ~= "string" or path == "" then
+    set_status(state, "usage: /attach-image <path>", true)
+    return
+  end
+  local image, err, resolved = read_image_file(path)
+  if type(image) ~= "table" then
+    set_status(state, tostring(err or "failed to read image file"), true)
+    return
+  end
+  add_pending_image(state, image)
+  add_image_debug(state, "attach-image file", image, resolved)
+  set_status(state, "attached " .. image_label(image), false)
+  state.dirty = true
+end
+
+local function percent_decode(text)
+  return (text:gsub("%%(%x%x)", function(hex)
+    return string.char(tonumber(hex, 16))
+  end))
+end
+
+local function pasted_image_path(text)
+  local trimmed = prelude.trim(text or "")
+  if trimmed == "" or trimmed:find("[\r\n]") then
+    return nil
+  end
+  trimmed = trimmed:match('^"(.*)"$') or trimmed:match("^'(.*)'$") or trimmed
+  if trimmed:match("^file://") then
+    local path = trimmed:gsub("^file://localhost", "")
+    path = path:gsub("^file://", "")
+    if path:sub(1, 1) ~= "/" then
+      return nil
+    end
+    return percent_decode(path)
+  end
+  if trimmed:match("^~?/?[^%z]+%.[Pp][Nn][Gg]$") then
+    return trimmed
+  end
+  if trimmed:match("^~?/?[^%z]+%.[Jj][Pp][Ee]?[Gg]$") then
+    return trimmed
+  end
+  if trimmed:match("^~?/?[^%z]+%.[Gg][Ii][Ff]$") then
+    return trimmed
+  end
+  if trimmed:match("^~?/?[^%z]+%.[Ww][Ee][Bb][Pp]$") then
+    return trimmed
+  end
+  return nil
+end
+
+local function attach_pasted_image_path(state, text)
+  local path = pasted_image_path(text)
+  if path == nil then
+    return false
+  end
+  if not setting_bool(SETTING_IMAGES_ENABLED, true) then
+    set_status(state, "image attach is disabled", true)
+    return true
+  end
+  local image = read_image_file(path)
+  if type(image) ~= "table" then
+    return false
+  end
+  add_pending_image(state, image)
+  add_image_debug(state, "pasted image path", image, path)
+  set_status(state, "attached " .. image_label(image), false)
+  state.dirty = true
+  return true
+end
+
+local function attach_image_data_uri(state, text)
+  local trimmed = prelude.trim(text or "")
+  local mime, data = trimmed:match("^data:([%w%+%-%./]+);base64,(.+)$")
+  if mime == nil or data == nil then
+    return false
+  end
+  clear_busy_input_error(state)
+  if not setting_bool(SETTING_IMAGES_ENABLED, true) then
+    set_status(state, "image attach is disabled", true)
+    return true
+  end
+  if type(psi.image_from_base64) ~= "function" then
+    set_status(state, "base64 image support is not compiled in", true)
+    return true
+  end
+  data = data:gsub("%s+", "")
+  local image, err = psi.image_from_base64(data, mime)
+  if type(image) ~= "table" then
+    set_status(state, tostring(err or "failed to decode image data"), true)
+    return true
+  end
+  state.input = ""
+  state.cursor = 0
+  add_pending_image(state, image)
+  add_image_debug(state, "data URI", image, "attached to prompt")
+  set_status(state, "attached " .. image_label(image), false)
+  state.dirty = true
+  return true
+end
+
+local function attach_image_bytes(state, bytes)
+  if type(bytes) ~= "string" or bytes == "" then
+    return false
+  end
+  if type(psi.image_from_bytes) ~= "function" then
+    return false
+  end
+  local image = psi.image_from_bytes(bytes)
+  if type(image) ~= "table" then
+    return false
+  end
+  add_pending_image(state, image)
+  add_image_debug(state, "raw pasted bytes", image, "attached to prompt")
+  set_status(state, "attached " .. image_label(image), false)
+  state.dirty = true
+  return true
+end
+
 function render_input_text(state, line)
   local text = sanitize_terminal_text(state.input:sub(line.start + 1, line.start + line.len), false)
   if state.selection_kind == "line" then
@@ -1570,7 +2195,36 @@ local function insert_text(state, text)
   state.dirty = true
 end
 
+local function paste_text(state, text)
+  clear_busy_input_error(state)
+  if attach_image_bytes(state, text) then
+    return
+  end
+  if attach_image_data_uri(state, text) then
+    return
+  end
+  if attach_pasted_image_path(state, text) then
+    return
+  end
+  insert_text(state, text or "")
+end
+
 local function delete_backward(state)
+  if state.cursor == 0 and #state.input == 0 and #(state.pending_images or {}) > 0 then
+    clear_busy_input_error(state)
+    table.remove(state.pending_images)
+    if #(state.pending_images or {}) == 0 then
+      set_status(state, "removed image", false)
+    else
+      set_status(
+        state,
+        "removed image (" .. tostring(#state.pending_images) .. " remaining)",
+        false
+      )
+    end
+    state.dirty = true
+    return
+  end
   if state.cursor == 0 or #state.input == 0 then
     return
   end
@@ -1728,8 +2382,12 @@ local function queued_messages_text()
   local pieces = {}
   for _, item in ipairs(agent.pending_messages() or {}) do
     local text = compact_status_text(item and item.text or "", 96)
-    if text ~= "" then
-      pieces[#pieces + 1] = text
+    local images = item and item.images or {}
+    local image_suffix = #images > 0
+        and (" [" .. tostring(#images) .. " image" .. (#images == 1 and "" or "s") .. "]")
+      or ""
+    if text ~= "" or #images > 0 then
+      pieces[#pieces + 1] = (text ~= "" and text or "(image)") .. image_suffix
     end
   end
   return table.concat(pieces, " | ")
@@ -1761,21 +2419,22 @@ local function busy_command_action(line)
   return nil
 end
 
-local function queue_current_input(state, line)
+local function queue_current_input(state, line, images)
   local count = agent.pending_message_count()
+  images = images or {}
   if
     state.queue_nav_index ~= nil
     and state.queue_nav_index >= 1
     and state.queue_nav_index <= count
   then
-    if agent.replace_pending(state.queue_nav_index, line) then
+    if agent.replace_pending(state.queue_nav_index, { text = line, images = images }) then
       state.queue_nav_index = nil
       set_status(state, queue_status_text(), false)
       state.dirty = true
       return
     end
   end
-  if agent.queue_follow_up(line) then
+  if agent.queue_follow_up({ text = line, images = images }) then
     state.queue_nav_index = nil
     set_status(state, queue_status_text(), false)
   else
@@ -1813,6 +2472,10 @@ local function navigate_queue(state, direction)
   state.queue_nav_index = index
   state.input = item.text or ""
   state.cursor = #state.input
+  state.pending_images = {}
+  for _, image in ipairs(item.images or {}) do
+    add_pending_image(state, image)
+  end
   set_status(state, queue_status_text(), false)
   state.dirty = true
 end
@@ -1825,10 +2488,14 @@ local function restore_queued_message(state)
     return
   end
   local messages = {}
+  local images = {}
   for _, item in ipairs(agent.pending_messages() or {}) do
     messages[#messages + 1] = item.text or ""
+    for _, image in ipairs(item.images or {}) do
+      images[#images + 1] = image
+    end
   end
-  if #messages == 0 then
+  if #messages == 0 and #images == 0 then
     state.queue_nav_index = nil
     set_status(state, "queue is empty", false)
     return
@@ -1845,6 +2512,10 @@ local function restore_queued_message(state)
   state.queue_nav_index = nil
   state.input = combined
   state.cursor = #state.input
+  state.pending_images = {}
+  for _, image in ipairs(images) do
+    add_pending_image(state, image)
+  end
   clear_selection(state)
   state.block_edit = nil
   state.editor_mode = "insert"
@@ -1945,7 +2616,7 @@ local function observer_tool_result(state, tool_call_id, tool_name, output_json)
   scroll_anchor_after(state, before)
 end
 
-local function observer_queued_user(state, text, kind)
+local function observer_queued_user(state, text, kind, images)
   local before = scroll_anchor_before(state)
   finish_streaming_assistant(state)
   state.streaming_thinking_index = nil
@@ -1958,7 +2629,7 @@ local function observer_queued_user(state, text, kind)
     state.editor_mode = "insert"
   end
   state.queue_nav_index = nil
-  add_entry(state, "user", text or "")
+  add_user_entries(state, text or "", images or {})
   set_status(state, kind == "steering" and "using queued steering" or "using queued message", false)
   scroll_anchor_after(state, before)
 end
@@ -1977,7 +2648,7 @@ local function after_turn_payload(reply, assistant_streamed)
   }
 end
 
-local function run_turn(state, line)
+local function run_turn(state, line, images)
   local assistant_streamed = false
   local observer = {
     on_assistant_text_delta = function(text)
@@ -2001,8 +2672,8 @@ local function run_turn(state, line)
     on_thinking_delta = function(text)
       observer_thinking_delta(state, text)
     end,
-    on_queued_user = function(text, kind)
-      observer_queued_user(state, text, kind)
+    on_queued_user = function(text, kind, queued_images)
+      observer_queued_user(state, text, kind, queued_images)
     end,
   }
 
@@ -2010,6 +2681,7 @@ local function run_turn(state, line)
   local ran, ok, reply = xpcall(function()
     return agent.run_turn({
       user_text = line or "",
+      user_images = images or {},
       model = state.opts.model,
       max_tokens = state.opts.max_tokens,
       thinking_level = state.opts.thinking_level,
@@ -2199,6 +2871,16 @@ local function handle_command(state, line)
     return true
   end
 
+  if action.kind == "paste-image" then
+    paste_image(state)
+    return true
+  end
+
+  if action.kind == "attach-image" then
+    attach_image_file(state, action.payload)
+    return true
+  end
+
   if action.kind == "compact" then
     run_compact(state, tonumber(action.payload) or 12)
     return true
@@ -2299,13 +2981,19 @@ local function handle_command(state, line)
 end
 
 local function submit(state)
-  if state.input == "" then
+  if state.input == "" and #(state.pending_images or {}) == 0 then
+    return
+  end
+
+  if #(state.pending_images or {}) == 0 and attach_image_data_uri(state, state.input) then
     return
   end
 
   local line = state.input
+  local images = state.pending_images or {}
   state.input = ""
   state.cursor = 0
+  state.pending_images = {}
   clear_selection(state)
   state.block_edit = nil
   state.editor_mode = "insert"
@@ -2315,6 +3003,7 @@ local function submit(state)
     if state.busy_kind ~= "agent" then
       state.input = line
       state.cursor = #state.input
+      state.pending_images = images
       set_status(state, "busy", true)
       state.dirty = true
       return
@@ -2324,6 +3013,7 @@ local function submit(state)
       if action == nil then
         state.input = line
         state.cursor = #state.input
+        state.pending_images = images
         set_status(state, "command unavailable while busy", true)
         return
       end
@@ -2337,6 +3027,7 @@ local function submit(state)
       if action.kind == "btw" then
         state.input = line
         state.cursor = #state.input
+        state.pending_images = images
         set_status(state, "/btw is unavailable while a turn is running", true)
         return
       end
@@ -2345,15 +3036,16 @@ local function submit(state)
       else
         state.input = line
         state.cursor = #state.input
+        state.pending_images = images
         set_status(state, "command unavailable while busy", true)
         return
       end
     end
-    queue_current_input(state, line)
+    queue_current_input(state, line, images)
     return
   end
 
-  if line:sub(1, 1) == "/" then
+  if line:sub(1, 1) == "/" and #images == 0 then
     local handled, expanded = handle_command(state, line)
     if handled then
       return
@@ -2361,7 +3053,7 @@ local function submit(state)
     line = expanded or ""
   end
 
-  add_entry(state, "user", line)
+  add_user_entries(state, line, images)
   state.streaming_assistant_index = add_entry(state, "assistant", "")
   state.show_thinking = tui.show_thinking() == "1"
   state.scroll_offset = 0
@@ -2375,7 +3067,7 @@ local function submit(state)
   psi.abort_reset()
   set_status(state, "", false)
   redraw(state)
-  local turn_ok = run_turn(state, line)
+  local turn_ok = run_turn(state, line, images)
   state.busy = false
   state.busy_kind = nil
   state.busy_label = nil
@@ -2403,6 +3095,18 @@ local function apply_action(state, action, arg)
     end
     state.editor_mode = "insert"
     insert_text(state, arg or "")
+    return
+  end
+  if action == "paste" then
+    if state.editor_mode == "visual" then
+      clear_selection(state)
+    end
+    state.editor_mode = "insert"
+    paste_text(state, arg or "")
+    return
+  end
+  if action == "paste-image" then
+    paste_image(state)
     return
   end
   if action == "submit" then
@@ -2619,6 +3323,7 @@ local function handle_key_event(state, event)
     pending_key = state.pending_key,
     scroll = state.scroll_offset,
     queue_count = agent.pending_message_count(),
+    image_count = #(state.pending_images or {}),
     text = event.text or "",
   })
   if result == nil then
@@ -2692,6 +3397,15 @@ function M.run(opts)
       if state.dirty then
         redraw(state)
       end
+    end
+    if state.kitty_images_visible and type(psi.tui_render_frame) == "function" then
+      psi.tui_render_frame(
+        M._kitty_delete_visible_sequence(tmux_passthrough_enabled()),
+        1,
+        1,
+        false
+      )
+      state.kitty_images_visible = false
     end
   end, debug.traceback)
 
@@ -2888,6 +3602,7 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     entries = {},
     input = input or "",
     cursor = tonumber(cursor) or #(input or ""),
+    pending_images = {},
     editor_mode = "insert",
     selection_anchor = nil,
     selection_kind = nil,
@@ -2935,6 +3650,7 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     block_edit = state.block_edit,
     scroll_offset = state.scroll_offset,
     status_text = state.status_text,
+    pending_images = #(state.pending_images or {}),
     rendered = rendered,
   }
 end

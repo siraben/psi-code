@@ -156,7 +156,8 @@ function M.build_api_messages(session, system_prompt, cfg)
   end
   transform.replay_session(session, {
     user = function(message)
-      out[#out + 1] = { role = "user", content = transform.text_from_content(message.content) }
+      out[#out + 1] =
+        { role = "user", content = transform.openai_content_from_content(message.content) }
     end,
     assistant = function(message)
       local tool_calls = nil
@@ -201,7 +202,8 @@ function M.build_api_messages(session, system_prompt, cfg)
     custom_message = function(message)
       out[#out + 1] = {
         role = message.role == "assistant" and "assistant" or "user",
-        content = transform.text_from_content(message.content),
+        content = message.role == "assistant" and transform.text_from_content(message.content)
+          or transform.openai_content_from_content(message.content),
       }
     end,
   })

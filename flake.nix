@@ -111,9 +111,8 @@
         # LDFLAGS.  Works cleanly only on musl-based pkgsStatic because
         # glibc cannot be fully statically linked in general (NSS
         # modules, dlopen).
-
         mkPsi = { p, static ? false, extraMakeFlags ? [], extraNativeBuildInputs ? [],
-                   deps ? buildDeps { inherit p; } }:
+                   extraBuildInputs ? [], deps ? (buildDeps { inherit p; }) ++ extraBuildInputs }:
           let
             # When cross-compiling, embed (the host helper that bakes
             # Lua/doc files into a .c) must run on the build machine, so
@@ -186,6 +185,12 @@
           p = pkgs;
           extraNativeBuildInputs = [ pkgs.clang ];
           extraMakeFlags = [ "CC=clang" ];
+        };
+
+        packages.psi-sdl-clipboard = mkPsi {
+          p = pkgs;
+          extraBuildInputs = [ pkgs.sdl3 ];
+          extraMakeFlags = [ "CLIPBOARD_SDL=1" ];
         };
 
         packages.psi-tcc = mkPsi {
@@ -560,6 +565,7 @@
               ps.pytest
             ]))
             pkgs.ripgrep
+            pkgs.sdl3
             pkgs.stylua
             pkgs.tinycc
             pkgs.valgrind

@@ -60,9 +60,9 @@ local function emit_turn_end(text, model)
 end
 
 local function queued_user_observer(observer, kind)
-  return function(text)
+  return function(text, _, images)
     if observer.on_queued_user then
-      observer.on_queued_user(text, kind)
+      observer.on_queued_user(text, kind, images)
     end
   end
 end

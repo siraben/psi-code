@@ -35,6 +35,7 @@
 #include "psi/embedded_data.h"
 #include "psi/host_ops.h"
 #include "psi/message.h"
+#include "psi/image.h"
 #include "psi/process.h"
 #include "psi/runtime.h"
 #include "psi/session.h"
@@ -52,6 +53,12 @@
 #ifndef PSI_ENABLE_REPL_EDITLINE
 #define PSI_ENABLE_REPL_EDITLINE 0
 #endif
+#ifndef PSI_ENABLE_SDL_CLIPBOARD
+#define PSI_ENABLE_SDL_CLIPBOARD 0
+#endif
+
+#define PSI_VM_IMAGE_MAX_BYTES (50u * 1024u * 1024u)
+#define PSI_VM_IMAGE_MAX_BASE64_BYTES (((PSI_VM_IMAGE_MAX_BYTES + 2u) / 3u) * 4u + 4u)
 
 /* ------------------------------------------------------------------
  * Tiny OS-level helpers used by the FFI date/cwd/file_exists primitives
@@ -509,10 +516,13 @@ static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx) {
 
 #define PSI_VM_TUI_KEY_NAME_MAX 32
 #define PSI_VM_TUI_KEY_TEXT_MAX 8
+#define PSI_VM_TUI_PASTE_MAX_BYTES (50u * 1024u * 1024u)
 
 struct psi_vm_tui_key_event {
     char key_name[PSI_VM_TUI_KEY_NAME_MAX];
     char text[PSI_VM_TUI_KEY_TEXT_MAX];
+    char *text_heap;
+    size_t text_len;
 };
 
 static void psi_vm_copy_truncated(char *dest, size_t dest_size, const char *src) {
@@ -611,6 +621,422 @@ static void psi_vm_tui_write(const char *text) {
     if (text != NULL) {
         fputs(text, stdout);
     }
+}
+
+struct psi_vm_byte_buffer {
+    char *data;
+    size_t len;
+    size_t cap;
+};
+
+static void psi_vm_byte_buffer_init(struct psi_vm_byte_buffer *buf) {
+    if (buf == NULL) {
+        return;
+    }
+    buf->data = NULL;
+    buf->len = 0u;
+    buf->cap = 0u;
+}
+
+static void psi_vm_byte_buffer_free(struct psi_vm_byte_buffer *buf) {
+    if (buf == NULL) {
+        return;
+    }
+    free(buf->data);
+    psi_vm_byte_buffer_init(buf);
+}
+
+static void psi_vm_set_error(char *error, size_t error_size, const char *message) {
+    size_t len;
+
+    if (error == NULL || error_size == 0u) {
+        return;
+    }
+    if (message == NULL) {
+        message = "error";
+    }
+    len = strlen(message);
+    if (len >= error_size) {
+        len = error_size - 1u;
+    }
+    memcpy(error, message, len);
+    error[len] = '\0';
+}
+
+static int psi_vm_byte_buffer_append(struct psi_vm_byte_buffer *buf, const char *data, size_t len) {
+    size_t next_cap;
+    char *next;
+
+    if (buf == NULL || (data == NULL && len != 0u)) {
+        return 0;
+    }
+    if (len > PSI_VM_IMAGE_MAX_BASE64_BYTES || buf->len > PSI_VM_IMAGE_MAX_BASE64_BYTES - len) {
+        return 0;
+    }
+    if (buf->len + len + 1u <= buf->cap) {
+        if (len != 0u) {
+            memcpy(buf->data + buf->len, data, len);
+        }
+        buf->len += len;
+        buf->data[buf->len] = '\0';
+        return 1;
+    }
+
+    next_cap = buf->cap == 0u ? 4096u : buf->cap;
+    while (next_cap < buf->len + len + 1u) {
+        if (next_cap > PSI_VM_IMAGE_MAX_BASE64_BYTES / 2u) {
+            next_cap = PSI_VM_IMAGE_MAX_BASE64_BYTES + 1u;
+            break;
+        }
+        next_cap *= 2u;
+    }
+    if (next_cap > PSI_VM_IMAGE_MAX_BASE64_BYTES + 1u) {
+        return 0;
+    }
+    next = (char *)realloc(buf->data, next_cap);
+    if (next == NULL) {
+        return 0;
+    }
+    buf->data = next;
+    buf->cap = next_cap;
+    if (len != 0u) {
+        memcpy(buf->data + buf->len, data, len);
+    }
+    buf->len += len;
+    buf->data[buf->len] = '\0';
+    return 1;
+}
+
+static int psi_vm_tui_write_kitty_clipboard_request(int tmux_passthrough) {
+    static const char mime_list[] = "image/png image/jpeg image/webp image/gif";
+    char *payload;
+    size_t payload_len;
+
+    payload = psi_image_base64_encode((const unsigned char *)mime_list, strlen(mime_list), &payload_len);
+    if (payload == NULL) {
+        return 0;
+    }
+    if (tmux_passthrough) {
+        fputs("\033Ptmux;\033\033]5522;type=read:id=psi;", stdout);
+        fputs(payload, stdout);
+        fputs("\033\033\\\033\\", stdout);
+    } else {
+        fputs("\033]5522;type=read:id=psi;", stdout);
+        fputs(payload, stdout);
+        fputs("\033\\", stdout);
+    }
+    fflush(stdout);
+    free(payload);
+    return 1;
+}
+
+static int psi_vm_tui_read_osc_packet(struct psi_vm_byte_buffer *packet, int timeout_ms) {
+    int ch;
+    char byte;
+
+    if (packet == NULL) {
+        return 0;
+    }
+    psi_vm_byte_buffer_free(packet);
+    psi_vm_byte_buffer_init(packet);
+
+    for (;;) {
+        ch = psi_vm_tui_read_byte(timeout_ms);
+        if (ch < 0) {
+            return 0;
+        }
+        if (ch == 27) {
+            ch = psi_vm_tui_read_byte(25);
+            if (ch == ']') {
+                break;
+            }
+            if (ch < 0) {
+                return 0;
+            }
+        }
+    }
+
+    for (;;) {
+        ch = psi_vm_tui_read_byte(timeout_ms);
+        if (ch < 0) {
+            return 0;
+        }
+        if (ch == 7) {
+            return 1;
+        }
+        if (ch == 27) {
+            int next = psi_vm_tui_read_byte(25);
+            if (next == '\\') {
+                return 1;
+            }
+            if (next < 0) {
+                return 0;
+            }
+            if (!psi_vm_byte_buffer_append(packet, "\033", 1u)) {
+                return 0;
+            }
+            ch = next;
+        }
+        byte = (char)ch;
+        if (!psi_vm_byte_buffer_append(packet, &byte, 1u)) {
+            return 0;
+        }
+    }
+}
+
+static const char *psi_vm_kitty_clipboard_packet_mime(const char *packet) {
+    static char mime[32];
+    const char *meta_end;
+    const char *key;
+    const char *value;
+    const char *end;
+    size_t len;
+    struct {
+        const char *base64;
+        const char *mime;
+    } known[] = {
+        { "aW1hZ2UvcG5n", "image/png" },
+        { "aW1hZ2UvcG5n==", "image/png" },
+        { "aW1hZ2UvanBlZw==", "image/jpeg" },
+        { "aW1hZ2Uvd2VicA==", "image/webp" },
+        { "aW1hZ2UvZ2lm", "image/gif" },
+        { "aW1hZ2UvZ2lm==", "image/gif" },
+        { NULL, NULL }
+    };
+    int i;
+
+    if (packet == NULL) {
+        return NULL;
+    }
+    meta_end = strchr(packet, ';');
+    if (meta_end == NULL) {
+        meta_end = packet + strlen(packet);
+    }
+    key = strstr(packet, "mime=");
+    if (key == NULL || key > meta_end) {
+        return NULL;
+    }
+    value = key + 5;
+    end = value;
+    while (*end != '\0' && *end != ':' && *end != ';') {
+        end++;
+    }
+    len = (size_t)(end - value);
+    for (i = 0; known[i].base64 != NULL; i++) {
+        if (strlen(known[i].base64) == len && memcmp(value, known[i].base64, len) == 0) {
+            psi_vm_copy_truncated(mime, sizeof(mime), known[i].mime);
+            return mime;
+        }
+    }
+    return NULL;
+}
+
+static int psi_vm_tui_read_kitty_clipboard_image(
+    int tmux_passthrough,
+    int timeout_ms,
+    struct psi_image_data *image,
+    char *error,
+    size_t error_size
+) {
+    struct psi_vm_byte_buffer packet;
+    struct psi_vm_byte_buffer pending_base64;
+    struct psi_vm_byte_buffer raw;
+    char selected_mime[32];
+    int has_selected_mime;
+    int saw_ok;
+    int done;
+    unsigned int data_chunks;
+    size_t total_base64_len;
+
+    if (timeout_ms < 1) {
+        timeout_ms = 1000;
+    }
+    if (image == NULL) {
+        return 0;
+    }
+    psi_image_data_init(image);
+    psi_vm_byte_buffer_init(&packet);
+    psi_vm_byte_buffer_init(&pending_base64);
+    psi_vm_byte_buffer_init(&raw);
+    selected_mime[0] = '\0';
+    has_selected_mime = 0;
+    saw_ok = 0;
+    done = 0;
+    data_chunks = 0u;
+    total_base64_len = 0u;
+
+    if (!psi_vm_tui_write_kitty_clipboard_request(tmux_passthrough)) {
+        psi_vm_set_error(error, error_size, "failed to write Kitty clipboard request");
+        return 0;
+    }
+
+    while (!done) {
+        const char *payload;
+        const char *mime;
+
+        if (!psi_vm_tui_read_osc_packet(&packet, timeout_ms)) {
+            psi_vm_byte_buffer_free(&packet);
+            psi_vm_byte_buffer_free(&pending_base64);
+            psi_vm_byte_buffer_free(&raw);
+            psi_vm_set_error(error, error_size, "Kitty clipboard read timed out");
+            return 0;
+        }
+        if (strncmp(packet.data != NULL ? packet.data : "", "5522;", 5u) != 0) {
+            continue;
+        }
+        if (strstr(packet.data, "status=OK") != NULL) {
+            saw_ok = 1;
+            continue;
+        }
+        if (strstr(packet.data, "status=DONE") != NULL) {
+            done = 1;
+            break;
+        }
+        if (strstr(packet.data, "status=DATA") != NULL) {
+            payload = strchr(packet.data + 5, ';');
+            if (payload == NULL) {
+                continue;
+            }
+            payload++;
+            mime = psi_vm_kitty_clipboard_packet_mime(packet.data + 5);
+            if (mime != NULL && !has_selected_mime) {
+                psi_vm_copy_truncated(selected_mime, sizeof(selected_mime), mime);
+                has_selected_mime = 1;
+            }
+            if (
+                (mime != NULL && strcmp(selected_mime, mime) == 0) ||
+                (mime == NULL && has_selected_mime)
+            ) {
+                unsigned char *decoded;
+                size_t decoded_len;
+                size_t payload_len;
+
+                data_chunks++;
+                payload_len = strlen(payload);
+                total_base64_len += payload_len;
+                if (!psi_vm_byte_buffer_append(&pending_base64, payload, payload_len)) {
+                    psi_vm_byte_buffer_free(&packet);
+                    psi_vm_byte_buffer_free(&pending_base64);
+                    psi_vm_byte_buffer_free(&raw);
+                    psi_vm_set_error(error, error_size, "Kitty clipboard image is too large");
+                    return 0;
+                }
+                if (pending_base64.len > 0u && pending_base64.len % 4u == 0u) {
+                    decoded = NULL;
+                    decoded_len = 0u;
+                    if (!psi_image_base64_decode_alloc(
+                            pending_base64.data,
+                            pending_base64.len,
+                            &decoded,
+                            &decoded_len,
+                            error,
+                            error_size
+                        )) {
+                        psi_vm_byte_buffer_free(&packet);
+                        psi_vm_byte_buffer_free(&pending_base64);
+                        psi_vm_byte_buffer_free(&raw);
+                        return 0;
+                    }
+                    if (!psi_vm_byte_buffer_append(&raw, (const char *)decoded, decoded_len)) {
+                        free(decoded);
+                        psi_vm_byte_buffer_free(&packet);
+                        psi_vm_byte_buffer_free(&pending_base64);
+                        psi_vm_byte_buffer_free(&raw);
+                        psi_vm_set_error(error, error_size, "Kitty clipboard image is too large");
+                        return 0;
+                    }
+                    free(decoded);
+                    pending_base64.len = 0u;
+                    if (pending_base64.data != NULL) {
+                        pending_base64.data[0] = '\0';
+                    }
+                }
+            }
+            continue;
+        }
+        if (strstr(packet.data, "status=EPERM") != NULL) {
+            psi_vm_byte_buffer_free(&packet);
+            psi_vm_byte_buffer_free(&pending_base64);
+            psi_vm_byte_buffer_free(&raw);
+            psi_vm_set_error(error, error_size, "Kitty clipboard read was denied");
+            return 0;
+        }
+        if (strstr(packet.data, "status=ENOSYS") != NULL) {
+            psi_vm_byte_buffer_free(&packet);
+            psi_vm_byte_buffer_free(&pending_base64);
+            psi_vm_byte_buffer_free(&raw);
+            psi_vm_set_error(error, error_size, "Kitty clipboard images are not supported by this terminal");
+            return 0;
+        }
+        if (strstr(packet.data, "status=EBUSY") != NULL) {
+            psi_vm_byte_buffer_free(&packet);
+            psi_vm_byte_buffer_free(&pending_base64);
+            psi_vm_byte_buffer_free(&raw);
+            psi_vm_set_error(error, error_size, "Kitty clipboard is busy");
+            return 0;
+        }
+    }
+
+    psi_vm_byte_buffer_free(&packet);
+    if (pending_base64.len > 0u) {
+        unsigned char *decoded = NULL;
+        size_t decoded_len = 0u;
+        if (!psi_image_base64_decode_alloc(
+                pending_base64.data,
+                pending_base64.len,
+                &decoded,
+                &decoded_len,
+                error,
+                error_size
+            )) {
+            psi_vm_byte_buffer_free(&pending_base64);
+            psi_vm_byte_buffer_free(&raw);
+            return 0;
+        }
+        if (!psi_vm_byte_buffer_append(&raw, (const char *)decoded, decoded_len)) {
+            free(decoded);
+            psi_vm_byte_buffer_free(&pending_base64);
+            psi_vm_byte_buffer_free(&raw);
+            psi_vm_set_error(error, error_size, "Kitty clipboard image is too large");
+            return 0;
+        }
+        free(decoded);
+    }
+    psi_vm_byte_buffer_free(&pending_base64);
+    if (!saw_ok || raw.len == 0u || !has_selected_mime) {
+        psi_vm_byte_buffer_free(&raw);
+        psi_vm_set_error(error, error_size, "clipboard does not contain a supported image");
+        return 0;
+    }
+    image->bytes = (unsigned char *)raw.data;
+    image->size = raw.len;
+    raw.data = NULL;
+    raw.len = 0u;
+    raw.cap = 0u;
+    psi_image_probe(
+        image->bytes,
+        image->size,
+        selected_mime,
+        image->mime_type,
+        sizeof(image->mime_type),
+        &image->width,
+        &image->height
+    );
+    if (image->mime_type[0] == '\0' || strcmp(image->mime_type, "application/octet-stream") == 0) {
+        psi_image_data_free(image);
+        psi_vm_byte_buffer_free(&raw);
+        psi_vm_set_error(error, error_size, "unsupported image data");
+        return 0;
+    }
+    image->complete = (unsigned int)psi_image_is_complete(
+        image->bytes,
+        image->size,
+        image->mime_type
+    );
+    image->clipboard_chunks = data_chunks;
+    image->clipboard_base64_len = total_base64_len;
+    psi_vm_byte_buffer_free(&raw);
+    return 1;
 }
 
 static void psi_vm_tui_draw_raw_line(long row, const char *text) {
@@ -781,6 +1207,68 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
     return NULL;
 }
 
+static int psi_vm_tui_collect_bracketed_paste(struct psi_vm_tui_key_event *event) {
+    char *data;
+    size_t len;
+    size_t cap;
+    int match;
+
+    if (event == NULL) {
+        return 0;
+    }
+    cap = 4096u;
+    data = (char *)malloc(cap);
+    if (data == NULL) {
+        return 0;
+    }
+    len = 0u;
+    match = 0;
+    for (;;) {
+        static const char END[] = "\033[201~";
+        int ch;
+
+        ch = psi_vm_tui_read_byte(-1);
+        if (ch < 0) {
+            free(data);
+            return 0;
+        }
+        if (len >= PSI_VM_TUI_PASTE_MAX_BYTES) {
+            free(data);
+            return 0;
+        }
+        if (len + 1u > cap) {
+            size_t next_cap;
+            char *next;
+
+            next_cap = cap * 2u;
+            if (next_cap < cap || next_cap > PSI_VM_TUI_PASTE_MAX_BYTES) {
+                next_cap = PSI_VM_TUI_PASTE_MAX_BYTES;
+            }
+            next = (char *)realloc(data, next_cap);
+            if (next == NULL) {
+                free(data);
+                return 0;
+            }
+            data = next;
+            cap = next_cap;
+        }
+        data[len++] = (char)ch;
+
+        if ((char)ch == END[match]) {
+            match++;
+            if (END[match] == '\0') {
+                len -= (sizeof(END) - 1u);
+                psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "paste");
+                event->text_heap = data;
+                event->text_len = len;
+                return 1;
+            }
+        } else {
+            match = ((char)ch == END[0]) ? 1 : 0;
+        }
+    }
+}
+
 static int psi_vm_tui_normalize_key(
     int ch, int restore_timeout_ms, struct psi_vm_tui_key_event *event) {
     char sequence[64];
@@ -794,6 +1282,9 @@ static int psi_vm_tui_normalize_key(
 
     if (ch == 27) {
         psi_vm_tui_collect_escape_sequence(sequence, sizeof(sequence), restore_timeout_ms);
+        if (strcmp(sequence, "[200~") == 0) {
+            return psi_vm_tui_collect_bracketed_paste(event);
+        }
         key_name = psi_vm_tui_escape_sequence_key(sequence);
         if (key_name == NULL) {
             return 0;
@@ -824,6 +1315,7 @@ static int psi_vm_tui_normalize_key(
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "text");
         event->text[0] = (char)ch;
         event->text[1] = '\0';
+        event->text_len = 1u;
         return 1;
     }
     return 0;
@@ -2253,6 +2745,12 @@ static int lfn_runtime_info(lua_State *L) {
     lua_setfield(L, -2, "repl-editline");
     lua_pushboolean(L, PSI_ENABLE_TUI ? 1 : 0);
     lua_setfield(L, -2, "tui");
+    lua_pushboolean(L, 1);
+    lua_setfield(L, -2, "kitty-images");
+    lua_pushboolean(L, PSI_ENABLE_TUI ? 1 : 0);
+    lua_setfield(L, -2, "kitty-clipboard");
+    lua_pushboolean(L, PSI_ENABLE_SDL_CLIPBOARD ? 1 : 0);
+    lua_setfield(L, -2, "clipboard-images");
 
     {
         struct psi_session *s = host ? host->session : NULL;
@@ -2284,6 +2782,355 @@ static int lfn_runtime_info(lua_State *L) {
 
     free(date);
     free(cwd);
+    return 1;
+}
+
+static int psi_vm_push_image_table(lua_State *L, struct psi_image_data *image) {
+    char *base64;
+    size_t base64_len;
+
+    if (image == NULL || image->bytes == NULL || image->size == 0u) {
+        lua_pushnil(L);
+        lua_pushstring(L, "image was empty");
+        return 2;
+    }
+
+    base64 = psi_image_base64_encode(image->bytes, image->size, &base64_len);
+    if (base64 == NULL) {
+        lua_pushnil(L);
+        lua_pushstring(L, "failed to encode image");
+        return 2;
+    }
+
+    lua_newtable(L);
+    lua_pushlstring(L, base64, base64_len);
+    lua_setfield(L, -2, "data");
+    lua_pushstring(L, image->mime_type[0] != '\0' ? image->mime_type : "application/octet-stream");
+    lua_setfield(L, -2, "mimeType");
+    lua_pushinteger(L, (lua_Integer)image->size);
+    lua_setfield(L, -2, "bytes");
+    lua_pushinteger(L, (lua_Integer)image->width);
+    lua_setfield(L, -2, "width");
+    lua_pushinteger(L, (lua_Integer)image->height);
+    lua_setfield(L, -2, "height");
+    lua_pushboolean(L, image->complete ? 1 : 0);
+    lua_setfield(L, -2, "complete");
+    if (image->clipboard_chunks > 0u) {
+        lua_pushinteger(L, (lua_Integer)image->clipboard_chunks);
+        lua_setfield(L, -2, "clipboardChunks");
+        lua_pushinteger(L, (lua_Integer)image->clipboard_base64_len);
+        lua_setfield(L, -2, "clipboardBase64Len");
+    }
+
+    free(base64);
+    return 1;
+}
+
+static int lfn_clipboard_read_image(lua_State *L) {
+    struct psi_image_data image;
+    char error[256];
+    int result;
+
+    PSI_UNUSED(L);
+    error[0] = '\0';
+    psi_image_data_init(&image);
+    if (!psi_clipboard_read_image(&image, error, sizeof(error))) {
+        lua_pushnil(L);
+        lua_pushstring(L, error[0] != '\0' ? error : "failed to read clipboard image");
+        return 2;
+    }
+
+    result = psi_vm_push_image_table(L, &image);
+    psi_image_data_free(&image);
+    return result;
+}
+
+#if PSI_ENABLE_TUI
+static int lfn_kitty_clipboard_read_image(lua_State *L) {
+    int tmux_passthrough = lua_toboolean(L, 1);
+    lua_Integer timeout_arg = luaL_optinteger(L, 2, 1000);
+    struct psi_image_data image;
+    char error[256];
+    int result;
+
+    psi_vm_require_tui(L);
+    if (timeout_arg < 1) {
+        timeout_arg = 1;
+    }
+    if (timeout_arg > 10000) {
+        timeout_arg = 10000;
+    }
+    error[0] = '\0';
+    psi_image_data_init(&image);
+    if (!psi_vm_tui_read_kitty_clipboard_image(
+        tmux_passthrough,
+        (int)timeout_arg,
+        &image,
+        error,
+        sizeof(error)
+    )) {
+        lua_pushnil(L);
+        lua_pushstring(L, error[0] != '\0' ? error : "failed to read Kitty clipboard image");
+        return 2;
+    }
+
+    result = psi_vm_push_image_table(L, &image);
+    psi_image_data_free(&image);
+    return result;
+}
+#else
+static int lfn_kitty_clipboard_read_image(lua_State *L) {
+    lua_pushnil(L);
+    lua_pushstring(L, "TUI support is not compiled in");
+    return 2;
+}
+#endif
+
+static int lfn_image_read_file(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    struct psi_image_data image;
+    char error[256];
+    int result;
+
+    error[0] = '\0';
+    psi_image_data_init(&image);
+    if (!psi_image_read_file(path, &image, error, sizeof(error))) {
+        lua_pushnil(L);
+        lua_pushstring(L, error[0] != '\0' ? error : "failed to read image file");
+        return 2;
+    }
+
+    result = psi_vm_push_image_table(L, &image);
+    psi_image_data_free(&image);
+    return result;
+}
+
+static int lfn_image_from_base64(lua_State *L) {
+    size_t base64_len;
+    const char *base64 = luaL_checklstring(L, 1, &base64_len);
+    const char *mime_hint = luaL_optstring(L, 2, NULL);
+    struct psi_image_data image;
+    char error[256];
+    int result;
+
+    error[0] = '\0';
+    psi_image_data_init(&image);
+    if (!psi_image_from_base64(base64, base64_len, mime_hint, &image, error, sizeof(error))) {
+        lua_pushnil(L);
+        lua_pushstring(L, error[0] != '\0' ? error : "failed to decode image data");
+        return 2;
+    }
+
+    result = psi_vm_push_image_table(L, &image);
+    psi_image_data_free(&image);
+    return result;
+}
+
+static int lfn_image_from_bytes(lua_State *L) {
+    size_t bytes_len;
+    const char *bytes = luaL_checklstring(L, 1, &bytes_len);
+    const char *mime_hint = luaL_optstring(L, 2, NULL);
+    struct psi_image_data image;
+    int result;
+
+    psi_image_data_init(&image);
+    if (bytes_len == 0u) {
+        lua_pushnil(L);
+        lua_pushstring(L, "missing image data");
+        return 2;
+    }
+    if (bytes_len > PSI_VM_IMAGE_MAX_BYTES) {
+        lua_pushnil(L);
+        lua_pushstring(L, "image data is too large");
+        return 2;
+    }
+    image.bytes = (unsigned char *)malloc(bytes_len);
+    if (image.bytes == NULL) {
+        lua_pushnil(L);
+        lua_pushstring(L, "out of memory");
+        return 2;
+    }
+    memcpy(image.bytes, bytes, bytes_len);
+    image.size = bytes_len;
+    psi_image_probe(
+        image.bytes,
+        image.size,
+        mime_hint,
+        image.mime_type,
+        sizeof(image.mime_type),
+        &image.width,
+        &image.height
+    );
+    if (image.mime_type[0] == '\0' || strcmp(image.mime_type, "application/octet-stream") == 0) {
+        psi_image_data_free(&image);
+        lua_pushnil(L);
+        lua_pushstring(L, "unsupported image data");
+        return 2;
+    }
+
+    result = psi_vm_push_image_table(L, &image);
+    psi_image_data_free(&image);
+    return result;
+}
+
+static int lfn_kitty_image_sequence(lua_State *L) {
+    size_t base64_len;
+    const char *base64 = luaL_checklstring(L, 1, &base64_len);
+    lua_Integer columns_arg = luaL_optinteger(L, 2, 80);
+    lua_Integer rows_arg = luaL_optinteger(L, 3, 1);
+    int tmux_passthrough = lua_toboolean(L, 4);
+    unsigned int columns;
+    unsigned int rows;
+    char *sequence;
+    size_t sequence_len;
+
+    if (columns_arg < 1) {
+        columns_arg = 1;
+    }
+    if (rows_arg < 1) {
+        rows_arg = 1;
+    }
+    if (columns_arg > 1000) {
+        columns_arg = 1000;
+    }
+    if (rows_arg > 1000) {
+        rows_arg = 1000;
+    }
+    columns = (unsigned int)columns_arg;
+    rows = (unsigned int)rows_arg;
+
+    sequence = psi_image_kitty_sequence(
+        base64,
+        base64_len,
+        columns,
+        rows,
+        tmux_passthrough,
+        &sequence_len
+    );
+    if (sequence == NULL) {
+        lua_pushnil(L);
+        lua_pushstring(L, "failed to build Kitty image sequence");
+        return 2;
+    }
+
+    lua_pushlstring(L, sequence, sequence_len);
+    free(sequence);
+    return 1;
+}
+
+static int lfn_kitty_image_virtual_sequence(lua_State *L) {
+    size_t base64_len;
+    const char *base64 = luaL_checklstring(L, 1, &base64_len);
+    lua_Integer columns_arg = luaL_optinteger(L, 2, 80);
+    lua_Integer rows_arg = luaL_optinteger(L, 3, 1);
+    lua_Integer width_arg = luaL_optinteger(L, 4, 0);
+    lua_Integer height_arg = luaL_optinteger(L, 5, 0);
+    lua_Integer image_id_arg = luaL_optinteger(L, 6, 1);
+    int tmux_passthrough = lua_toboolean(L, 7);
+    char *sequence;
+    size_t sequence_len;
+
+    if (columns_arg < 1) {
+        columns_arg = 1;
+    }
+    if (rows_arg < 1) {
+        rows_arg = 1;
+    }
+    if (columns_arg > 297) {
+        columns_arg = 297;
+    }
+    if (rows_arg > 297) {
+        rows_arg = 297;
+    }
+    if (width_arg < 0) {
+        width_arg = 0;
+    }
+    if (height_arg < 0) {
+        height_arg = 0;
+    }
+    if (image_id_arg < 1) {
+        image_id_arg = 1;
+    }
+    if (image_id_arg > 0xffffff) {
+        image_id_arg = ((image_id_arg - 1) % 0xffffff) + 1;
+    }
+
+    sequence = psi_image_kitty_virtual_sequence(
+        base64,
+        base64_len,
+        (unsigned int)columns_arg,
+        (unsigned int)rows_arg,
+        (unsigned int)width_arg,
+        (unsigned int)height_arg,
+        (unsigned int)image_id_arg,
+        tmux_passthrough,
+        &sequence_len
+    );
+    if (sequence == NULL) {
+        lua_pushnil(L);
+        lua_pushstring(L, "failed to build Kitty virtual image sequence");
+        return 2;
+    }
+
+    lua_pushlstring(L, sequence, sequence_len);
+    free(sequence);
+    return 1;
+}
+
+static int lfn_kitty_image_placeholder_line(lua_State *L) {
+    lua_Integer image_id_arg = luaL_checkinteger(L, 1);
+    lua_Integer row_arg = luaL_optinteger(L, 2, 0);
+    lua_Integer columns_arg = luaL_optinteger(L, 3, 1);
+    char *line;
+    size_t line_len;
+
+    if (image_id_arg < 1) {
+        image_id_arg = 1;
+    }
+    if (image_id_arg > 0xffffff) {
+        image_id_arg = ((image_id_arg - 1) % 0xffffff) + 1;
+    }
+    if (row_arg < 0) {
+        row_arg = 0;
+    }
+    if (columns_arg < 1) {
+        columns_arg = 1;
+    }
+    if (columns_arg > 297) {
+        columns_arg = 297;
+    }
+
+    line = psi_image_kitty_placeholder_line(
+        (unsigned int)image_id_arg,
+        (unsigned int)row_arg,
+        (unsigned int)columns_arg,
+        &line_len
+    );
+    if (line == NULL) {
+        lua_pushnil(L);
+        lua_pushstring(L, "failed to build Kitty placeholder line");
+        return 2;
+    }
+
+    lua_pushlstring(L, line, line_len);
+    free(line);
+    return 1;
+}
+
+static int lfn_kitty_image_delete_sequence(lua_State *L) {
+    int tmux_passthrough = lua_toboolean(L, 1);
+    char *sequence;
+    size_t sequence_len;
+
+    sequence = psi_image_kitty_delete_sequence(tmux_passthrough, &sequence_len);
+    if (sequence == NULL) {
+        lua_pushnil(L);
+        lua_pushstring(L, "failed to build Kitty delete sequence");
+        return 2;
+    }
+
+    lua_pushlstring(L, sequence, sequence_len);
+    free(sequence);
     return 1;
 }
 
@@ -2379,7 +3226,14 @@ static int lfn_tui_poll_key(lua_State *L) {
     lua_newtable(L);
     lua_pushstring(L, event.key_name);
     lua_setfield(L, -2, "key");
-    if (event.text[0] != '\0') {
+    if (event.text_heap != NULL) {
+        lua_pushlstring(L, event.text_heap, event.text_len);
+        lua_setfield(L, -2, "text");
+        free(event.text_heap);
+    } else if (event.text_len > 0u) {
+        lua_pushlstring(L, event.text, event.text_len);
+        lua_setfield(L, -2, "text");
+    } else if (event.text[0] != '\0') {
         lua_pushstring(L, event.text);
         lua_setfield(L, -2, "text");
     }
@@ -2671,6 +3525,15 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("embedded_source_names", lfn_embedded_source_names);
     PSI_REG("json_encode", lfn_json_encode);
     PSI_REG("json_decode", lfn_json_decode);
+    PSI_REG("clipboard_read_image", lfn_clipboard_read_image);
+    PSI_REG("kitty_clipboard_read_image", lfn_kitty_clipboard_read_image);
+    PSI_REG("image_read_file", lfn_image_read_file);
+    PSI_REG("image_from_base64", lfn_image_from_base64);
+    PSI_REG("image_from_bytes", lfn_image_from_bytes);
+    PSI_REG("kitty_image_sequence", lfn_kitty_image_sequence);
+    PSI_REG("kitty_image_virtual_sequence", lfn_kitty_image_virtual_sequence);
+    PSI_REG("kitty_image_placeholder_line", lfn_kitty_image_placeholder_line);
+    PSI_REG("kitty_image_delete_sequence", lfn_kitty_image_delete_sequence);
     PSI_REG("http_post", lfn_http_post);
     PSI_REG("http_get", lfn_http_get);
     PSI_REG("http_stream_begin", lfn_http_stream_begin);

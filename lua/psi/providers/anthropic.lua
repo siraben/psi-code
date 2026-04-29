@@ -101,6 +101,17 @@ local function pi_content_to_anthropic(blocks)
         if prelude.trim(t) ~= "" then
           out[#out + 1] = { type = "text", text = t }
         end
+      elseif b.type == "image" then
+        if type(b.data) == "string" and b.data ~= "" then
+          out[#out + 1] = {
+            type = "image",
+            source = {
+              type = "base64",
+              media_type = b.mimeType or b.mime or "image/png",
+              data = b.data,
+            },
+          }
+        end
       elseif b.type == "toolCall" then
         out[#out + 1] = { type = "tool_use", id = b.id, name = b.name, input = b.arguments or {} }
       elseif b.type == "thinking" then

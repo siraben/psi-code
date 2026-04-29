@@ -538,6 +538,15 @@ local BUILTIN_COMMANDS = {
     description = "Copy the last assistant message to the clipboard",
   },
   {
+    name = "paste-image",
+    description = "Attach an image from the clipboard in the TUI",
+  },
+  {
+    name = "attach-image",
+    argument_hint = "<path>",
+    description = "Attach an image file in the TUI",
+  },
+  {
     name = "export",
     argument_hint = "[path]",
     description = "Write the session as markdown",
@@ -722,6 +731,17 @@ function M.handle(line)
   end
   if line == "/copy" then
     return cmd_copy()
+  end
+  if line == "/paste-image" or line == "/screenshot" then
+    return records.new_command_action("paste-image", nil)
+  end
+  if starts_word(line, "/attach-image") or starts_word(line, "/image") then
+    local path = starts_word(line, "/image") and arg_after(line, "/image")
+      or arg_after(line, "/attach-image")
+    if path == "" then
+      return records.new_command_action("print", "usage: /attach-image <path>")
+    end
+    return records.new_command_action("attach-image", path)
   end
   if line == "/new" or line == "/clear" then
     return cmd_new_session()

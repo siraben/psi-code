@@ -22,6 +22,12 @@ local DEFINITIONS = {
     description = "Insert newline",
   },
   {
+    id = "tui.input.pasteImage",
+    section = "Editing",
+    default_keys = { "ctrl-v" },
+    description = "Paste image",
+  },
+  {
     id = "tui.input.clear",
     section = "Editing",
     default_keys = {},

@@ -201,6 +201,7 @@ function M.handle_key(arg)
   local key = arg.key
   local busy = not not arg.busy
   local input_length = tonumber(arg.input_length) or 0
+  local image_count = tonumber(arg.image_count) or 0
   local text = arg.text or ""
 
   for _, handler in ipairs(key_handlers) do
@@ -219,9 +220,15 @@ function M.handle_key(arg)
     end
     return nil
   end
+  if key == "paste" then
+    if text ~= "" then
+      return action("paste", text)
+    end
+    return nil
+  end
 
   if keybindings.matches(key, "tui.input.submit") then
-    if input_length > 0 then
+    if input_length > 0 or image_count > 0 then
       return action("submit")
     end
     return nil
@@ -229,6 +236,9 @@ function M.handle_key(arg)
 
   if keybindings.matches(key, "tui.input.newLine") then
     return action("insert", "\n")
+  end
+  if keybindings.matches(key, "tui.input.pasteImage") then
+    return action("paste-image")
   end
   if (tonumber(arg.queue_count) or 0) > 0 and keybindings.matches(key, "tui.queue.restore") then
     return action("queue-restore")
@@ -628,6 +638,9 @@ function M.status_bar(arg_json)
     pair("model", model, false),
     pair("messages", tostring(psi.session_message_count()), false),
   }
+  if tonumber(arg.pending_images) and tonumber(arg.pending_images) > 0 then
+    right_parts[#right_parts + 1] = pair("images", tostring(arg.pending_images), false)
+  end
   for _, hook in ipairs(status_hooks) do
     local ok_hook, extra = pcall(hook.fn, arg)
     if ok_hook and type(extra) == "string" and extra ~= "" then

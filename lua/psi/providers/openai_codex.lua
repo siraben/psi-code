@@ -125,7 +125,12 @@ local function response_input_from_session(session, _system_prompt)
 
   transform.replay_session(session, {
     user = function(message)
-      out[#out + 1] = user_input(transform.text_from_content(message.content))
+      local content = transform.responses_input_from_content(message.content)
+      if type(content) == "table" then
+        out[#out + 1] = { type = "message", role = "user", content = content }
+      else
+        out[#out + 1] = user_input(content)
+      end
     end,
     assistant = function(message)
       local pending = prelude.array(#(message.content or {}))
@@ -175,7 +180,12 @@ local function response_input_from_session(session, _system_prompt)
       if message.role == "assistant" then
         out[#out + 1] = assistant_text(text)
       else
-        out[#out + 1] = user_input(text)
+        local content = transform.responses_input_from_content(message.content)
+        if type(content) == "table" then
+          out[#out + 1] = { type = "message", role = "user", content = content }
+        else
+          out[#out + 1] = user_input(content)
+        end
       end
     end,
   })

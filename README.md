@@ -117,8 +117,20 @@ disabled per build:
 - `ANSI=0`: build without ANSI SGR emission/parsing.
 - `COLOR=0`: build ANSI text styles without color handling.
 - `REPL_EDITLINE=0`: build the REPL without libedit/history support.
+- `CLIPBOARD_SDL=1`: build SDL3-backed image clipboard reads for TUI
+  screenshot paste. It defaults to `0`; the SDL-enabled binary defaults to
+  `./build-sdl/psi`. Kitty image rendering and OSC 5522 image clipboard reads
+  remain built in and fall back to text or SDL when disabled by settings or
+  terminal capability.
 
-Use a separate `BUILD_DIR` when checking variants so object files do not mix:
+In Kitty, `Ctrl-V` in the TUI can read screenshot images from the terminal
+clipboard via OSC 5522 without server-side helper binaries. In headless
+sessions without Kitty clipboard support, use `/attach-image <path>` in the
+TUI, or paste a `data:image/png;base64,...` URL as the whole prompt and press
+Enter to convert it into an attached image.
+
+Most feature variants use separate build directories automatically where they
+need to. You can still set `BUILD_DIR` explicitly when checking variants:
 
 ```bash
 make BUILD_DIR=build-color0 COLOR=0

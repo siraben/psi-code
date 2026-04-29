@@ -126,6 +126,56 @@ local function finalize_tool_calls(state)
   return state.tool_calls
 end
 
+local function data_uri_base64(url)
+  if type(url) ~= "string" then
+    return nil
+  end
+  return url:match("^data:[^;]+;base64,(.+)$")
+end
+
+local function ollama_message_from_openai(message)
+  if type(message) ~= "table" or type(message.content) ~= "table" then
+    return message
+  end
+  local out = {}
+  for k, v in pairs(message) do
+    if k ~= "content" and k ~= "images" then
+      out[k] = v
+    end
+  end
+
+  local parts = {}
+  local images = {}
+  for _, block in ipairs(message.content) do
+    if type(block) == "table" then
+      if block.type == "text" and type(block.text) == "string" then
+        parts[#parts + 1] = block.text
+      elseif block.type == "image_url" then
+        local image_url = block.image_url
+        local url = type(image_url) == "table" and image_url.url or image_url
+        local data = data_uri_base64(url)
+        if data ~= nil and data ~= "" then
+          images[#images + 1] = data
+        end
+      end
+    end
+  end
+  out.content = table.concat(parts)
+  if #images > 0 then
+    out.images = prelude.as_array(images)
+  end
+  return out
+end
+
+local function build_api_messages(session, system_prompt, cfg)
+  local messages = compat.build_api_messages(session, system_prompt, cfg)
+  local out = {}
+  for i, message in ipairs(messages) do
+    out[i] = ollama_message_from_openai(message)
+  end
+  return prelude.as_array(out)
+end
+
 -- ---------- Provider config ----------
 
 local function make_config(model)
@@ -135,6 +185,7 @@ local function make_config(model)
     url = api_url("api/chat"),
     headers = { "Content-Type: application/json" },
     include_response_id = false,
+    build_messages = build_api_messages,
 
     request_body = function(args)
       local body = {
@@ -215,5 +266,12 @@ function M.complete_text(opts)
     max_tokens = opts.max_tokens,
   }, make_config(model))
 end
+
+M._test = {
+  build_api_messages = function(session, system_prompt)
+    return build_api_messages(session, system_prompt, make_config(resolve_model(nil)))
+  end,
+  ollama_message_from_openai = ollama_message_from_openai,
+}
 
 return M

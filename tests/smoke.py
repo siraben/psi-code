@@ -18,6 +18,7 @@ Exit status: 0 on clean, 1 on any failure.
 from __future__ import annotations
 
 import argparse
+import base64
 import contextvars
 import json
 import os
@@ -38,6 +39,9 @@ DEFAULT_PTY_COLS = 80
 DEFAULT_PTY_ROWS = 24
 _CURRENT_TEST_ENV: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar(
     "CURRENT_TEST_ENV", default=None)
+PNG_1X1_BASE64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+)
 
 
 # ---------------------------------------------------------------------------
@@ -342,6 +346,85 @@ def t_eval_read_primitive(psi: Psi):
     assert_equals(out, "ok", "read primitive")
 
 
+@test("images/kitty_sequence")
+def t_images_kitty_sequence(psi: Psi):
+    out = psi.eval(
+        'local s = assert(psi.kitty_image_sequence("AAAA", 3, 2, false))\n'
+        'local t = assert(psi.kitty_image_sequence("AAAA", 3, 2, true))\n'
+        'local v = assert(psi.kitty_image_virtual_sequence("AAAA", 3, 2, 10, 20, 7, true))\n'
+        'local p = assert(psi.kitty_image_placeholder_line(0x010203, 0, 2))\n'
+        'local d = assert(psi.kitty_image_delete_sequence(true))\n'
+        'return tostring(s:match("^\\27_Ga=T,f=100,q=2,c=3,r=2,C=1;") ~= nil)\n'
+        '  .. "|" .. tostring(t:match("^\\27Ptmux;\\27\\27_Ga=T") ~= nil)\n'
+        '  .. "|" .. tostring(v:match("^\\27Ptmux;\\27\\27_Ga=T,C=1,U=1") ~= nil)\n'
+        '  .. "|" .. tostring(p:match("^\\27%[38;2;1;2;3m") ~= nil)\n'
+        '  .. "|" .. tostring(d:match("^\\27Ptmux;\\27\\27_Ga=d,d=A") ~= nil)'
+    )
+    assert_equals(out, "true|true|true|true|true", "Kitty image sequence")
+
+
+@test("images/base64_and_file_read")
+def t_images_base64_and_file_read(psi: Psi):
+    path = psi.tmp / "one.png"
+    path.write_bytes(base64.b64decode(PNG_1X1_BASE64))
+    out = psi.eval(
+        'local b64 = "' + PNG_1X1_BASE64 + '"\n'
+        + 'local a = assert(psi.image_from_base64(b64, "image/png"))\n'
+        + 'local b = assert(psi.image_read_file(' + json.dumps(str(path)) + '))\n'
+        + 'local header = string.char(137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1)\n'
+        + 'local c = assert(psi.image_from_bytes(header))\n'
+        + 'return a.mimeType .. ":" .. tostring(a.width) .. "x" .. tostring(a.height)\n'
+        + '  .. "|" .. b.mimeType .. ":" .. tostring(b.width) .. "x" .. tostring(b.height)\n'
+        + '  .. "|" .. c.mimeType .. ":" .. tostring(c.width) .. "x" .. tostring(c.height)'
+    )
+    assert_equals(
+        out,
+        "image/png:1x1|image/png:1x1|image/png:1x1",
+        "base64/file/raw image reads",
+    )
+
+
+@test("images/session_and_provider_blocks")
+def t_images_session_and_provider_blocks(psi: Psi):
+    out = psi.eval(
+        'local session = require("psi.session")\n'
+        'local transform = require("psi.message_transform")\n'
+        'psi.session_clear()\n'
+        'session.append_user_blocks("look", {{data="QUJD", mimeType="image/png", width=2, height=3}})\n'
+        'local msg = require("psi.records").messages_from_alists(psi.session_messages())[1]\n'
+        'local body = require("psi.prelude").safe_json_decode(msg.data)\n'
+        'local content = body.message.content\n'
+        'local openai = transform.openai_content_from_content(content)\n'
+        'local responses = transform.responses_input_from_content(content)\n'
+        'return content[2].type .. "|" .. content[2].mimeType .. "|"\n'
+        '  .. openai[2].image_url.url .. "|" .. responses[2].image_url'
+    )
+    assert_equals(
+        out,
+        "image|image/png|data:image/png;base64,QUJD|data:image/png;base64,QUJD",
+        "image session/provider blocks",
+    )
+
+
+@test("images/ollama_message_images")
+def t_images_ollama_message_images(psi: Psi):
+    out = psi.eval(
+        'local session = require("psi.session")\n'
+        'local transform = require("psi.message_transform")\n'
+        'local ollama = require("psi.ollama")\n'
+        'psi.session_clear()\n'
+        'session.append_user_blocks("look", {{data="QUJD", mimeType="image/png", width=2, height=3}})\n'
+        'local wire = ollama._test.build_api_messages(transform.plain_session(), "")\n'
+        'return type(wire[1].content) .. "|" .. wire[1].content .. "|"\n'
+        '  .. tostring(wire[1].images and wire[1].images[1])'
+    )
+    assert_equals(
+        out,
+        "string|look|QUJD",
+        "Ollama image messages should use content string plus images array",
+    )
+
+
 @test("fs/portable_primitives")
 def t_fs_portable_primitives(psi: Psi):
     root = psi.tmp / "portable-fs" / "a" / "b"
@@ -575,6 +658,24 @@ def t_agent_control_queues(psi: Psi):
     )
     assert_equals(out, "true|true|2|follow-up|true|steer|nil|follow edited|0",
                   "agent queues should drain in FIFO order")
+
+
+@test("agent/control_queue_images")
+def t_agent_control_queue_images(psi: Psi):
+    out = psi.eval(
+        'local agent = require("psi.agent")\n'
+        + 'agent.clear_queues()\n'
+        + 'local image = {type="image", mimeType="image/png", data="abc", width=1, height=1}\n'
+        + 'local ok = agent.queue_follow_up({text = "see this", images = {image}})\n'
+        + 'local item = agent.pending_message(1)\n'
+        + 'local seen = 0\n'
+        + 'local appended = agent.append_follow_ups(function(text, kind, images)\n'
+        + '  seen = #(images or {})\n'
+        + 'end)\n'
+        + 'return tostring(ok) .. "|" .. tostring(item.images and #item.images) .. "|"\n'
+        + '  .. tostring(appended) .. "|" .. tostring(seen)'
+    )
+    assert_equals(out, "true|1|1|1", "queued image messages should preserve image blocks")
 
 
 @test("events/session_lifecycle")
@@ -2021,6 +2122,7 @@ def t_tui_key_policy(psi: Psi):
         + 'end\n'
         + 'return table.concat({\n'
         + '  fmt(tui.handle_key({key="enter", busy=false, input_length=1})),\n'
+        + '  fmt(tui.handle_key({key="enter", busy=false, input_length=0, image_count=1})),\n'
         + '  fmt(tui.handle_key({key="enter", busy=true, input_length=1})),\n'
         + '  fmt(tui.handle_key({key="shift-enter", busy=false, input_length=0})),\n'
         + '  fmt(tui.handle_key({key="ctrl-u", busy=false, input_length=0})),\n'
@@ -2035,8 +2137,123 @@ def t_tui_key_policy(psi: Psi):
         + '  fmt(tui.handle_key({key="text", text="x"}))\n'
         + '}, "|")'
     )
-    assert_equals(out, "submit:-|submit:-|insert:\\n|scroll:page-up|quit:-|nil|queue-restore:-|scroll:line-up|scroll:line-up|scroll:line-down|nil|abort:-|insert:x",
+    assert_equals(out, "submit:-|submit:-|submit:-|insert:\\n|scroll:page-up|quit:-|nil|queue-restore:-|scroll:line-up|scroll:line-up|scroll:line-down|nil|abort:-|insert:x",
                   "Lua TUI key policy")
+
+
+@test("commands/paste_image_action")
+def t_commands_paste_image_action(psi: Psi):
+    out = psi.eval(
+        'local c = require("psi.commands")\n'
+        + 'local a = c.handle("/paste-image")\n'
+        + 'local b = c.handle("/screenshot")\n'
+        + 'local d = c.handle("/attach-image /tmp/a.png")\n'
+        + 'return tostring(a and a.kind) .. "|" .. tostring(b and b.kind) .. "|"\n'
+        + '  .. tostring(d and d.kind) .. ":" .. tostring(d and d.payload)'
+    )
+    assert_equals(
+        out,
+        "paste-image|paste-image|attach-image:/tmp/a.png",
+        "/paste-image and /attach-image should route to TUI image actions",
+    )
+
+
+@test("tui/bracketed_paste_png_payload")
+def t_tui_bracketed_paste_png_payload(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local header = string.char(137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1)\n'
+        + 'local d = rt._debug_edit_keys("", 0, {{key="paste", text=header}}, false)\n'
+        + 'return tostring(d.pending_images) .. "|" .. d.input .. "|" .. tostring(d.status_text)'
+    )
+    assert_contains(out, "1||attached [Image: image/png 1x1]", "PNG paste payload should attach")
+
+
+@test("tui/bracketed_paste_image_path")
+def t_tui_bracketed_paste_image_path(psi: Psi):
+    path = psi.tmp / "pasted image.png"
+    path.write_bytes(base64.b64decode(PNG_1X1_BASE64))
+    file_uri = "file://" + str(path).replace(" ", "%20")
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local d1 = rt._debug_edit_keys("", 0, {{key="paste", text='
+        + json.dumps(str(path))
+        + '}}, false)\n'
+        + 'local d2 = rt._debug_edit_keys("", 0, {{key="paste", text='
+        + json.dumps(file_uri)
+        + '}}, false)\n'
+        + 'return tostring(d1.pending_images) .. "|" .. d1.input .. "|" .. tostring(d1.status_text)\n'
+        + '  .. "\\n" .. tostring(d2.pending_images) .. "|" .. d2.input .. "|" .. tostring(d2.status_text)'
+    )
+    assert_contains(out, "1||attached [Image: image/png 1x1]", "pasted image path should attach")
+    assert_contains(out, "\n1||attached [Image: image/png 1x1]", "pasted image file URI should attach")
+
+
+@test("tui/backspace_removes_pending_image")
+def t_tui_backspace_removes_pending_image(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local header = string.char(137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1)\n'
+        + 'local d = rt._debug_edit_keys("", 0, {{key="paste", text=header}, {key="backspace"}}, false)\n'
+        + 'return tostring(d.pending_images) .. "|" .. d.input .. "|" .. tostring(d.status_text)'
+    )
+    assert_equals(out, "0||removed image", "Backspace should remove a pending image")
+
+
+@test("mode/tui_ctrl_v_kitty_clipboard_image")
+def t_mode_tui_ctrl_v_kitty_clipboard_image(psi: Psi):
+    response = (
+        "\x1b]5522;type=read:status=OK\x1b\\"
+        "\x1b]5522;type=read:status=DATA:mime=aW1hZ2UvcG5n;"
+        + PNG_1X1_BASE64
+        + "\x1b\\"
+        "\x1b]5522;type=read:status=DONE\x1b\\"
+    ).encode()
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [(b"", 0.5), (b"\x16", 0.2), (response, 0.5), (b"/quit\r", 0.5)],
+        env_extra={"TERM": "xterm-kitty"},
+    )
+    assert_contains(
+        raw.decode("utf-8", "replace"),
+        "attached [Image: image/png 1x1]",
+        "Ctrl-V should attach Kitty OSC 5522 clipboard image",
+    )
+    assert_contains(raw.decode("latin1"), "\x1b_G", "attached image should render with Kitty graphics")
+
+
+@test("mode/tui_ctrl_v_kitty_clipboard_image_chunks")
+def t_mode_tui_ctrl_v_kitty_clipboard_image_chunks(psi: Psi):
+    decoded = base64.b64decode(PNG_1X1_BASE64) + (b"\0" * 3300)
+    payload = base64.b64encode(decoded).decode()
+    first = payload[:4096]
+    rest = payload[4096:]
+    response = (
+        "\x1b]5522;type=read:status=OK\x1b\\"
+        "\x1b]5522;type=read:status=DATA:mime=aW1hZ2UvcG5n;"
+        + first
+        + "\x1b\\"
+        "\x1b]5522;type=read:status=DATA;"
+        + rest
+        + "\x1b\\"
+        "\x1b]5522;type=read:status=DONE\x1b\\"
+    ).encode()
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [(b"", 0.5), (b"\x16", 0.2), (response, 0.5), (b"\r", 0.3), (b"/quit\r", 0.5)],
+        env_extra={"TERM": "xterm-kitty", "XDG_STATE_HOME": str(psi.tmp / "state")},
+    )
+    latest = max(
+        (psi.tmp / "state" / "psi" / "sessions").glob("*.jsonl"),
+        key=lambda p: p.stat().st_mtime,
+    )
+    text = latest.read_text()
+    assert_contains(raw.decode("utf-8", "replace"), "attached [Image: image/png 1x1]")
+    assert_contains(
+        text,
+        f'"bytes":{len(decoded)}',
+        "Kitty clipboard DATA continuations should be accumulated",
+    )
 
 
 @test("tui/ctrl_d_empty_prompt_exits")

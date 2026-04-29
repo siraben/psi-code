@@ -343,6 +343,17 @@ It is enabled by default so yanks update terminal clipboards, including tmux
 via DCS passthrough. Disable it with
 `"extensions": { "osc52_clipboard": { "enabled": false } }`.
 
+TUI image paste/rendering is controlled separately under `tui.images`.
+`tui.images.enabled`, `tui.images.paste`, `tui.images.kitty_clipboard`, and
+`tui.images.render` default to enabled when host support is present. `Ctrl-V`
+first tries Kitty OSC 5522 image clipboard reads in Kitty-compatible terminals,
+then falls back to SDL when built with `CLIPBOARD_SDL=1`. Kitty image rendering
+is used for PNG previews; set
+`"tui": { "images": { "tmux_passthrough": true } }` to wrap Kitty sequences
+for tmux passthrough when the tmux server is configured to allow it. Headless
+sessions can attach images with `/attach-image <path>` or by pasting a
+`data:image/png;base64,...` URL as the whole prompt and pressing Enter.
+
 ### Prompt templates
 
 Drop a `.md` file in any of:

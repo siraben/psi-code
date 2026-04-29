@@ -29,6 +29,7 @@ ANSI          ?= 1
 COLOR         ?= 1
 REPL_EDITLINE ?= 1
 STATIC        ?= 0
+CLIPBOARD_SDL ?= 0
 
 # Lua TUI is ANSI-terminal-only; ANSI=0 implies TUI=0.
 ifeq ($(ANSI),0)
@@ -100,13 +101,15 @@ dep_libs   = $(call pkg_libs,$(firstword $(subst :, ,$(1))),$(lastword $(subst :
 LUA_PKG_CONFIG ?= lua5.5
 PKG_DEPS  = LUA:$(LUA_PKG_CONFIG) CJSON:libcjson CURL:libcurl ZLIB:zlib
 PKG_DEPS += $(if $(filter 1,$(REPL_EDITLINE)),EDIT:libedit)
+PKG_DEPS += $(if $(filter 1,$(CLIPBOARD_SDL)),SDL3:sdl3)
 
 LOCAL_CPPFLAGS  = -Iinclude -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600 \
                   -DPSI_LUA_BOOT_FILE=\"$(LUA_BOOT_FILE)\" \
                   -DPSI_ENABLE_TUI=$(TUI) \
                   -DPSI_ENABLE_ANSI=$(ANSI) \
                   -DPSI_ENABLE_COLOR=$(COLOR) \
-                  -DPSI_ENABLE_REPL_EDITLINE=$(REPL_EDITLINE)
+                  -DPSI_ENABLE_REPL_EDITLINE=$(REPL_EDITLINE) \
+                  -DPSI_ENABLE_SDL_CLIPBOARD=$(CLIPBOARD_SDL)
 LOCAL_CPPFLAGS += $(EMBED_CA_CPPFLAGS)
 LOCAL_CPPFLAGS += $(CA_BUNDLE_CPPFLAGS)
 LOCAL_CPPFLAGS += $(foreach d,$(PKG_DEPS),$(call dep_cflags,$(d)))
@@ -187,7 +190,10 @@ install: $(TARGET)
 	cd lua && find psi -type f -name '*.lua' -exec $(INSTALL_DATA) {} '$(DESTDIR)$(SHAREDIR)'/{} \;
 
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf $(CLEAN_BUILD_DIRS)
+
+clean-all distclean:
+	rm -rf $(GENERATED_BUILD_DIRS)
 
 # ---- Lint / static analysis ----
 lint-lua:
@@ -237,4 +243,4 @@ check-build-configs:
 .PHONY: all clean install \
         lint lint-lua lint-c format format-lua format-c check-format-c \
         analyze analyze-cppcheck analyze-gcc analyze-scan-build analyze-infer \
-        check-build-configs
+        check-build-configs clean-all distclean
