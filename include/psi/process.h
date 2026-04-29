@@ -51,6 +51,22 @@ int psi_process_begin(const char *command, const struct psi_abort_signal *abort_
 int psi_process_begin_argv(char *const argv[], const struct psi_abort_signal *abort_signal,
     struct psi_process_handle **out);
 
+/* Start a process intended for stdio protocols: child stdin is a
+ * writable pipe owned by the parent, child stdout is the pollable
+ * output stream, and child stderr is kept out of the protocol stream. */
+int psi_process_begin_stdio_argv(char *const argv[], const struct psi_abort_signal *abort_signal,
+    struct psi_process_handle **out);
+
+int psi_process_write(struct psi_process_handle *h, const char *data, size_t len);
+
+int psi_process_close_stdin(struct psi_process_handle *h);
+
+/* Best-effort termination for leaked or failed protocol children.
+ * Closes child stdin and sends SIGTERM if the child has not been
+ * reaped yet. The handle is still owned by the caller and must still
+ * be passed to psi_process_finish. */
+int psi_process_terminate(struct psi_process_handle *h);
+
 /* Drain one read() worth of output.
  *
  * Returns:

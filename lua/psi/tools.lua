@@ -20,6 +20,13 @@ for _, mod in ipairs(BUILTINS) do
   require(mod)()
 end
 
+local ok_mcp, mcp = pcall(require, "psi.mcp")
+if ok_mcp and type(mcp.register_configured_servers) == "function" then
+  mcp.register_configured_servers(registry, records)
+elseif not ok_mcp then
+  io.stderr:write("psi: MCP support failed to load: " .. tostring(mcp) .. "\n")
+end
+
 M.dispatch = registry.dispatch
 M.dispatch_alist = registry.dispatch_alist
 M.select_specs = registry.select_specs

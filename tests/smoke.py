@@ -39,6 +39,15 @@ DEFAULT_PTY_ROWS = 24
 _CURRENT_TEST_ENV: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar(
     "CURRENT_TEST_ENV", default=None)
 
+MCP_AUTO_ENV = [
+    "FORGEJO_ACCESS_TOKEN",
+    "FORGEJO_URL",
+    "GITEA_ACCESS_TOKEN",
+    "GITEA_HOST",
+    "LINEAR_API_KEY",
+    "LINEAR_MCP_AUTO",
+]
+
 
 # ---------------------------------------------------------------------------
 # Test runner.
@@ -151,6 +160,8 @@ def _smoke_env(tmp: Path) -> dict[str, str]:
     env["XDG_STATE_HOME"] = str(state)
     env["XDG_CACHE_HOME"] = str(cache)
     env["PWD"] = str(ROOT)
+    for key in MCP_AUTO_ENV:
+        env[key] = ""
     return env
 
 
@@ -512,6 +523,303 @@ def t_tool_lua_eval(psi: Psi):
         'return r.extras.result'
     )
     assert_equals(out, "8", "tool count")
+
+
+@test("handles/process_stdio")
+def t_process_stdio(psi: Psi):
+    out = psi.eval(
+        "local h, err = psi.process_begin_stdio_argv({\"sh\", \"-c\", \"read line; printf 'reply:%s\\\\n' \\\"$line\\\"\"})\n"
+        'if not h then return err end\n'
+        'local ok, werr = psi.process_write(h, "hello\\n")\n'
+        'if not ok then return werr end\n'
+        'psi.process_close_stdin(h)\n'
+        'while true do\n'
+        '  local _, done = psi.process_poll(h, 50)\n'
+        '  if done then break end\n'
+        'end\n'
+        'local r = psi.process_finish(h)\n'
+        'return r.output .. "|" .. tostring(r.status)\n'
+    )
+    assert_equals(out, "reply:hello\n|0", "stdio process round trip")
+
+
+@test("handles/process_stdio_terminate")
+def t_process_stdio_terminate(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local h, err = psi.process_begin_stdio_argv({"sh", "-c", "sleep 60"})\n'
+        'if not h then return err end\n'
+        'local ok, terr = psi.process_terminate(h)\n'
+        'if not ok then return terr end\n'
+        'local r = psi.process_finish(h)\n'
+        'return tostring(r.status)\n',
+        timeout=3,
+    ).stdout.strip()
+    assert_equals(out, "130", "stdio terminate returns interrupted status")
+
+
+@test("handles/process_write_sigpipe_scoped")
+def t_process_write_sigpipe_scoped(psi: Psi):
+    marker = psi.tmp / "sigpipe-survived"
+    lua = (
+        'local h, err = psi.process_begin_stdio_argv({"sh", "-c", "exit 0"})\n'
+        'if not h then return err end\n'
+        'while true do\n'
+        '  local _, done = psi.process_poll(h, 10)\n'
+        '  if done then break end\n'
+        'end\n'
+        'psi.process_write(h, string.rep("x", 4096))\n'
+        'psi.process_finish(h)\n'
+        f'os.remove("{marker}")\n'
+        f"os.execute([[sh -c 'kill -PIPE $$; echo survived > {marker}']])\n"
+        f'local f = io.open("{marker}", "r")\n'
+        'if f then local text = f:read("*a"); f:close(); return "sigpipe-ignored:" .. text end\n'
+        'return "sigpipe-default"\n'
+    )
+    out = psi.run(
+        "--eval",
+        lua,
+        timeout=3,
+    ).stdout.strip()
+    assert_equals(out, "sigpipe-default", "process_write restores SIGPIPE disposition")
+
+
+@test("tool/mcp_stdio")
+def t_tool_mcp_stdio(psi: Psi):
+    project = psi.tmp / "mcp-project"
+    project.mkdir()
+    (project / ".psi").mkdir()
+    server = psi.tmp / "mock_mcp.py"
+    server.write_text(
+        "import json, sys\n"
+        "for line in sys.stdin:\n"
+        "    msg = json.loads(line)\n"
+        "    method = msg.get('method')\n"
+        "    if method == 'initialize':\n"
+        "        result = {\n"
+        "            'protocolVersion': msg['params']['protocolVersion'],\n"
+        "            'capabilities': {'tools': {}},\n"
+        "            'serverInfo': {'name': 'mock', 'version': '1'},\n"
+        "        }\n"
+        "    elif method == 'tools/list':\n"
+        "        result = {'tools': [{\n"
+        "            'name': 'echo',\n"
+        "            'description': 'Echo input text',\n"
+        "            'inputSchema': {'type': 'object', 'properties': {'text': {'type': 'string'}}, 'required': ['text']},\n"
+        "        }]}\n"
+        "    elif method == 'tools/call':\n"
+        "        text = msg.get('params', {}).get('arguments', {}).get('text', '')\n"
+        "        result = {'content': [{'type': 'text', 'text': 'echo:' + text}]}\n"
+        "    elif method == 'notifications/initialized':\n"
+        "        continue\n"
+        "    else:\n"
+        "        print(json.dumps({'jsonrpc': '2.0', 'id': msg.get('id'), 'error': {'code': -32601, 'message': method}}), flush=True)\n"
+        "        continue\n"
+        "    print(json.dumps({'jsonrpc': '2.0', 'id': msg['id'], 'result': result}), flush=True)\n"
+    )
+    (project / ".psi" / "settings.json").write_text(
+        json.dumps({
+            "mcp": {
+                "servers": {
+                    "echo": {
+                        "command": sys.executable,
+                        "args": [str(server)],
+                    }
+                }
+            }
+        })
+    )
+    lua = (
+        'local tools = require("psi.tools")\n'
+        'local spec = tools.find("mcp_echo_echo")\n'
+        'if not spec then return "missing" end\n'
+        'local r = tools.dispatch("mcp_echo_echo", {text = "hi"})\n'
+        'return spec.name .. "|" .. tostring(r.ok) .. "|" .. r.extras.text .. "|" .. r.extras.mcp_tool\n'
+    )
+    out = psi.run("--eval", lua, cwd=project).stdout.strip()
+    assert_equals(out, "mcp_echo_echo|true|echo:hi|echo", "MCP stdio tool registration and call")
+
+
+@test("tool/mcp_timeout_does_not_hang")
+def t_tool_mcp_timeout_does_not_hang(psi: Psi):
+    project = psi.tmp / "mcp-timeout-project"
+    project.mkdir()
+    (project / ".psi").mkdir()
+    (project / ".psi" / "settings.json").write_text(
+        json.dumps({
+            "mcp": {
+                "timeout_ms": 100,
+                "servers": {
+                    "stuck": {
+                        "command": "sh",
+                        "args": ["-c", "sleep 60"],
+                    }
+                },
+            }
+        })
+    )
+    out = psi.run(
+        "--eval",
+        'require("psi.tools"); return require("psi.mcp").status_text({tools=false})',
+        cwd=project,
+        timeout=3,
+    ).stdout
+    assert_contains(out, "- stuck [error] tools=0 source=settings", "MCP timeout status")
+    assert_contains(out, "timeout waiting for MCP initialize", "MCP timeout error")
+
+
+@test("commands/mcp_status")
+def t_commands_mcp_status(psi: Psi):
+    project = psi.tmp / "mcp-status-project"
+    project.mkdir()
+    (project / ".psi").mkdir()
+    server = psi.tmp / "mock_mcp_status.py"
+    server.write_text(
+        "import json, sys\n"
+        "for line in sys.stdin:\n"
+        "    msg = json.loads(line)\n"
+        "    method = msg.get('method')\n"
+        "    if method == 'initialize':\n"
+        "        result = {'protocolVersion': msg['params']['protocolVersion'], 'capabilities': {'tools': {}}, 'serverInfo': {'name': 'mock', 'version': '1'}}\n"
+        "    elif method == 'tools/list':\n"
+        "        result = {'tools': [{'name': 'echo', 'description': 'Echo input text', 'inputSchema': {'type': 'object'}}]}\n"
+        "    elif method == 'notifications/initialized':\n"
+        "        continue\n"
+        "    else:\n"
+        "        result = {'content': [{'type': 'text', 'text': 'ok'}]}\n"
+        "    print(json.dumps({'jsonrpc': '2.0', 'id': msg['id'], 'result': result}), flush=True)\n"
+    )
+    (project / ".psi" / "settings.json").write_text(
+        json.dumps({
+            "mcp": {
+                "servers": {
+                    "echo": {
+                        "command": sys.executable,
+                        "args": [str(server)],
+                    }
+                }
+            }
+        })
+    )
+    lua = (
+        'require("psi.tools")\n'
+        'local commands = require("psi.slash_commands")\n'
+        'local mcp = commands.handle("/mcp")\n'
+        'local status = commands.handle("/status")\n'
+        'return mcp.kind .. "\\n" .. mcp.payload .. "\\n---\\n" .. status.kind .. "\\n" .. status.payload\n'
+    )
+    out = psi.run("--eval", lua, cwd=project).stdout
+    assert_contains(out, "print\nMCP servers:", "/mcp output")
+    assert_contains(out, "- echo [ok] tools=1 source=settings", "/mcp server status")
+    assert_contains(out, "mcp_echo_echo -> echo", "/mcp tool listing")
+    assert_contains(out, "---\nprint\nid:", "/status session output")
+    assert_contains(out, "MCP servers:", "/status MCP output")
+
+
+@test("tool/mcp_forgejo_auto")
+def t_tool_mcp_forgejo_auto(psi: Psi):
+    project = psi.tmp / "mcp-forgejo-auto"
+    project.mkdir()
+    bindir = psi.tmp / "mcp-bin"
+    bindir.mkdir()
+    server = bindir / "forgejo-mcp"
+    server.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "if '--token' not in sys.argv or sys.argv[sys.argv.index('--token') + 1] != 'test-token':\n"
+        "    sys.exit(2)\n"
+        "for line in sys.stdin:\n"
+        "    msg = json.loads(line)\n"
+        "    method = msg.get('method')\n"
+        "    if method == 'initialize':\n"
+        "        result = {'protocolVersion': msg['params']['protocolVersion'], 'capabilities': {'tools': {}}, 'serverInfo': {'name': 'forgejo', 'version': 'test'}}\n"
+        "    elif method == 'tools/list':\n"
+        "        result = {'tools': [{'name': 'get_forgejo_mcp_server_version', 'description': 'Get version', 'inputSchema': {'type': 'object'}}]}\n"
+        "    elif method == 'tools/call':\n"
+        "        result = {'content': [{'type': 'text', 'text': 'auto-forgejo-ok'}]}\n"
+        "    elif method == 'notifications/initialized':\n"
+        "        continue\n"
+        "    else:\n"
+        "        result = {}\n"
+        "    print(json.dumps({'jsonrpc': '2.0', 'id': msg['id'], 'result': result}), flush=True)\n"
+    )
+    server.chmod(0o755)
+    lua = (
+        'local tools = require("psi.tools")\n'
+        'local name = "mcp_forgejo_get_forgejo_mcp_server_version"\n'
+        'local spec = tools.find(name)\n'
+        'if not spec then return "missing" end\n'
+        'local r = tools.dispatch(name, {})\n'
+        'return tostring(r.ok) .. "|" .. r.extras.text\n'
+    )
+    out = psi.run(
+        "--eval", lua, cwd=project,
+        env_extra={
+            "PATH": str(bindir) + os.pathsep + os.environ.get("PATH", ""),
+            "FORGEJO_URL": "https://forgejo.example.invalid",
+            "FORGEJO_ACCESS_TOKEN": "test-token",
+        },
+    ).stdout.strip()
+    assert_equals(out, "true|auto-forgejo-ok", "auto Forgejo MCP registration")
+
+    status = psi.run(
+        "--eval",
+        'require("psi.tools"); return require("psi.mcp").status_text({tools=true})',
+        cwd=project,
+        env_extra={
+            "PATH": str(bindir) + os.pathsep + os.environ.get("PATH", ""),
+            "FORGEJO_URL": "https://forgejo.example.invalid",
+            "FORGEJO_ACCESS_TOKEN": "test-token",
+        },
+    ).stdout.strip()
+    assert_contains(status, "--token <redacted>", "Forgejo status redacts token")
+    assert_true("test-token" not in status, "Forgejo token leaked in status")
+
+
+@test("tool/mcp_linear_auto")
+def t_tool_mcp_linear_auto(psi: Psi):
+    project = psi.tmp / "mcp-linear-auto"
+    project.mkdir()
+    bindir = psi.tmp / "linear-mcp-bin"
+    bindir.mkdir()
+    server = bindir / "linear-mcp"
+    server.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "for line in sys.stdin:\n"
+        "    msg = json.loads(line)\n"
+        "    method = msg.get('method')\n"
+        "    if method == 'initialize':\n"
+        "        result = {'protocolVersion': msg['params']['protocolVersion'], 'capabilities': {'tools': {}}, 'serverInfo': {'name': 'linear', 'version': 'test'}}\n"
+        "    elif method == 'tools/list':\n"
+        "        result = {'tools': [{'name': 'list_issues', 'description': 'List issues', 'inputSchema': {'type': 'object'}}]}\n"
+        "    elif method == 'tools/call':\n"
+        "        result = {'content': [{'type': 'text', 'text': 'auto-linear-ok'}]}\n"
+        "    elif method == 'notifications/initialized':\n"
+        "        continue\n"
+        "    else:\n"
+        "        result = {}\n"
+        "    print(json.dumps({'jsonrpc': '2.0', 'id': msg['id'], 'result': result}), flush=True)\n"
+    )
+    server.chmod(0o755)
+    lua = (
+        'local tools = require("psi.tools")\n'
+        'local name = "mcp_linear_list_issues"\n'
+        'local spec = tools.find(name)\n'
+        'if not spec then return "missing" end\n'
+        'local r = tools.dispatch(name, {})\n'
+        'return tostring(r.ok) .. "|" .. r.extras.text\n'
+    )
+    out = psi.run(
+        "--eval", lua, cwd=project,
+        env_extra={
+            "PATH": str(bindir) + os.pathsep + os.environ.get("PATH", ""),
+            "FORGEJO_URL": "",
+            "FORGEJO_ACCESS_TOKEN": "",
+            "LINEAR_API_KEY": "test-linear-token",
+        },
+    ).stdout.strip()
+    assert_equals(out, "true|auto-linear-ok", "auto Linear MCP registration")
 
 
 @test("render/tool_write_diff")

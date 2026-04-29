@@ -147,6 +147,52 @@ Current structured host tools registered in `lua/psi/tools.lua`:
 - `ls`
 - `lua`
 
+MCP stdio servers can add more tools at startup. Configure them in
+`~/.config/psi/settings.json` or `./.psi/settings.json`:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "filesystem": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+        "env": { "EXAMPLE": "value" }
+      }
+    }
+  }
+}
+```
+
+Discovered MCP tools are registered as `mcp_<server>_<tool>` and dispatched
+through the normal psi tool hook chain. The implementation is Lua-owned
+(`lua/psi/mcp.lua`) on top of a small bidirectional process primitive in C.
+Use `/mcp` to list configured MCP servers, connection state, and discovered
+tools. Use `/status` for the current session status plus MCP server status.
+
+The default Nix package wraps `psi` with `forgejo-mcp` on `PATH`. If no
+explicit server named `forgejo` exists and `FORGEJO_ACCESS_TOKEN` or
+`FORGEJO_URL` is set, psi auto-registers a Forgejo MCP server named `forgejo`:
+
+```bash
+export FORGEJO_URL=https://codeberg.org
+export FORGEJO_ACCESS_TOKEN=...
+nix run . -- --tui
+```
+
+Use `"mcp": { "auto_forgejo": false }` to disable that auto-registration.
+The default Nix package also includes a `linear-mcp` wrapper around
+`mcp-remote https://mcp.linear.app/mcp`. If no explicit server named `linear`
+exists and `LINEAR_API_KEY` or `LINEAR_MCP_AUTO` is set, psi auto-registers a
+Linear MCP server named `linear`:
+
+```bash
+export LINEAR_API_KEY=...
+nix run . -- --tui
+```
+
+Use `"mcp": { "auto_linear": false }` to disable Linear auto-registration.
+
 Tool inputs are plain Lua tables (or Lua alists when routed through the C
 glue). The bootstrap and extensions live in Lua and dispatch through
 `psi.tools.dispatch_alist` rather than a stringly JSON API.
@@ -156,7 +202,8 @@ the same time.
 
 `bash`, `grep`, `find`, and `ls` run through a small host process layer in
 `src/core/process.c` that captures output and exit status using `fork`/`exec`
-on POSIX.
+on POSIX. MCP uses the same layer's stdio variant so Lua can speak JSON-RPC
+over a long-lived child process.
 
 `--system-prompt` is the current bridge from scaffold to usable harness
 behavior. It emits the default coding-agent prompt that `psi` would hand to a
