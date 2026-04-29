@@ -459,8 +459,7 @@ local function render_text(self, width)
 
   while i <= #source_lines do
     local line = source_lines[i]
-    local table_block = not fence_state and parse_gfm_table_block(source_lines, i)
-      or nil
+    local table_block = not fence_state and parse_gfm_table_block(source_lines, i) or nil
     if table_block then
       i = table_block.next_index
       local table_width = wrap_width(width, prefix)
@@ -555,7 +554,10 @@ function M.new(opts)
 end
 
 function M.render_table(lines, width)
-  return render_table_lines(type(lines) == "table" and lines or {}, math.max(1, tonumber(width) or 1))
+  return render_table_lines(
+    type(lines) == "table" and lines or {},
+    math.max(1, tonumber(width) or 1)
+  )
 end
 
 return M
