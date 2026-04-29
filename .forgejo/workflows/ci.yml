@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+env:
+  NIX_CONFIG: |
+    experimental-features = nix-command flakes
+  LANG: C.UTF-8
+  LC_ALL: C.UTF-8
+  TERM: xterm-256color
+
+jobs:
+  style:
+    name: Style and static analysis
+    runs-on: native
+    steps:
+      - name: Checkout
+        run: |
+          token="${FORGEJO_TOKEN:-$GITHUB_TOKEN}"
+          auth_header="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
+          git init .
+          git remote add origin http://127.0.0.1:3010/siraben/psi-coding-agent
+          GIT_TERMINAL_PROMPT=0 git -c "http.extraHeader=Authorization: Basic $auth_header" fetch --quiet --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+
+      - name: Run linters
+        run: |
+          export HOME="$PWD/.home"
+          export XDG_CACHE_HOME="$PWD/.cache"
+          export CI_BUILD_DIR="/tmp/psi-ci-${GITHUB_RUN_ID:-local}-${GITHUB_JOB:-style}-${GITHUB_RUN_ATTEMPT:-1}"
+          mkdir -p "$HOME" "$XDG_CACHE_HOME"
+          rm -rf build "$CI_BUILD_DIR"
+          mkdir -p "$CI_BUILD_DIR"
+          ln -s "$CI_BUILD_DIR" build
+          nix develop --command make BUILD_DIR="$CI_BUILD_DIR" lint
+
+  feature-matrix:
+    name: Build and smoke (${{ matrix.name }})
+    runs-on: native
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: default
+            make_flags: ""
+            smoke_excludes: ""
+          - name: no-tui
+            make_flags: "TUI=0"
+            smoke_excludes: "events/tui,render/tui,tui/,mode/tui"
+          - name: no-ansi
+            make_flags: "ANSI=0"
+            smoke_excludes: "events/tui,render/tui,tui/,mode/tui,commands/rainbow,markdown/inline_code_no_backticks,theme/compound_ansi_mapping,theme/composite_ansi_remap"
+          - name: no-color
+            make_flags: "COLOR=0"
+            smoke_excludes: "commands/rainbow,mode/tui_rainbow,tui/raw_ansi_available_with_ansi,mode/tui_theme_applies_to_rendered_colors,mode/tui_input_box_background,theme/compound_ansi_mapping,theme/composite_ansi_remap"
+          - name: no-repl-editline
+            make_flags: "REPL_EDITLINE=0"
+            smoke_excludes: ""
+          - name: minimal
+            make_flags: "TUI=0 ANSI=0 COLOR=0 REPL_EDITLINE=0"
+            smoke_excludes: "events/tui,render/tui,tui/,mode/tui,commands/rainbow,markdown/inline_code_no_backticks,theme/compound_ansi_mapping,theme/composite_ansi_remap"
+    steps:
+      - name: Checkout
+        run: |
+          token="${FORGEJO_TOKEN:-$GITHUB_TOKEN}"
+          auth_header="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
+          git init .
+          git remote add origin http://127.0.0.1:3010/siraben/psi-coding-agent
+          GIT_TERMINAL_PROMPT=0 git -c "http.extraHeader=Authorization: Basic $auth_header" fetch --quiet --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+
+      - name: Build and run smoke tests
+        env:
+          MATRIX_NAME: ${{ matrix.name }}
+          MAKE_FLAGS: ${{ matrix.make_flags }}
+          SMOKE_EXCLUDES: ${{ matrix.smoke_excludes }}
+        run: |
+          export HOME="$PWD/.home"
+          export XDG_CACHE_HOME="$PWD/.cache"
+          export CI_BUILD_DIR="/tmp/psi-ci-${GITHUB_RUN_ID:-local}-${GITHUB_JOB:-feature}-${GITHUB_RUN_ATTEMPT:-1}-${MATRIX_NAME:-default}"
+          mkdir -p "$HOME" "$XDG_CACHE_HOME"
+          rm -rf build "$CI_BUILD_DIR"
+          mkdir -p "$CI_BUILD_DIR"
+          ln -s "$CI_BUILD_DIR" build
+          nix develop --command bash -euxo pipefail -c '
+            make_args=()
+            if [ -n "$MAKE_FLAGS" ]; then
+              read -r -a make_args <<< "$MAKE_FLAGS"
+            fi
+
+            smoke_args=(--psi build/psi --no-live)
+            if [ -n "$SMOKE_EXCLUDES" ]; then
+              IFS=, read -r -a excludes <<< "$SMOKE_EXCLUDES"
+              for exclude in "${excludes[@]}"; do
+                smoke_args+=(--exclude "$exclude")
+              done
+            fi
+
+            make BUILD_DIR="$CI_BUILD_DIR" "${make_args[@]}"
+            python3 tests/smoke.py "${smoke_args[@]}"
+          '
+
+  valgrind:
+    name: Valgrind
+    runs-on: native
+    steps:
+      - name: Checkout
+        run: |
+          token="${FORGEJO_TOKEN:-$GITHUB_TOKEN}"
+          auth_header="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
+          git init .
+          git remote add origin http://127.0.0.1:3010/siraben/psi-coding-agent
+          GIT_TERMINAL_PROMPT=0 git -c "http.extraHeader=Authorization: Basic $auth_header" fetch --quiet --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+
+      - name: Run memcheck harness
+        run: |
+          export HOME="$PWD/.home"
+          export XDG_CACHE_HOME="$PWD/.cache"
+          export CI_BUILD_DIR="/tmp/psi-ci-${GITHUB_RUN_ID:-local}-${GITHUB_JOB:-valgrind}-${GITHUB_RUN_ATTEMPT:-1}"
+          mkdir -p "$HOME" "$XDG_CACHE_HOME"
+          rm -rf build "$CI_BUILD_DIR"
+          mkdir -p "$CI_BUILD_DIR"
+          ln -s "$CI_BUILD_DIR" build
+          nix develop --command bash -euxo pipefail -c '
+            make BUILD_DIR="$CI_BUILD_DIR"
+            bash tests/valgrind.sh
+          '
