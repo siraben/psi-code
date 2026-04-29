@@ -1955,6 +1955,44 @@ def t_tui_renderer_cursor_marker(psi: Psi):
     assert_equals(out, "abcd|ef|1|3", "renderer strips cursor marker and reports position")
 
 
+@test("tui/renderer_full_redraw_clears_rows")
+def t_tui_renderer_full_redraw_clears_rows(psi: Psi):
+    out = psi.eval(
+        'local r = require("psi.tui_renderer")\n'
+        + 'local old_frame = psi.tui_render_frame\n'
+        + 'local old_write = psi.stdout_write\n'
+        + 'local frame\n'
+        + 'psi.tui_render_frame = function(f) frame = f end\n'
+        + 'psi.stdout_write = function() end\n'
+        + 'local renderer = r.new()\n'
+        + 'r.render(renderer, {"abcdef"}, {width=10, height=1})\n'
+        + 'r.render(renderer, {"x"}, {width=10, height=1, force_full=true})\n'
+        + 'psi.tui_render_frame = old_frame\n'
+        + 'psi.stdout_write = old_write\n'
+        + 'return tostring((frame or ""):find("\\27[2K", 1, true) ~= nil)'
+    )
+    assert_equals(out, "true", "full redraw should clear rows before shorter lines")
+
+
+@test("tui/renderer_moves_cursor_without_line_changes")
+def t_tui_renderer_moves_cursor_without_line_changes(psi: Psi):
+    out = psi.eval(
+        'local r = require("psi.tui_renderer")\n'
+        + 'local old_frame = psi.tui_render_frame\n'
+        + 'local old_write = psi.stdout_write\n'
+        + 'local writes = {}\n'
+        + 'psi.tui_render_frame = function() end\n'
+        + 'psi.stdout_write = function(text) writes[#writes + 1] = text or "" end\n'
+        + 'local renderer = r.new()\n'
+        + 'r.render(renderer, {"abc"}, {width=10, height=1, cursor_row=1, cursor_col=1, cursor_visible=true})\n'
+        + 'r.render(renderer, {"abc"}, {width=10, height=1, cursor_row=1, cursor_col=3, cursor_visible=true})\n'
+        + 'psi.tui_render_frame = old_frame\n'
+        + 'psi.stdout_write = old_write\n'
+        + 'return table.concat({renderer.last_mode, tostring(#writes), tostring((writes[1] or ""):find("\\27[1;3H", 1, true) ~= nil)}, "|")'
+    )
+    assert_equals(out, "diff|1|true", "cursor-only redraw should move hardware cursor")
+
+
 @test("tui/renderer_applies_cursor_marker_and_resets")
 def t_tui_renderer_applies_cursor_marker_and_resets(psi: Psi):
     out = psi.eval(

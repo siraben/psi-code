@@ -51,7 +51,7 @@ end
 local function absolute_frame(lines)
   local frame = {}
   for row, line in ipairs(lines) do
-    frame[#frame + 1] = CSI .. tostring(row) .. ";1H" .. line
+    frame[#frame + 1] = CSI .. tostring(row) .. ";1H" .. CSI .. "2K" .. line
   end
   return table.concat(frame)
 end
@@ -71,11 +71,13 @@ end
 
 local function write_diff(lines, first, last, cursor_row, cursor_col, cursor_visible)
   local out = { SYNC_BEGIN, HIDE_CURSOR }
-  for row = first, last do
-    out[#out + 1] = CSI .. tostring(row) .. ";1H"
-    out[#out + 1] = CSI .. "2K"
-    out[#out + 1] = lines[row] or ""
-    out[#out + 1] = RESET
+  if first ~= nil and last ~= nil then
+    for row = first, last do
+      out[#out + 1] = CSI .. tostring(row) .. ";1H"
+      out[#out + 1] = CSI .. "2K"
+      out[#out + 1] = lines[row] or ""
+      out[#out + 1] = RESET
+    end
   end
   if cursor_visible then
     out[#out + 1] = CSI .. tostring(cursor_row) .. ";" .. tostring(cursor_col) .. "H"
@@ -92,6 +94,9 @@ function M.new()
     previous_lines = {},
     previous_width = nil,
     previous_height = nil,
+    previous_cursor_row = nil,
+    previous_cursor_col = nil,
+    previous_cursor_visible = nil,
     full_redraws = 0,
     diff_redraws = 0,
     skipped_redraws = 0,
@@ -109,6 +114,9 @@ function M.reset(renderer)
   renderer.previous_lines = {}
   renderer.previous_width = nil
   renderer.previous_height = nil
+  renderer.previous_cursor_row = nil
+  renderer.previous_cursor_col = nil
+  renderer.previous_cursor_visible = nil
   renderer.last_changed_first = nil
   renderer.last_changed_last = nil
   renderer.last_mode = nil
@@ -151,7 +159,11 @@ function M.render(renderer, lines, opts)
   renderer.last_changed_first = first
   renderer.last_changed_last = last
 
-  if first == nil and reason == nil then
+  local cursor_changed = renderer.previous_cursor_row ~= cursor_row
+    or renderer.previous_cursor_col ~= cursor_col
+    or renderer.previous_cursor_visible ~= cursor_visible
+
+  if first == nil and reason == nil and not cursor_changed then
     renderer.skipped_redraws = renderer.skipped_redraws + 1
     renderer.last_mode = "skip"
     renderer.last_full_reason = nil
@@ -182,6 +194,9 @@ function M.render(renderer, lines, opts)
   renderer.previous_lines = next_lines
   renderer.previous_width = width
   renderer.previous_height = height
+  renderer.previous_cursor_row = cursor_row
+  renderer.previous_cursor_col = cursor_col
+  renderer.previous_cursor_visible = cursor_visible
   return renderer
 end
 
