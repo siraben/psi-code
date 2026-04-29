@@ -255,7 +255,7 @@ local function detect_tui_capabilities()
   local term_lower = term:lower()
   local kitty_window = os.getenv("KITTY_WINDOW_ID") or ""
   local tmux = os.getenv("TMUX") or ""
-  local kitty_clipboard_terminal = term_lower:find("kitty", 1, true) ~= nil
+  local kitty_terminal = term_lower:find("kitty", 1, true) ~= nil
     or term_lower:find("ghostty", 1, true) ~= nil
     or kitty_window ~= ""
     or (tmux ~= "" and setting_bool(SETTING_IMAGES_TMUX_PASSTHROUGH, false))
@@ -280,10 +280,12 @@ local function detect_tui_capabilities()
     ansi = ansi_ok,
     color = color_ok,
     raw_ansi = raw_ansi_ok,
-    kitty_images = info["kitty-images"] ~= false and type(psi.kitty_image_sequence) == "function",
+    kitty_images = info["kitty-images"] ~= false
+      and type(psi.kitty_image_sequence) == "function"
+      and kitty_terminal,
     kitty_clipboard = info["kitty-clipboard"] == true
       and type(psi.kitty_clipboard_read_image) == "function"
-      and kitty_clipboard_terminal,
+      and kitty_terminal,
     clipboard_images = info["clipboard-images"] == true
       and type(psi.clipboard_read_image) == "function",
     term = term,

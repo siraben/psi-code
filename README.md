@@ -121,14 +121,36 @@ disabled per build:
   screenshot paste. It defaults to `0`; the SDL-enabled binary defaults to
   `./build-sdl/psi`. Kitty image rendering and OSC 5522 image clipboard reads
   remain built in and fall back to text or SDL when disabled by settings or
-  terminal capability. Use `PSI_TUI_IMAGES=0` at runtime to disable all TUI
-  image paste/rendering for one run.
+  terminal capability.
 
 In Kitty, `Ctrl-V` in the TUI can read screenshot images from the terminal
 clipboard via OSC 5522 without server-side helper binaries. In headless
 sessions without Kitty clipboard support, use `/attach-image <path>` in the
 TUI, or paste a `data:image/png;base64,...` URL as the whole prompt and press
 Enter to convert it into an attached image.
+
+To disable TUI images for one run without rebuilding:
+
+```bash
+PSI_TUI_IMAGES=0 ./build/psi --tui
+```
+
+More targeted runtime toggles are also available:
+
+```bash
+PSI_TUI_IMAGES_PASTE=0 ./build/psi --tui
+PSI_TUI_IMAGES_RENDER=0 ./build/psi --tui
+PSI_TUI_IMAGES_KITTY_CLIPBOARD=0 ./build/psi --tui
+```
+
+These environment variables override `tui.images.*` settings. They do not
+remove image code from the binary; they just disable the TUI behavior at
+runtime. For a build without SDL clipboard integration, keep the default
+`CLIPBOARD_SDL=0` or pass it explicitly:
+
+```bash
+make CLIPBOARD_SDL=0
+```
 
 Most feature variants use separate build directories automatically where they
 need to. You can still set `BUILD_DIR` explicitly when checking variants:

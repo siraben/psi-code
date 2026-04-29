@@ -2113,6 +2113,22 @@ def t_tui_raw_ansi_available_with_ansi(psi: Psi):
     assert_equals(default_out, "true|true|true", "raw ANSI is available with ANSI terminals")
 
 
+@test("tui/kitty_images_require_kitty_terminal")
+def t_tui_kitty_images_require_kitty_terminal(psi: Psi):
+    expr = (
+        'local caps = require("psi.tui_runtime")._debug_tui_capabilities()\n'
+        + 'return tostring(caps.kitty_images)'
+    )
+    xterm = psi.run(
+        "--eval",
+        expr,
+        env_extra={"TERM": "xterm-256color", "TMUX": "", "KITTY_WINDOW_ID": ""},
+    ).stdout.strip()
+    kitty = psi.run("--eval", expr, env_extra={"TERM": "xterm-kitty"}).stdout.strip()
+    assert_equals(xterm, "false", "non-Kitty terminals should not enable Kitty images")
+    assert_equals(kitty, "true", "Kitty-compatible terminals should enable Kitty images")
+
+
 @test("tui/sanitizes_untrusted_terminal_sequences")
 def t_tui_sanitizes_untrusted_terminal_sequences(psi: Psi):
     out = psi.eval(
