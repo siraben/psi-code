@@ -235,6 +235,17 @@ local function env_bool(name)
 end
 
 local function setting_bool(name, default)
+  if name == SETTING_IMAGES_ENABLED then
+    local enabled = env_bool("PSI_TUI_IMAGES")
+    if enabled ~= nil then
+      return enabled
+    end
+  end
+  local env_name = "PSI_" .. tostring(name):upper():gsub("[^A-Z0-9]+", "_")
+  local env_value = env_bool(env_name)
+  if env_value ~= nil then
+    return env_value
+  end
   return settings.get(name, default) ~= false
 end
 
@@ -2294,6 +2305,13 @@ local function attach_image_bytes(state, bytes)
   local image = psi.image_from_bytes(bytes)
   if type(image) ~= "table" then
     return false
+  end
+  if
+    not setting_bool(SETTING_IMAGES_ENABLED, true) or not setting_bool(SETTING_IMAGES_PASTE, true)
+  then
+    set_status(state, "image paste is disabled", true)
+    state.dirty = true
+    return true
   end
   add_pending_image(state, image)
   add_image_debug(state, "raw pasted bytes", image, "attached to prompt")

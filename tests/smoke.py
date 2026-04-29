@@ -452,6 +452,33 @@ def t_images_tui_failure_debug_shows_provider(psi: Psi):
     assert_contains(out, "base64_len=4", "image failure debug should summarize image data")
 
 
+@test("images/env_disables_tui_images")
+def t_images_env_disables_tui_images(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local header = string.char(137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1)\n'
+        + 'local d = rt._debug_edit_keys("", 0, {{key="paste", text=header}}, false)\n'
+        + 'return tostring(d.pending_images) .. "|" .. d.input .. "|" .. tostring(d.status_text)',
+        env_extra={"PSI_TUI_IMAGES": "0"},
+    ).stdout.strip()
+    assert_equals(out, "0||image paste is disabled", "PSI_TUI_IMAGES=0 should disable image paste")
+
+
+@test("images/env_disables_tui_image_paste")
+def t_images_env_disables_tui_image_paste(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local header = string.char(137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1)\n'
+        + 'local d = rt._debug_edit_keys("", 0, {{key="paste", text=header}}, false)\n'
+        + 'return tostring(d.pending_images) .. "|" .. d.input .. "|" .. tostring(d.status_text)',
+        env_extra={"PSI_TUI_IMAGES_PASTE": "0"},
+    ).stdout.strip()
+    assert_equals(out, "0||image paste is disabled",
+                  "PSI_TUI_IMAGES_PASTE=0 should disable image paste")
+
+
 @test("images/ollama_message_images")
 def t_images_ollama_message_images(psi: Psi):
     out = psi.eval(

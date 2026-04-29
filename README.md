@@ -121,7 +121,8 @@ disabled per build:
   screenshot paste. It defaults to `0`; the SDL-enabled binary defaults to
   `./build-sdl/psi`. Kitty image rendering and OSC 5522 image clipboard reads
   remain built in and fall back to text or SDL when disabled by settings or
-  terminal capability.
+  terminal capability. Use `PSI_TUI_IMAGES=0` at runtime to disable all TUI
+  image paste/rendering for one run.
 
 In Kitty, `Ctrl-V` in the TUI can read screenshot images from the terminal
 clipboard via OSC 5522 without server-side helper binaries. In headless

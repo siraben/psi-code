@@ -352,7 +352,10 @@ is used for PNG previews; set
 `"tui": { "images": { "tmux_passthrough": true } }` to wrap Kitty sequences
 for tmux passthrough when the tmux server is configured to allow it. Headless
 sessions can attach images with `/attach-image <path>` or by pasting a
-`data:image/png;base64,...` URL as the whole prompt and pressing Enter.
+`data:image/png;base64,...` URL as the whole prompt and pressing Enter. Set
+`PSI_TUI_IMAGES=0` to disable all TUI image paste/rendering for one run, or use
+path-specific environment overrides such as `PSI_TUI_IMAGES_RENDER=0`,
+`PSI_TUI_IMAGES_PASTE=0`, and `PSI_TUI_IMAGES_KITTY_CLIPBOARD=0`.
 
 ### Prompt templates
 
