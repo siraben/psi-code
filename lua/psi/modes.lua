@@ -294,6 +294,23 @@ local function handle_slash_command(opts, line)
     end
     return true, false
   end
+  if kind == "ralph" then
+    local prompt_text, err = require("psi.ralph").start_prompt(action.payload or "")
+    if not prompt_text then
+      io.stderr:write("ralph failed: " .. tostring(err) .. "\n")
+      return true, false
+    end
+    print("> " .. prompt_text)
+    local ok = run_agent_turn(opts, prompt_text)
+    if ok and opts.session_file and opts.session_file ~= "" then
+      local saved, save_err = session.save()
+      if not saved then
+        io.stderr:write("failed to save session file: " .. tostring(save_err) .. "\n")
+        return false, false
+      end
+    end
+    return true, false
+  end
   io.stderr:write("unknown command\n")
   return true, false
 end

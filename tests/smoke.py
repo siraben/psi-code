@@ -383,13 +383,13 @@ def t_tool_lua_summary(psi: Psi):
 
 @test("tool/lua_eval")
 def t_tool_lua_eval(psi: Psi):
-    # 8 tools registered today (read/write/edit/bash/grep/find/ls/lua).
+    # 9 tools registered today (read/write/edit/bash/grep/find/ls/lua/ralph_state).
     out = psi.eval(
         'local r = require("psi.tools").dispatch("lua", '
         '{mode="eval", expression="#require(\\"psi.tools\\").all()"})\n'
         'return r.extras.result'
     )
-    assert_equals(out, "8", "tool count")
+    assert_equals(out, "9", "tool count")
 
 
 @test("render/tool_write_diff")
@@ -578,6 +578,86 @@ def t_commands_help_generated(psi: Psi):
     assert_contains(out, "/greet <name>", "extension argument hint")
     assert_contains(out, "Say hello", "extension description")
     assert_contains(out, "/btw <question>", "packaged /btw extension help")
+
+
+@test("commands/ralph_action")
+def t_commands_ralph_action(psi: Psi):
+    out = psi.eval(
+        'local action = require("psi.commands").handle("/ralph fix the bug")\n'
+        + 'return action.kind .. "|" .. action.payload'
+    )
+    assert_equals(out, "ralph|fix the bug", "ralph command action")
+
+
+@test("ralph/state_and_tool")
+def t_ralph_state_and_tool(psi: Psi):
+    cwd = psi.tmp / "ralph-state"
+    cwd.mkdir(exist_ok=True)
+    out = psi.run(
+        "--eval",
+        'local ralph = require("psi.ralph")\n'
+        + 'local prompt = ralph.start_prompt("ship the fix", { max_iterations = 3 })\n'
+        + 'local tool = require("psi.tools").dispatch("ralph_state", {\n'
+        + '  action = "complete", evidence = "test passed"\n'
+        + '})\n'
+        + 'local state = ralph.read()\n'
+        + 'return tostring(prompt:find("ship the fix") ~= nil) .. "|"\n'
+        + '  .. tostring(tool.ok) .. "|"\n'
+        + '  .. tostring(state.active) .. "|"\n'
+        + '  .. tostring(state.current_phase) .. "|"\n'
+        + '  .. tostring(state.evidence[1].text)',
+        cwd=cwd,
+    ).stdout.strip()
+    assert_equals(out, "true|true|false|complete|test passed",
+                  "ralph state tool should terminalize with evidence")
+
+
+@test("ralph/direct_state_write")
+def t_ralph_direct_state_write(psi: Psi):
+    cwd = psi.tmp / "ralph-direct-state"
+    cwd.mkdir(exist_ok=True)
+    out = psi.run(
+        "--eval",
+        'local ralph = require("psi.ralph")\n'
+        + 'ralph.start("ship direct state", { max_iterations = 3 })\n'
+        + 'local tools = require("psi.tools")\n'
+        + 'local phase = tools.dispatch("ralph_state", { current_phase = "verifying" })\n'
+        + 'local done = tools.dispatch("ralph_state", {\n'
+        + '  mode = "ralph", active = false, current_phase = "complete", evidence = "build passed"\n'
+        + '})\n'
+        + 'local state = ralph.read()\n'
+        + 'return tostring(phase.ok) .. "|"\n'
+        + '  .. tostring(done.ok) .. "|"\n'
+        + '  .. tostring(state.active) .. "|"\n'
+        + '  .. tostring(state.current_phase) .. "|"\n'
+        + '  .. tostring(state.evidence[1].text)',
+        cwd=cwd,
+    ).stdout.strip()
+    assert_equals(out, "true|true|false|complete|build passed",
+                  "ralph_state should accept oh-my-codex direct state_write shape")
+
+
+@test("ralph/follow_up_queue")
+def t_ralph_follow_up_queue(psi: Psi):
+    cwd = psi.tmp / "ralph-follow-up"
+    cwd.mkdir(exist_ok=True)
+    out = psi.run(
+        "--eval",
+        'local agent = require("psi.agent")\n'
+        + 'local ralph = require("psi.ralph")\n'
+        + 'agent.clear_queues()\n'
+        + 'ralph.start("finish it", { max_iterations = 3 })\n'
+        + 'local queued = ralph.queue_follow_up_if_active("not done yet")\n'
+        + 'local item = agent.drain_follow_ups()[1]\n'
+        + 'local state = ralph.read()\n'
+        + 'return tostring(queued) .. "|"\n'
+        + '  .. tostring(item:find("Ralph loop active continue") ~= nil) .. "|"\n'
+        + '  .. tostring(state.iteration) .. "|"\n'
+        + '  .. tostring(state.current_phase)',
+        cwd=cwd,
+    ).stdout.strip()
+    assert_equals(out, "true|true|1|executing",
+                  "active Ralph should queue a follow-up and advance state")
 
 
 @test("commands/queue_management")

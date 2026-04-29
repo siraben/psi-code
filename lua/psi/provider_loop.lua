@@ -58,6 +58,16 @@ local function emit_turn_end(text, model)
   end
 end
 
+local function maybe_queue_ralph_follow_up(text)
+  if control.pending_count() ~= 0 then
+    return
+  end
+  local ok, ralph = pcall(require, "psi.ralph")
+  if ok and ralph and ralph.queue_follow_up_if_active then
+    ralph.queue_follow_up_if_active(text)
+  end
+end
+
 local function queued_user_observer(observer, kind)
   return function(text)
     if observer.on_queued_user then
@@ -296,6 +306,7 @@ function M.run_turn(opts, cfg)
     local text = cfg.text(state)
     if #tool_calls == 0 then
       cfg.after_iteration(model, opts)
+      maybe_queue_ralph_follow_up(text)
       if control.append_follow_ups(queued_user_observer(observer, "follow-up")) == 0 then
         emit_turn_end(text, model)
         return true, text
@@ -307,6 +318,7 @@ function M.run_turn(opts, cfg)
       end
       cfg.after_iteration(model, opts)
       if transform.all_results_terminate(results) then
+        maybe_queue_ralph_follow_up(text)
         if control.append_follow_ups(queued_user_observer(observer, "follow-up")) == 0 then
           emit_turn_end(text, model)
           return true, text

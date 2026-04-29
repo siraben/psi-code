@@ -2207,6 +2207,15 @@ local function handle_command(state, line)
     return false, action.payload or ""
   end
 
+  if action.kind == "ralph" then
+    local prompt_text, err = require("psi.ralph").start_prompt(action.payload or "")
+    if not prompt_text then
+      set_status(state, "ralph failed: " .. tostring(err), true)
+      return true
+    end
+    return false, prompt_text
+  end
+
   if action.kind == "quit" then
     state.running = false
     return true

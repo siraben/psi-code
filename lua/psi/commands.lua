@@ -575,6 +575,19 @@ local BUILTIN_COMMANDS = {
     description = "Summarize older context, keeping recent messages",
   },
   {
+    name = "ralph",
+    argument_hint = "<task>",
+    description = "Run a persistent completion and verification loop",
+  },
+  {
+    name = "ralph-status",
+    description = "Show Ralph loop state",
+  },
+  {
+    name = "ralph-stop",
+    description = "Stop the active Ralph loop",
+  },
+  {
     name = "fork",
     argument_hint = "[N]",
     description = "Save the first N entries to a new session file",
@@ -840,6 +853,20 @@ function M.handle(line)
   end
   if starts_word(line, "/compact") then
     return records.new_command_action("compact", parse_compact_count(line))
+  end
+  if starts_word(line, "/ralph") then
+    local task = arg_after(line, "/ralph")
+    if task == "" then
+      return records.new_command_action("print", "usage: /ralph <task>")
+    end
+    return records.new_command_action("ralph", task)
+  end
+  if line == "/ralph-status" then
+    return records.new_command_action("print", require("psi.ralph").status_text())
+  end
+  if line == "/ralph-stop" then
+    local ok, err = require("psi.ralph").stop("stopped_by_user", "cancelled")
+    return records.new_command_action("print", ok and "ralph stopped" or ("ralph stop failed: " .. tostring(err)))
   end
   if starts_word(line, "/fork") then
     local keep = parse_fork_count(line)

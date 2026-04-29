@@ -14,6 +14,7 @@ local BUILTINS = {
   "psi.tools.find",
   "psi.tools.ls",
   "psi.tools.lua",
+  "psi.tools.ralph_state",
 }
 
 for _, mod in ipairs(BUILTINS) do
