@@ -6,6 +6,10 @@ SHAREDIR = $(PREFIX)/share/psi
 CC ?= cc
 HOST_CC ?= $(CC)
 PKG_CONFIG ?= pkg-config
+INSTALL ?= install
+INSTALL_PROGRAM ?= $(INSTALL) -m 755
+INSTALL_DATA ?= $(INSTALL) -m 644
+INSTALL_DIR ?= $(INSTALL) -d
 # embed_lua links zlib at host build time. On a native build it shares
 # pkg-config with the target; on cross builds the caller must override
 # HOST_CFLAGS_ZLIB / HOST_LIBS_ZLIB (or HOST_PKG_CONFIG) so the host
@@ -215,11 +219,12 @@ $(BUILD_DIR)/vm.o: src/lua/vm.c include/psi/common.h include/psi/embedded_lua.h 
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
 install: $(TARGET)
-	mkdir -p $(DESTDIR)$(BINDIR) $(DESTDIR)$(INCLUDEDIR)/psi $(DESTDIR)$(SHAREDIR)/psi
-	cp $(TARGET) $(DESTDIR)$(BINDIR)/psi
-	cp include/psi/*.h $(DESTDIR)$(INCLUDEDIR)/psi/
-	cp lua/boot.lua $(DESTDIR)$(SHAREDIR)/boot.lua
-	cp -R lua/psi/. $(DESTDIR)$(SHAREDIR)/psi/
+	$(INSTALL_DIR) $(DESTDIR)$(BINDIR) $(DESTDIR)$(INCLUDEDIR)/psi $(DESTDIR)$(SHAREDIR)/psi
+	$(INSTALL_PROGRAM) $(TARGET) $(DESTDIR)$(BINDIR)/psi
+	$(INSTALL_DATA) include/psi/*.h $(DESTDIR)$(INCLUDEDIR)/psi/
+	$(INSTALL_DATA) lua/boot.lua $(DESTDIR)$(SHAREDIR)/boot.lua
+	cd lua && find psi -type d -exec $(INSTALL_DIR) '$(DESTDIR)$(SHAREDIR)'/{} \;
+	cd lua && find psi -type f -name '*.lua' -exec $(INSTALL_DATA) {} '$(DESTDIR)$(SHAREDIR)'/{} \;
 
 clean:
 	rm -rf $(BUILD_DIR)
