@@ -5,6 +5,7 @@
 -- state through the ralph_state tool or a local cancel path.
 
 local prelude = require("psi.prelude")
+local session = require("psi.session")
 
 local M = {}
 
@@ -27,12 +28,40 @@ local function now()
   return prelude.iso_timestamp()
 end
 
+local function current_session_id()
+  session.ensure_id()
+  return psi.session_id() or ""
+end
+
+local function path_safe_id(id)
+  id = tostring(id or "")
+  id = id:gsub("[^A-Za-z0-9_.-]", "_")
+  if id == "" then
+    return "unknown"
+  end
+  return id
+end
+
 local function state_path()
-  return prelude.path_join(psi.cwd() or ".", ".psi/ralph-state.json")
+  return prelude.path_join(
+    prelude.path_join(prelude.path_join(psi.cwd() or ".", ".psi"), "ralph"),
+    path_safe_id(current_session_id()) .. ".json"
+  )
 end
 
 function M.state_path()
   return state_path()
+end
+
+local function owns_state(state)
+  return type(state) == "table"
+    and type(state.session_id) == "string"
+    and state.session_id ~= ""
+    and state.session_id == current_session_id()
+end
+
+function M.owns_state(state)
+  return owns_state(state)
 end
 
 local function normalize_phase(phase)
@@ -106,6 +135,10 @@ function M.write(state)
   if not state then
     return false, "invalid ralph state"
   end
+  state.session_id = state.session_id or current_session_id()
+  if not owns_state(state) then
+    return false, "ralph belongs to another session"
+  end
   state.updated_at = now()
   local path = state_path()
   if not psi.mkdir_parent(path) then
@@ -121,6 +154,7 @@ end
 function M.is_active(state)
   state = state or M.read()
   return type(state) == "table"
+    and owns_state(state)
     and state.active == true
     and ACTIVE_PHASES[state.current_phase] == true
 end
@@ -138,11 +172,11 @@ function M.update(fields)
   if not state then
     return false, "ralph is not active"
   end
-  fields = fields or {}
-  local phase = normalize_phase(fields.current_phase or fields.phase)
-  if phase and ACTIVE_PHASES[phase] and not M.is_active(state) then
+  if not M.is_active(state) then
     return false, "ralph is not active"
   end
+  fields = fields or {}
+  local phase = normalize_phase(fields.current_phase or fields.phase)
   if phase then
     state.current_phase = phase
     state.active = not TERMINAL_PHASES[phase]
@@ -178,7 +212,7 @@ function M.start(task, opts)
     current_phase = "starting",
     task_description = task,
     started_at = now(),
-    session_id = psi.session_id() or "",
+    session_id = current_session_id(),
     evidence = {},
   }
   local ok, written = M.write(state)
@@ -192,6 +226,9 @@ function M.stop(reason, phase)
   local state = M.read()
   if not state then
     return false, "ralph is not active"
+  end
+  if not owns_state(state) then
+    return false, "ralph belongs to another session"
   end
   state.active = false
   state.current_phase = normalize_phase(phase) or "cancelled"

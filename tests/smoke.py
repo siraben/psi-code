@@ -703,6 +703,30 @@ def t_ralph_cancelled_run_cannot_reactivate(psi: Psi):
                   "late phase updates should not reactivate a cancelled Ralph run")
 
 
+@test("ralph/cancelled_run_cannot_be_completed_late")
+def t_ralph_cancelled_run_cannot_be_completed_late(psi: Psi):
+    cwd = psi.tmp / "ralph-cancelled-complete-late"
+    cwd.mkdir(exist_ok=True)
+    out = psi.run(
+        "--eval",
+        'local ralph = require("psi.ralph")\n'
+        + 'ralph.start("keep cancelled", { max_iterations = 3 })\n'
+        + 'ralph.stop("stopped_by_user", "cancelled")\n'
+        + 'local tool = require("psi.tools").dispatch("ralph_state", {\n'
+        + '  action = "complete", evidence = "late verification"\n'
+        + '})\n'
+        + 'local state = ralph.read()\n'
+        + 'return tostring(tool.ok) .. "|"\n'
+        + '  .. tostring(tool.error) .. "|"\n'
+        + '  .. tostring(state.active) .. "|"\n'
+        + '  .. tostring(state.current_phase) .. "|"\n'
+        + '  .. tostring(state.stop_reason)',
+        cwd=cwd,
+    ).stdout.strip()
+    assert_equals(out, "false|ralph is not active|false|cancelled|stopped_by_user",
+                  "late terminal updates should not overwrite a cancelled Ralph run")
+
+
 @test("ralph/direct_write_cannot_reactivate_cancelled_run")
 def t_ralph_direct_write_cannot_reactivate_cancelled_run(psi: Psi):
     cwd = psi.tmp / "ralph-direct-cancelled-reactivate"
@@ -725,6 +749,45 @@ def t_ralph_direct_write_cannot_reactivate_cancelled_run(psi: Psi):
     ).stdout.strip()
     assert_equals(out, "false|ralph is not active|false|cancelled|stopped_by_user",
                   "direct writes should not reactivate a cancelled Ralph run")
+
+
+@test("ralph/state_is_session_scoped")
+def t_ralph_state_is_session_scoped(psi: Psi):
+    cwd = psi.tmp / "ralph-session-scope"
+    cwd.mkdir(exist_ok=True)
+    out = psi.run(
+        "--eval",
+        'local agent = require("psi.agent")\n'
+        + 'local ralph = require("psi.ralph")\n'
+        + 'agent.clear_queues()\n'
+        + 'psi.session_set_id("session-a")\n'
+        + 'ralph.start("owned task", { max_iterations = 3 })\n'
+        + 'local path_a = ralph.state_path()\n'
+        + 'psi.session_set_id("session-b")\n'
+        + 'local path_b = ralph.state_path()\n'
+        + 'local read_b = ralph.read()\n'
+        + 'local active_b = ralph.is_active()\n'
+        + 'local queued_b = ralph.queue_follow_up_if_active("foreign turn")\n'
+        + 'local stop_b, err_b = ralph.stop("foreign stop", "cancelled")\n'
+        + 'local pending_b = agent.pending_message_count()\n'
+        + 'psi.session_set_id("session-a")\n'
+        + 'local state_a = ralph.read()\n'
+        + 'return table.concat({\n'
+        + '  tostring(path_a ~= path_b),\n'
+        + '  tostring(read_b == nil),\n'
+        + '  tostring(active_b),\n'
+        + '  tostring(queued_b),\n'
+        + '  tostring(pending_b),\n'
+        + '  tostring(stop_b),\n'
+        + '  tostring(err_b),\n'
+        + '  tostring(state_a.active),\n'
+        + '  tostring(state_a.current_phase),\n'
+        + '  tostring(state_a.session_id)\n'
+        + '}, "|")',
+        cwd=cwd,
+    ).stdout.strip()
+    assert_equals(out, "true|true|false|false|0|false|ralph is not active|true|starting|session-a",
+                  "Ralph state and follow-ups should be scoped to the owning session")
 
 
 @test("ralph/follow_up_queue")
