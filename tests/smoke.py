@@ -703,6 +703,30 @@ def t_ralph_cancelled_run_cannot_reactivate(psi: Psi):
                   "late phase updates should not reactivate a cancelled Ralph run")
 
 
+@test("ralph/direct_write_cannot_reactivate_cancelled_run")
+def t_ralph_direct_write_cannot_reactivate_cancelled_run(psi: Psi):
+    cwd = psi.tmp / "ralph-direct-cancelled-reactivate"
+    cwd.mkdir(exist_ok=True)
+    out = psi.run(
+        "--eval",
+        'local ralph = require("psi.ralph")\n'
+        + 'ralph.start("keep stopped", { max_iterations = 3 })\n'
+        + 'ralph.stop("stopped_by_user", "cancelled")\n'
+        + 'local tool = require("psi.tools").dispatch("ralph_state", {\n'
+        + '  active = true, current_phase = "executing"\n'
+        + '})\n'
+        + 'local state = ralph.read()\n'
+        + 'return tostring(tool.ok) .. "|"\n'
+        + '  .. tostring(tool.error) .. "|"\n'
+        + '  .. tostring(state.active) .. "|"\n'
+        + '  .. tostring(state.current_phase) .. "|"\n'
+        + '  .. tostring(state.stop_reason)',
+        cwd=cwd,
+    ).stdout.strip()
+    assert_equals(out, "false|ralph is not active|false|cancelled|stopped_by_user",
+                  "direct writes should not reactivate a cancelled Ralph run")
+
+
 @test("ralph/follow_up_queue")
 def t_ralph_follow_up_queue(psi: Psi):
     cwd = psi.tmp / "ralph-follow-up"

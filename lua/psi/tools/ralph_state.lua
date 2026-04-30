@@ -31,6 +31,9 @@ local function direct_state_write(input)
   if not state then
     return records.tool_failure("ralph_state", "ralph is not active")
   end
+  if not ralph.is_active(state) then
+    return records.tool_failure("ralph_state", "ralph is not active")
+  end
 
   for _, key in ipairs({
     "active",
