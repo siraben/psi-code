@@ -679,6 +679,31 @@ def t_ralph_direct_complete_requires_evidence(psi: Psi):
                   "direct complete writes should require verification evidence")
 
 
+@test("ralph/direct_inactive_requires_terminal_phase")
+def t_ralph_direct_inactive_requires_terminal_phase(psi: Psi):
+    cwd = psi.tmp / "ralph-inactive-terminal-phase"
+    cwd.mkdir(exist_ok=True)
+    out = psi.run(
+        "--eval",
+        'local ralph = require("psi.ralph")\n'
+        + 'ralph.start("ship terminal phase", { max_iterations = 3 })\n'
+        + 'local tool = require("psi.tools").dispatch("ralph_state", {\n'
+        + '  active = false\n'
+        + '})\n'
+        + 'local state = ralph.read()\n'
+        + 'return tostring(tool.ok) .. "|"\n'
+        + '  .. tostring(tool.error) .. "|"\n'
+        + '  .. tostring(state.active) .. "|"\n'
+        + '  .. tostring(state.current_phase)',
+        cwd=cwd,
+    ).stdout.strip()
+    assert_equals(
+        out,
+        "false|active=false requires terminal current_phase: complete, failed, or cancelled|true|starting",
+        "direct inactive writes should require a terminal phase",
+    )
+
+
 @test("ralph/cancelled_run_cannot_reactivate")
 def t_ralph_cancelled_run_cannot_reactivate(psi: Psi):
     cwd = psi.tmp / "ralph-cancelled-reactivate"
@@ -725,6 +750,31 @@ def t_ralph_cancelled_run_cannot_be_completed_late(psi: Psi):
     ).stdout.strip()
     assert_equals(out, "false|ralph is not active|false|cancelled|stopped_by_user",
                   "late terminal updates should not overwrite a cancelled Ralph run")
+
+
+@test("ralph/stop_preserves_completed_state")
+def t_ralph_stop_preserves_completed_state(psi: Psi):
+    cwd = psi.tmp / "ralph-stop-preserve-complete"
+    cwd.mkdir(exist_ok=True)
+    out = psi.run(
+        "--eval",
+        'local ralph = require("psi.ralph")\n'
+        + 'ralph.start("preserve completion", { max_iterations = 3 })\n'
+        + 'local done = require("psi.tools").dispatch("ralph_state", {\n'
+        + '  active = false, current_phase = "complete", evidence = "tests passed"\n'
+        + '})\n'
+        + 'local stopped, err = ralph.stop("late stop", "cancelled")\n'
+        + 'local state = ralph.read()\n'
+        + 'return tostring(done.ok) .. "|"\n'
+        + '  .. tostring(stopped) .. "|"\n'
+        + '  .. tostring(err) .. "|"\n'
+        + '  .. tostring(state.active) .. "|"\n'
+        + '  .. tostring(state.current_phase) .. "|"\n'
+        + '  .. tostring(state.evidence[1].text)',
+        cwd=cwd,
+    ).stdout.strip()
+    assert_equals(out, "true|false|ralph is not active|false|complete|tests passed",
+                  "ralph.stop should not overwrite an already completed run")
 
 
 @test("ralph/direct_write_cannot_reactivate_cancelled_run")

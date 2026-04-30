@@ -8,6 +8,7 @@ result-*
 # ANTHROPIC_API_KEY; keep it out of commits by default.
 .env.local
 .env
+.psi/
 apr*.jsonl
 pi-mono/
 

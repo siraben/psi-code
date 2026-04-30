@@ -67,7 +67,15 @@ local function direct_state_write(input)
     }
   end
 
-  if ralph.normalize_phase(state.current_phase) == "complete" and not has_evidence(state) then
+  local phase = ralph.normalize_phase(state.current_phase)
+  if state.active == false and not ralph.phase_is_terminal(phase) then
+    return records.tool_failure(
+      "ralph_state",
+      "active=false requires terminal current_phase: complete, failed, or cancelled"
+    )
+  end
+
+  if phase == "complete" and not has_evidence(state) then
     return records.tool_failure("ralph_state", "complete requires evidence")
   end
 

@@ -230,6 +230,9 @@ function M.stop(reason, phase)
   if not owns_state(state) then
     return false, "ralph belongs to another session"
   end
+  if not M.is_active(state) then
+    return false, "ralph is not active"
+  end
   state.active = false
   state.current_phase = normalize_phase(phase) or "cancelled"
   if not TERMINAL_PHASES[state.current_phase] then
