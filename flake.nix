@@ -259,43 +259,146 @@
         packages.psi-cosmocc-hello-fat =
           cosmoBase.pkgsCosmoFat.callPackage ./nix/cosmocc.nix {};
 
-        # Real psi build via the cosmocc cross stdenv. TUI / libedit
-        # are compiled out (cosmopolitan can't satisfy ncurses and
-        # libedit's static termios init), curl is statically linked
-        # for HTTPS, and the binary is a static APE.
+        # Real psi build via the cosmocc cross stdenv. Both single-arch
+        # and fat APE go through the same recipe with the same set of
+        # cosmocc-specific overrides:
         #
-        # cosmopkgs's cross overlays apply `staticOnly = true` to
-        # `lua` but not the `lua5_4` attribute, so we re-apply it
-        # here. cosmocc only supports static linkage, and lua's
-        # default Makefile builds liblua.so unless told otherwise.
+        # - lua5_4 forced to staticOnly (cosmocc only links static; the
+        #   default Makefile builds liblua.so).
+        # - mbedtls hardened-protector disabled (cosmocc-aarch64 has no
+        #   __stack_chk_guard, so anything with -fstack-protector fails
+        #   the link), plus -Wno-error so cosmopolitan's pthread_mutex_t
+        #   _futex-field mismatch warning isn't fatal.
+        # - curl built with mbedtls (not openssl — openssl's fat-arch
+        #   build trips a -Werror on cosmocc-fat that we can't suppress
+        #   through configureFlags / NIX_CFLAGS).
+        # - cjson with stackprotector hardening off and ENABLE_CUSTOM_
+        #   COMPILER_FLAGS=OFF (cjson's CMakeLists adds its own
+        #   -fstack-protector when ENABLE_CUSTOM_COMPILER_FLAGS=ON).
+        # - libedit / ncurses both skipped — cosmopolitan resolves
+        #   termios constants at run time, breaking libedit's static
+        #   `ttymodes[]` initializer.
         packages.psi-cosmocc =
-          cosmoBase.pkgsCosmo.callPackage ./nix/psi-cosmocc.nix {
-            lua5_4 = cosmoBase.pkgsCosmo.lua5_4.override {
-              staticOnly = true;
-            };
-            buildCC = pkgs.stdenv.cc;
-            buildZlib = pkgs.zlib;
-          };
-
-        packages.psi-cosmocc-fat =
-          cosmoBase.pkgsCosmoFat.callPackage ./nix/psi-cosmocc.nix {
-            lua5_4 = cosmoBase.pkgsCosmoFat.lua5_4.override {
-              staticOnly = true;
-            };
-            # cosmocc-aarch64's runtime doesn't provide
-            # __stack_chk_guard. Disable both the nixpkgs hardening
-            # arm AND cjson's own CMakeLists "custom compiler flags"
-            # arm (which independently adds -fstack-protector for
-            # gcc builds). Skip the test suite too — it's built as
-            # part of `make all`.
-            cjson = cosmoBase.pkgsCosmoFat.cjson.overrideAttrs (old: {
-              hardeningDisable = (old.hardeningDisable or [])
-                ++ [ "stackprotector" ];
+          let
+            p = cosmoBase.pkgsCosmo;
+            # nixpkgs mbedtls's postConfigure invokes a perl script
+            # (`scripts/config.pl`) that's not present in mbedtls 3.x
+            # (replaced by `scripts/config.py`). Substitute the call.
+            mbedtlsPatched = p.mbedtls.overrideAttrs (old: {
+              hardeningDisable = (old.hardeningDisable or []) ++ [ "all" ];
+              env = (old.env or {}) // {
+                NIX_CFLAGS_COMPILE =
+                  (old.env.NIX_CFLAGS_COMPILE or "") + " -Wno-error";
+              };
+              # cosmocc can only emit static — disable the shared
+              # mbedtls library that nixpkgs's mbedtls/generic.nix
+              # turns on by default for non-pkgsStatic hosts.
+              cmakeFlags = (old.cmakeFlags or []) ++ [
+                "-DCMAKE_C_FLAGS=-Wno-error"
+                "-DENABLE_TESTING=OFF"
+                "-DENABLE_PROGRAMS=OFF"
+                "-DUSE_SHARED_MBEDTLS_LIBRARY=OFF"
+                "-DUSE_STATIC_MBEDTLS_LIBRARY=ON"
+              ];
+              # nixpkgs mbedtls's generic.nix postConfigure invokes
+              # `perl scripts/config.pl` which doesn't exist in
+              # mbedtls 3.6.x (replaced by config.py). Drop the
+              # threading-pthread tweaks; cosmopolitan supplies its
+              # own pthread shims and the default mbedtls config is
+              # fine for our HTTPS use.
+              postConfigure = "";
+            });
+            curlMbedtls = (p.curl.override {
+              opensslSupport = false;
+              http3Support = false;
+              scpSupport = false;
+              gssSupport = false;
+            }).overrideAttrs (old: {
+              configureFlags = p.lib.remove "--without-ssl" old.configureFlags
+                ++ [ "--with-mbedtls=${p.lib.getDev mbedtlsPatched}" ];
+              propagatedBuildInputs = old.propagatedBuildInputs ++ [ mbedtlsPatched ];
+              nativeCheckInputs = p.lib.remove p.openssl (old.nativeCheckInputs or []);
+              hardeningDisable = (old.hardeningDisable or []) ++ [ "all" ];
+              env = (old.env or {}) // {
+                NIX_CFLAGS_COMPILE =
+                  (old.env.NIX_CFLAGS_COMPILE or "") + " -Wno-error";
+              };
+            });
+            cjsonPatched = p.cjson.overrideAttrs (old: {
+              hardeningDisable = (old.hardeningDisable or []) ++ [ "stackprotector" ];
               cmakeFlags = (old.cmakeFlags or []) ++ [
                 "-DENABLE_CJSON_TEST=OFF"
                 "-DENABLE_CUSTOM_COMPILER_FLAGS=OFF"
               ];
             });
+          in
+          p.callPackage ./nix/psi-cosmocc.nix {
+            lua5_4 = p.lua5_4.override { staticOnly = true; };
+            curl = curlMbedtls;
+            cjson = cjsonPatched;
+            openssl = null;
+            mbedtls = mbedtlsPatched;
+            buildCC = pkgs.stdenv.cc;
+            buildZlib = pkgs.zlib;
+          };
+
+        packages.psi-cosmocc-fat =
+          let
+            p = cosmoBase.pkgsCosmoFat;
+            mbedtlsPatched = p.mbedtls.overrideAttrs (old: {
+              hardeningDisable = (old.hardeningDisable or []) ++ [ "all" ];
+              env = (old.env or {}) // {
+                NIX_CFLAGS_COMPILE =
+                  (old.env.NIX_CFLAGS_COMPILE or "") + " -Wno-error";
+              };
+              # cosmocc can only emit static — disable the shared
+              # mbedtls library that nixpkgs's mbedtls/generic.nix
+              # turns on by default for non-pkgsStatic hosts.
+              cmakeFlags = (old.cmakeFlags or []) ++ [
+                "-DCMAKE_C_FLAGS=-Wno-error"
+                "-DENABLE_TESTING=OFF"
+                "-DENABLE_PROGRAMS=OFF"
+                "-DUSE_SHARED_MBEDTLS_LIBRARY=OFF"
+                "-DUSE_STATIC_MBEDTLS_LIBRARY=ON"
+              ];
+              # nixpkgs mbedtls's generic.nix postConfigure invokes
+              # `perl scripts/config.pl` which doesn't exist in
+              # mbedtls 3.6.x (replaced by config.py). Drop the
+              # threading-pthread tweaks; cosmopolitan supplies its
+              # own pthread shims and the default mbedtls config is
+              # fine for our HTTPS use.
+              postConfigure = "";
+            });
+            curlMbedtls = (p.curl.override {
+              opensslSupport = false;
+              http3Support = false;
+              scpSupport = false;
+              gssSupport = false;
+            }).overrideAttrs (old: {
+              configureFlags = p.lib.remove "--without-ssl" old.configureFlags
+                ++ [ "--with-mbedtls=${p.lib.getDev mbedtlsPatched}" ];
+              propagatedBuildInputs = old.propagatedBuildInputs ++ [ mbedtlsPatched ];
+              nativeCheckInputs = p.lib.remove p.openssl (old.nativeCheckInputs or []);
+              hardeningDisable = (old.hardeningDisable or []) ++ [ "all" ];
+              env = (old.env or {}) // {
+                NIX_CFLAGS_COMPILE =
+                  (old.env.NIX_CFLAGS_COMPILE or "") + " -Wno-error";
+              };
+            });
+            cjsonPatched = p.cjson.overrideAttrs (old: {
+              hardeningDisable = (old.hardeningDisable or []) ++ [ "stackprotector" ];
+              cmakeFlags = (old.cmakeFlags or []) ++ [
+                "-DENABLE_CJSON_TEST=OFF"
+                "-DENABLE_CUSTOM_COMPILER_FLAGS=OFF"
+              ];
+            });
+          in
+          p.callPackage ./nix/psi-cosmocc.nix {
+            lua5_4 = p.lua5_4.override { staticOnly = true; };
+            curl = curlMbedtls;
+            cjson = cjsonPatched;
+            openssl = null;
+            mbedtls = mbedtlsPatched;
             buildCC = pkgs.stdenv.cc;
             buildZlib = pkgs.zlib;
           };

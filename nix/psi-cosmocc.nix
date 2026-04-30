@@ -5,6 +5,14 @@
 , cjson
 , curl
 , lua5_4
+# OpenSSL only needed when curl uses openssl as its TLS backend
+# (curl's NTLM references DES_ecb_encrypt). Pass `null` when curl
+# was built with mbedTLS / wolfssl / etc.
+, openssl ? null
+# mbedTLS only needed when curl uses mbedtls as its TLS backend.
+# curl's libcurl.a then has unresolved mbedtls_ssl_* / mbedtls_x509_*
+# / mbedtls_des_* references that we must satisfy at the final link.
+, mbedtls ? null
 # Build-platform tools — passed in from the flake. nativeBuildInputs
 # splicing in cosmopkgs gives us cross artefacts (target triple in
 # path), so we route around it for the host helper.
@@ -28,15 +36,13 @@
 #   pkg-config-cross transitively needs cross-glibc-nolibgcc, which
 #   is the build that fails on the current cosmopkgs nixpkgs base.
 #
-# - TUI and libedit are disabled. ncurses + termios + readline aren't
-#   meaningfully cosmocc-compatible (cosmopolitan resolves termios
-#   constants at run time, breaking libedit's ttymodes static init),
-#   and the TUI requires ncurses anyway. ANSI / colour rendering is
-#   kept on — the lua side still produces colourised output, just
-#   line-buffered rather than fullscreen.
+# - libedit is disabled — cosmopolitan resolves termios constants at
+#   run time, which breaks libedit's static `ttymodes[]` initializer.
+#   TUI is on (the master branch's TUI uses raw termios; no ncurses
+#   needed any more — the libcosmo runtime supplies what's required).
 #
 # - STATIC=1 plus pkg-config-style --static flags so curl pulls its
-#   transitive openssl/zlib/etc. into the link line.
+#   transitive mbedtls/zlib/etc. into the link line.
 #
 # - dontStrip / dontPatchELF: cosmocc emits APE polyglot bytes that
 #   nixpkgs's default fixup phases would corrupt.
@@ -48,16 +54,6 @@ stdenv.mkDerivation {
   src = lib.cleanSource ./..;
 
   nativeBuildInputs = [ gnumake ];
-
-  # The Makefile's embed_lua rule shells out to pkg-config for zlib.
-  # In this cross context that resolves to the cosmocc-cross zlib,
-  # which native cc can't link. Replace those shell-outs with our
-  # own envvars pointing at the build-platform zlib.
-  postPatch = ''
-    substituteInPlace Makefile \
-      --replace-fail '$(shell $(PKG_CONFIG) --cflags zlib)' '$(HOST_ZLIB_CFLAGS)' \
-      --replace-fail '$(shell $(PKG_CONFIG) --libs zlib)'   '$(HOST_ZLIB_LIBS)'
-  '';
 
   # zlib intentionally NOT in buildInputs — cosmocc's libcosmo.a
   # provides _Cz_zlib symbols and its bundled third_party/zlib/zlib.h
@@ -74,15 +70,24 @@ stdenv.mkDerivation {
   # Use a bash array (set in preBuild) so multi-token values like
   # `-L/path -lz` aren't word-split. Plain `makeFlags` shell-splits;
   # `makeFlagsArray` only honours bash arrays set imperatively.
-  preBuild = ''
+  preBuild =
+    let
+      curlExtraLibs =
+        if openssl != null
+        then " -L${openssl.out}/lib -lssl -lcrypto"
+        else if mbedtls != null
+        then " -L${lib.getLib mbedtls}/lib -lmbedtls -lmbedx509 -lmbedcrypto"
+        else "";
+    in
+    ''
     makeFlagsArray+=(
       "PREFIX=$out"
       "CC=${stdenv.cc.targetPrefix}cc"
       "HOST_CC=${buildCC}/bin/cc"
-      "HOST_ZLIB_CFLAGS=-I${lib.getDev buildZlib}/include"
-      "HOST_ZLIB_LIBS=-L${lib.getLib buildZlib}/lib -lz"
+      "HOST_CFLAGS_ZLIB=-I${lib.getDev buildZlib}/include"
+      "HOST_LIBS_ZLIB=-L${lib.getLib buildZlib}/lib -lz"
       "STATIC=1"
-      "TUI=0"
+      "TUI=1"
       "REPL_EDITLINE=0"
       "LUA_BOOT_FILE=$out/share/psi/boot.lua"
       "PSI_CFLAGS_LUA=-I${lua5_4}/include"
@@ -90,7 +95,7 @@ stdenv.mkDerivation {
       "PSI_CFLAGS_CJSON=-I${cjson}/include"
       "PSI_LIBS_CJSON=-L${cjson}/lib -lcjson"
       "PSI_CFLAGS_CURL=-I${curl.dev}/include"
-      "PSI_LIBS_CURL=-L${curl.out}/lib -lcurl"
+      "PSI_LIBS_CURL=-L${curl.out}/lib -lcurl${curlExtraLibs}"
       # cosmocc bundles zlib in its own third_party/ tree:
       #   - libcosmo.a (auto-linked) provides _Cz_compress / _Cz_uncompress / ...
       #   - include/third_party/zlib/zlib.h #defines the standard
