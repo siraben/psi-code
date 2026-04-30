@@ -2030,7 +2030,7 @@ local function run_turn(state, line)
     set_status(state, "agent turn failed", true)
     fire_turn_event(state, "after-turn", after_turn_payload("", false))
     session.save()
-    return false
+    return false, reply or "agent turn failed"
   end
 
   fire_turn_event(state, "after-turn", after_turn_payload(reply, assistant_streamed))
@@ -2043,7 +2043,7 @@ local function run_turn(state, line)
       set_status(state, "agent turn failed", true)
     end
     session.save()
-    return false
+    return false, reply or "provider request failed"
   end
 
   local saved, err = session.save()
@@ -2216,6 +2216,7 @@ local function handle_command(state, line)
       set_status(state, "ralph failed: " .. tostring(err), true)
       return true
     end
+    state.ralph_turn_pending = true
     return false, prompt_text
   end
 
@@ -2386,7 +2387,9 @@ local function submit(state)
   psi.abort_reset()
   set_status(state, "", false)
   redraw(state)
-  local turn_ok = run_turn(state, line)
+  local ralph_turn = state.ralph_turn_pending == true
+  state.ralph_turn_pending = nil
+  local turn_ok, turn_err = run_turn(state, line)
   state.busy = false
   state.busy_kind = nil
   state.busy_label = nil
@@ -2395,6 +2398,13 @@ local function submit(state)
   state.busy_next_frame_at = nil
   state.busy_started_at = nil
   if not turn_ok then
+    if ralph_turn then
+      local aborted = turn_err == "aborted" or (psi.is_aborted and psi.is_aborted())
+      require("psi.ralph").stop(
+        aborted and "provider_turn_aborted" or "provider_turn_failed",
+        aborted and "cancelled" or "failed"
+      )
+    end
     state.force_physical_clear = true
   end
   state.dirty = true
@@ -2946,6 +2956,8 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     block_edit = state.block_edit,
     scroll_offset = state.scroll_offset,
     status_text = state.status_text,
+    force_physical_clear = state.force_physical_clear,
+    ralph_turn_pending = state.ralph_turn_pending,
     rendered = rendered,
   }
 end

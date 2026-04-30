@@ -86,6 +86,14 @@ local function run_agent_turn(opts, user_text)
   return true, reply
 end
 
+local function stop_ralph_after_failed_turn(err)
+  local aborted = err == "aborted" or (psi.is_aborted and psi.is_aborted())
+  require("psi.ralph").stop(
+    aborted and "provider_turn_aborted" or "provider_turn_failed",
+    aborted and "cancelled" or "failed"
+  )
+end
+
 -- ---------- mode handlers ----------
 
 function M.run_print(opts)
@@ -301,7 +309,10 @@ local function handle_slash_command(opts, line)
       return true, false
     end
     print("> " .. prompt_text)
-    local ok = run_agent_turn(opts, prompt_text)
+    local ok, turn_err = run_agent_turn(opts, prompt_text)
+    if not ok then
+      stop_ralph_after_failed_turn(turn_err)
+    end
     if ok and opts.session_file and opts.session_file ~= "" then
       local saved, save_err = session.save()
       if not saved then

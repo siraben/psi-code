@@ -790,6 +790,74 @@ def t_ralph_state_is_session_scoped(psi: Psi):
                   "Ralph state and follow-ups should be scoped to the owning session")
 
 
+@test("ralph/repl_failed_turn_marks_failed")
+def t_ralph_repl_failed_turn_marks_failed(psi: Psi):
+    cwd = psi.tmp / "ralph-repl-failed-turn"
+    cwd.mkdir(exist_ok=True)
+    out = psi.run(
+        "--eval",
+        'package.preload["psi.test_fail_provider"] = function()\n'
+        + '  return { run_turn = function() return false, "forced failure" end }\n'
+        + 'end\n'
+        + 'local providers = require("psi.providers")\n'
+        + 'providers.register_api("test-fail-api", { module = "psi.test_fail_provider" })\n'
+        + 'providers.register_provider("test-fail", { api = "test-fail-api", default_model = "fail" })\n'
+        + 'providers.register_model("test-fail/fail", { provider = "test-fail", api = "test-fail-api" })\n'
+        + 'local lines = { "/ralph failing turn", ":quit" }\n'
+        + 'local i = 0\n'
+        + 'psi.readline = function()\n'
+        + '  i = i + 1\n'
+        + '  return lines[i]\n'
+        + 'end\n'
+        + 'require("psi.modes").run_repl({ model = "test-fail/fail" })\n'
+        + 'local state = require("psi.ralph").read()\n'
+        + 'return table.concat({\n'
+        + '  tostring(state.active),\n'
+        + '  tostring(state.current_phase),\n'
+        + '  tostring(state.stop_reason)\n'
+        + '}, "|")',
+        cwd=cwd,
+    ).stdout.strip().splitlines()[-1]
+    assert_equals(out, "false|failed|provider_turn_failed",
+                  "REPL /ralph should mark state failed when the provider turn fails")
+
+
+@test("ralph/tui_failed_turn_marks_failed")
+def t_ralph_tui_failed_turn_marks_failed(psi: Psi):
+    cwd = psi.tmp / "ralph-tui-failed-turn"
+    cwd.mkdir(exist_ok=True)
+    out = psi.run(
+        "--eval",
+        'package.preload["psi.test_fail_provider"] = function()\n'
+        + '  return { run_turn = function() return false, "forced failure" end }\n'
+        + 'end\n'
+        + 'local providers = require("psi.providers")\n'
+        + 'providers.register_api("test-fail-api", { module = "psi.test_fail_provider" })\n'
+        + 'providers.register_provider("test-fail", { api = "test-fail-api", default_model = "fail" })\n'
+        + 'providers.register_model("test-fail/fail", { provider = "test-fail", api = "test-fail-api" })\n'
+        + 'require("psi.agent").set_model("test-fail/fail")\n'
+        + 'psi.tui_size = function() return { width = 80, height = 24 } end\n'
+        + 'psi.tui_clear = function() end\n'
+        + 'psi.tui_render_frame = function() end\n'
+        + 'psi.tui_set_cursor = function() end\n'
+        + 'psi.tui_refresh = function() end\n'
+        + 'local rt = require("psi.tui_runtime")\n'
+        + 'local state = rt._debug_edit_keys("/ralph broken", 13, {{ key = "enter" }}, false)\n'
+        + 'local rs = require("psi.ralph").read()\n'
+        + 'return table.concat({\n'
+        + '  tostring(rs.active),\n'
+        + '  tostring(rs.current_phase),\n'
+        + '  tostring(rs.stop_reason),\n'
+        + '  tostring(state.status_text),\n'
+        + '  tostring(state.force_physical_clear),\n'
+        + '  tostring(state.ralph_turn_pending)\n'
+        + '}, "|")',
+        cwd=cwd,
+    ).stdout.strip()
+    assert_equals(out, "false|failed|provider_turn_failed|agent turn failed|true|nil",
+                  "TUI /ralph should mark state failed when the provider turn fails")
+
+
 @test("ralph/follow_up_queue")
 def t_ralph_follow_up_queue(psi: Psi):
     cwd = psi.tmp / "ralph-follow-up"
