@@ -3,6 +3,7 @@ local ansi = require("psi.ansi")
 local commands = require("psi.commands")
 local context = require("psi.context")
 local markdown = require("psi.markdown")
+local plan = require("psi.plan")
 local prelude = require("psi.prelude")
 local render = require("psi.render")
 local sched = require("psi.sched")
@@ -588,6 +589,24 @@ local function format_tool_call(tool_name, input)
   if tool_name == "lua" then
     return "lua " .. tostring(input.mode or "summary")
   end
+  if tool_name == "apply_patch" then
+    return "apply_patch"
+  end
+  if tool_name == "update_plan" then
+    return "update_plan"
+  end
+  if tool_name == "request_user_input" then
+    return "request_user_input"
+  end
+  if tool_name == "subagent" then
+    if type(input.tasks) == "table" then
+      return "subagent parallel " .. tostring(#input.tasks) .. " task(s)"
+    end
+    if type(input.chain) == "table" then
+      return "subagent chain " .. tostring(#input.chain) .. " step(s)"
+    end
+    return "subagent " .. tostring(input.agent or "worker")
+  end
   return tool_name .. " " .. psi.json_encode(input)
 end
 
@@ -620,6 +639,14 @@ local function format_tool_result(tool_name, result)
   end
   if tool_name == "lua" then
     return limit_text(tostring(result.result or "")), false
+  end
+  if
+    tool_name == "apply_patch"
+    or tool_name == "update_plan"
+    or tool_name == "request_user_input"
+    or tool_name == "subagent"
+  then
+    return limit_text(tostring(result.output or "")), false
   end
   return limit_text(psi.json_encode(result)), false
 end
@@ -1092,6 +1119,9 @@ local function redraw(state)
     scroll = state.scroll_offset,
     editor_mode = state.editor_mode,
     selection_kind = state.selection_kind,
+    plan_mode = plan.is_active() or state.turn_plan_mode,
+    plan_model = plan.model(state.opts.model),
+    plan_status = plan.status_text(),
   }
 
   if state.status_text ~= nil then
@@ -1865,6 +1895,60 @@ local function observer_text_delta(state, text)
   scroll_anchor_after(state, before)
 end
 
+local function option_lines(options)
+  if type(options) ~= "table" or #options == 0 then
+    return {}
+  end
+  local lines = {}
+  for i, option in ipairs(options) do
+    if type(option) == "table" then
+      local line = tostring(i) .. ". " .. tostring(option.label or "")
+      if type(option.description) == "string" and option.description ~= "" then
+        line = line .. " - " .. option.description
+      end
+      lines[#lines + 1] = line
+    end
+  end
+  return lines
+end
+
+local function format_user_input_question(q)
+  q = type(q) == "table" and q or {}
+  local lines = {}
+  local header = type(q.header) == "string" and q.header ~= "" and q.header or "request_user_input"
+  lines[#lines + 1] = header .. ": " .. tostring(q.question or q.id or "question")
+  for _, line in ipairs(option_lines(q.options)) do
+    lines[#lines + 1] = line
+  end
+  return table.concat(lines, "\n")
+end
+
+local function normalize_user_input_answer(q, answer)
+  answer = answer or ""
+  if type(q) == "table" and type(q.options) == "table" then
+    local n = tonumber(answer)
+    if n and q.options[n] and type(q.options[n]) == "table" then
+      local label = q.options[n].label
+      if type(label) == "string" and label ~= "" then
+        return label
+      end
+    end
+  end
+  return answer
+end
+
+local function answer_pending_user_input(state, line)
+  local pending = state.pending_user_input
+  if not pending then
+    return false
+  end
+  pending.answer = normalize_user_input_answer(pending.question, line)
+  add_entry(state, "info", "answered request_user_input")
+  set_status(state, "", false)
+  state.dirty = true
+  return true
+end
+
 local function observer_thinking_delta(state, text)
   if not state.show_thinking then
     return
@@ -1977,7 +2061,8 @@ local function after_turn_payload(reply, assistant_streamed)
   }
 end
 
-local function run_turn(state, line)
+local function run_turn(state, line, opts)
+  opts = opts or {}
   local assistant_streamed = false
   local observer = {
     on_assistant_text_delta = function(text)
@@ -2014,6 +2099,7 @@ local function run_turn(state, line)
       max_tokens = state.opts.max_tokens,
       thinking_level = state.opts.thinking_level,
       reasoning_effort = state.opts.reasoning_effort,
+      plan_mode = opts.plan_mode,
       observer = observer,
       abort_check = psi.is_aborted,
     })
@@ -2207,6 +2293,11 @@ local function handle_command(state, line)
     return false, action.payload or ""
   end
 
+  if action.kind == "plan" then
+    state.next_turn_plan_mode = true
+    return false, action.payload or ""
+  end
+
   if action.kind == "quit" then
     state.running = false
     return true
@@ -2298,7 +2389,7 @@ local function handle_command(state, line)
 end
 
 local function submit(state)
-  if state.input == "" then
+  if state.input == "" and not state.pending_user_input then
     return
   end
 
@@ -2309,6 +2400,10 @@ local function submit(state)
   state.block_edit = nil
   state.editor_mode = "insert"
   state.pending_key = nil
+
+  if answer_pending_user_input(state, line) then
+    return
+  end
 
   if state.busy then
     if state.busy_kind ~= "agent" then
@@ -2360,13 +2455,18 @@ local function submit(state)
     line = expanded or ""
   end
 
+  local plan_once = state.next_turn_plan_mode and true or false
+  state.next_turn_plan_mode = nil
+  state.turn_plan_mode = plan_once
+
   add_entry(state, "user", line)
   state.streaming_assistant_index = add_entry(state, "assistant", "")
   state.show_thinking = tui.show_thinking() == "1"
   state.scroll_offset = 0
   state.busy = true
   state.busy_kind = "agent"
-  state.busy_label = tui.pick_busy_status() or "working"
+  state.busy_label = (plan_once or plan.is_active()) and "planning"
+    or (tui.pick_busy_status() or "working")
   state.busy_phase = 0
   state.busy_tick = 0
   state.busy_next_frame_at = now_ms() + BUSY_ANIMATION_INTERVAL_MS
@@ -2374,7 +2474,7 @@ local function submit(state)
   psi.abort_reset()
   set_status(state, "", false)
   redraw(state)
-  local turn_ok = run_turn(state, line)
+  local turn_ok = run_turn(state, line, { plan_mode = plan_once and true or nil })
   state.busy = false
   state.busy_kind = nil
   state.busy_label = nil
@@ -2382,6 +2482,7 @@ local function submit(state)
   state.busy_tick = 0
   state.busy_next_frame_at = nil
   state.busy_started_at = nil
+  state.turn_plan_mode = nil
   if not turn_ok then
     state.force_physical_clear = true
   end
@@ -2673,8 +2774,46 @@ function M.run(opts)
 
   local state = new_state(opts)
   rebuild_from_session(state)
+  local previous_user_input_resolver = sched.resolvers.user_input
 
   local success, runtime_err = xpcall(function()
+    sched.resolvers.user_input = function(req)
+      local questions = type(req.questions) == "table" and req.questions or {}
+      local answers = {}
+      local previous_kind = state.busy_kind
+      local previous_label = state.busy_label
+      state.busy_kind = "input-request"
+      state.busy_label = "waiting for input"
+      for i, q in ipairs(questions) do
+        q = type(q) == "table" and q or {}
+        local id = type(q.id) == "string" and q.id ~= "" and q.id or ("q" .. tostring(i))
+        state.pending_user_input = { question = q, answer = nil }
+        add_entry(state, "info", format_user_input_question(q))
+        set_status(state, "answer request_user_input and press Enter", false)
+        state.dirty = true
+        redraw(state)
+        while state.pending_user_input and state.pending_user_input.answer == nil do
+          if psi.is_aborted and psi.is_aborted() then
+            break
+          end
+          tick(state)
+          if
+            state.pending_user_input
+            and state.pending_user_input.answer == nil
+            and psi.sleep_ms
+          then
+            psi.sleep_ms(30)
+          end
+        end
+        answers[id] = state.pending_user_input and state.pending_user_input.answer or ""
+        state.pending_user_input = nil
+      end
+      state.busy_kind = previous_kind
+      state.busy_label = previous_label
+      set_status(state, "", false)
+      state.dirty = true
+      return answers
+    end
     psi.tui_set_tick_handler(function()
       tick(state)
     end)
@@ -2693,6 +2832,8 @@ function M.run(opts)
       end
     end
   end, debug.traceback)
+
+  sched.resolvers.user_input = previous_user_input_resolver
 
   psi.tui_set_tick_handler(nil)
   psi.tui_set_tool_progress_handler(nil)

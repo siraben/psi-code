@@ -58,6 +58,11 @@ def assert_contains(haystack: str, needle: str, what: str = "output") -> None:
         raise Fail(f"{what} missing {needle!r}\n--- got ---\n{haystack}")
 
 
+def assert_not_contains(haystack: str, needle: str, what: str = "output") -> None:
+    if needle in haystack:
+        raise Fail(f"{what} unexpectedly contained {needle!r}\n--- got ---\n{haystack}")
+
+
 def assert_regex(haystack: str, pattern: str, what: str = "output") -> None:
     if not re.search(pattern, haystack, re.MULTILINE):
         raise Fail(f"{what} does not match /{pattern}/\n--- got ---\n{haystack}")
@@ -267,6 +272,23 @@ def t_eval_tool_registry(psi: Psi):
     assert_equals(out, "read", "first tool")
 
 
+@test("tool/schemas_arrays_have_items")
+def t_tool_schema_arrays_have_items(psi: Psi):
+    out = psi.eval(
+        'local tools = require("psi.tools")\n'
+        + 'local missing = {}\n'
+        + 'local function walk(path, node)\n'
+        + '  if type(node) ~= "table" then return end\n'
+        + '  if node.type == "array" and node.items == nil then missing[#missing + 1] = path end\n'
+        + '  for k, v in pairs(node) do walk(path .. "." .. tostring(k), v) end\n'
+        + 'end\n'
+        + 'for _, tool in ipairs(tools.all()) do walk(tool.name, tool.input_schema) end\n'
+        + 'table.sort(missing)\n'
+        + 'return table.concat(missing, ",")'
+    )
+    assert_equals(out, "", "array schemas must declare items")
+
+
 @test("tool/mutation_tools_keep_parallel_mode")
 def t_mutation_tools_keep_parallel_mode(psi: Psi):
     out = psi.eval(
@@ -383,13 +405,413 @@ def t_tool_lua_summary(psi: Psi):
 
 @test("tool/lua_eval")
 def t_tool_lua_eval(psi: Psi):
-    # 8 tools registered today (read/write/edit/bash/grep/find/ls/lua).
+    # Built-in tools registered in lua/psi/tools.lua.
     out = psi.eval(
         'local r = require("psi.tools").dispatch("lua", '
         '{mode="eval", expression="#require(\\"psi.tools\\").all()"})\n'
         'return r.extras.result'
     )
-    assert_equals(out, "8", "tool count")
+    assert_equals(out, "12", "tool count")
+
+
+@test("tool/apply_patch")
+def t_tool_apply_patch(psi: Psi):
+    root = psi.tmp / "patch"
+    root.mkdir(exist_ok=True)
+    target = root / "a.txt"
+    target.write_text("one\ntwo\n")
+    patch = (
+        "*** Begin Patch\n"
+        f"*** Update File: {target}\n"
+        "@@\n"
+        " one\n"
+        "-two\n"
+        "+three\n"
+        "*** End Patch\n"
+    )
+    out = psi.eval(
+        "local tools = require('psi.tools')\n"
+        f"local r = tools.dispatch('apply_patch', {{patch={json.dumps(patch)}}})\n"
+        f"return tostring(r.ok) .. '|' .. (psi.read_file({json.dumps(str(target))}) or '')"
+    )
+    assert_equals(out, "true|one\nthree", "apply_patch update")
+
+
+@test("tool/apply_patch_preserves_trailing_blank_lines")
+def t_tool_apply_patch_trailing_blanks(psi: Psi):
+    root = psi.tmp / "patch-trailing"
+    root.mkdir(exist_ok=True)
+    target = root / "a.txt"
+    target.write_text("one\ntwo\n\n")
+    patch = (
+        "*** Begin Patch\n"
+        f"*** Update File: {target}\n"
+        "@@\n"
+        "-one\n"
+        "+ONE\n"
+        " two\n"
+        "*** End Patch"
+    )
+    out = psi.run(
+        "--eval",
+        "local tools = require('psi.tools')\n"
+        f"local r = tools.dispatch('apply_patch', {{patch={json.dumps(patch)}}})\n"
+        f"local body = psi.read_file({json.dumps(str(target))}) or ''\n"
+        "return tostring(r.ok) .. '|' .. tostring(#body) .. '|' .. body",
+    ).stdout
+    assert_equals(out, "true|9|ONE\ntwo\n\n\n", "apply_patch preserves trailing blanks")
+
+
+@test("tool/apply_patch_move_and_rollback")
+def t_tool_apply_patch_move_rollback(psi: Psi):
+    root = psi.tmp / "patch-move"
+    root.mkdir(exist_ok=True)
+    src = root / "old.txt"
+    dst = root / "new.txt"
+    src.write_text("alpha\nbeta\n")
+    move_patch = (
+        "*** Begin Patch\n"
+        f"*** Update File: {src}\n"
+        f"*** Move to: {dst}\n"
+        "@@\n"
+        " alpha\n"
+        "-beta\n"
+        "+gamma\n"
+        "*** End Patch"
+    )
+    out = psi.eval(
+        "local tools = require('psi.tools')\n"
+        "local session = require('psi.session')\n"
+        "session.reset_file_ops()\n"
+        f"local r = tools.dispatch('apply_patch', {{patch={json.dumps(move_patch)}}})\n"
+        "local _, modified = session.pending_file_ops()\n"
+        f"return tostring(r.ok) .. '|' .. tostring(psi.file_exists({json.dumps(str(src))}))"
+        f" .. '|' .. (psi.read_file({json.dumps(str(dst))}) or '')"
+        " .. '|' .. table.concat(modified, ',')"
+    )
+    assert_equals(out, f"true|false|alpha\ngamma\n|{dst}", "apply_patch move")
+
+    add_parent = root / "newdir"
+    add_parent_file = add_parent / "a.txt"
+    add_path = add_parent / "nested" / "added.txt"
+    executable = root / "run.sh"
+    executable.write_text("#!/bin/sh\necho ok\n")
+    executable.chmod(0o755)
+    link_target = root / "target.txt"
+    link = root / "link.txt"
+    link_target.write_text("target\n")
+    os.symlink(link_target, link)
+    link_edit_target = root / "editable-target.txt"
+    link_edit = root / "editable-link.txt"
+    link_edit_target.write_text("original\n")
+    os.symlink(link_edit_target, link_edit)
+    bad_patch = (
+        "*** Begin Patch\n"
+        f"*** Add File: {add_parent_file}\n"
+        "+parent\n"
+        f"*** Add File: {add_path}\n"
+        "+new\n"
+        f"*** Delete File: {executable}\n"
+        f"*** Delete File: {link}\n"
+        f"*** Update File: {link_edit}\n"
+        "@@\n"
+        "-original\n"
+        "+changed\n"
+        f"*** Update File: {dst}\n"
+        "@@\n"
+        "-does-not-match\n"
+        "+changed\n"
+        "*** End Patch"
+    )
+    out = psi.eval(
+        "local tools = require('psi.tools')\n"
+        f"local r = tools.dispatch('apply_patch', {{patch={json.dumps(bad_patch)}}})\n"
+        f"return tostring(r.ok) .. '|' .. tostring(psi.file_exists({json.dumps(str(add_parent_file))}))"
+        f" .. '|' .. tostring(psi.file_exists({json.dumps(str(add_path))}))"
+        f" .. '|' .. tostring(psi.file_exists({json.dumps(str(add_parent))}))"
+        f" .. '|' .. (psi.read_file({json.dumps(str(dst))}) or '')"
+    )
+    assert_equals(out, "false|false|false|false|alpha\ngamma", "apply_patch rollback")
+    assert_true(executable.exists() and os.access(executable, os.X_OK),
+                "rollback should preserve executable files")
+    assert_true(link.is_symlink() and os.readlink(link) == str(link_target),
+                "rollback should preserve symlinks")
+    assert_true(link_edit.is_symlink() and os.readlink(link_edit) == str(link_edit_target),
+                "rollback should preserve updated symlink")
+    assert_equals(link_edit_target.read_text(), "original\n",
+                  "rollback should restore symlink target content")
+
+
+@test("tool/apply_patch_refuses_unreadable_existing_files")
+def t_tool_apply_patch_refuses_large(psi: Psi):
+    root = psi.tmp / "patch-large"
+    root.mkdir(exist_ok=True)
+    target = root / "large.txt"
+    target.write_text("x" * 270_000)
+    patch = (
+        "*** Begin Patch\n"
+        f"*** Update File: {target}\n"
+        "@@\n"
+        "+inserted\n"
+        "*** End Patch"
+    )
+    out = psi.eval(
+        "local tools = require('psi.tools')\n"
+        f"local r = tools.dispatch('apply_patch', {{patch={json.dumps(patch)}}})\n"
+        "return tostring(r.ok) .. '|' .. tostring(r.error)"
+    )
+    assert_contains(out, "false|could not snapshot unreadable file:", "large patch refused")
+    assert_equals(target.stat().st_size, 270_000, "large file size unchanged")
+
+
+@test("tool/update_plan")
+def t_tool_update_plan(psi: Psi):
+    out = psi.eval(
+        "local r = require('psi.tools').dispatch('update_plan', "
+        "{plan={{step='inspect', status='in_progress'}, {step='finish', status='pending'}}})\n"
+        "return tostring(r.ok) .. '|' .. require('psi.plan').status_text()"
+    )
+    assert_equals(out, "true|0/2 inspect", "update_plan status")
+
+
+@test("tool/update_plan_resets_on_session_switch")
+def t_tool_update_plan_resets_session_switch(psi: Psi):
+    session_path = psi.tmp / "plan-session.jsonl"
+    session_path.write_text('{"type":"session","id":"loaded"}\n')
+    out = psi.eval(
+        "local tools = require('psi.tools')\n"
+        "local plan = require('psi.plan')\n"
+        "local commands = require('psi.commands')\n"
+        "local session = require('psi.session')\n"
+        "tools.dispatch('update_plan', {plan={{step='old', status='in_progress'}}})\n"
+        "local before = plan.status_text()\n"
+        "commands.handle('/new')\n"
+        "local after_new = plan.status_text()\n"
+        "tools.dispatch('update_plan', {plan={{step='loaded old', status='in_progress'}}})\n"
+        f"session.load({json.dumps(str(session_path))})\n"
+        "return before .. '|' .. after_new .. '|' .. plan.status_text()"
+    )
+    assert_equals(out, "0/1 old||", "plan state resets on session switches")
+
+
+@test("tool/request_user_input_stdin")
+def t_tool_request_user_input_stdin(psi: Psi):
+    lua = (
+        "local r = require('psi.tools').dispatch('request_user_input', "
+        "{questions={{id='name', question='Name?', options={{label='Ada', description='first'}, {label='Grace'}}}}})\n"
+        "return tostring(r.ok) .. '|' .. tostring(r.extras.answers.name)"
+    )
+    out = psi.run("--eval", lua, input_text="2\n").stdout
+    assert_contains(out, "Name?", "request prompt")
+    assert_contains(out, "1. Ada - first", "request option with description")
+    assert_contains(out, "2. Grace", "request option label")
+    assert_contains(out, "true|Grace", "numeric option answer")
+
+
+@test("tool/subagent_fake_single_parallel_chain")
+def t_tool_subagent_fake(psi: Psi):
+    script = psi.tmp / "fake-subagent"
+    script.write_text(
+        "#!/bin/sh\n"
+        "agent=''\n"
+        "session=''\n"
+        "while [ \"$#\" -gt 0 ]; do\n"
+        "  if [ \"$1\" = \"--agent\" ]; then shift; agent=\"$1\"; fi\n"
+        "  if [ \"$1\" = \"--session\" ]; then shift; session=\"$1\"; fi\n"
+        "  shift || break\n"
+        "done\n"
+        "if [ -n \"$session\" ]; then mkdir -p \"$(dirname \"$session\")\"; : > \"$session\"; fi\n"
+        "printf '%s' \"$agent\" | tr '\\n' ' '\n"
+    )
+    script.chmod(0o755)
+    lua = (
+        "local tools = require('psi.tools')\n"
+        "local single = tools.dispatch('subagent', {agent='scout', task='single task', cwd='/tmp'})\n"
+        "local parallel = tools.dispatch('subagent', {tasks={{task='p1'}, {task='p2'}}})\n"
+        "local chain = tools.dispatch('subagent', {chain={{task='100% done'}, {task='second {previous}'}}})\n"
+        "local inherited = tools.dispatch('subagent', {agent='scout', tasks={{task='inherited agent'}}})\n"
+        "local p1 = parallel.extras.results[1]\n"
+        "local p2 = parallel.extras.results[2]\n"
+        "return tostring(single.ok) .. '|' .. tostring(parallel.ok) .. '|' .. tostring(chain.ok) .. '|'\n"
+        "  .. tostring(single.extras.output:match('single task') ~= nil) .. '|'\n"
+        "  .. tostring(parallel.extras.output:match('p1') ~= nil and parallel.extras.output:match('p2') ~= nil) .. '|'\n"
+        "  .. tostring(chain.extras.output:match('second') ~= nil and chain.extras.output:match('100%% done') ~= nil) .. '|'\n"
+        "  .. tostring(psi.file_exists(single.extras.results[1].log_path) and psi.file_exists(single.extras.results[1].script_path)) .. '|'\n"
+        "  .. tostring(single.extras.results[1].session_path:sub(1, 1) == '/' and psi.file_exists(single.extras.results[1].session_path)) .. '|'\n"
+        "  .. tostring(p1.script_path ~= p2.script_path) .. '|'\n"
+        "  .. tostring(p1.log_path ~= p2.log_path and p1.session_path ~= p2.session_path) .. '|'\n"
+        "  .. tostring(inherited.extras.results[1].agent)"
+    )
+    out = psi.run(
+        "--eval",
+        lua,
+        env_extra={"PSI_SUBAGENT_COMMAND": str(script)},
+        cwd=psi.tmp,
+        timeout=10,
+    ).stdout.strip()
+    assert_equals(out, "true|true|true|true|true|true|true|true|true|true|scout", "subagent modes")
+
+
+@test("tool/subagent_scout_is_read_only")
+def t_tool_subagent_scout_is_read_only(psi: Psi):
+    out = psi.eval(
+        "local scout = require('psi.subagents').resolve('scout')\n"
+        "for _, tool in ipairs(scout.tools or {}) do\n"
+        "  if tool == 'bash' or tool == 'write' or tool == 'edit' or tool == 'apply_patch' then\n"
+        "    return tool\n"
+        "  end\n"
+        "end\n"
+        "return table.concat(scout.tools, ',')"
+    )
+    assert_equals(out, "read,grep,find,ls", "scout tools")
+
+
+@test("tool/subagent_unknown_agent_fails_closed")
+def t_tool_subagent_unknown_agent_fails_closed(psi: Psi):
+    out = psi.eval(
+        "local r = require('psi.tools').dispatch('subagent', {agent='scuot', task='typo'})\n"
+        "return tostring(r.ok) .. '|' .. tostring(r.error) .. '|' .. tostring(r.extras.output)"
+    )
+    assert_contains(out, "false|[1] scuot failed: unknown subagent: scuot", "unknown agent error")
+    assert_not_contains(out, "worker", "unknown explicit agent must not fall back to worker")
+
+
+@test("tool/subagent_failure_reports_summary")
+def t_tool_subagent_failure_reports_summary(psi: Psi):
+    script = psi.tmp / "fake-subagent-fails"
+    script.write_text(
+        "#!/bin/sh\n"
+        "session=''\n"
+        "while [ \"$#\" -gt 0 ]; do\n"
+        "  if [ \"$1\" = \"--session\" ]; then shift; session=\"$1\"; fi\n"
+        "  shift || break\n"
+        "done\n"
+        "if [ -n \"$session\" ]; then mkdir -p \"$(dirname \"$session\")\"; : > \"$session\"; fi\n"
+        "printf 'child failed\\n'\n"
+        "exit 7\n"
+    )
+    script.chmod(0o755)
+    lua = (
+        "local r = require('psi.tools').dispatch('subagent', {task='fail task'})\n"
+        "return tostring(r.ok) .. '\\n' .. tostring(r.error)"
+    )
+    out = psi.run(
+        "--eval",
+        lua,
+        env_extra={"PSI_SUBAGENT_COMMAND": str(script)},
+        cwd=psi.tmp,
+        timeout=10,
+    ).stdout
+    assert_contains(out, "false\n[1] worker failed: exit 7", "subagent failure status")
+    assert_contains(out, "inspect: session=", "subagent failure inspect paths")
+    assert_contains(out, "child failed", "subagent failure output")
+    assert_not_contains(out, "unknown error", "subagent failure should not hide summary")
+
+
+@test("tool/subagent_explicit_model_precedence")
+def t_tool_subagent_explicit_model_precedence(psi: Psi):
+    project = psi.tmp / "subagent-model-project"
+    (project / ".psi").mkdir(parents=True, exist_ok=True)
+    (project / ".psi" / "settings.json").write_text(
+        json.dumps({"subagent": {"model": "ollama/global"}})
+    )
+    script = psi.tmp / "fake-subagent-model"
+    script.write_text(
+        "#!/bin/sh\n"
+        "model=''\n"
+        "session=''\n"
+        "while [ \"$#\" -gt 0 ]; do\n"
+        "  if [ \"$1\" = \"--model\" ]; then shift; model=\"$1\"; fi\n"
+        "  if [ \"$1\" = \"--session\" ]; then shift; session=\"$1\"; fi\n"
+        "  shift || break\n"
+        "done\n"
+        "if [ -n \"$session\" ]; then mkdir -p \"$(dirname \"$session\")\"; : > \"$session\"; fi\n"
+        "printf 'model=%s' \"$model\"\n"
+    )
+    script.chmod(0o755)
+    lua = (
+        "local r = require('psi.tools').dispatch('subagent', "
+        "{task='use explicit model', model='ollama/explicit'})\n"
+        "local result = r.extras.results[1]\n"
+        "return tostring(r.ok) .. '|' .. tostring(result.model) .. '|' .. tostring(result.output)"
+    )
+    out = psi.run(
+        "--eval",
+        lua,
+        env_extra={"PSI_SUBAGENT_COMMAND": str(script)},
+        cwd=project,
+        timeout=10,
+    ).stdout.strip()
+    assert_contains(out, "true|ollama/explicit|", "explicit subagent model selected")
+    assert_contains(out, "model=ollama/explicit", "explicit subagent model passed to child")
+    assert_not_contains(out, "ollama/global", "global subagent model must not override explicit")
+
+
+@test("command/plan_status")
+def t_command_plan_status(psi: Psi):
+    out = psi.eval("return require('psi.commands').handle('/plan status').payload")
+    assert_contains(out, "plan mode: off", "plan status mode")
+    assert_contains(out, "plan model: openai-codex/gpt-5.5", "plan status model")
+
+
+@test("agent/plan_mode_restores_after_setup_error")
+def t_agent_plan_mode_restores_after_setup_error(psi: Psi):
+    out = psi.eval(
+        "local agent = require('psi.agent')\n"
+        "local plan = require('psi.plan')\n"
+        "local prompt = require('psi.prompt')\n"
+        "local tools = require('psi.tools')\n"
+        "plan.set_active(false)\n"
+        "tools.set_active({'read', 'write'})\n"
+        "local old_prompt = prompt.system_prompt\n"
+        "prompt.system_prompt = function() error('prompt boom') end\n"
+        "local ok, err = pcall(function()\n"
+        "  agent.run_turn({user_text='plan setup failure', plan_mode=true})\n"
+        "end)\n"
+        "prompt.system_prompt = old_prompt\n"
+        "local active = plan.is_active()\n"
+        "local active_tools = table.concat(tools.get_active_filter() or {}, ',')\n"
+        "tools.set_active(nil)\n"
+        "plan.set_active(false)\n"
+        "return tostring(ok) .. '|' .. tostring(active) .. '|' .. active_tools .. '|'"
+        "  .. tostring(tostring(err):match('prompt boom') ~= nil)"
+    )
+    assert_equals(out, "false|false|read,write|true", "one-shot plan mode restore after setup error")
+
+
+@test("agent/plan_mode_blocks_mutating_tools")
+def t_agent_plan_mode_blocks_mutating_tools(psi: Psi):
+    target = psi.tmp / "plan-mutated.txt"
+    out = psi.eval(
+        "local agent = require('psi.agent')\n"
+        "local plan = require('psi.plan')\n"
+        "local providers = require('psi.providers')\n"
+        "local tools = require('psi.tools')\n"
+        "providers.register_api('fake-plan-api', {module='psi.fake_plan_provider'})\n"
+        "providers.register_provider('fake-plan', {api='fake-plan-api', default_model='model'})\n"
+        "package.preload['psi.fake_plan_provider'] = function()\n"
+        "  return { run_turn = function(args)\n"
+        "    local has_read, has_write = false, false\n"
+        "    for _, spec in ipairs(tools.select_specs()) do\n"
+        "      if spec.name == 'read' then has_read = true end\n"
+        "      if spec.name == 'write' then has_write = true end\n"
+        "    end\n"
+        f"    local r = tools.dispatch('write', {{path={json.dumps(str(target))}, content='bad'}})\n"
+        "    return true, table.concat({tostring(has_read), tostring(has_write), tostring(r.ok), tostring(r.error)}, '|')\n"
+        "  end }\n"
+        "end\n"
+        "tools.set_active({'read', 'write'})\n"
+        "plan.set_model('fake-plan/model')\n"
+        "local ok, reply = agent.run_turn({user_text='plan safely', plan_mode=true})\n"
+        "local active_tools = table.concat(tools.get_active_filter() or {}, ',')\n"
+        f"local exists = psi.file_exists({json.dumps(str(target))})\n"
+        "tools.set_active(nil)\n"
+        "plan.set_model(nil)\n"
+        "plan.set_active(false)\n"
+        "return tostring(ok) .. '|' .. tostring(reply) .. '|' .. active_tools .. '|' .. tostring(exists)"
+    )
+    assert_contains(out, "true|true|false|false|tool is not active: write|read,write|false",
+                    "plan mode must block mutating tools and restore active tools")
 
 
 @test("render/tool_write_diff")
@@ -754,15 +1176,21 @@ def t_set_active(psi: Psi):
         + 't.set_active({"read", "grep"})\n'
         + 'local narrowed = #t.select_specs()\n'
         + 'local active = table.concat(t.get_active(), ",")\n'
+        + 'local hidden = t.dispatch("bash", {command="echo hidden"})\n'
         + 't.set_active(nil)\n'
+        + 'local visible = t.dispatch("bash", {command="printf visible"})\n'
         + 'local restored = #t.select_specs()\n'
-        + 'return string.format("%d|%d|%s|%d", all, narrowed, active, restored)'
+        + 'return string.format("%d|%d|%s|%s|%s|%s|%d", all, narrowed, active,\n'
+        + '  tostring(hidden.ok), tostring(hidden.error), tostring(visible.ok), restored)'
     )
     parts = out.strip().split("|")
     assert int(parts[0]) >= 3 and int(parts[1]) == 2, \
         f"allowlist didn't narrow: {out!r}"
     assert "read" in parts[2] and "grep" in parts[2]
-    assert parts[0] == parts[3], "nil didn't restore full set"
+    assert parts[3] == "false" and "not active: bash" in parts[4], \
+        f"allowlist did not block dispatch: {out!r}"
+    assert parts[5] == "true", f"nil did not restore dispatch: {out!r}"
+    assert parts[0] == parts[6], "nil didn't restore full set"
 
 
 @test("session/send_message")
@@ -1291,6 +1719,23 @@ def t_tui_status_default_model(psi: Psi):
     )
     assert "model:?" not in out, "status line should show effective default model"
     assert_contains(out, "model:", "status line includes model")
+
+
+@test("tui/status_bar_plan_progress")
+def t_tui_status_bar_plan_progress(psi: Psi):
+    out = psi.eval(
+        'local tui = require("psi.tui")\n'
+        + 'local dirty = "1/2\\nimpl\\27[31mred\\27[0m\\27]0;bad\\7done"\n'
+        + 'local bar = tui.status_bar({model="m", busy=false, scroll=0, plan_mode=true,\n'
+        + '  plan_model="openai-codex/gpt-5.5", plan_status=dirty})\n'
+        + 'local line = tui.status_line({model="m", busy=false, scroll=0, plan_mode=true,\n'
+        + '  plan_model="openai-codex/gpt-5.5", plan_status=dirty})\n'
+        + 'return bar .. "\\n---\\n" .. line'
+    )
+    assert_contains(out, "plan-progress", "status bar includes plan progress label")
+    assert_contains(out, "1/2 implreddone", "status renderers include sanitized progress text")
+    assert_not_contains(out, "[31m", "status renderers must strip model-supplied CSI")
+    assert_not_contains(out, "0;bad", "status renderers must strip OSC payload")
 
 
 @test("providers/openrouter_metadata")
@@ -2269,6 +2714,7 @@ def t_tui_quits(psi: Psi):
         ("repo" in text and "worktree" in text) or "cwd" in text,
         "TUI header should show workspace context",
     )
+    assert_contains(raw.decode(errors="ignore"), "\x1b[2 q", "TUI resets cursor shape to block")
 
 
 @test("mode/tui_theme_applies_to_rendered_colors")

@@ -804,11 +804,19 @@ local function append_v3_custom(parsed)
   append_body("custom", text, body)
 end
 
+local function reset_plan_state()
+  local ok, plan = pcall(require, "psi.plan")
+  if ok and type(plan) == "table" and type(plan.reset) == "function" then
+    plan.reset()
+  end
+end
+
 function M.load(path)
   if not path or path == "" then
     return false, "no path"
   end
   psi.session_set_path(path)
+  reset_plan_state()
 
   -- Any previously-cached save cursor belongs to a different
   -- session file. Clear it so the first save after load re-opens
@@ -946,6 +954,18 @@ local pending_modified = {}
 
 local function record_file_op(name, input, result)
   if not (result and result.ok) then
+    return
+  end
+  if name == "apply_patch" and type(result.extras) == "table" then
+    for _, file in ipairs(result.extras.files or {}) do
+      if type(file) == "table" then
+        local modified_path = type(file.move_to) == "string" and file.move_to ~= "" and file.move_to
+          or file.path
+        if type(modified_path) == "string" then
+          pending_modified[modified_path] = true
+        end
+      end
+    end
     return
   end
   if not (input and type(input.path) == "string") then

@@ -68,6 +68,42 @@ M.resolvers["tick"] = function(_req)
   return nil
 end
 
+M.resolvers["user_input"] = function(req)
+  local questions = type(req.questions) == "table" and req.questions or {}
+  local answers = {}
+  for i, q in ipairs(questions) do
+    q = type(q) == "table" and q or {}
+    local id = type(q.id) == "string" and q.id ~= "" and q.id or ("q" .. tostring(i))
+    local prompt = type(q.question) == "string" and q.question ~= "" and q.question or id
+    io.write(prompt .. "\n")
+    if type(q.options) == "table" then
+      for n, option in ipairs(q.options) do
+        if type(option) == "table" then
+          local label = type(option.label) == "string" and option.label or ""
+          local description = type(option.description) == "string" and option.description or ""
+          if description ~= "" then
+            io.write(tostring(n) .. ". " .. label .. " - " .. description .. "\n")
+          elseif label ~= "" then
+            io.write(tostring(n) .. ". " .. label .. "\n")
+          end
+        end
+      end
+    end
+    io.write("> ")
+    local line = io.read("*l")
+    local answer = line or ""
+    local selected = tonumber(answer)
+    if type(q.options) == "table" and selected and type(q.options[selected]) == "table" then
+      local label = q.options[selected].label
+      if type(label) == "string" and label ~= "" then
+        answer = label
+      end
+    end
+    answers[id] = answer
+  end
+  return answers
+end
+
 -- Run fn(...) as a coroutine; return all of fn's return values.
 -- Propagates errors verbatim.
 function M.run(fn, ...)
@@ -121,6 +157,14 @@ end
 
 function M.proc_poll(handle, timeout_ms)
   return coroutine.yield({ kind = "proc", h = handle, ms = timeout_ms })
+end
+
+function M.user_input(questions)
+  local _, main = coroutine.running()
+  if main ~= false then
+    return M.resolvers.user_input({ questions = questions or {} })
+  end
+  return coroutine.yield({ kind = "user_input", questions = questions or {} })
 end
 
 -- Helper: is the current execution inside a coroutine? Lets

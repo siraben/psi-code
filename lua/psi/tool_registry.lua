@@ -48,9 +48,9 @@ function M.find(name)
 end
 
 -- Per-session active-tools allowlist. When nil, all registered tools
--- are offered to the model (default). When set to a set of names via
+-- are available (default). When set to a set of names via
 -- M.set_active({"read","grep"}), select_specs returns only those
--- tools, narrowing what the LLM can call. Lets extensions / skills
+-- tools and dispatch rejects all others. Lets extensions / skills
 -- scope an agent to a safe subset without unregistering tools
 -- globally. Reset with M.set_active(nil).
 local active_allowlist = nil
@@ -89,6 +89,19 @@ function M.get_active()
   return out
 end
 
+function M.get_active_filter()
+  if active_allowlist == nil then
+    return nil
+  end
+  local out = {}
+  for _, t in ipairs(registry) do
+    if active_allowlist[t.name] then
+      out[#out + 1] = t.name
+    end
+  end
+  return out
+end
+
 -- Same filter as get_active but returns the full Tool records
 -- (name / description / prompt_snippet / guidelines / impl). Used by
 -- psi.prompt.system_prompt so the "Available tools:" section in the
@@ -107,6 +120,10 @@ function M.active()
     end
   end
   return out
+end
+
+local function tool_allowed(name)
+  return active_allowlist == nil or active_allowlist[name] == true
 end
 
 -- Entry point for C-side schema serialization. user_text lets hosts
@@ -147,6 +164,9 @@ end
 -- `input` stay compatible since the extra arg is optional.
 function M.dispatch(name, input, meta)
   input = input or {}
+  if not tool_allowed(name) then
+    return records.tool_failure(name, "tool is not active: " .. tostring(name))
+  end
   for _, hook in ipairs(before_hooks) do
     local intercept = hook(name, input, meta)
     if intercept ~= nil then

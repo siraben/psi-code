@@ -73,6 +73,7 @@ local function run_agent_turn(opts, user_text)
     max_tokens = opts.max_tokens,
     thinking_level = opts.thinking_level,
     reasoning_effort = opts.reasoning_effort,
+    plan_mode = opts.plan_mode,
     observer = observer,
     abort_check = psi.is_aborted,
   })
@@ -255,6 +256,21 @@ local function handle_slash_command(opts, line)
     opts.thinking_level = level
     opts.reasoning_effort = level == "off" and "none" or level
     print("thinking set to " .. tostring(level))
+    return true, false
+  end
+  if kind == "plan" then
+    print("> " .. (action.payload or ""))
+    local old = opts.plan_mode
+    opts.plan_mode = true
+    local ok = run_agent_turn(opts, action.payload or "")
+    opts.plan_mode = old
+    if ok and opts.session_file and opts.session_file ~= "" then
+      local saved, err = session.save()
+      if not saved then
+        io.stderr:write("failed to save session file: " .. tostring(err) .. "\n")
+        return false, false
+      end
+    end
     return true, false
   end
   -- "new-session" / "reload" are now handled inside commands.lua and

@@ -146,6 +146,10 @@ Current structured host tools registered in `lua/psi/tools.lua`:
 - `find`
 - `ls`
 - `lua`
+- `apply_patch`
+- `update_plan`
+- `request_user_input`
+- `subagent`
 
 Tool inputs are plain Lua tables (or Lua alists when routed through the C
 glue). The bootstrap and extensions live in Lua and dispatch through
@@ -153,6 +157,12 @@ glue). The bootstrap and extensions live in Lua and dispatch through
 The `read` tool supports `offset` and `limit`; `write` and `edit` are
 serialized per path so concurrent tool calls cannot mutate the same file at
 the same time.
+`apply_patch` applies Codex-style structured patches, including file moves and
+rollback on failed multi-file patches. `update_plan` maintains the visible task
+plan. `request_user_input` asks blocking questions through the REPL or TUI
+composer, and `subagent` launches isolated child `psi` agents for single,
+parallel, or chained tasks. Subagent sessions, logs, and runnable shell scripts
+are written under `.psi/subagents/` by default for inspection.
 
 `bash`, `grep`, `find`, and `ls` run through a small host process layer in
 `src/core/process.c` that captures output and exit status using `fork`/`exec`
@@ -167,7 +177,7 @@ working directory upward plus global files from `~/.config/psi/`.
 API, streams text to stdout as it arrives, executes built-in host tools, and
 persists user/tool/assistant events in the session log. Starting `psi` with no
 explicit mode opens the same agent loop in an interactive shell with `/help`,
-`/session`, `/system-prompt`, `/compact`, and `/quit`. `--tui` opens a
+`/session`, `/system-prompt`, `/plan`, `/compact`, and `/quit`. `--tui` opens a
 full-screen ANSI view over the same runtime and uses the same Lua hook
 renderers for tool execution blocks and diffs. The default model is
 `claude-opus-4-7`, overridable via `--model` or `PSI_ANTHROPIC_MODEL`.

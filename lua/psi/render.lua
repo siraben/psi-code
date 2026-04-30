@@ -179,6 +179,31 @@ local function render_lua_call(p)
   return tool_call_leading() .. "\n" .. ansi.bold(ansi.cyan("lua")) .. " " .. mode .. "\n"
 end
 
+local function render_apply_patch_call(_p)
+  return tool_call_leading() .. "\n" .. ansi.bold(ansi.cyan("apply_patch")) .. "\n"
+end
+
+local function render_update_plan_call(_p)
+  return tool_call_leading() .. "\n" .. ansi.bold(ansi.cyan("update_plan")) .. "\n"
+end
+
+local function render_request_user_input_call(_p)
+  return tool_call_leading() .. "\n" .. ansi.bold(ansi.cyan("request_user_input")) .. "\n"
+end
+
+local function render_subagent_call(p)
+  local input = payload_input(p)
+  local suffix
+  if type(input.tasks) == "table" then
+    suffix = "parallel " .. tostring(#input.tasks) .. " task(s)"
+  elseif type(input.chain) == "table" then
+    suffix = "chain " .. tostring(#input.chain) .. " step(s)"
+  else
+    suffix = tostring(input.agent or "worker")
+  end
+  return tool_call_leading() .. "\n" .. ansi.bold(ansi.cyan("subagent")) .. " " .. suffix .. "\n"
+end
+
 local function render_generic_call(p)
   return tool_banner(payload_tool(p) or "tool", payload_input(p).path)
 end
@@ -257,6 +282,18 @@ local function render_lua_result(p)
   return error_line("lua", result)
 end
 
+local function render_output_result(tool_name, p)
+  local result = payload_result(p)
+  local output = result:get("output") or ""
+  if result.ok then
+    if type(output) == "string" and output ~= "" then
+      return diff.preview_output(output) .. "\n"
+    end
+    return ansi.dim(tool_name .. " completed") .. "\n"
+  end
+  return error_line(tool_name, result)
+end
+
 local function render_generic_result(p)
   local result = payload_result(p)
   if result.ok then
@@ -293,6 +330,18 @@ function M.render_tool_call(p)
   if tool == "lua" then
     return render_lua_call(p)
   end
+  if tool == "apply_patch" then
+    return render_apply_patch_call(p)
+  end
+  if tool == "update_plan" then
+    return render_update_plan_call(p)
+  end
+  if tool == "request_user_input" then
+    return render_request_user_input_call(p)
+  end
+  if tool == "subagent" then
+    return render_subagent_call(p)
+  end
   return render_generic_call(p)
 end
 
@@ -316,6 +365,18 @@ function M.render_tool_result(p)
   end
   if tool == "lua" then
     return render_lua_result(p, frame)
+  end
+  if tool == "apply_patch" then
+    return render_output_result("apply_patch", p)
+  end
+  if tool == "update_plan" then
+    return render_output_result("update_plan", p)
+  end
+  if tool == "request_user_input" then
+    return render_output_result("request_user_input", p)
+  end
+  if tool == "subagent" then
+    return render_output_result("subagent", p)
   end
   return render_generic_result(p, frame)
 end

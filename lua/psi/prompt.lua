@@ -133,6 +133,10 @@ function M.system_prompt()
       out = transformed
     end
   end
+  local ok_plan, plan = pcall(require, "psi.plan")
+  if ok_plan and plan and plan.prompt_suffix then
+    out = out .. plan.prompt_suffix()
+  end
   return out
 end
 

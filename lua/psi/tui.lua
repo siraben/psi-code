@@ -12,6 +12,13 @@ local M = {}
 local BAR_SPLIT = string.char(31)
 local busy_rng_seeded = false
 local enabled_setting
+local BYTE_ESC = 27
+local BYTE_BEL = 7
+local BYTE_BACKSLASH = 92
+local BYTE_CSI_FINAL_START = 64
+local BYTE_CSI_FINAL_END = 126
+local BYTE_SPACE = 32
+local BYTE_DEL = 127
 
 local DEFAULT_BUSY_LABELS = {
   { label = "working", weight = 1 },
@@ -504,6 +511,59 @@ local function tilde_path(path)
   return path
 end
 
+local function find_csi_terminator(text, start)
+  local i = start
+  while i <= #text do
+    local byte = text:byte(i)
+    if byte >= BYTE_CSI_FINAL_START and byte <= BYTE_CSI_FINAL_END then
+      return i + 1
+    end
+    i = i + 1
+  end
+  return #text + 1
+end
+
+local function find_string_terminator(text, start)
+  local i = start
+  while i <= #text do
+    local byte = text:byte(i)
+    if byte == BYTE_BEL then
+      return i + 1
+    end
+    if byte == BYTE_ESC and text:byte(i + 1) == BYTE_BACKSLASH then
+      return i + 2
+    end
+    i = i + 1
+  end
+  return #text + 1
+end
+
+local function sanitize_inline_status(text)
+  text = tostring(text or "")
+  local out = {}
+  local i = 1
+  while i <= #text do
+    local byte = text:byte(i)
+    local next_char = text:sub(i + 1, i + 1)
+    if byte == BYTE_ESC then
+      if next_char == "[" then
+        i = find_csi_terminator(text, i + 2)
+      elseif next_char == "]" or next_char == "P" or next_char == "^" or next_char == "_" then
+        i = find_string_terminator(text, i + 2)
+      else
+        i = i + 2
+      end
+    elseif byte < BYTE_SPACE or byte == BYTE_DEL then
+      out[#out + 1] = " "
+      i = i + 1
+    else
+      out[#out + 1] = text:sub(i, i)
+      i = i + 1
+    end
+  end
+  return (table.concat(out):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
 local function visible_width(text)
   local width = 0
   local i = 1
@@ -581,6 +641,9 @@ function M.status_line(arg_json)
   local parts = {}
   parts[#parts + 1] = "session:" .. short_id(psi.session_id())
   parts[#parts + 1] = "model:" .. model
+  if arg.plan_mode then
+    parts[#parts + 1] = "plan:" .. tostring(arg.plan_model or "?")
+  end
   parts[#parts + 1] = "msg:" .. tostring(psi.session_message_count())
 
   local estimate = context.estimate_context_tokens()
@@ -592,6 +655,11 @@ function M.status_line(arg_json)
 
   if scroll > 0 then
     parts[#parts + 1] = "scroll:" .. tostring(scroll)
+  end
+  local plan_status = type(arg.plan_status) == "string" and sanitize_inline_status(arg.plan_status)
+    or ""
+  if plan_status ~= "" then
+    parts[#parts + 1] = "plan-progress:" .. plan_status
   end
   if ok and agent.pending_message_count then
     local queued = agent.pending_message_count()
@@ -626,6 +694,14 @@ function M.status_bar(arg_json)
     pair("model", model, false),
     pair("messages", tostring(psi.session_message_count()), false),
   }
+  if arg.plan_mode then
+    right_parts[#right_parts + 1] = pair("plan", tostring(arg.plan_model or "?"), false)
+  end
+  local plan_status = type(arg.plan_status) == "string" and sanitize_inline_status(arg.plan_status)
+    or ""
+  if plan_status ~= "" then
+    right_parts[#right_parts + 1] = pair("plan-progress", plan_status, false)
+  end
   for _, hook in ipairs(status_hooks) do
     local ok_hook, extra = pcall(hook.fn, arg)
     if ok_hook and type(extra) == "string" and extra ~= "" then

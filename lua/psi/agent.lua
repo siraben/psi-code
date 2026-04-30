@@ -13,8 +13,36 @@ local sched = require("psi.sched")
 local session = require("psi.session")
 local thinking = require("psi.thinking")
 local providers = require("psi.providers")
+local tools = require("psi.tools")
+local plan = require("psi.plan")
 
 local M = {}
+
+local PLAN_TOOLS = {
+  "read",
+  "grep",
+  "find",
+  "ls",
+  "update_plan",
+  "request_user_input",
+}
+
+local function plan_tools_for(previous_active_tools)
+  if previous_active_tools == nil then
+    return PLAN_TOOLS
+  end
+  local allowed = {}
+  for _, name in ipairs(previous_active_tools) do
+    allowed[name] = true
+  end
+  local out = {}
+  for _, name in ipairs(PLAN_TOOLS) do
+    if allowed[name] then
+      out[#out + 1] = name
+    end
+  end
+  return out
+end
 
 -- ---------- Provider routing ----------
 --
@@ -53,6 +81,20 @@ local override_model = nil
 local override_reasoning_effort = nil
 local configured_model = nil
 
+local function split_csv(text)
+  local out = {}
+  if type(text) ~= "string" then
+    return out
+  end
+  for part in (text .. ","):gmatch("([^,]*),") do
+    part = part:gsub("^[ \t]+", ""):gsub("[ \t]+$", "")
+    if part ~= "" then
+      out[#out + 1] = part
+    end
+  end
+  return out
+end
+
 local function normalize_reasoning_effort(value)
   if value == nil then
     return nil
@@ -78,6 +120,10 @@ end
 function M.configure(opts)
   opts = opts or {}
   configured_model = opts.model
+  local active_tools = os.getenv("PSI_ACTIVE_TOOLS")
+  if active_tools and active_tools ~= "" then
+    tools.set_active(split_csv(active_tools))
+  end
 end
 
 function M.set_model(name)
@@ -206,24 +252,45 @@ end
 -- modes get a trivial driver (no tick hook); the TUI installs its
 -- own tick hook so its main loop keeps redrawing.
 function M.run_turn(opts)
+  opts = opts or {}
   local user_text = opts.user_text or ""
   session.append_user(user_text)
   session.save()
 
-  local provider, resolved = pick_provider(M.current_model(opts.model))
-  local thinking_level = M.thinking_level_for(resolved, opts.thinking_level, opts.reasoning_effort)
-  local system_prompt = prompt.system_prompt()
-  return sched.run(function()
-    return provider.run_turn({
-      system_prompt = system_prompt,
-      model = resolved.id,
-      max_tokens = opts.max_tokens,
-      thinking_level = thinking_level,
-      reasoning_effort = M.current_reasoning_effort(opts.reasoning_effort),
-      observer = opts.observer,
-      abort_check = opts.abort_check,
-    })
+  local previous_plan_mode = plan.is_active()
+  local previous_active_tools = tools.get_active_filter()
+  if opts.plan_mode ~= nil then
+    plan.set_active(opts.plan_mode)
+  end
+  local ran, ok, reply = pcall(function()
+    if plan.is_active() then
+      tools.set_active(plan_tools_for(previous_active_tools))
+    end
+    local model_spec = plan.is_active() and plan.model(opts.model) or M.current_model(opts.model)
+    local provider, resolved = pick_provider(model_spec)
+    local thinking_level =
+      M.thinking_level_for(resolved, opts.thinking_level, opts.reasoning_effort)
+    local system_prompt = prompt.system_prompt()
+    return sched.run(function()
+      return provider.run_turn({
+        system_prompt = system_prompt,
+        model = resolved.id,
+        max_tokens = opts.max_tokens,
+        thinking_level = thinking_level,
+        reasoning_effort = M.current_reasoning_effort(opts.reasoning_effort),
+        observer = opts.observer,
+        abort_check = opts.abort_check,
+      })
+    end)
   end)
+  if opts.plan_mode ~= nil then
+    plan.set_active(previous_plan_mode)
+  end
+  tools.set_active(previous_active_tools)
+  if not ran then
+    error(ok, 0)
+  end
+  return ok, reply
 end
 
 function M.side_question(question, opts)

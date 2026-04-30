@@ -24,6 +24,7 @@ static int psi_tui_has_original_termios = 0;
 
 #define PSI_TUI_ENABLE_MOUSE "\033[?1000h\033[?1006h"
 #define PSI_TUI_DISABLE_MOUSE "\033[?1006l\033[?1000l"
+#define PSI_TUI_CURSOR_BLOCK "\033[2 q"
 
 static int psi_tui_enter_terminal(void) {
     struct termios raw_attrs;
@@ -44,13 +45,13 @@ static int psi_tui_enter_terminal(void) {
         perror("tcsetattr");
         return PSI_STATUS_ERROR;
     }
-    fputs("\033[?1049h" PSI_TUI_ENABLE_MOUSE "\033[?25h\033[2J\033[H", stdout);
+    fputs("\033[?1049h" PSI_TUI_ENABLE_MOUSE PSI_TUI_CURSOR_BLOCK "\033[?25h\033[2J\033[H", stdout);
     fflush(stdout);
     return PSI_STATUS_OK;
 }
 
 static void psi_tui_leave_terminal(void) {
-    fputs(PSI_TUI_DISABLE_MOUSE "\033[?2026l\033[0m\033[?25h\033[?1049l", stdout);
+    fputs(PSI_TUI_DISABLE_MOUSE "\033[?2026l\033[0m" PSI_TUI_CURSOR_BLOCK "\033[?25h\033[?1049l", stdout);
     fflush(stdout);
     if (psi_tui_has_original_termios) {
         tcsetattr(STDIN_FILENO, TCSAFLUSH, &psi_tui_original_termios);
@@ -61,7 +62,7 @@ void psi_tui_suspend_terminal(void) {
     if (psi_tui_has_original_termios) {
         tcsetattr(STDIN_FILENO, TCSAFLUSH, &psi_tui_original_termios);
     }
-    fputs(PSI_TUI_DISABLE_MOUSE "\033[?2026l\033[0m\033[?25h\033[?1049l", stdout);
+    fputs(PSI_TUI_DISABLE_MOUSE "\033[?2026l\033[0m" PSI_TUI_CURSOR_BLOCK "\033[?25h\033[?1049l", stdout);
     fflush(stdout);
 }
 
@@ -79,7 +80,7 @@ void psi_tui_resume_terminal(void) {
     raw_attrs.c_cc[VMIN] = 0;
     raw_attrs.c_cc[VTIME] = 0;
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_attrs);
-    fputs("\033[?1049h" PSI_TUI_ENABLE_MOUSE "\033[?25h\033[2J\033[H", stdout);
+    fputs("\033[?1049h" PSI_TUI_ENABLE_MOUSE PSI_TUI_CURSOR_BLOCK "\033[?25h\033[2J\033[H", stdout);
     fflush(stdout);
 }
 

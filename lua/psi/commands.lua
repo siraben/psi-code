@@ -16,6 +16,7 @@ local prelude = require("psi.prelude")
 local keybindings = require("psi.keybindings")
 local session = require("psi.session")
 local thinking = require("psi.thinking")
+local plan = require("psi.plan")
 
 local M = {}
 
@@ -114,6 +115,47 @@ local function cmd_thinking(rest)
     )
   end
   return records.new_command_action("set-thinking", level)
+end
+
+local function plan_status()
+  local lines = {
+    "plan mode: " .. (plan.is_active() and "on" or "off"),
+    "plan model: " .. tostring(plan.model()),
+  }
+  local current = plan.status_text()
+  if current ~= "" then
+    lines[#lines + 1] = "plan: " .. current
+  end
+  return table.concat(lines, "\n")
+end
+
+local function cmd_plan(rest)
+  rest = prelude.trim(rest or "")
+  if rest == "" or rest == "status" then
+    return records.new_command_action("print", plan_status())
+  end
+  local first, tail = split_first_word(rest)
+  first = first:lower()
+  if first == "on" then
+    plan.set_active(true)
+    return records.new_command_action("print", plan_status())
+  end
+  if first == "off" then
+    plan.set_active(false)
+    return records.new_command_action("print", plan_status())
+  end
+  if first == "toggle" then
+    plan.toggle()
+    return records.new_command_action("print", plan_status())
+  end
+  if first == "model" then
+    if tail == "" then
+      return records.new_command_action("print", "usage: /plan model <spec>")
+    end
+    plan.set_model(tail)
+    return records.new_command_action("print", plan_status())
+  end
+  return records.new_command_action("plan", rest)
 end
 
 local function copy_auth_url(url)
@@ -344,6 +386,7 @@ end
 local function cmd_new_session()
   psi.session_clear()
   session.reset_entry_chain()
+  plan.reset()
   if session.set_display_name then
     session.set_display_name(nil)
   end
@@ -554,6 +597,11 @@ local BUILTIN_COMMANDS = {
     name = "thinking",
     argument_hint = "<level>",
     description = "Set reasoning level",
+  },
+  {
+    name = "plan",
+    argument_hint = "[on|off|status|model <spec>|prompt]",
+    description = "Use plan mode or submit a one-shot planning prompt",
   },
   {
     name = "login",
@@ -777,6 +825,9 @@ function M.handle(line)
   end
   if starts_word(line, "/thinking") then
     return cmd_thinking(arg_after(line, "/thinking"))
+  end
+  if starts_word(line, "/plan") then
+    return cmd_plan(arg_after(line, "/plan"))
   end
   if starts_word(line, "/login") then
     local provider, input = split_first_word(arg_after(line, "/login"))

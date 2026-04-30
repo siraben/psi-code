@@ -14,6 +14,10 @@ local BUILTINS = {
   "psi.tools.find",
   "psi.tools.ls",
   "psi.tools.lua",
+  "psi.tools.apply_patch",
+  "psi.tools.update_plan",
+  "psi.tools.request_user_input",
+  "psi.tools.subagent",
 }
 
 for _, mod in ipairs(BUILTINS) do
@@ -31,6 +35,7 @@ M.add_after_hook = registry.add_after_hook
 M.clear_hooks = registry.clear_hooks
 M.set_active = registry.set_active
 M.get_active = registry.get_active
+M.get_active_filter = registry.get_active_filter
 M.active = registry.active
 
 -- Helper for before-hooks to cleanly cancel a tool call.
