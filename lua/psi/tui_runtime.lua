@@ -1755,6 +1755,9 @@ local function busy_command_action(line)
         or "queue is empty",
     }
   end
+  if line == "/ralph-stop" or line == "/ralph-status" then
+    return commands.handle(line)
+  end
   if line:match("^/btw%s+") then
     return { kind = "btw" }
   end

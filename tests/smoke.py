@@ -637,6 +637,28 @@ def t_ralph_direct_state_write(psi: Psi):
                   "ralph_state should accept oh-my-codex direct state_write shape")
 
 
+@test("ralph/direct_complete_requires_evidence")
+def t_ralph_direct_complete_requires_evidence(psi: Psi):
+    cwd = psi.tmp / "ralph-complete-evidence"
+    cwd.mkdir(exist_ok=True)
+    out = psi.run(
+        "--eval",
+        'local ralph = require("psi.ralph")\n'
+        + 'ralph.start("ship evidence", { max_iterations = 3 })\n'
+        + 'local tool = require("psi.tools").dispatch("ralph_state", {\n'
+        + '  mode = "ralph", active = false, current_phase = "complete"\n'
+        + '})\n'
+        + 'local state = ralph.read()\n'
+        + 'return tostring(tool.ok) .. "|"\n'
+        + '  .. tostring(tool.error) .. "|"\n'
+        + '  .. tostring(state.active) .. "|"\n'
+        + '  .. tostring(state.current_phase)',
+        cwd=cwd,
+    ).stdout.strip()
+    assert_equals(out, "false|complete requires evidence|true|starting",
+                  "direct complete writes should require verification evidence")
+
+
 @test("ralph/follow_up_queue")
 def t_ralph_follow_up_queue(psi: Psi):
     cwd = psi.tmp / "ralph-follow-up"
@@ -2077,6 +2099,32 @@ def t_tui_busy_slash_command_does_not_dispatch(psi: Psi):
     )
     assert_equals(out, "1|1|/new|command unavailable while busy",
                   "busy slash commands should not dispatch side effects like /new")
+
+
+@test("tui/busy_ralph_stop_allowed")
+def t_tui_busy_ralph_stop_allowed(psi: Psi):
+    cwd = psi.tmp / "busy-ralph-stop"
+    cwd.mkdir(exist_ok=True)
+    out = psi.run(
+        "--eval",
+        'local ralph = require("psi.ralph")\n'
+        + 'local rt = require("psi.tui_runtime")\n'
+        + 'ralph.start("busy task")\n'
+        + 'local state = rt._debug_edit_keys("/ralph-stop", 11, {{key="enter"}}, false, {\n'
+        + '  busy = true, busy_kind = "agent"\n'
+        + '})\n'
+        + 'local rs = ralph.read()\n'
+        + 'return table.concat({\n'
+        + '  state.input,\n'
+        + '  tostring(state.status_text),\n'
+        + '  tostring(rs.active),\n'
+        + '  tostring(rs.current_phase),\n'
+        + '  tostring(rs.stop_reason)\n'
+        + '}, "|")',
+        cwd=cwd,
+    ).stdout.strip()
+    assert_equals(out, "|nil|false|cancelled|stopped_by_user",
+                  "busy TUI should allow /ralph-stop to cancel the active loop")
 
 
 @test("tui/non_agent_busy_submit_not_queued")

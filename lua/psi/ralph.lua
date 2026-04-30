@@ -67,6 +67,10 @@ local function normalize_phase(phase)
   return nil
 end
 
+function M.normalize_phase(phase)
+  return normalize_phase(phase)
+end
+
 local function valid_state(raw)
   if type(raw) ~= "table" then
     return nil

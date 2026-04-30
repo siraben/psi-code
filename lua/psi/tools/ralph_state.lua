@@ -11,6 +11,21 @@ local function string_field(input, key)
   return nil
 end
 
+local function has_evidence(state)
+  if type(state.evidence) ~= "table" then
+    return false
+  end
+  for _, item in ipairs(state.evidence) do
+    if type(item) == "table" and type(item.text) == "string" and item.text ~= "" then
+      return true
+    end
+    if type(item) == "string" and item ~= "" then
+      return true
+    end
+  end
+  return false
+end
+
 local function direct_state_write(input)
   local state = ralph.read() or {
     active = true,
@@ -52,6 +67,10 @@ local function direct_state_write(input)
       at = require("psi.prelude").iso_timestamp(),
       text = evidence,
     }
+  end
+
+  if ralph.normalize_phase(state.current_phase) == "complete" and not has_evidence(state) then
+    return records.tool_failure("ralph_state", "complete requires evidence")
   end
 
   local ok, state_or_err = ralph.write(state)
