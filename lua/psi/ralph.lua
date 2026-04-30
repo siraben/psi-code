@@ -140,6 +140,9 @@ function M.update(fields)
   end
   fields = fields or {}
   local phase = normalize_phase(fields.current_phase or fields.phase)
+  if phase and ACTIVE_PHASES[phase] and not M.is_active(state) then
+    return false, "ralph is not active"
+  end
   if phase then
     state.current_phase = phase
     state.active = not TERMINAL_PHASES[phase]

@@ -637,6 +637,26 @@ def t_ralph_direct_state_write(psi: Psi):
                   "ralph_state should accept oh-my-codex direct state_write shape")
 
 
+@test("ralph/direct_write_requires_active_run")
+def t_ralph_direct_write_requires_active_run(psi: Psi):
+    cwd = psi.tmp / "ralph-direct-no-run"
+    cwd.mkdir(exist_ok=True)
+    out = psi.run(
+        "--eval",
+        'local ralph = require("psi.ralph")\n'
+        + 'local tool = require("psi.tools").dispatch("ralph_state", {\n'
+        + '  current_phase = "verifying"\n'
+        + '})\n'
+        + 'local state = ralph.read()\n'
+        + 'return tostring(tool.ok) .. "|"\n'
+        + '  .. tostring(tool.error) .. "|"\n'
+        + '  .. tostring(state == nil)',
+        cwd=cwd,
+    ).stdout.strip()
+    assert_equals(out, "false|ralph is not active|true",
+                  "direct ralph_state writes should not start a run outside /ralph")
+
+
 @test("ralph/direct_complete_requires_evidence")
 def t_ralph_direct_complete_requires_evidence(psi: Psi):
     cwd = psi.tmp / "ralph-complete-evidence"
@@ -657,6 +677,30 @@ def t_ralph_direct_complete_requires_evidence(psi: Psi):
     ).stdout.strip()
     assert_equals(out, "false|complete requires evidence|true|starting",
                   "direct complete writes should require verification evidence")
+
+
+@test("ralph/cancelled_run_cannot_reactivate")
+def t_ralph_cancelled_run_cannot_reactivate(psi: Psi):
+    cwd = psi.tmp / "ralph-cancelled-reactivate"
+    cwd.mkdir(exist_ok=True)
+    out = psi.run(
+        "--eval",
+        'local ralph = require("psi.ralph")\n'
+        + 'ralph.start("keep stopped", { max_iterations = 3 })\n'
+        + 'ralph.stop("stopped_by_user", "cancelled")\n'
+        + 'local tool = require("psi.tools").dispatch("ralph_state", {\n'
+        + '  action = "phase", phase = "executing"\n'
+        + '})\n'
+        + 'local state = ralph.read()\n'
+        + 'return tostring(tool.ok) .. "|"\n'
+        + '  .. tostring(tool.error) .. "|"\n'
+        + '  .. tostring(state.active) .. "|"\n'
+        + '  .. tostring(state.current_phase) .. "|"\n'
+        + '  .. tostring(state.stop_reason)',
+        cwd=cwd,
+    ).stdout.strip()
+    assert_equals(out, "false|ralph is not active|false|cancelled|stopped_by_user",
+                  "late phase updates should not reactivate a cancelled Ralph run")
 
 
 @test("ralph/follow_up_queue")

@@ -27,15 +27,10 @@ local function has_evidence(state)
 end
 
 local function direct_state_write(input)
-  local state = ralph.read() or {
-    active = true,
-    mode = "ralph",
-    iteration = 0,
-    max_iterations = 10,
-    current_phase = "starting",
-    started_at = require("psi.prelude").iso_timestamp(),
-    evidence = {},
-  }
+  local state = ralph.read()
+  if not state then
+    return records.tool_failure("ralph_state", "ralph is not active")
+  end
 
   for _, key in ipairs({
     "active",
