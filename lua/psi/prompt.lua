@@ -1,9 +1,9 @@
 -- psi.prompt: system prompt, compaction request, runtime summary, help text.
 
 local prelude = require("psi.prelude")
-local session = require("psi.session")
+local session = require("psi.session_manager")
 local tools = require("psi.tools")
-local resources = require("psi.resources")
+local resources = require("psi.resource_loader")
 
 local M = {}
 
@@ -234,7 +234,7 @@ function M.runtime_summary()
 end
 
 function M.help_text()
-  return require("psi.commands").help_text()
+  return require("psi.slash_commands").help_text()
 end
 
 function M.hotkeys_text()

@@ -7,8 +7,8 @@
 
 local context = require("psi.context")
 local control = require("psi.agent_control")
-local transform = require("psi.message_transform")
-local session_mod = require("psi.session")
+local transform = require("psi.transform_messages")
+local session_mod = require("psi.session_manager")
 
 local M = {}
 

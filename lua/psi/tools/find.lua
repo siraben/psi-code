@@ -1,7 +1,9 @@
+-- psi.tools.find: Find files matching a glob (fd backend); honors hidden files and a result cap.
+
 local records = require("psi.records")
 local registry = require("psi.tool_registry")
 local shell = require("psi.tool_shell")
-local path_util = require("psi.path")
+local path_util = require("psi.path_utils")
 local helpers = require("psi.tool_helpers")
 local truncate = require("psi.truncate")
 
@@ -15,7 +17,7 @@ local function impl(input, meta)
   local raw_path = registry.optional_string(input, "path", ".")
   local path = path_util.resolve(raw_path) or raw_path
   local limit = registry.optional_number(input, "limit", 1000)
-  local argv = { "fd", "--hidden", "--max-results", tostring(limit), "--glob", pattern, path }
+  local argv = { "fd", "--hidden", "--max-results", tostring(limit), "--glob", "--", pattern, path }
 
   local tool_call_id = meta and meta.tool_call_id or nil
   local stream = shell.run_streaming_argv(argv, tool_call_id, {

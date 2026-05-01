@@ -1,5 +1,5 @@
-#ifndef PSI_AGENT_H
-#define PSI_AGENT_H
+#ifndef PSI_AGENT_RUNTIME_H
+#define PSI_AGENT_RUNTIME_H
 
 #include "psi/abort.h"
 #include "psi/common.h"

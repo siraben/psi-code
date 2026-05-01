@@ -25,10 +25,11 @@
 #endif
 #include <dirent.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 
 #include "psi/abort.h"
-#include "psi/agent.h"
-#include "psi/anthropic.h"
+#include "psi/agent_runtime.h"
+#include "psi/http_buffered.h"
 #include "psi/http_async.h"
 #include "psi/common.h"
 #include "psi/embedded_lua.h"
@@ -935,6 +936,107 @@ static int lfn_file_write(lua_State *L) {
     return 1;
 }
 
+/* O_CREAT|O_EXCL temp file in the destination directory, fsync,
+ * rename(2), then fsync the parent directory. The file at `path` is
+ * either the old version or the new one — never a partial write. */
+static int psi_vm_file_write_atomic(const char *path, const char *content, size_t len, mode_t mode) {
+    char tmp_path[1024];
+    int fd;
+    long pid_l;
+    long ts;
+    static unsigned long atomic_counter = 0u;
+
+#ifdef _WIN32
+    pid_l = 0;
+#else
+    pid_l = (long)getpid();
+#endif
+    ts = (long)time(NULL);
+    atomic_counter++;
+    if ((size_t)snprintf(tmp_path, sizeof(tmp_path), "%s.psi-tmp-%ld-%ld-%lu",
+                         path, pid_l, ts, atomic_counter) >= sizeof(tmp_path)) {
+        return PSI_STATUS_ERROR;
+    }
+
+    fd = open(tmp_path, O_WRONLY | O_CREAT | O_EXCL, mode);
+    if (fd < 0) return PSI_STATUS_ERROR;
+
+    if (len > 0u) {
+        size_t off = 0u;
+        while (off < len) {
+            ssize_t n = write(fd, content + off, len - off);
+            if (n < 0) {
+                if (errno == EINTR) continue;
+                close(fd); unlink(tmp_path);
+                return PSI_STATUS_ERROR;
+            }
+            off += (size_t)n;
+        }
+    }
+#ifndef _WIN32
+    if (fsync(fd) != 0 && errno != EINVAL) {
+        close(fd); unlink(tmp_path);
+        return PSI_STATUS_ERROR;
+    }
+#endif
+    if (close(fd) != 0) { unlink(tmp_path); return PSI_STATUS_ERROR; }
+
+    if (rename(tmp_path, path) != 0) {
+        unlink(tmp_path);
+        return PSI_STATUS_ERROR;
+    }
+
+#ifndef _WIN32
+    {
+        const char *slash = strrchr(path, '/');
+        int dir_fd;
+        if (slash != NULL && slash != path) {
+            char dir[1024];
+            size_t dlen = (size_t)(slash - path);
+            if (dlen < sizeof(dir)) {
+                memcpy(dir, path, dlen);
+                dir[dlen] = '\0';
+                dir_fd = open(dir, O_RDONLY);
+                if (dir_fd >= 0) { (void)fsync(dir_fd); close(dir_fd); }
+            }
+        } else if (slash == path) {
+            dir_fd = open("/", O_RDONLY);
+            if (dir_fd >= 0) { (void)fsync(dir_fd); close(dir_fd); }
+        }
+    }
+#endif
+
+    return PSI_STATUS_OK;
+}
+
+/* psi.file_write_secure(path, content) -> bool
+ * Atomic 0600 write — for credential / token storage. */
+static int lfn_file_write_secure(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    size_t len;
+    const char *content = luaL_checklstring(L, 2, &len);
+
+    if ((long)len > PSI_VM_FILE_WRITE_MAX_BYTES) { lua_pushboolean(L, 0); return 1; }
+    lua_pushboolean(L, psi_vm_file_write_atomic(path, content, len, 0600) == PSI_STATUS_OK);
+    return 1;
+}
+
+/* psi.file_write_atomic(path, content) -> bool
+ * Atomic 0644 write — for files whose on-disk shape can't survive a
+ * partial write (e.g. session JSONL rewrites). */
+static int lfn_file_write_atomic(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    size_t len;
+    const char *content = luaL_checklstring(L, 2, &len);
+
+    if ((long)len > PSI_VM_FILE_WRITE_MAX_BYTES) { lua_pushboolean(L, 0); return 1; }
+    lua_pushboolean(L, psi_vm_file_write_atomic(path, content, len, 0644) == PSI_STATUS_OK);
+    return 1;
+}
+
+/* psi.file_append(path, content) -> bool
+ * Single fwrite + fflush + fsync; callers build the full payload
+ * (e.g. JSONL line) so a crash mid-write can't split a record. */
 static int lfn_file_append(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
     size_t len;
@@ -947,6 +1049,15 @@ static int lfn_file_append(lua_State *L) {
     if (len > 0 && fwrite(content, 1u, len, f) != len) {
         fclose(f); lua_pushboolean(L, 0); return 1;
     }
+    if (fflush(f) != 0) { fclose(f); lua_pushboolean(L, 0); return 1; }
+#ifndef _WIN32
+    {
+        int fd = fileno(f);
+        if (fd >= 0 && fsync(fd) != 0 && errno != EINVAL) {
+            fclose(f); lua_pushboolean(L, 0); return 1;
+        }
+    }
+#endif
     if (fclose(f) != 0) { lua_pushboolean(L, 0); return 1; }
     lua_pushboolean(L, 1);
     return 1;
@@ -1353,13 +1464,24 @@ static char **psi_vm_argv_from_table(lua_State *L, int idx, int *argc_out) {
     luaL_checktype(L, idx, LUA_TTABLE);
     n = lua_rawlen(L, idx);
     if (n <= 0) return NULL;
+
+    /* Pre-validate every entry first. luaL_checkstring would longjmp
+     * out of a half-allocated argv loop and leak. */
+    for (i = 1; i <= n; i++) {
+        int t;
+        lua_rawgeti(L, idx, i);
+        t = lua_type(L, -1);
+        lua_pop(L, 1);
+        if (t != LUA_TSTRING && t != LUA_TNUMBER) return NULL;
+    }
+
     argv = (char **)calloc((size_t)n + 1u, sizeof(char *));
     if (argv == NULL) return NULL;
     for (i = 1; i <= n; i++) {
         const char *value;
         lua_rawgeti(L, idx, i);
-        value = luaL_checkstring(L, -1);
-        argv[i - 1] = psi_strdup(value);
+        value = lua_tostring(L, -1);
+        argv[i - 1] = (value != NULL) ? psi_strdup(value) : NULL;
         lua_pop(L, 1);
         if (argv[i - 1] == NULL) {
             lua_Integer j;
@@ -1518,158 +1640,6 @@ static int lfn_session_append(lua_State *L) {
         status = psi_session_append_with_data(s, psi_session_role_from_name(role), text, data);
     }
     lua_pushboolean(L, status == PSI_STATUS_OK ? 1 : 0);
-    return 1;
-}
-
-static void psi_vm_json_copy_field(cJSON *dst, const cJSON *src, const char *name) {
-    cJSON *item;
-    cJSON *copy;
-
-    item = cJSON_GetObjectItemCaseSensitive((cJSON *)src, name);
-    if (item == NULL) return;
-    copy = cJSON_Duplicate(item, 1);
-    if (copy == NULL) return;
-    cJSON_AddItemToObject(dst, name, copy);
-}
-
-static cJSON *psi_vm_session_disk_entry(const struct psi_message *message) {
-    cJSON *body;
-    cJSON *entry;
-    cJSON *entry_type;
-    const char *type_name;
-    int is_compaction;
-    static const char *CUSTOM_FIELDS[] = {
-        "id", "parentId", "timestamp", "name", "data", NULL
-    };
-    static const char *CUSTOM_MESSAGE_FIELDS[] = {
-        "id", "parentId", "timestamp", "message", NULL
-    };
-    static const char *MODEL_CHANGE_FIELDS[] = {
-        "id", "parentId", "timestamp", "model", NULL
-    };
-    static const char *THINKING_LEVEL_FIELDS[] = {
-        "id", "parentId", "timestamp", "thinkingLevel", NULL
-    };
-    static const char *COMPACTION_FIELDS[] = {
-        "id", "parentId", "timestamp", "summary", "firstKeptEntryId",
-        "tokensBefore", "readFiles", "modifiedFiles", "compactedCount", NULL
-    };
-    static const char *MESSAGE_FIELDS[] = {
-        "id", "parentId", "timestamp", "message", NULL
-    };
-    const char **fields;
-    size_t i;
-
-    if (message == NULL || message->data_json == NULL) return NULL;
-    body = cJSON_Parse(message->data_json);
-    if (body == NULL || !cJSON_IsObject(body)) {
-        cJSON_Delete(body);
-        return NULL;
-    }
-
-    entry = cJSON_CreateObject();
-    if (entry == NULL) {
-        cJSON_Delete(body);
-        return NULL;
-    }
-
-    entry_type = cJSON_GetObjectItemCaseSensitive(body, "__entry_type");
-    type_name = cJSON_IsString(entry_type) ? entry_type->valuestring : NULL;
-    is_compaction = (message->role == PSI_MESSAGE_COMPACTION_SUMMARY);
-
-    if (type_name != NULL && strcmp(type_name, "custom") == 0) {
-        cJSON_AddStringToObject(entry, "type", "custom");
-        fields = CUSTOM_FIELDS;
-    } else if (type_name != NULL && strcmp(type_name, "custom_message") == 0) {
-        cJSON_AddStringToObject(entry, "type", "custom_message");
-        fields = CUSTOM_MESSAGE_FIELDS;
-    } else if (type_name != NULL && strcmp(type_name, "model_change") == 0) {
-        cJSON_AddStringToObject(entry, "type", "model_change");
-        fields = MODEL_CHANGE_FIELDS;
-    } else if (type_name != NULL && strcmp(type_name, "thinking_level_change") == 0) {
-        cJSON_AddStringToObject(entry, "type", "thinking_level_change");
-        fields = THINKING_LEVEL_FIELDS;
-    } else if (is_compaction) {
-        cJSON_AddStringToObject(entry, "type", "compaction");
-        fields = COMPACTION_FIELDS;
-    } else {
-        cJSON_AddStringToObject(entry, "type", "message");
-        fields = MESSAGE_FIELDS;
-    }
-
-    for (i = 0u; fields[i] != NULL; i++) {
-        psi_vm_json_copy_field(entry, body, fields[i]);
-    }
-    if (is_compaction && cJSON_GetObjectItemCaseSensitive(entry, "summary") == NULL) {
-        cJSON_AddStringToObject(entry, "summary", message->text ? message->text : "");
-    }
-    cJSON_Delete(body);
-    return entry;
-}
-
-static int lfn_session_append_jsonl(lua_State *L) {
-    const char *path = luaL_checkstring(L, 1);
-    lua_Integer start_arg = luaL_optinteger(L, 2, 1);
-    struct psi_host_context *host = PSI_VM_HOST(L);
-    struct psi_session *s = host ? host->session : NULL;
-    FILE *file;
-    size_t start;
-    size_t i;
-
-    if (!s) {
-        lua_pushboolean(L, 0);
-        lua_pushstring(L, "no session");
-        return 2;
-    }
-    if (start_arg < 1) start_arg = 1;
-    start = (size_t)(start_arg - 1);
-    if (start >= s->count) {
-        lua_pushboolean(L, 1);
-        return 1;
-    }
-
-    file = fopen(path, "a");
-    if (file == NULL) {
-        lua_pushboolean(L, 0);
-        lua_pushstring(L, strerror(errno));
-        return 2;
-    }
-
-    for (i = start; i < s->count; i++) {
-        cJSON *entry;
-        char *json;
-        size_t len;
-        entry = psi_vm_session_disk_entry(&s->messages[i]);
-        if (entry == NULL) {
-            fclose(file);
-            lua_pushboolean(L, 0);
-            lua_pushstring(L, "message has no structured data");
-            return 2;
-        }
-        json = cJSON_PrintUnformatted(entry);
-        cJSON_Delete(entry);
-        if (json == NULL) {
-            fclose(file);
-            lua_pushboolean(L, 0);
-            lua_pushstring(L, "failed to encode session entry");
-            return 2;
-        }
-        len = strlen(json);
-        if ((len > 0u && fwrite(json, 1u, len, file) != len) || fputc('\n', file) == EOF) {
-            free(json);
-            fclose(file);
-            lua_pushboolean(L, 0);
-            lua_pushstring(L, "write failed");
-            return 2;
-        }
-        free(json);
-    }
-    if (fclose(file) != 0) {
-        lua_pushboolean(L, 0);
-        lua_pushstring(L, "close failed");
-        return 2;
-    }
-    lua_pushboolean(L, 1);
     return 1;
 }
 
@@ -2301,23 +2271,9 @@ static int lfn_session_keep_recent_by_tokens(lua_State *L) {
 }
 
 static int lfn_runtime_info(lua_State *L) {
-    static const char *PRIMITIVES[] = {
-        "version", "log", "session_message_count", "read_file", "read_file_slice",
-        "file_write", "file_append", "tempfile_path", "current_date", "cwd", "parent_directory", "path_join",
-        "path_expand", "path_resolve", "file_exists", "file_type", "list_dir",
-        "list_dir_typed",
-        "mkdir_p", "mkdir_parent", "runtime_info", "session_messages",
-        "session_messages_from", "session_token_estimate_from",
-        "session_keep_recent_by_tokens", "process_run", "process_run_argv", "process_begin_argv",
-        "session_append", "session_append_jsonl", "session_clear",
-        "http_get", "http_post",
-        "tool_call",
-        NULL
-    };
     struct psi_host_context *host;
     char *date;
     char *cwd;
-    int i;
 
     host = PSI_VM_HOST(L);
     date = psi_vm_current_date();
@@ -2360,11 +2316,25 @@ static int lfn_runtime_info(lua_State *L) {
         lua_setfield(L, -2, "session-message-count");
     }
 
+    /* Iterate the live `psi` table so the primitives list can't
+     * drift from the actual registration. */
     lua_newtable(L);
     psi_vm_mark_array(L);
-    for (i = 0; PRIMITIVES[i] != NULL; i++) {
-        lua_pushstring(L, PRIMITIVES[i]);
-        lua_rawseti(L, -2, (lua_Integer)(i + 1));
+    {
+        lua_Integer next_idx = 1;
+        lua_getglobal(L, "psi");
+        if (lua_type(L, -1) == LUA_TTABLE) {
+            lua_pushnil(L);
+            while (lua_next(L, -2) != 0) {
+                if (lua_type(L, -2) == LUA_TSTRING && lua_type(L, -1) == LUA_TFUNCTION) {
+                    lua_pushvalue(L, -2);          /* key copy */
+                    lua_rawseti(L, -5, next_idx);  /* primitives[next_idx] = key */
+                    next_idx++;
+                }
+                lua_pop(L, 1); /* value, keep key for next iter */
+            }
+        }
+        lua_pop(L, 1); /* psi global (or nil) */
     }
     lua_setfield(L, -2, "primitives");
 
@@ -2722,6 +2692,8 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("read_file",             lfn_read_file);
     PSI_REG("read_file_slice",       lfn_read_file_slice);
     PSI_REG("file_write",            lfn_file_write);
+    PSI_REG("file_write_secure",     lfn_file_write_secure);
+    PSI_REG("file_write_atomic",     lfn_file_write_atomic);
     PSI_REG("file_append",           lfn_file_append);
     PSI_REG("tempfile_path",         lfn_tempfile_path);
     PSI_REG("current_date",          lfn_current_date);
@@ -2749,7 +2721,6 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("process_poll",          lfn_process_poll);
     PSI_REG("process_finish",        lfn_process_finish);
     PSI_REG("session_append",        lfn_session_append);
-    PSI_REG("session_append_jsonl",  lfn_session_append_jsonl);
     PSI_REG("session_clear",         lfn_session_clear);
     PSI_REG("session_id",            lfn_session_id);
     PSI_REG("session_parent_id",     lfn_session_parent_id);

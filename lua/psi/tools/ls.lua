@@ -1,6 +1,8 @@
+-- psi.tools.ls: List a directory's entries with type and size.
+
 local records = require("psi.records")
 local registry = require("psi.tool_registry")
-local path_util = require("psi.path")
+local path_util = require("psi.path_utils")
 local helpers = require("psi.tool_helpers")
 local truncate = require("psi.truncate")
 

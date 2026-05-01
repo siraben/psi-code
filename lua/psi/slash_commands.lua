@@ -14,7 +14,7 @@
 local records = require("psi.records")
 local prelude = require("psi.prelude")
 local keybindings = require("psi.keybindings")
-local session = require("psi.session")
+local session = require("psi.session_manager")
 local thinking = require("psi.thinking")
 
 local M = {}
@@ -454,7 +454,7 @@ local function cmd_rainbow()
 end
 
 local function queue_summary()
-  local agent = require("psi.agent")
+  local agent = require("psi.agent_session")
   local items = agent.pending_messages()
   if #items == 0 then
     return "queue is empty"
@@ -471,7 +471,7 @@ local function queue_summary()
 end
 
 local function cmd_queue(rest)
-  local agent = require("psi.agent")
+  local agent = require("psi.agent_session")
   rest = prelude.trim(rest or "")
   if rest == "" or rest == "list" then
     return records.new_command_action("print", queue_summary())
@@ -786,7 +786,7 @@ function M.handle(line)
     if provider ~= "openai-codex" then
       return records.new_command_action("print", "unsupported OAuth provider: " .. provider)
     end
-    local oauth = require("psi.oauth_openai_codex")
+    local oauth = require("psi.providers.oauth_openai_codex")
     local ok, result
     if input ~= "" then
       ok, result = oauth.finish_login(input)

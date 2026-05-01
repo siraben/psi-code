@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "psi/agent.h"
+#include "psi/agent_runtime.h"
 #include "psi/vm.h"
 
 int psi_agent_runtime_init(

@@ -20,6 +20,27 @@
 #include "psi/common.h"
 #include "psi/http_async.h"
 
+static pthread_once_t psi_http_init_once = PTHREAD_ONCE_INIT;
+static int psi_http_init_status = 1; /* non-zero = unattempted/failed */
+
+static void psi_http_init_cb(void) {
+    psi_http_init_status = (curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK) ? 0 : 1;
+}
+
+int psi_http_global_init(void) {
+    pthread_once(&psi_http_init_once, psi_http_init_cb);
+    return psi_http_init_status == 0 ? PSI_STATUS_OK : PSI_STATUS_ERROR;
+}
+
+/* curl_slist_append returns NULL on failure without freeing the
+ * prior list; this wrapper assigns through only on success. */
+static int psi_http_slist_append_safe(struct curl_slist **list, const char *line) {
+    struct curl_slist *next = curl_slist_append(*list, line);
+    if (next == NULL) return PSI_STATUS_ERROR;
+    *list = next;
+    return PSI_STATUS_OK;
+}
+
 struct psi_http_chunk_node {
     char *data;
     size_t len;
@@ -231,13 +252,12 @@ int psi_http_stream_begin(
     *out = NULL;
     if (url == NULL) return PSI_STATUS_ERROR;
 
-    if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
+    if (psi_http_global_init() != PSI_STATUS_OK) {
         return PSI_STATUS_ERROR;
     }
 
     h = (struct psi_http_stream *)calloc(1u, sizeof(*h));
     if (h == NULL) {
-        curl_global_cleanup();
         return PSI_STATUS_ERROR;
     }
 
@@ -251,12 +271,15 @@ int psi_http_stream_begin(
     }
     if (h->url == NULL || h->body == NULL) {
         free(h->url); free(h->body); free(h);
-        curl_global_cleanup();
         return PSI_STATUS_ERROR;
     }
 
     for (i = 0u; i < header_count; i++) {
-        h->headers = curl_slist_append(h->headers, header_lines[i]);
+        if (psi_http_slist_append_safe(&h->headers, header_lines[i]) != PSI_STATUS_OK) {
+            curl_slist_free_all(h->headers);
+            free(h->url); free(h->body); free(h);
+            return PSI_STATUS_ERROR;
+        }
     }
     h->abort_signal = abort_signal;
     h->curl_code = CURLE_OK;
@@ -265,14 +288,12 @@ int psi_http_stream_begin(
     if (pthread_mutex_init(&h->mu, NULL) != 0) {
         curl_slist_free_all(h->headers);
         free(h->url); free(h->body); free(h);
-        curl_global_cleanup();
         return PSI_STATUS_ERROR;
     }
     if (pthread_cond_init(&h->cond, NULL) != 0) {
         pthread_mutex_destroy(&h->mu);
         curl_slist_free_all(h->headers);
         free(h->url); free(h->body); free(h);
-        curl_global_cleanup();
         return PSI_STATUS_ERROR;
     }
 
@@ -282,7 +303,6 @@ int psi_http_stream_begin(
         pthread_mutex_destroy(&h->mu);
         curl_slist_free_all(h->headers);
         free(h->url); free(h->body); free(h);
-        curl_global_cleanup();
         return PSI_STATUS_ERROR;
     }
     h->thread_started = 1;
@@ -366,7 +386,6 @@ long psi_http_stream_finish(struct psi_http_stream *h) {
     free(h->url);
     free(h->body);
     free(h);
-    curl_global_cleanup();
 
     return (code == CURLE_OK) ? status : -1l;
 }

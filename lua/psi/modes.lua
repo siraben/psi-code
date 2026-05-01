@@ -5,11 +5,11 @@
 -- module owns the session lifecycle, REPL loop, observer wiring, and
 -- command dispatch.
 
-local agent = require("psi.agent")
+local agent = require("psi.agent_session")
 local prelude = require("psi.prelude")
 local prompt = require("psi.prompt")
 local render = require("psi.render")
-local session = require("psi.session")
+local session = require("psi.session_manager")
 
 local M = {}
 
@@ -178,7 +178,7 @@ end
 -- Returns (continue, quit): continue=false aborts the REPL with an
 -- error, quit=true ends the loop cleanly.
 local function handle_slash_command(opts, line)
-  local commands = require("psi.commands")
+  local commands = require("psi.slash_commands")
   local action = commands.handle(line)
   if action == nil then
     io.stderr:write("unknown command\n")

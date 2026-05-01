@@ -118,6 +118,8 @@ static int psi_process_begin_exec(
 #pragma GCC diagnostic ignored "-Wanalyzer-fd-leak"
 #endif
         int devnull;
+        /* New pgrp so abort can signal the whole tree, not just sh. */
+        (void)setpgid(0, 0);
         if (close(pipe_fds[0]) != 0) _exit(127);
         /* Detach the child from the controlling TTY's input so that
          * keypresses (notably ESC, used in TUI mode to interrupt the
@@ -146,11 +148,15 @@ static int psi_process_begin_exec(
         fcntl(pipe_fds[0], F_SETFL, flags | O_NONBLOCK);
     }
 
+    /* Mirror the child's setpgid so the group exists race-free; an
+     * EACCES here means the child already exec'd, which is fine. */
+    (void)setpgid(child_pid, child_pid);
+
     h = (struct psi_process_handle *)calloc(1u, sizeof(*h));
     if (h == NULL) {
         close(pipe_fds[0]);
         /* Can't reap child cleanly here; fall through to OS cleanup. */
-        kill(child_pid, SIGTERM);
+        kill(-child_pid, SIGTERM);
         waitpid(child_pid, NULL, 0);
         return PSI_STATUS_ERROR;
     }
@@ -198,7 +204,8 @@ int psi_process_poll(
 
     if (psi_abort_signal_is_triggered(h->abort_signal) && !h->aborted) {
         h->aborted = 1;
-        kill(h->child_pid, SIGTERM);
+        /* Negative pid → signal the whole process group. */
+        kill(-h->child_pid, SIGTERM);
     }
 
     /* Loop until either we produce a chunk, time runs out, or
@@ -293,10 +300,39 @@ int psi_process_finish(
 
     if (!h->reaped) {
         close(h->pipe_fd);
-        if (waitpid(h->child_pid, &h->wait_status, 0) < 0) {
-            /* Best-effort: carry on with whatever we have. */
+        /* On abort, poll for up to 500ms then escalate to SIGKILL,
+         * capping abort latency at ~1.5s for SIGTERM-ignoring trees. */
+        if (h->aborted) {
+            int waited_ms;
+            int sigkilled;
+            sigkilled = 0;
+            for (waited_ms = 0; waited_ms < 1500; waited_ms += 20) {
+                pid_t r;
+                struct timespec delay;
+                r = waitpid(h->child_pid, &h->wait_status, WNOHANG);
+                if (r == h->child_pid) {
+                    h->reaped = 1;
+                    break;
+                }
+                if (r < 0) {
+                    h->reaped = 1; /* ECHILD: already harvested */
+                    break;
+                }
+                if (!sigkilled && waited_ms >= 500) {
+                    kill(-h->child_pid, SIGKILL);
+                    sigkilled = 1;
+                }
+                delay.tv_sec = 0;
+                delay.tv_nsec = 20L * 1000000L;
+                nanosleep(&delay, NULL);
+            }
         }
-        h->reaped = 1;
+        if (!h->reaped) {
+            if (waitpid(h->child_pid, &h->wait_status, 0) < 0) {
+                /* Best-effort: carry on with whatever we have. */
+            }
+            h->reaped = 1;
+        }
     }
 
     if (exit_status != NULL) {

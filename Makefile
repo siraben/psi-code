@@ -96,7 +96,7 @@ BUILD_DIR = build
 TARGET = $(BUILD_DIR)/psi
 
 # Every .lua file under lua/ gets compiled into the binary as a byte
-# array. embed_lua (a host-side helper built from scripts/embed_lua.c)
+# array. The embed helper (a host-side tool built from scripts/embed.c)
 # generates the C from the file list. README.md + docs/*.md are
 # embedded similarly under a second table (psi_embedded_docs_table)
 # so a portable static binary can self-describe without a source tree.
@@ -104,35 +104,35 @@ LUA_SOURCES = \
 	lua/boot.lua \
 	$(sort $(shell find lua/psi -type f -name '*.lua' 2>/dev/null))
 DOC_SOURCES = README.md $(sort $(wildcard docs/*.md))
-EMBED_TOOL  = $(BUILD_DIR)/embed_lua
+EMBED_TOOL  = $(BUILD_DIR)/embed
 EMBED_OUT   = $(BUILD_DIR)/embedded_lua.c
 EMBED_DOCS_OUT = $(BUILD_DIR)/embedded_docs.c
 
 SOURCES = \
 	src/main.c \
 	src/core/abort.c \
-	src/core/agent.c \
+	src/core/agent_runtime.c \
 	src/core/common.c \
-	src/core/anthropic.c \
+	src/core/http_buffered.c \
 	src/core/http_async.c \
 	src/core/process.c \
 	src/core/session.c \
 	src/runtime/cli.c \
-	src/runtime/print_mode.c \
+	src/runtime/cli_mode.c \
 	src/runtime/tui_mode.c \
 	src/lua/vm.c
 
 OBJECTS = \
 	$(BUILD_DIR)/main.o \
 	$(BUILD_DIR)/abort.o \
-	$(BUILD_DIR)/agent.o \
+	$(BUILD_DIR)/agent_runtime.o \
 	$(BUILD_DIR)/common.o \
-	$(BUILD_DIR)/anthropic.o \
+	$(BUILD_DIR)/http_buffered.o \
 	$(BUILD_DIR)/http_async.o \
 	$(BUILD_DIR)/process.o \
 	$(BUILD_DIR)/session.o \
 	$(BUILD_DIR)/cli.o \
-	$(BUILD_DIR)/print_mode.o \
+	$(BUILD_DIR)/cli_mode.o \
 	$(BUILD_DIR)/tui_mode.o \
 	$(BUILD_DIR)/vm.o \
 	$(BUILD_DIR)/embedded_lua.o \
@@ -155,7 +155,7 @@ $(OBJECTS): | $(BUILD_DIR)
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(EMBED_TOOL): scripts/embed_lua.c | $(BUILD_DIR)
+$(EMBED_TOOL): scripts/embed.c | $(BUILD_DIR)
 	$(HOST_CC) -O2 $(HOST_CFLAGS_ZLIB) -o $@ $< $(HOST_LIBS_ZLIB)
 
 $(EMBED_OUT): $(EMBED_TOOL) $(LUA_SOURCES)
@@ -188,13 +188,13 @@ $(BUILD_DIR)/main.o: src/main.c include/psi/common.h include/psi/runtime.h inclu
 $(BUILD_DIR)/abort.o: src/core/abort.c include/psi/abort.h include/psi/common.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/agent.o: src/core/agent.c include/psi/abort.h include/psi/agent.h include/psi/anthropic.h include/psi/common.h include/psi/session.h
+$(BUILD_DIR)/agent_runtime.o: src/core/agent_runtime.c include/psi/abort.h include/psi/agent_runtime.h include/psi/http_buffered.h include/psi/common.h include/psi/session.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/common.o: src/core/common.c include/psi/common.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/anthropic.o: src/core/anthropic.c include/psi/abort.h include/psi/anthropic.h include/psi/common.h
+$(BUILD_DIR)/http_buffered.o: src/core/http_buffered.c include/psi/abort.h include/psi/http_buffered.h include/psi/common.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/http_async.o: src/core/http_async.c include/psi/abort.h include/psi/common.h include/psi/http_async.h
@@ -209,10 +209,10 @@ $(BUILD_DIR)/session.o: src/core/session.c include/psi/common.h include/psi/mess
 $(BUILD_DIR)/cli.o: src/runtime/cli.c include/psi/common.h include/psi/runtime.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/print_mode.o: src/runtime/print_mode.c include/psi/common.h include/psi/message.h include/psi/runtime.h include/psi/session.h include/psi/vm.h
+$(BUILD_DIR)/cli_mode.o: src/runtime/cli_mode.c include/psi/common.h include/psi/message.h include/psi/runtime.h include/psi/session.h include/psi/vm.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/tui_mode.o: src/runtime/tui_mode.c include/psi/agent.h include/psi/common.h include/psi/message.h include/psi/runtime.h include/psi/session.h include/psi/vm.h
+$(BUILD_DIR)/tui_mode.o: src/runtime/tui_mode.c include/psi/agent_runtime.h include/psi/common.h include/psi/message.h include/psi/runtime.h include/psi/session.h include/psi/vm.h
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/vm.o: src/lua/vm.c include/psi/common.h include/psi/embedded_lua.h include/psi/host_ops.h include/psi/http_async.h include/psi/message.h include/psi/process.h include/psi/session.h include/psi/vm.h

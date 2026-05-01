@@ -436,7 +436,7 @@ def t_context_event(psi: Psi):
 @test("agent/control_queues")
 def t_agent_control_queues(psi: Psi):
     out = psi.eval(
-        'local agent = require("psi.agent")\n'
+        'local agent = require("psi.agent_session")\n'
         + 'agent.clear_queues()\n'
         + 'local ok1 = agent.queue_steering("steer")\n'
         + 'local ok2 = agent.queue_follow_up({text = "follow"})\n'
@@ -465,7 +465,7 @@ def t_session_lifecycle(psi: Psi):
         + 'psi.events.on("session-shutdown", function()\n'
         + '  seen[#seen + 1] = "shutdown"\n'
         + 'end)\n'
-        + 'local s = require("psi.session")\n'
+        + 'local s = require("psi.session_manager")\n'
         + 's.announce_start()\n'
         + 's.announce_shutdown()\n'
         + 'return table.concat(seen, ",")'
@@ -563,7 +563,7 @@ def t_prompt_templates_miss(psi: Psi):
 @test("commands/help_is_generated")
 def t_commands_help_generated(psi: Psi):
     out = psi.eval(
-        'local c = require("psi.commands")\n'
+        'local c = require("psi.slash_commands")\n'
         + 'c.register("greet", {\n'
         + '  description = "Say hello",\n'
         + '  argument_hint = "<name>",\n'
@@ -583,8 +583,8 @@ def t_commands_help_generated(psi: Psi):
 @test("commands/queue_management")
 def t_commands_queue_management(psi: Psi):
     out = psi.eval(
-        'local agent = require("psi.agent")\n'
-        + 'local c = require("psi.commands")\n'
+        'local agent = require("psi.agent_session")\n'
+        + 'local c = require("psi.slash_commands")\n'
         + 'agent.clear_queues()\n'
         + 'agent.queue_follow_up("first queued")\n'
         + 'agent.queue_follow_up("second queued")\n'
@@ -602,7 +602,7 @@ def t_commands_queue_management(psi: Psi):
 @test("commands/btw_action")
 def t_commands_btw_action(psi: Psi):
     out = psi.eval(
-        'local c = require("psi.commands")\n'
+        'local c = require("psi.slash_commands")\n'
         + 'local action = c.handle("/btw should not call the network")\n'
         + 'return action.kind .. "|" .. action.payload'
     )
@@ -612,8 +612,8 @@ def t_commands_btw_action(psi: Psi):
 @test("agent/btw_allows_local_model")
 def t_agent_btw_allows_local(psi: Psi):
     out = psi.eval(
-        'local agent = require("psi.agent")\n'
-        + 'local ollama = require("psi.ollama")\n'
+        'local agent = require("psi.agent_session")\n'
+        + 'local ollama = require("psi.providers.ollama")\n'
         + 'ollama.complete_text = function(opts) return true, opts.model end\n'
         + 'agent.configure({model = "ollama/qwen2.5"})\n'
         + 'local ok, answer = agent.side_question("should not call the network")\n'
@@ -626,8 +626,8 @@ def t_agent_btw_allows_local(psi: Psi):
 @test("agent/btw_openai_compat_abort_forwarded")
 def t_agent_btw_openai_compat_abort_forwarded(psi: Psi):
     out = psi.eval(
-        'local agent = require("psi.agent")\n'
-        + 'local compat = require("psi.openai_compat")\n'
+        'local agent = require("psi.agent_session")\n'
+        + 'local compat = require("psi.providers.openai_compat")\n'
         + 'local seen = "-"\n'
         + 'compat.complete_text = function(opts)\n'
         + '  seen = tostring(type(opts.abort_check) == "function" and opts.abort_check())\n'
@@ -645,7 +645,7 @@ def t_agent_btw_openai_compat_abort_forwarded(psi: Psi):
 def t_commands_rainbow(psi: Psi):
     out = psi.run(
         "--eval",
-        'local action = require("psi.commands").handle("/rainbow")\n'
+        'local action = require("psi.slash_commands").handle("/rainbow")\n'
         + 'local payload = action.payload or ""\n'
         + 'return table.concat({\n'
         + '  action.kind,\n'
@@ -706,7 +706,7 @@ def t_commands_help_templates(psi: Psi):
     out = psi.run(
         "--eval",
         'local pt = require("psi.prompt_templates")\n'
-        + 'local c = require("psi.commands")\n'
+        + 'local c = require("psi.slash_commands")\n'
         + 'pt.load()\n'
         + 'return c.help_text()',
         env_extra={"PSI_PROMPTS_DIR": str(tmpdir)},
@@ -768,7 +768,7 @@ def t_set_active(psi: Psi):
 @test("session/send_message")
 def t_send_message(psi: Psi):
     out = psi.eval(
-        'local s = require("psi.session")\n'
+        'local s = require("psi.session_manager")\n'
         + 'local before = psi.session_message_count()\n'
         + 's.send_message("user", "from extension")\n'
         + 's.send_message("assistant", "hi")\n'
@@ -830,7 +830,7 @@ def t_compact_snap(psi: Psi):
     points. Without the snap, Anthropic 400s with 'unexpected
     tool_use_id found in tool_result blocks'."""
     out = psi.eval(
-        'local s = require("psi.session")\n'
+        'local s = require("psi.session_manager")\n'
         + '-- Build: user, asst(toolCall), tool-result, user, asst(toolCall), tool-result\n'
         + 'local records = require("psi.records")\n'
         + 's.append_user("hi")\n'
@@ -867,7 +867,7 @@ def t_compact_snap(psi: Psi):
 @test("session/native_token_ranges")
 def t_session_native_token_ranges(psi: Psi):
     out = psi.eval(
-        'local s = require("psi.session")\n'
+        'local s = require("psi.session_manager")\n'
         + 'local c = require("psi.context")\n'
         + 's.append_user("12345678")\n'
         + 's.append_user("1234")\n'
@@ -886,7 +886,7 @@ def t_session_native_token_ranges(psi: Psi):
 @test("session/native_token_estimate_matches_pi_shapes")
 def t_session_native_token_estimate_matches_pi_shapes(psi: Psi):
     out = psi.eval(
-        'local s = require("psi.session")\n'
+        'local s = require("psi.session_manager")\n'
         + 's.append_assistant("", {\n'
         + '  { type = "text", text = "abcd" },\n'
         + '  { type = "thinking", thinking = "12345678" },\n'
@@ -912,7 +912,7 @@ def t_anthropic_orphan_drop(psi: Psi):
     message — e.g. a session loaded from an older psi that compacted
     without the snap. Exactly the Haiku session 71d7999f symptom."""
     out = psi.eval(
-        'local a = require("psi.anthropic")\n'
+        'local a = require("psi.providers.anthropic")\n'
         + 'local prelude = require("psi.prelude")\n'
         + '-- Synthetic session: compaction + orphan tool-result\n'
         + '-- (tool_use never appeared) + user + assistant-text.\n'
@@ -957,7 +957,7 @@ def t_session_default_path(psi: Psi):
     Skipping this made every turn show "failed to save session file"
     in the status bar (session 71f5944b symptom)."""
     out = psi.eval(
-        'local s = require("psi.session")\n'
+        'local s = require("psi.session_manager")\n'
         + 'local first = s.ensure_default_path()\n'
         + 'local second = s.ensure_default_path()\n'
         + 'return tostring(first == second) .. "|"\n'
@@ -1007,7 +1007,7 @@ def t_tools_cancel(psi: Psi):
 @test("agent/set_model")
 def t_agent_set_model(psi: Psi):
     out = psi.eval(
-        'local a = require("psi.agent")\n'
+        'local a = require("psi.agent_session")\n'
         + 'a.set_model("openrouter/x/y")\n'
         + 'local got = a.current_model("anthropic/fallback")\n'
         + 'a.set_model(nil)\n'
@@ -1027,7 +1027,7 @@ def t_agent_set_model(psi: Psi):
 @test("agent/set_reasoning_effort")
 def t_agent_set_reasoning_effort(psi: Psi):
     out = psi.eval(
-        'local a = require("psi.agent")\n'
+        'local a = require("psi.agent_session")\n'
         + 'a.set_reasoning_effort("high")\n'
         + 'local got = a.current_reasoning_effort("low")\n'
         + 'a.set_reasoning_effort("none")\n'
@@ -1042,7 +1042,7 @@ def t_agent_set_reasoning_effort(psi: Psi):
 @test("agent/thinking_level")
 def t_agent_thinking_level(psi: Psi):
     out = psi.eval(
-        'local a = require("psi.agent")\n'
+        'local a = require("psi.agent_session")\n'
         + 'local openai = { provider="openai-codex", id="gpt-5.5", reasoning=true }\n'
         + 'local fallback = a.thinking_level_for(openai, nil, nil)\n'
         + 'local explicit = a.thinking_level_for(openai, "xhigh", nil)\n'
@@ -1059,7 +1059,7 @@ def t_agent_thinking_level(psi: Psi):
 @test("commands/set_reasoning_effort")
 def t_commands_set_reasoning_effort(psi: Psi):
     out = psi.eval(
-        'local c = require("psi.commands")\n'
+        'local c = require("psi.slash_commands")\n'
         + 'local a = c.handle("/set effort xhigh")\n'
         + 'local b = c.handle("/set reasoning_effort nope")\n'
         + 'return a.kind .. "|" .. tostring(a.payload) .. "|" .. b.kind .. "|" .. b.payload'
@@ -1071,7 +1071,7 @@ def t_commands_set_reasoning_effort(psi: Psi):
 @test("commands/thinking")
 def t_commands_thinking(psi: Psi):
     out = psi.eval(
-        'local c = require("psi.commands")\n'
+        'local c = require("psi.slash_commands")\n'
         + 'local a = c.handle("/thinking xhigh")\n'
         + 'local b = c.handle("/thinking nope")\n'
         + 'return a.kind .. "|" .. tostring(a.payload) .. "|" .. b.kind .. "|"\n'
@@ -1198,7 +1198,7 @@ def t_theme_reload_reverts_default(psi: Psi):
     out = psi.run(
         "--eval",
         'local theme = require("psi.theme")\n'
-        'local settings = require("psi.settings")\n'
+        'local settings = require("psi.settings_manager")\n'
         'local before = theme.current()\n'
         'psi.file_write(".psi/settings.json", "{}")\n'
         'settings.reload()\n'
@@ -1231,7 +1231,7 @@ def t_theme_reload_preserves_extension_selected_theme(psi: Psi):
     )
     out = psi.run(
         "--eval",
-        'local commands = require("psi.commands")\n'
+        'local commands = require("psi.slash_commands")\n'
         'local theme = require("psi.theme")\n'
         'commands.handle("/reload")\n'
         'local cur = theme.current()\n'
@@ -1245,7 +1245,7 @@ def t_theme_reload_preserves_extension_selected_theme(psi: Psi):
 @test("tui/status_hook")
 def t_tui_status_hook(psi: Psi):
     out = psi.eval(
-        'local tui = require("psi.tui")\n'
+        'local tui = require("psi.tui_status")\n'
         + 'tui.register_status_hook(function(arg) return "ext:" .. tostring(arg.editor_mode) end)\n'
         + 'local line = tui.status_line(\n'
         + '  psi.json_encode({model="m", busy=false, scroll=0, editor_mode="normal"}))\n'
@@ -1267,8 +1267,8 @@ def t_tui_reload_deduplicates_builtin_hooks(psi: Psi):
     )
     out = psi.run(
         "--eval",
-        'local commands = require("psi.commands")\n'
-        + 'local tui = require("psi.tui")\n'
+        'local commands = require("psi.slash_commands")\n'
+        + 'local tui = require("psi.tui_status")\n'
         + 'commands.handle("/reload")\n'
         + 'commands.handle("/reload")\n'
         + 'local writes = 0\n'
@@ -1286,7 +1286,7 @@ def t_tui_reload_deduplicates_builtin_hooks(psi: Psi):
 @test("tui/status_default_model")
 def t_tui_status_default_model(psi: Psi):
     out = psi.eval(
-        'local tui = require("psi.tui")\n'
+        'local tui = require("psi.tui_status")\n'
         + 'return tui.status_line(psi.json_encode({busy=false, scroll=0}))'
     )
     assert "model:?" not in out, "status line should show effective default model"
@@ -1321,7 +1321,7 @@ def t_providers_openrouter_metadata(psi: Psi):
     }))
     out = psi.run(
         "--eval",
-        'local providers = require("psi.providers")\n'
+        'local providers = require("psi.api_registry")\n'
         + 'local full = providers.model("openrouter/google/gemini-3-flash-preview")\n'
         + 'local slug = providers.model("google/gemini-3-flash-preview")\n'
         + 'local codex = providers.model("openrouter/openai/gpt-5.1-codex")\n'
@@ -1344,7 +1344,7 @@ def t_providers_openrouter_metadata(psi: Psi):
 @test("providers/api_registry")
 def t_providers_api_registry(psi: Psi):
     out = psi.eval(
-        'local p = require("psi.providers")\n'
+        'local p = require("psi.api_registry")\n'
         + 'local api = p.api("anthropic-messages")\n'
         + 'local desc = p.resolve_descriptor("anthropic/claude-opus-4-7")\n'
         + 'local mod = p.load_api("anthropic-messages")\n'
@@ -1356,14 +1356,14 @@ def t_providers_api_registry(psi: Psi):
         + '  tostring(#p.all_apis()),\n'
         + '}, "|")'
     )
-    assert_equals(out, "psi.anthropic|anthropic-messages|true|function|4",
+    assert_equals(out, "psi.providers.anthropic|anthropic-messages|true|function|4",
                   "provider API registry should route API adapters")
 
 
 @test("providers/openai_codex_registry")
 def t_providers_openai_codex_registry(psi: Psi):
     out = psi.eval(
-        'local p = require("psi.providers")\n'
+        'local p = require("psi.api_registry")\n'
         + 'local desc = p.resolve_descriptor("openai-codex/gpt-5.5")\n'
         + 'local model = p.model("openai-codex/gpt-5.5")\n'
         + 'return table.concat({desc.provider, desc.api, desc.id,\n'
@@ -1376,7 +1376,7 @@ def t_providers_openai_codex_registry(psi: Psi):
 @test("oauth/openai_codex_pkce")
 def t_oauth_openai_codex_pkce(psi: Psi):
     out = psi.eval(
-        'local d = require("psi.oauth_openai_codex")._debug\n'
+        'local d = require("psi.providers.oauth_openai_codex")._debug\n'
         + 'local digest = d.base64url_encode(d.sha256_bytes("abc"))\n'
         + 'local q = d.parse_query("http://localhost:1455/auth/callback?code=abc&state=xyz")\n'
         + 'return digest .. "|" .. q.code .. "|" .. q.state'
@@ -1390,7 +1390,7 @@ def t_commands_openai_codex_login_starts(psi: Psi):
     out = psi.eval(
         'local copied = ""\n'
         + 'psi.stdout_write = function(s) copied = copied .. s end\n'
-        + 'local action = require("psi.commands").handle("/login openai-codex")\n'
+        + 'local action = require("psi.slash_commands").handle("/login openai-codex")\n'
         + 'return table.concat({\n'
         + '  action.kind,\n'
         + '  tostring(action.payload:find("https://auth.openai.com/oauth/authorize", 1, true) ~= nil),\n'
@@ -1420,7 +1420,7 @@ def t_auth_storage_roundtrip(psi: Psi):
 @test("providers/openai_codex_parser")
 def t_providers_openai_codex_parser(psi: Psi):
     out = psi.eval(
-        'local d = require("psi.openai_codex")._debug\n'
+        'local d = require("psi.providers.openai_codex")._debug\n'
         + 'local s, p = d.new_state(), d.parser_new()\n'
         + 'local seen = ""\n'
         + 'local obs = { on_assistant_text_delta = function(t) seen = seen .. t end }\n'
@@ -1445,8 +1445,8 @@ def t_providers_openai_codex_parser(psi: Psi):
 @test("providers/openai_codex_unresolved_tool_call")
 def t_providers_openai_codex_unresolved_tool_call(psi: Psi):
     out = psi.eval(
-        'local s = require("psi.session")\n'
-        + 'local d = require("psi.openai_codex")._debug\n'
+        'local s = require("psi.session_manager")\n'
+        + 'local d = require("psi.providers.openai_codex")._debug\n'
         + 's.append_user("hi")\n'
         + 's.append_assistant("", {\n'
         + '  { type = "tool_use", id = "call_1|item_1", name = "bash",\n'
@@ -1470,8 +1470,8 @@ def t_providers_openai_codex_unresolved_tool_call(psi: Psi):
 @test("providers/openai_codex_custom_messages")
 def t_providers_openai_codex_custom_messages(psi: Psi):
     out = psi.eval(
-        'local s = require("psi.session")\n'
-        + 'local d = require("psi.openai_codex")._debug\n'
+        'local s = require("psi.session_manager")\n'
+        + 'local d = require("psi.providers.openai_codex")._debug\n'
         + 's.append_custom_message("visible user", { role = "user" })\n'
         + 's.append_custom_message("hidden user", { role = "user", hidden = true })\n'
         + 's.append_custom_message("visible assistant", { role = "assistant" })\n'
@@ -1500,7 +1500,7 @@ def t_providers_openai_codex_reasoning_config(psi: Psi):
     )
     out = psi.run(
         "--eval",
-        'local d = require("psi.openai_codex")._debug\n'
+        'local d = require("psi.providers.openai_codex")._debug\n'
         + 'local a = d.request_body({model="gpt-5.5", messages={}, reasoning_effort="xhigh"})\n'
         + 'local b = d.request_body({model="gpt-5.5", messages={}, reasoning_effort="none"})\n'
         + 'local c = d.request_body({model="gpt-5.5", messages={}})\n'
@@ -1515,7 +1515,7 @@ def t_providers_openai_codex_reasoning_config(psi: Psi):
 @test("providers/openai_codex_reasoning")
 def t_providers_openai_codex_reasoning(psi: Psi):
     out = psi.eval(
-        'local d = require("psi.openai_codex")._debug\n'
+        'local d = require("psi.providers.openai_codex")._debug\n'
         + 'local a = d.request_body({model="gpt-5.5", messages={}})\n'
         + 'local b = d.request_body({model="gpt-5.5", messages={}, thinking_level="minimal"})\n'
         + 'local c = d.request_body({model="gpt-5.5", messages={}, thinking_level="xhigh"})\n'
@@ -1538,7 +1538,7 @@ def t_providers_openai_codex_http_error(psi: Psi):
         + 'psi.http_stream_poll = function() return "{\\"error\\":{\\"message\\":\\"nope\\"}}", true end\n'
         + 'psi.http_stream_finish = function() return 401 end\n'
         + 'local ok, err = require("psi.sched").run(function()\n'
-        + '  return require("psi.openai_codex").run_turn({model="gpt-5.5"})\n'
+        + '  return require("psi.providers.openai_codex").run_turn({model="gpt-5.5"})\n'
         + 'end)\n'
         + 'return tostring(ok) .. "|" .. tostring(err)',
         env_extra={"PSI_AUTH_FILE": str(auth_file)},
@@ -1563,7 +1563,7 @@ def t_tui_status_context_window(psi: Psi):
     out = psi.run(
         "--eval",
         'local context = require("psi.context")\n'
-        + 'local tui = require("psi.tui")\n'
+        + 'local tui = require("psi.tui_status")\n'
         + 'context.record_usage(0, { input_tokens = 3000, output_tokens = 566 }, "google/gemini-3-flash-preview")\n'
         + 'return tui.status_line(psi.json_encode({model="openrouter/google/gemini-3-flash-preview", busy=false, scroll=0}))',
         env_extra={"PSI_OPENROUTER_MODELS_CACHE": str(cache)},
@@ -1575,7 +1575,7 @@ def t_tui_status_context_window(psi: Psi):
 @test("tui/footer_hint_hidden")
 def t_tui_footer_hint_hidden(psi: Psi):
     out = psi.eval(
-        'local tui = require("psi.tui")\n'
+        'local tui = require("psi.tui_status")\n'
         + 'local idle = tui.footer_hint(psi.json_encode({busy=false, scroll=0}))\n'
         + 'local busy = tui.footer_hint(psi.json_encode({\n'
         + '  busy=true, busy_label="working", elapsed_seconds=4, busy_phase=2, scroll=0\n'
@@ -1665,7 +1665,7 @@ def t_tui_busy_status_config(psi: Psi):
     )
     out = psi.run(
         "--eval",
-        'return require("psi.tui").pick_busy_status()',
+        'return require("psi.tui_status").pick_busy_status()',
         cwd=project,
     ).stdout.strip()
     assert_equals(out, "custom busy", "busy label pulled from settings")
@@ -1677,7 +1677,7 @@ def t_tui_busy_status_render(psi: Psi):
         "--eval",
         'local ansi = require("psi.ansi")\n'
         + 'ansi.color_enabled = true\n'
-        + 'return require("psi.tui").render_busy_status("working", 2, 4)',
+        + 'return require("psi.tui_status").render_busy_status("working", 2, 4)',
     ).stdout.rstrip("\n")
     plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
     assert_equals(
@@ -1710,7 +1710,7 @@ def t_tui_full_redraw_uses_single_ansi_pass(psi: Psi):
 
 @test("tui/show_thinking_config")
 def t_tui_show_thinking_config(psi: Psi):
-    default_out = psi.eval('return require("psi.tui").show_thinking()')
+    default_out = psi.eval('return require("psi.tui_status").show_thinking()')
     assert_equals(default_out, "0", "thinking hidden by default in TUI")
 
     project = psi.tmp / "thinking-config-project"
@@ -1720,7 +1720,7 @@ def t_tui_show_thinking_config(psi: Psi):
     )
     out = psi.run(
         "--eval",
-        'return require("psi.tui").show_thinking()',
+        'return require("psi.tui_status").show_thinking()',
         cwd=project,
     ).stdout.strip()
     assert_equals(out, "1", "thinking visibility pulled from settings")
@@ -1850,7 +1850,7 @@ def t_tui_busy_animation_uses_wall_clock(psi: Psi):
 @test("tui/key_policy")
 def t_tui_key_policy(psi: Psi):
     out = psi.eval(
-        'local tui = require("psi.tui")\n'
+        'local tui = require("psi.tui_status")\n'
         + 'local function fmt(res)\n'
         + '  if not res then return "nil" end\n'
         + '  local arg = res.arg\n'
@@ -1890,7 +1890,7 @@ def t_tui_ctrl_d_empty_prompt_exits(psi: Psi):
 @test("tui/queue_restore")
 def t_tui_queue_restore(psi: Psi):
     out = psi.eval(
-        'local agent = require("psi.agent")\n'
+        'local agent = require("psi.agent_session")\n'
         + 'local rt = require("psi.tui_runtime")\n'
         + 'agent.clear_queues()\n'
         + 'agent.queue_follow_up("first queued")\n'
@@ -1906,8 +1906,8 @@ def t_tui_queue_restore(psi: Psi):
 @test("tui/queue_status_lists_all")
 def t_tui_queue_status_lists_all(psi: Psi):
     out = psi.eval(
-        'local agent = require("psi.agent")\n'
-        + 'local tui = require("psi.tui")\n'
+        'local agent = require("psi.agent_session")\n'
+        + 'local tui = require("psi.tui_status")\n'
         + 'agent.clear_queues()\n'
         + 'agent.queue_follow_up("first queued")\n'
         + 'agent.queue_follow_up("second queued")\n'
@@ -1920,7 +1920,7 @@ def t_tui_queue_status_lists_all(psi: Psi):
 @test("tui/queue_edit_then_append")
 def t_tui_queue_edit_then_append(psi: Psi):
     out = psi.eval(
-        'local agent = require("psi.agent")\n'
+        'local agent = require("psi.agent_session")\n'
         + 'local rt = require("psi.tui_runtime")\n'
         + 'agent.clear_queues()\n'
         + 'agent.queue_follow_up("first queued")\n'
@@ -2002,7 +2002,7 @@ def t_tui_busy_slash_command_does_not_dispatch(psi: Psi):
 @test("tui/non_agent_busy_submit_not_queued")
 def t_tui_non_agent_busy_submit_not_queued(psi: Psi):
     out = psi.eval(
-        'local agent = require("psi.agent")\n'
+        'local agent = require("psi.agent_session")\n'
         + 'local rt = require("psi.tui_runtime")\n'
         + 'agent.clear_queues()\n'
         + 'local state = rt._debug_edit_keys("draft", 5, {{key="enter"}}, false, {busy=true, busy_kind="compact"})\n'
@@ -2016,7 +2016,7 @@ def t_tui_non_agent_busy_submit_not_queued(psi: Psi):
 def t_tui_vim_modal_keys(psi: Psi):
     out = psi.eval(
         'local rt = require("psi.tui_runtime")\n'
-        + 'local tui = require("psi.tui")\n'
+        + 'local tui = require("psi.tui_status")\n'
         + 'require("psi.extensions.vim_keybindings").enable(psi)\n'
         + 'local function text(c) return {key="text", text=c} end\n'
         + 'local s = rt._debug_edit_keys("alpha beta gamma", 0, {\n'
@@ -2080,7 +2080,7 @@ def t_tui_vim_modal_keys(psi: Psi):
 @test("tui/osc52_clipboard")
 def t_tui_osc52_clipboard(psi: Psi):
     out = psi.eval(
-        'local tui = require("psi.tui")\n'
+        'local tui = require("psi.tui_status")\n'
         + 'local osc52 = require("psi.extensions.osc52_clipboard")\n'
         + 'local writes = {}\n'
         + 'psi.stdout_write = function(text) writes[#writes + 1] = text end\n'
@@ -2104,7 +2104,7 @@ def t_tui_osc52_clipboard(psi: Psi):
 @test("tui/vim_yank_writes_clipboard")
 def t_tui_vim_yank_writes_clipboard(psi: Psi):
     out = psi.eval(
-        'local tui = require("psi.tui")\n'
+        'local tui = require("psi.tui_status")\n'
         + 'local rt = require("psi.tui_runtime")\n'
         + 'require("psi.extensions.vim_keybindings").enable(psi)\n'
         + 'local copied = "-"\n'
@@ -2355,7 +2355,7 @@ def t_save_no_path(psi: Psi):
     Regression test for the i686-transcripts bug where flushes
     counter incremented while nothing ever hit disk."""
     out = psi.eval(
-        'local session = require("psi.session")\n'
+        'local session = require("psi.session_manager")\n'
         'local ok, err = session.save()\n'
         'return tostring(ok) .. " | " .. tostring(err)'
     )
@@ -2370,7 +2370,7 @@ def t_save_stamps_id(psi: Psi):
     session_id()==nil on its first flush because no path was set
     yet, and the extension fell back to a timestamp filename."""
     out = psi.eval(
-        'local session = require("psi.session")\n'
+        'local session = require("psi.session_manager")\n'
         'print("before:", tostring(psi.session_id()))\n'
         'session.save()  -- returns false, but should still stamp id\n'
         'local id = psi.session_id()\n'
@@ -2384,7 +2384,7 @@ def t_append_stamps_id(psi: Psi):
     """Any append_* call is an observable event; id must exist
     before an extension's hook runs."""
     out = psi.eval(
-        'local session = require("psi.session")\n'
+        'local session = require("psi.session_manager")\n'
         'session.append_user("hi")\n'
         'local id = psi.session_id()\n'
         'return (id ~= nil and #id > 0) and "stamped" or "still-nil"'
@@ -2398,7 +2398,7 @@ def t_classify_http(psi: Psi):
     specific hint for common failure codes and (b) surface the
     provider's error-body message when present."""
     out = psi.eval(
-        'local c = require("psi.openai_compat").classify_http_error\n'
+        'local c = require("psi.providers.openai_compat").classify_http_error\n'
         + 'local results = {}\n'
         + 'results[1] = c(401,\n'
         + '  psi.json_encode({error = {message = "invalid key"}}),\n'
@@ -2513,7 +2513,7 @@ def t_append_only(psi: Psi):
     the on-disk file matches a sibling written via a single save."""
     a = str(psi.tmp / "a.jsonl")
     out = psi.eval(
-        'local s = require("psi.session")\n'
+        'local s = require("psi.session_manager")\n'
         + 'psi.session_set_path("' + a + '")\n'
         + 's.append_user("one"); s.save()\n'
         + 's.append_assistant("two", {{type="text",text="two"}}); s.save()\n'
@@ -2540,7 +2540,7 @@ def t_compaction_rewrites(psi: Psi):
     the next save() must do a full rewrite (not append) so the
     on-disk file reflects the compacted state."""
     out = psi.eval(
-        'local s = require("psi.session")\n'
+        'local s = require("psi.session_manager")\n'
         'local path = "' + str(psi.tmp / "c.jsonl") + '"\n'
         'psi.session_set_path(path)\n'
         'for i = 1, 10 do s.append_user("msg " .. i) end\n'

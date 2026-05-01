@@ -103,7 +103,7 @@ BENCHES: list[tuple[str, str]] = [
     (
         "session_save_growing",
         r"""
-        local s = require('psi.session')
+        local s = require('psi.session_manager')
         local path = '/tmp/psi-bench-session.jsonl'
         os.remove(path)
         psi.session_set_path(path)
@@ -130,7 +130,7 @@ BENCHES: list[tuple[str, str]] = [
         -- entries with 4 flushes spread across them (roughly
         -- simulating a 3-tool turn: after provider response, after
         -- each tool result, at turn end).
-        local s = require('psi.session')
+        local s = require('psi.session_manager')
         local path = '/tmp/psi-bench-turn.jsonl'
         os.remove(path)
         psi.session_set_path(path)
@@ -162,7 +162,7 @@ BENCHES: list[tuple[str, str]] = [
     (
         "session_append_delta",
         r"""
-        local s = require('psi.session')
+        local s = require('psi.session_manager')
         local path = '/tmp/psi-bench-delta.jsonl'
         os.remove(path)
         psi.session_set_path(path)
@@ -185,7 +185,7 @@ BENCHES: list[tuple[str, str]] = [
     (
         "context_range_queries",
         r"""
-        local s = require('psi.session')
+        local s = require('psi.session_manager')
         local c = require('psi.context')
         for i = 1, 1000 do
           s.append_user(string.rep('range-query-message-', 8) .. i)
@@ -249,7 +249,7 @@ BENCHES: list[tuple[str, str]] = [
         -- Realistic adversarial workload: several large SSE events,
         -- each fragmented into tiny TCP chunks. Exercises the
         -- stateful sse parser (no cross-chunk leftover concat).
-        local anthro = require('psi.anthropic')
+        local anthro = require('psi.providers.anthropic')
         local new_sse_parser = anthro._test.new_sse_parser
         local sse_push = anthro._test.sse_push
         local CHUNKS_PER_EVENT = 200
@@ -283,7 +283,7 @@ BENCHES: list[tuple[str, str]] = [
     (
         "anthropic_text_delta_accum",
         r"""
-        local t = require('psi.anthropic')._test
+        local t = require('psi.providers.anthropic')._test
         local N = 200
         local CHUNKS = 2000
         local start = os.clock()

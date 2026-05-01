@@ -23,9 +23,9 @@ local context = require("psi.context")
 local prelude = require("psi.prelude")
 local provider_loop = require("psi.provider_loop")
 local sched = require("psi.sched")
-local transform = require("psi.message_transform")
+local transform = require("psi.transform_messages")
 local tools = require("psi.tools")
-local session_mod = require("psi.session")
+local session_mod = require("psi.session_manager")
 
 local M = {}
 
@@ -497,22 +497,16 @@ local function finalize_blocks(state)
       if #input_json > 0 then
         input = safe_decode(input_json)
         if type(input) ~= "table" then
-          -- Truncated or malformed input_json means stream events
-          -- were dropped (SSE chunk-boundary bug, network glitch, or
-          -- server truncation). Surface it loudly rather than silently
-          -- passing {} — otherwise the agent's next turn sees a
-          -- "missing field" error from the tool and wastes a round
-          -- trip retrying blindly.
-          io.stderr:write(
-            string.format(
-              "psi: tool_use %s (%s) has malformed input_json (%d bytes, "
-                .. "starts with %q); dispatching with empty input\n",
+          -- Truncated/malformed input_json: surface via stream_error
+          -- so the turn fails instead of dispatching with empty input.
+          state.malformed_tool_input_error = state.malformed_tool_input_error
+            or string.format(
+              "tool_use %s (%s) has malformed input_json (%d bytes, starts with %q)",
               block.name or "?",
               block.id or "?",
               #input_json,
               input_json:sub(1, 48)
             )
-          )
           input = {}
         end
       else
@@ -688,7 +682,7 @@ local function maybe_auto_compact(model, opts)
   )
   -- Lazy require to avoid a load-time cycle with psi.agent.
   local keep = context.keep_recent_messages(context.keep_recent_tokens())
-  local ok, summary = require("psi.agent").run_compact({
+  local ok, summary = require("psi.agent_session").run_compact({
     keep_recent = keep,
     model = model,
   })
@@ -702,6 +696,8 @@ local function maybe_auto_compact(model, opts)
     end
   end
 end
+
+M.maybe_auto_compact = maybe_auto_compact
 
 -- ---------- One-shot completion (non-streaming) ----------
 
@@ -828,6 +824,12 @@ function M.run_turn(opts)
       end)
     end,
     finalize = finalize_blocks,
+    stream_error = function(state)
+      if state.malformed_tool_input_error then
+        return "anthropic: " .. state.malformed_tool_input_error
+      end
+      return nil
+    end,
     persist = function(state, persisted_model, content, _tool_uses, stop_override, error_message)
       session_mod.append_assistant(state_assistant_text(state), content, {
         usage = state.usage,
@@ -843,7 +845,7 @@ function M.run_turn(opts)
       return state.response_id
     end,
     save_failed_partial = save_failed_partial,
-    classify_http_error = require("psi.openai_compat").classify_http_error,
+    classify_http_error = require("psi.providers.openai_compat").classify_http_error,
     text = state_assistant_text,
     after_iteration = function(iter_model, iter_opts)
       maybe_auto_compact(iter_model, iter_opts)

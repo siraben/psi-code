@@ -1,8 +1,10 @@
+-- psi.tools.edit: Read-then-write a file in place via exact-match string substitution.
+
 local records = require("psi.records")
 local registry = require("psi.tool_registry")
 local prelude = require("psi.prelude")
-local path_util = require("psi.path")
-local mutation_queue = require("psi.tool_mutation_queue")
+local path_util = require("psi.path_utils")
+local mutation_queue = require("psi.file_mutation_queue")
 local helpers = require("psi.tool_helpers")
 
 local function apply_edits(text, edits)

@@ -7,12 +7,12 @@
 
 local context = require("psi.context")
 local control = require("psi.agent_control")
-local transform = require("psi.message_transform")
+local transform = require("psi.transform_messages")
 local prompt = require("psi.prompt")
 local sched = require("psi.sched")
-local session = require("psi.session")
+local session = require("psi.session_manager")
 local thinking = require("psi.thinking")
-local providers = require("psi.providers")
+local providers = require("psi.api_registry")
 
 local M = {}
 

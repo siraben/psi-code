@@ -1,16 +1,15 @@
 -- psi.openai_codex: OpenAI Codex provider via ChatGPT backend
 -- `POST /backend-api/codex/responses`.
 
-local auth = require("psi.oauth_openai_codex")
-local context = require("psi.context")
-local openai_compat = require("psi.openai_compat")
+local auth = require("psi.providers.oauth_openai_codex")
+local openai_compat = require("psi.providers.openai_compat")
 local prelude = require("psi.prelude")
 local provider_loop = require("psi.provider_loop")
-local settings = require("psi.settings")
-local session_mod = require("psi.session")
+local settings = require("psi.settings_manager")
+local session_mod = require("psi.session_manager")
 local thinking = require("psi.thinking")
 local tools = require("psi.tools")
-local transform = require("psi.message_transform")
+local transform = require("psi.transform_messages")
 
 local M = {}
 
@@ -474,10 +473,28 @@ local function finalize(state)
   local tool_calls = {}
   for _, b in ipairs(state.blocks) do
     if b.kind == "tool" and b.name and b.name ~= "" then
+      -- Malformed arg_text → stream_error; don't dispatch with {}.
+      local raw = b.arg_text or ""
+      local args = b.arguments
+      if not args and #raw > 0 then
+        local parsed = safe_decode(raw, nil)
+        if type(parsed) ~= "table" then
+          state.malformed_tool_input_error = state.malformed_tool_input_error
+            or string.format(
+              "tool call %s (%s) has malformed arguments (%d bytes, starts with %q)",
+              b.name or "?",
+              b.id or "?",
+              #raw,
+              raw:sub(1, 48)
+            )
+          parsed = {}
+        end
+        args = parsed
+      end
       tool_calls[#tool_calls + 1] = {
         id = b.id,
         name = b.name,
-        arguments = b.arguments or parse_args(b.arg_text or "{}"),
+        arguments = args or {},
       }
     end
   end
@@ -574,6 +591,9 @@ function M.run_turn(opts)
       if state.stop_reason == "error" then
         return state.error_message or "Codex response failed"
       end
+      if state.malformed_tool_input_error then
+        return "openai-codex: " .. state.malformed_tool_input_error
+      end
       return nil
     end,
     text = state_text,
@@ -581,14 +601,9 @@ function M.run_turn(opts)
       return state_text(state) ~= "" or #tool_calls > 0
     end,
     after_iteration = function(turn_model, turn_opts)
-      local ok, anthropic = pcall(require, "psi.anthropic")
-      if ok and anthropic and anthropic._maybe_auto_compact then
-        anthropic._maybe_auto_compact(turn_model, turn_opts)
-      elseif os.getenv("PSI_AUTO_COMPACT") ~= "0" and os.getenv("PSI_AUTO_COMPACT") ~= "false" then
-        local over = context.should_compact(turn_model)
-        if over then
-          require("psi.agent").run_compact({ model = turn_model })
-        end
+      local ok, anthropic = pcall(require, "psi.providers.anthropic")
+      if ok and anthropic and anthropic.maybe_auto_compact then
+        anthropic.maybe_auto_compact(turn_model, turn_opts)
       end
     end,
   })

@@ -49,19 +49,11 @@ local function write_all(data)
   if not psi.mkdir_parent(path) then
     return false, "could not create auth directory"
   end
-  local ok = psi.file_write(path, psi.json_encode(data or {}))
+  -- 0600 from first open + atomic rename: credentials never sit on
+  -- disk world-readable, and there's no failed-chmod cleanup window.
+  local ok = psi.file_write_secure(path, psi.json_encode(data or {}))
   if not ok then
     return false, "could not write " .. path
-  end
-  if psi.process_run_argv then
-    local chmod = psi.process_run_argv({ "chmod", "600", path })
-    if not chmod or chmod.status ~= 0 then
-      os.remove(path)
-      return false, "could not secure " .. path
-    end
-  else
-    os.remove(path)
-    return false, "could not secure " .. path
   end
   return true
 end
