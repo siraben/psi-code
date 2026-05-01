@@ -40,9 +40,9 @@
 local prelude = require("psi.prelude")
 local provider_loop = require("psi.provider_loop")
 local sched = require("psi.sched")
-local transform = require("psi.message_transform")
+local transform = require("psi.transform_messages")
 local tools = require("psi.tools")
-local session_mod = require("psi.session")
+local session_mod = require("psi.session_manager")
 
 local M = {}
 

@@ -6,7 +6,7 @@
 -- otherwise stop. Psi stores transcript state in psi.session, so
 -- draining a queue appends user messages directly to the session.
 
-local session = require("psi.session")
+local session = require("psi.session_manager")
 
 local M = {}
 

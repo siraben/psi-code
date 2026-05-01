@@ -89,7 +89,7 @@ local function records()
 end
 
 local function settings()
-  return require("psi.settings")
+  return require("psi.settings_manager")
 end
 
 local function keybindings()
@@ -276,7 +276,7 @@ function M.enable(psi)
   if M.is_enabled() then
     return true
   end
-  local tui = psi.tui or require("psi.tui")
+  local tui = psi.tui or require("psi.tui_status")
   key_handler_id = tui.register_key_handler(key_handler)
   status_hook_id = tui.register_status_hook(status_hook)
   return true
@@ -286,7 +286,7 @@ function M.disable(psi)
   if not M.is_enabled() then
     return true
   end
-  local tui = psi.tui or require("psi.tui")
+  local tui = psi.tui or require("psi.tui_status")
   if tui.unregister_key_handler then
     tui.unregister_key_handler(key_handler_id)
   end
@@ -328,8 +328,8 @@ local function command_handler(rest)
 end
 
 function M.register(psi)
-  local commands = psi.commands or require("psi.commands")
-  local tui = psi.tui or require("psi.tui")
+  local commands = psi.commands or require("psi.slash_commands")
+  local tui = psi.tui or require("psi.tui_status")
 
   commands.register(COMMAND_NAME, {
     handler = command_handler,

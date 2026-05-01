@@ -6,7 +6,7 @@
 -- tool-result termination hints.
 
 local prelude = require("psi.prelude")
-local session_mod = require("psi.session")
+local session_mod = require("psi.session_manager")
 
 local M = {}
 

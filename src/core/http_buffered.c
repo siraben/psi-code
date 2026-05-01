@@ -9,8 +9,18 @@
 #include <string.h>
 #include <curl/curl.h>
 #include "psi/abort.h"
-#include "psi/anthropic.h"
+#include "psi/http_buffered.h"
 #include "psi/common.h"
+#include "psi/http_async.h"
+
+/* curl_slist_append returns NULL on failure without freeing the
+ * prior list; this wrapper assigns through only on success. */
+static int psi_http_slist_append_safe(struct curl_slist **list, const char *line) {
+    struct curl_slist *next = curl_slist_append(*list, line);
+    if (next == NULL) return PSI_STATUS_ERROR;
+    *list = next;
+    return PSI_STATUS_OK;
+}
 
 struct psi_http_buffer {
     char *data;
@@ -72,7 +82,11 @@ static CURL *psi_http_build_handle(
     if (curl == NULL) return NULL;
 
     for (i = 0; i < header_count; i++) {
-        headers = curl_slist_append(headers, header_lines[i]);
+        if (psi_http_slist_append_safe(&headers, header_lines[i]) != PSI_STATUS_OK) {
+            curl_slist_free_all(headers);
+            curl_easy_cleanup(curl);
+            return NULL;
+        }
     }
     *headers_out = headers;
 
@@ -106,9 +120,9 @@ int psi_http_post_stream(
     struct psi_http_chunk_ctx ctx;
 
     if (status_code != NULL) *status_code = 0l;
-    if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) return PSI_STATUS_ERROR;
+    if (psi_http_global_init() != PSI_STATUS_OK) return PSI_STATUS_ERROR;
     curl = psi_http_build_handle(url, header_lines, header_count, body, body_len, &headers, abort_signal);
-    if (curl == NULL) { curl_global_cleanup(); return PSI_STATUS_ERROR; }
+    if (curl == NULL) return PSI_STATUS_ERROR;
 
     ctx.cb = on_chunk;
     ctx.userdata = userdata;
@@ -122,7 +136,6 @@ int psi_http_post_stream(
 
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
-    curl_global_cleanup();
     return (code == CURLE_OK) ? PSI_STATUS_OK : PSI_STATUS_ERROR;
 }
 
@@ -143,9 +156,9 @@ int psi_http_post(
     buffer.data = NULL;
     buffer.length = 0u;
 
-    if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) return PSI_STATUS_ERROR;
+    if (psi_http_global_init() != PSI_STATUS_OK) return PSI_STATUS_ERROR;
     curl = psi_http_build_handle(url, header_lines, header_count, body, body_len, &headers, abort_signal);
-    if (curl == NULL) { curl_global_cleanup(); return PSI_STATUS_ERROR; }
+    if (curl == NULL) return PSI_STATUS_ERROR;
 
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, psi_http_buffer_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&buffer);
@@ -157,14 +170,18 @@ int psi_http_post(
 
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
-    curl_global_cleanup();
 
     if (code != CURLE_OK) {
         free(buffer.data);
         return PSI_STATUS_ERROR;
     }
     if (response_body != NULL) {
-        *response_body = buffer.data != NULL ? buffer.data : psi_strdup("");
+        if (buffer.data != NULL) {
+            *response_body = buffer.data;
+        } else {
+            *response_body = psi_strdup("");
+            if (*response_body == NULL) return PSI_STATUS_ERROR;
+        }
     } else {
         free(buffer.data);
     }
@@ -187,9 +204,9 @@ int psi_http_get(
     buffer.data = NULL;
     buffer.length = 0u;
 
-    if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) return PSI_STATUS_ERROR;
+    if (psi_http_global_init() != PSI_STATUS_OK) return PSI_STATUS_ERROR;
     curl = psi_http_build_handle(url, header_lines, header_count, NULL, 0u, &headers, abort_signal);
-    if (curl == NULL) { curl_global_cleanup(); return PSI_STATUS_ERROR; }
+    if (curl == NULL) return PSI_STATUS_ERROR;
 
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, psi_http_buffer_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&buffer);
@@ -201,14 +218,18 @@ int psi_http_get(
 
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
-    curl_global_cleanup();
 
     if (code != CURLE_OK) {
         free(buffer.data);
         return PSI_STATUS_ERROR;
     }
     if (response_body != NULL) {
-        *response_body = buffer.data != NULL ? buffer.data : psi_strdup("");
+        if (buffer.data != NULL) {
+            *response_body = buffer.data;
+        } else {
+            *response_body = psi_strdup("");
+            if (*response_body == NULL) return PSI_STATUS_ERROR;
+        }
     } else {
         free(buffer.data);
     }

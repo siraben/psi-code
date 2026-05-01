@@ -1,6 +1,8 @@
+-- psi.tools.grep: Search file contents for a pattern (rg backend); returns matching lines with line numbers.
+
 local records = require("psi.records")
 local registry = require("psi.tool_registry")
-local path_util = require("psi.path")
+local path_util = require("psi.path_utils")
 local helpers = require("psi.tool_helpers")
 local shell = require("psi.tool_shell")
 local truncate = require("psi.truncate")
@@ -34,6 +36,7 @@ local function build_argv(pattern, path, glob, limit, context, ignore_case, lite
     argv[#argv + 1] = "--glob"
     argv[#argv + 1] = glob
   end
+  argv[#argv + 1] = "--"
   argv[#argv + 1] = pattern
   argv[#argv + 1] = path
   return argv

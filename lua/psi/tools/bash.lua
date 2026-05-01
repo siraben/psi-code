@@ -1,3 +1,5 @@
+-- psi.tools.bash: Run an arbitrary shell command and stream its output.
+
 local records = require("psi.records")
 local registry = require("psi.tool_registry")
 local shell = require("psi.tool_shell")

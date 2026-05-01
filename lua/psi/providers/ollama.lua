@@ -6,7 +6,7 @@
 -- that decodes Ollama's `{message:{content, tool_calls}, done}`
 -- envelope.
 
-local compat = require("psi.openai_compat")
+local compat = require("psi.providers.openai_compat")
 local prelude = require("psi.prelude")
 
 local M = {}

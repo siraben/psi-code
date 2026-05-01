@@ -76,7 +76,7 @@ function M.model(id)
     slug = slug:sub(#prefix + 1)
   end
 
-  local ok, openrouter_models = pcall(require, "psi.openrouter_models")
+  local ok, openrouter_models = pcall(require, "psi.providers.openrouter_models")
   local meta = ok and openrouter_models and openrouter_models.model(slug)
   if type(meta) ~= "table" then
     return nil
@@ -120,7 +120,7 @@ function M.all_models()
     seen[id] = true
     out[#out + 1] = item
   end
-  local ok, openrouter_models = pcall(require, "psi.openrouter_models")
+  local ok, openrouter_models = pcall(require, "psi.providers.openrouter_models")
   local openrouter_all = ok and openrouter_models and openrouter_models.all()
   if type(openrouter_all) == "table" then
     for slug, spec in pairs(openrouter_all) do
@@ -159,7 +159,7 @@ local function canonical_id(provider_name, model_id)
 end
 
 M.register_api("anthropic-messages", {
-  module = "psi.anthropic",
+  module = "psi.providers.anthropic",
   compat = {
     supports_reasoning = true,
     supports_tool_use = true,
@@ -168,7 +168,7 @@ M.register_api("anthropic-messages", {
 })
 
 M.register_api("ollama-chat", {
-  module = "psi.ollama",
+  module = "psi.providers.ollama",
   compat = {
     supports_tool_use = true,
     thinking_format = "openai-compatible",
@@ -176,7 +176,7 @@ M.register_api("ollama-chat", {
 })
 
 M.register_api("openrouter-chat-completions", {
-  module = "psi.openrouter",
+  module = "psi.providers.openrouter",
   compat = {
     supports_tool_use = true,
     supports_reasoning_effort = false,
@@ -185,7 +185,7 @@ M.register_api("openrouter-chat-completions", {
 })
 
 M.register_api("openai-codex-responses", {
-  module = "psi.openai_codex",
+  module = "psi.providers.openai_codex",
   compat = {
     supports_tool_use = true,
     supports_reasoning_effort = true,
@@ -293,7 +293,7 @@ function M.resolve_model(provider_name, requested)
   if requested and requested ~= "" then
     return requested
   end
-  local ok, settings = pcall(require, "psi.settings")
+  local ok, settings = pcall(require, "psi.settings_manager")
   if ok and settings then
     local configured = settings.get("defaults.model", nil)
     if type(configured) == "string" and configured ~= "" then
@@ -322,7 +322,7 @@ function M.resolve_route(model)
     return providers[env_provider], model
   end
 
-  local ok, settings = pcall(require, "psi.settings")
+  local ok, settings = pcall(require, "psi.settings_manager")
   if ok and settings then
     local configured_model = settings.get("defaults.model", nil)
     if (not model or model == "") and type(configured_model) == "string" then

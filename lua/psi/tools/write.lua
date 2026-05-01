@@ -1,7 +1,9 @@
+-- psi.tools.write: Create or overwrite a file with the supplied content.
+
 local records = require("psi.records")
 local registry = require("psi.tool_registry")
-local path_util = require("psi.path")
-local mutation_queue = require("psi.tool_mutation_queue")
+local path_util = require("psi.path_utils")
+local mutation_queue = require("psi.file_mutation_queue")
 local helpers = require("psi.tool_helpers")
 
 local function impl(input)

@@ -95,12 +95,12 @@ function M.input_layout(arg_json)
 end
 
 function M.footer_hint(arg_json)
-  local tui = require("psi.tui")
+  local tui = require("psi.tui_status")
   return tui.footer_hint(arg_json)
 end
 
 function M.status_line(arg_json)
-  local tui = require("psi.tui")
+  local tui = require("psi.tui_status")
   return tui.status_line(arg_json)
 end
 

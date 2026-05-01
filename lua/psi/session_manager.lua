@@ -545,14 +545,28 @@ local function write_session_file(path, header, messages, count)
   if not psi.mkdir_parent(path) then
     return false, "failed to create parent directory"
   end
+  local n = count or #messages
+
+  -- Atomic temp+fsync+rename so a crash mid-write can't leave a
+  -- truncated session log. The host primitive caps content at 16 MiB;
+  -- larger sessions fall through to the streamed writer below.
+  if psi.file_write_atomic then
+    local parts = { psi.json_encode(header), "\n" }
+    for i = 1, n do
+      parts[#parts + 1] = psi.json_encode(to_disk_entry(messages[i]))
+      parts[#parts + 1] = "\n"
+    end
+    if psi.file_write_atomic(path, table.concat(parts)) then
+      return true
+    end
+  end
+
   local f, err = io.open(path, "w")
   if not f then
     return false, err
   end
-  -- Wrap the write loop in pcall so a mid-write failure (disk full,
-  -- ENOSPC, killed process, …) still closes the descriptor rather
-  -- than leaking it until GC.
-  local n = count or #messages
+  -- pcall so a mid-write failure (disk full, ENOSPC, killed process)
+  -- still closes the descriptor rather than leaking it until GC.
   local ok, werr = pcall(function()
     write_line(f, header)
     for i = 1, n do
@@ -572,19 +586,20 @@ end
 -- rewriting the header or earlier entries. A 100-entry session
 -- with a 5-entry delta drops from 105-line rewrite to 5-line
 -- append; on iSH this turns a ~50ms save into a ~2ms append.
+-- The full delta goes out as one fwrite; psi.file_append fsyncs
+-- before close, so a successful return means it's on disk.
 local function append_session_file(path, messages)
-  local f, err = io.open(path, "a")
-  if not f then
-    return false, err
+  local parts = {}
+  for i = 1, #messages do
+    parts[#parts + 1] = psi.json_encode(to_disk_entry(messages[i]))
+    parts[#parts + 1] = "\n"
   end
-  local ok, werr = pcall(function()
-    for i = 1, #messages do
-      write_line(f, to_disk_entry(messages[i]))
-    end
-  end)
-  f:close()
-  if not ok then
-    return false, werr
+  local content = table.concat(parts)
+  if #content == 0 then
+    return true
+  end
+  if not psi.file_append(path, content) then
+    return false, "file_append failed"
   end
   return true
 end
@@ -653,14 +668,8 @@ function M.save(path)
     return true
   end
 
-  local ok, err
-  if psi.session_append_jsonl then
-    ok, err = psi.session_append_jsonl(path, last_saved_count + 1)
-  end
-  if ok == nil or (ok == false and err == "message has no structured data") then
-    local messages = psi.session_messages_from(last_saved_count + 1)
-    ok, err = append_session_file(path, messages)
-  end
+  local messages = psi.session_messages_from(last_saved_count + 1)
+  local ok, err = append_session_file(path, messages)
   if ok then
     last_saved_count = count
   else

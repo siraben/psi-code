@@ -2,9 +2,10 @@
 --   1. Set package.path to locate lua/psi/*.lua modules.
 --   2. Created a `psi` global table populated with FFI primitives.
 --
--- We attach subsystem tables onto `psi` so the C bridge can reach them
--- through psi.tools.*, psi.session.*, psi.prompt.*, psi.render.*,
--- psi.commands.*.
+-- We attach subsystem tables onto `psi` so the C bridge can reach
+-- them through psi.tools.*, psi.session.*, psi.prompt.*, etc. The
+-- public namespace names stay short; underlying file paths mirror
+-- pi-mono (e.g. psi.session → psi.session_manager).
 
 -- Runtime tuning: Lua 5.4's generational GC wins on psi's workload.
 -- Most allocations are short-lived (SSE chunks parsed into tables
@@ -26,30 +27,30 @@ do
 end
 
 psi.prelude = require("psi.prelude")
-psi.path = require("psi.path")
+psi.path = require("psi.path_utils")
 psi.sched = require("psi.sched")
-psi.events = require("psi.events")
+psi.events = require("psi.event_bus")
 psi.ansi = require("psi.ansi")
 psi.ansi.autodetect()
 psi.diff = require("psi.diff")
 psi.records = require("psi.records")
 psi.context = require("psi.context")
-psi.settings = require("psi.settings")
+psi.settings = require("psi.settings_manager")
 psi.theme = require("psi.theme")
 psi.theme.bootstrap()
-psi.providers = require("psi.providers")
-psi.resources = require("psi.resources")
-psi.session = require("psi.session")
+psi.providers = require("psi.api_registry")
+psi.resources = require("psi.resource_loader")
+psi.session = require("psi.session_manager")
 psi.tools = require("psi.tools")
-psi.anthropic = require("psi.anthropic")
-psi.ollama = require("psi.ollama")
+psi.anthropic = require("psi.providers.anthropic")
+psi.ollama = require("psi.providers.ollama")
 psi.prompt = require("psi.prompt")
 psi.keybindings = require("psi.keybindings")
-psi.agent = require("psi.agent")
+psi.agent = require("psi.agent_session")
 psi.render = require("psi.render")
-psi.commands = require("psi.commands")
+psi.commands = require("psi.slash_commands")
 psi.prompt_templates = require("psi.prompt_templates")
-psi.tui = require("psi.tui")
+psi.tui = require("psi.tui_status")
 psi.tui_layout = require("psi.tui_layout")
 psi.extensions = psi.extensions or {}
 psi.extensions.osc52_clipboard = require("psi.extensions.osc52_clipboard")

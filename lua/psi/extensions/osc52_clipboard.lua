@@ -1,6 +1,6 @@
 -- Built-in OSC 52 clipboard writer for TUI yanks.
 
-local settings = require("psi.settings")
+local settings = require("psi.settings_manager")
 
 local M = {}
 
@@ -114,7 +114,7 @@ function M.enable(psi_state)
   if writer_id ~= nil then
     return true
   end
-  local tui = (psi_state and psi_state.tui) or require("psi.tui")
+  local tui = (psi_state and psi_state.tui) or require("psi.tui_status")
   writer_id = tui.register_clipboard_writer(write_clipboard)
   return true
 end
@@ -123,7 +123,7 @@ function M.disable(psi_state)
   if writer_id == nil then
     return true
   end
-  local tui = (psi_state and psi_state.tui) or require("psi.tui")
+  local tui = (psi_state and psi_state.tui) or require("psi.tui_status")
   if tui.unregister_clipboard_writer then
     tui.unregister_clipboard_writer(writer_id)
   end

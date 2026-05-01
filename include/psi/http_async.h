@@ -32,6 +32,11 @@ struct psi_abort_signal;
  *   PSI_STATUS_ERROR otherwise; *out is left NULL.
  */
 
+/* One-shot libcurl init. There is no shutdown: per-call
+ * curl_global_cleanup is not thread-safe, and process exit reclaims
+ * libcurl's resources anyway. */
+int psi_http_global_init(void);
+
 struct psi_http_stream;
 
 int psi_http_stream_begin(

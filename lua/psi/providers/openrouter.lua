@@ -9,7 +9,7 @@
 -- provider. psi.agent.pick_provider strips the first segment and
 -- passes the rest verbatim as the OpenRouter model slug.
 
-local compat = require("psi.openai_compat")
+local compat = require("psi.providers.openai_compat")
 local prelude = require("psi.prelude")
 
 local M = {}
@@ -205,8 +205,23 @@ local function finalize_tool_calls(state)
     local slot = state.tool_calls_by_index[idx]
     if slot and slot.name then
       local arg_json = table.concat(slot.arg_parts)
-      local args = safe_decode(arg_json)
-      if type(args) ~= "table" then
+      local args
+      if #arg_json > 0 then
+        args = safe_decode(arg_json)
+        if type(args) ~= "table" then
+          -- Truncated/malformed args: surface via stream_error so the
+          -- turn fails instead of dispatching with empty input.
+          state.malformed_tool_input_error = state.malformed_tool_input_error
+            or string.format(
+              "tool call %s (%s) has malformed arguments (%d bytes, starts with %q)",
+              slot.name or "?",
+              slot.id or "?",
+              #arg_json,
+              arg_json:sub(1, 48)
+            )
+          args = {}
+        end
+      else
         args = {}
       end
       local id = slot.id
@@ -247,6 +262,12 @@ local function make_config(model)
     parser_push = parser_push,
     new_state = new_state,
     finalize_tool_calls = finalize_tool_calls,
+    stream_error = function(state)
+      if state.malformed_tool_input_error then
+        return "openrouter: " .. state.malformed_tool_input_error
+      end
+      return nil
+    end,
 
     tool_result_message = function(tool_call_id, tool_name, text)
       local msg = { role = "tool", content = text }

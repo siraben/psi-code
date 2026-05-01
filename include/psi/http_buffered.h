@@ -1,5 +1,5 @@
-#ifndef PSI_ANTHROPIC_H
-#define PSI_ANTHROPIC_H
+#ifndef PSI_HTTP_BUFFERED_H
+#define PSI_HTTP_BUFFERED_H
 
 #include "psi/common.h"
 

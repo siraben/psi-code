@@ -1,3 +1,5 @@
+-- psi.tools.lua: Inspect or evaluate expressions in psi's embedded Lua runtime.
+
 local records = require("psi.records")
 local registry = require("psi.tool_registry")
 local prelude = require("psi.prelude")

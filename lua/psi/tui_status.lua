@@ -1,12 +1,14 @@
--- psi.tui: helpers for the C-side TUI to render things that depend
--- on Lua-owned state (session, context, usage). Kept tiny and
--- side-effect-free so the C layer can call them on every redraw.
+-- psi.tui_status: status-line and footer helpers for --tui mode.
+-- Renders the rich status line (cwd / model / session / token usage)
+-- and the keybinding hint footer. Kept tiny and side-effect-free so
+-- the TUI runtime can call them on every redraw. The full TUI state
+-- machine and key dispatch live in psi.tui_runtime.
 
 local ansi = require("psi.ansi")
 local context = require("psi.context")
 local keybindings = require("psi.keybindings")
 local prelude = require("psi.prelude")
-local settings = require("psi.settings")
+local settings = require("psi.settings_manager")
 
 local M = {}
 local BAR_SPLIT = string.char(31)
@@ -570,7 +572,7 @@ function M.status_line(arg_json)
   -- extension-driven change is reflected in the footer without a
   -- restart. require() is resolved lazily to avoid a boot-time
   -- cycle (agent ↔ prompt ↔ tools ↔ tui).
-  local ok, agent = pcall(require, "psi.agent")
+  local ok, agent = pcall(require, "psi.agent_session")
   local resolved = ok and agent.model_descriptor(arg.model)
   local model = (resolved and resolved.id) or arg.model or "?"
   local context_window = tonumber(arg.context_window)
@@ -618,7 +620,7 @@ end
 
 function M.status_bar(arg_json)
   local arg = type(arg_json) == "table" and arg_json or prelude.safe_json_decode(arg_json, {})
-  local ok, agent = pcall(require, "psi.agent")
+  local ok, agent = pcall(require, "psi.agent_session")
   local resolved = ok and agent.model_descriptor(arg.model)
   local model = (resolved and resolved.id) or arg.model or "?"
   local left = pair("session", short_id(psi.session_id()), true)

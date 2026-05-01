@@ -1,5 +1,8 @@
+-- psi.theme: ANSI theme registry. The single active theme drives
+-- psi.ansi.* color output; extensions can register more.
+
 local ansi = require("psi.ansi")
-local settings = require("psi.settings")
+local settings = require("psi.settings_manager")
 
 local M = {}
 

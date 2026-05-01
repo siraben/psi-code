@@ -102,7 +102,7 @@ function M.context_window(model)
   if not model or model == "" then
     return DEFAULT_CONTEXT_WINDOW
   end
-  local ok, providers = pcall(require, "psi.providers")
+  local ok, providers = pcall(require, "psi.api_registry")
   if ok and providers then
     local meta = providers.model(model)
     if type(meta) == "table" and type(meta.context_window) == "number" then

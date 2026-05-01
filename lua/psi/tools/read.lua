@@ -1,6 +1,8 @@
+-- psi.tools.read: Read a file with offset/limit paging and head-truncation.
+
 local records = require("psi.records")
 local registry = require("psi.tool_registry")
-local path_util = require("psi.path")
+local path_util = require("psi.path_utils")
 local helpers = require("psi.tool_helpers")
 
 local function notice(meta)
