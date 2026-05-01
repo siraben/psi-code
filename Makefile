@@ -94,9 +94,10 @@ pkg_cflags = $(if $(PSI_CFLAGS_$(1)),$(PSI_CFLAGS_$(1)),$(shell $(PKG_CONFIG) $(
 pkg_libs   = $(if $(PSI_LIBS_$(1)),$(PSI_LIBS_$(1)),$(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --libs $(2) 2>/dev/null))
 
 # A "VAR:pkgname" entry (e.g. LUA:lua5.4) names the override-var
-# prefix and the pkg-config package. Helpers split the colon.
-dep_cflags = $(call pkg_cflags,$(word 1,$(subst :, ,$(1))),$(word 2,$(subst :, ,$(1))))
-dep_libs   = $(call pkg_libs,$(word 1,$(subst :, ,$(1))),$(word 2,$(subst :, ,$(1))))
+# prefix and the pkg-config package. firstword/lastword split the
+# colon-separated pair without an intermediate variable.
+dep_cflags = $(call pkg_cflags,$(firstword $(subst :, ,$(1))),$(lastword $(subst :, ,$(1))))
+dep_libs   = $(call pkg_libs,$(firstword $(subst :, ,$(1))),$(lastword $(subst :, ,$(1))))
 
 # Always-on dependencies; feature-gated ones append below.
 PKG_DEPS  = LUA:lua5.4 CJSON:libcjson CURL:libcurl ZLIB:zlib
@@ -135,22 +136,24 @@ MAKEFLAGS += -j$(JOBS)
 endif
 
 # ---- Default target ----
+.DEFAULT_GOAL := all
 all: $(TARGET)
 
 # ---- Pattern rules ----
 #
-# A single pattern rule covers every src/**/*.c → $(BUILD_DIR)/src/**/*.o.
-# -MMD -MP emits .d sidecar files that record the headers each
-# translation unit pulled in, so a header edit triggers a rebuild
-# without us hand-maintaining per-file dependency lists. The .d
-# files are loaded back via -include below.
-$(BUILD_DIR)/%.o: %.c
+# Static pattern rules bind the recipe to a specific target list, so
+# the rule only matches the intended .c → .o translations and never
+# accidentally fires for an unrelated path. -MMD -MP emits .d sidecar
+# files that record the headers each translation unit pulled in, so
+# a header edit triggers a rebuild without hand-maintained dependency
+# lists; the .d files are loaded back via -include below.
+$(OBJECTS): $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 
 # Generated blobs (embedded_lua.c, embedded_docs.c) compile with a
 # leaner include set — they only reference psi/embedded_lua.h.
-$(BUILD_DIR)/embedded_%.o: $(BUILD_DIR)/embedded_%.c
+$(GEN_OBJECTS): $(BUILD_DIR)/%.o: $(BUILD_DIR)/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -Iinclude $(BASE_CFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 
@@ -181,7 +184,10 @@ check-curl-ca:
 		exit 1; \
 	fi
 
-$(TARGET): check-curl-ca $(OBJECTS) $(GEN_OBJECTS) | $(BUILD_DIR)
+# `check-curl-ca` is order-only so its phony status never marks
+# $(TARGET) out-of-date; it still runs once per `make` invocation
+# and aborts before linking if libcurl can't reach a CA bundle.
+$(TARGET): $(OBJECTS) $(GEN_OBJECTS) | check-curl-ca $(BUILD_DIR)
 	$(CC) $(LDFLAGS) $(RPATH_LDFLAGS) -o $@ $(OBJECTS) $(GEN_OBJECTS) $(LOCAL_LDFLAGS)
 
 # ---- Install / clean ----
