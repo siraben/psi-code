@@ -1,8 +1,4 @@
-# psi build — minimal, portable, parallel-safe.
-#
-# Configuration knobs at the top; machinery below. Designed for GNU
-# make 3.81+ since pattern rules, $(call), $(foreach), and -include
-# are used pervasively.
+# psi build. Designed for GNU make 3.81+.
 
 # ---- Install paths ----
 PREFIX     ?= /usr/local
@@ -24,8 +20,6 @@ LUACHECK        ?= luacheck
 STYLUA          ?= stylua
 
 # ---- Feature gates ----
-# Each maps to a -DPSI_ENABLE_<NAME>=<0|1> compile flag and (where
-# applicable) selects which optional dependencies the link picks up.
 TUI           ?= 1
 ANSI          ?= 1
 COLOR         ?= 1
@@ -43,44 +37,38 @@ CPPFLAGS      ?=
 LDFLAGS       ?=
 RPATH_LDFLAGS ?=
 
-# Stays at -std=c89 -pedantic -Werror so portable C89 hosts (Plan 9
-# APE, AmigaOS, Haiku gcc-2.95, …) build without surprises.
-# -Wno-long-long accommodates Lua 5.4's lua_Integer being long long.
+# -Wno-long-long suppresses the C90-pedantic warning Lua 5.4 forces
+# via lua_Integer being long long.
 STRICT_CFLAGS ?= -std=c89 -pedantic -Wall -Wextra -Werror -Wno-long-long
 BASE_CFLAGS    = $(STRICT_CFLAGS)
+
+# Auto-deps: gcc/clang/tcc emit .d files with these flags. On
+# toolchains that can't (e.g. Plan 9 pcc), `make DEPFLAGS=` disables
+# header-driven rebuild tracking; the build itself still works.
+DEPFLAGS ?= -MMD -MP
 
 # ---- Build outputs ----
 BUILD_DIR      = build
 TARGET         = $(BUILD_DIR)/psi
 LUA_BOOT_FILE ?= $(abspath lua/boot.lua)
 
-# Source discovery: every .c under src/ is part of the binary. The
-# build mirror under $(BUILD_DIR) preserves the src/ layout so two
-# files with the same basename (none today, but cheap insurance)
-# never collide.
 SOURCES := $(sort $(shell find src -name '*.c' 2>/dev/null))
 OBJECTS := $(SOURCES:%.c=$(BUILD_DIR)/%.o)
 
-# Embedded blobs: lua/ sources go into psi_embedded_lua_table;
-# README.md + docs/*.md go into psi_embedded_docs_table.
 LUA_SOURCES = lua/boot.lua $(sort $(shell find lua/psi -name '*.lua' 2>/dev/null))
 DOC_SOURCES = README.md $(sort $(wildcard docs/*.md))
 EMBED_TOOL  = $(BUILD_DIR)/embed
 EMBED_LUA   = $(BUILD_DIR)/embedded_lua.c
 EMBED_DOCS  = $(BUILD_DIR)/embedded_docs.c
 GEN_OBJECTS = $(EMBED_LUA:.c=.o) $(EMBED_DOCS:.c=.o)
+DEPS       := $(OBJECTS:.o=.d) $(GEN_OBJECTS:.o=.d)
 
-# Auto-generated header dependencies (-MMD -MP). One .d per .o.
-DEPS := $(OBJECTS:.o=.d) $(GEN_OBJECTS:.o=.d)
-
-# ---- Dependencies via pkg-config (with environment override) ----
+# ---- Dependencies via pkg-config ----
 #
-# Each library is sourced from pkg-config by default; on platforms
-# without pkg-config (or where a package is named differently — e.g.
-# lua5.4 vs lua54 vs lua), set PSI_CFLAGS_<DEP>= and PSI_LIBS_<DEP>=
-# in the environment to skip the pkg-config call. The build never
-# fails because pkg-config is missing, only because the user hasn't
-# told us where to find a library.
+# Set PSI_CFLAGS_<DEP>= / PSI_LIBS_<DEP>= in the environment to skip
+# pkg-config for a particular package — useful on hosts where the
+# package is named differently (lua5.4 vs lua54 vs lua) or where
+# pkg-config isn't available at all.
 ifeq ($(STATIC),1)
 PKG_CONFIG_FLAGS = --static
 LDFLAGS         += -static
@@ -88,18 +76,13 @@ else
 PKG_CONFIG_FLAGS =
 endif
 
-# Resolve --cflags / --libs for a single package, with PSI_CFLAGS_X /
-# PSI_LIBS_X taking precedence over pkg-config.
 pkg_cflags = $(if $(PSI_CFLAGS_$(1)),$(PSI_CFLAGS_$(1)),$(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --cflags $(2) 2>/dev/null))
 pkg_libs   = $(if $(PSI_LIBS_$(1)),$(PSI_LIBS_$(1)),$(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --libs $(2) 2>/dev/null))
 
-# A "VAR:pkgname" entry (e.g. LUA:lua5.4) names the override-var
-# prefix and the pkg-config package. firstword/lastword split the
-# colon-separated pair without an intermediate variable.
+# Each PKG_DEPS entry is "<override-prefix>:<pkg-config-name>".
 dep_cflags = $(call pkg_cflags,$(firstword $(subst :, ,$(1))),$(lastword $(subst :, ,$(1))))
 dep_libs   = $(call pkg_libs,$(firstword $(subst :, ,$(1))),$(lastword $(subst :, ,$(1))))
 
-# Always-on dependencies; feature-gated ones append below.
 PKG_DEPS  = LUA:lua5.4 CJSON:libcjson CURL:libcurl ZLIB:zlib
 PKG_DEPS += $(if $(filter 1,$(REPL_EDITLINE)),EDIT:libedit)
 
@@ -122,14 +105,11 @@ LOCAL_RPATH_LDFLAGS = $(patsubst -L%,-Wl$(comma)-rpath$(comma)%,$(filter -L%,$(L
 CURL_SSL_BACKENDS   = $(shell curl-config --ssl-backends 2>/dev/null)
 CURL_CA_BUNDLE      = $(shell curl-config --ca 2>/dev/null)
 
-# Host-side embed helper links zlib at host-build time. On native
-# builds it shares pkg-config with the target; cross builds set
-# HOST_CFLAGS_ZLIB / HOST_LIBS_ZLIB so the host helper doesn't link
-# against the target's zlib.
+# Cross builds: HOST_* vars must point at the build host's zlib so
+# the embed helper doesn't link against the target arch's libs.
 HOST_CFLAGS_ZLIB ?= $(shell $(HOST_PKG_CONFIG) --cflags zlib)
 HOST_LIBS_ZLIB   ?= $(shell $(HOST_PKG_CONFIG) --libs zlib)
 
-# Parallel-build by default unless the caller passed -j explicitly.
 JOBS := $(shell nproc 2>/dev/null || echo 4)
 ifeq (,$(filter -j%,$(MAKEFLAGS)))
 MAKEFLAGS += -j$(JOBS)
@@ -140,25 +120,15 @@ endif
 all: $(TARGET)
 
 # ---- Pattern rules ----
-#
-# Static pattern rules bind the recipe to a specific target list, so
-# the rule only matches the intended .c → .o translations and never
-# accidentally fires for an unrelated path. -MMD -MP emits .d sidecar
-# files that record the headers each translation unit pulled in, so
-# a header edit triggers a rebuild without hand-maintained dependency
-# lists; the .d files are loaded back via -include below.
 $(OBJECTS): $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
+	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
-# Generated blobs (embedded_lua.c, embedded_docs.c) compile with a
-# leaner include set — they only reference psi/embedded_lua.h.
+# Generated blobs only need psi/embedded_lua.h.
 $(GEN_OBJECTS): $(BUILD_DIR)/%.o: $(BUILD_DIR)/%.c
 	@mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) -Iinclude $(BASE_CFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
+	$(CC) $(CPPFLAGS) -Iinclude $(BASE_CFLAGS) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
-# Pull in auto-generated header deps. `-include` is silent when the
-# files don't exist (clean tree, first build).
 -include $(DEPS)
 
 # ---- Embed helper ----
@@ -184,9 +154,7 @@ check-curl-ca:
 		exit 1; \
 	fi
 
-# `check-curl-ca` is order-only so its phony status never marks
-# $(TARGET) out-of-date; it still runs once per `make` invocation
-# and aborts before linking if libcurl can't reach a CA bundle.
+# Order-only so check-curl-ca's phony status doesn't relink every build.
 $(TARGET): $(OBJECTS) $(GEN_OBJECTS) | check-curl-ca $(BUILD_DIR)
 	$(CC) $(LDFLAGS) $(RPATH_LDFLAGS) -o $@ $(OBJECTS) $(GEN_OBJECTS) $(LOCAL_LDFLAGS)
 
@@ -203,11 +171,6 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 # ---- Lint / static analysis ----
-#
-# `make lint` runs the full battery (stylua, luacheck, cppcheck, gcc
-# -fanalyzer). Each tool ships in the dev shell; on bare systems
-# install them or invoke individual sub-targets.
-
 lint-lua:
 	$(STYLUA) --check lua
 	$(LUACHECK) lua
