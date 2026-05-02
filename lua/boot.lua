@@ -7,14 +7,14 @@
 -- public namespace names stay short; underlying file paths mirror
 -- pi-mono (e.g. psi.session → psi.session_manager).
 
--- Runtime tuning: Lua 5.4's generational GC wins on psi's workload.
--- Most allocations are short-lived (SSE chunks parsed into tables
--- then discarded, gsub replacement strings, per-line markdown
--- spans, per-tick scratch tables from sched.run_all). With
--- incremental the same workload pays ~15% more than with
--- generational on the hot paths that churn. Set PSI_GC_MODE to
--- override ("incremental" reverts; "off" disables autocollection
--- entirely — don't do this unless you know what you want).
+-- Runtime tuning: Lua 5.5 keeps generational collection as the best
+-- default for psi's allocation-heavy hot paths. Most allocations are
+-- short-lived (SSE chunks parsed into tables then discarded, gsub
+-- replacement strings, per-line markdown spans, per-tick scratch
+-- tables from sched.run_all). Lua 5.5 also gives generational mode
+-- incremental major collections, so we get lower churn cost without
+-- full stop-the-world majors. Set PSI_GC_MODE to override
+-- ("incremental" reverts; "off" disables autocollection entirely).
 do
   local mode = os.getenv("PSI_GC_MODE")
   if mode == "off" then

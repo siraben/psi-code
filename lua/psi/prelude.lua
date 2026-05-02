@@ -1,6 +1,7 @@
 -- psi.prelude: small string/table/path helpers used across the runtime.
 
 local M = {}
+local table_create = rawget(table, "create")
 
 -- ---------- strings ----------
 
@@ -42,18 +43,24 @@ end
 
 -- ---------- sequences (1-indexed Lua tables) ----------
 
+function M.array(nseq, nrec)
+  if table_create then
+    return table_create(nseq or 0, nrec or 0)
+  end
+  return {}
+end
+
 function M.length(xs)
   return #xs
 end
 
 function M.take(xs, n)
   if n <= 0 then
-    return {}
+    return M.array(0)
   end
-  local out = {}
-  for i = 1, math.min(n, #xs) do
-    out[#out + 1] = xs[i]
-  end
+  local count = math.min(n, #xs)
+  local out = M.array(count)
+  table.move(xs, 1, count, 1, out)
   return out
 end
 
@@ -61,28 +68,26 @@ function M.drop(xs, n)
   if n <= 0 then
     return xs
   end
-  local out = {}
-  for i = n + 1, #xs do
-    out[#out + 1] = xs[i]
-  end
+  local count = math.max(0, #xs - n)
+  local out = M.array(count)
+  table.move(xs, n + 1, #xs, 1, out)
   return out
 end
 
 function M.take_right(xs, n)
   local len = #xs
   if n <= 0 then
-    return {}
+    return M.array(0)
   end
-  local out = {}
+  local count = math.min(n, len)
+  local out = M.array(count)
   local start = math.max(1, len - n + 1)
-  for i = start, len do
-    out[#out + 1] = xs[i]
-  end
+  table.move(xs, start, len, 1, out)
   return out
 end
 
 function M.reverse(xs)
-  local out = {}
+  local out = M.array(#xs)
   for i = #xs, 1, -1 do
     out[#out + 1] = xs[i]
   end
@@ -90,7 +95,7 @@ function M.reverse(xs)
 end
 
 function M.map(xs, fn)
-  local out = {}
+  local out = M.array(#xs)
   for i, v in ipairs(xs) do
     out[i] = fn(v)
   end
@@ -98,7 +103,7 @@ function M.map(xs, fn)
 end
 
 function M.filter(xs, pred)
-  local out = {}
+  local out = M.array(#xs)
   for _, v in ipairs(xs) do
     if pred(v) then
       out[#out + 1] = v
@@ -124,7 +129,7 @@ end
 local uuid_counter = 0
 function M.uuid_short()
   if not (psi and psi.amiga_bridge) then
-    local t = {}
+    local t = M.array(32)
     for i = 1, 32 do
       t[i] = string.format("%x", math.random(0, 15))
     end
@@ -144,7 +149,7 @@ function M.uuid_short()
   uuid_counter = uuid_counter + 1
   local digits = "0123456789abcdef"
   local n = uuid_counter
-  local t = {}
+  local t = M.array(32)
   for i = 1, 32 do
     n = n + i * 7
     while n >= 16 do

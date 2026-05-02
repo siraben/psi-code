@@ -203,6 +203,27 @@ BENCHES: list[tuple[str, str]] = [
         """,
     ),
     (
+        "prelude_sequence_helpers",
+        r"""
+        local prelude = require('psi.prelude')
+        local xs = {}
+        for i = 1, 1000 do xs[i] = i end
+        local N = 20000
+        local total = 0
+        local start = os.clock()
+        for _ = 1, N do
+          local a = prelude.take(xs, 500)
+          local b = prelude.drop(xs, 500)
+          local c = prelude.take_right(xs, 500)
+          local d = prelude.reverse(xs)
+          total = total + #a + #b + #c + #d
+        end
+        local dt = (os.clock() - start) * 1000
+        io.write(string.format('ms: %.1f  iterations: %d  checksum: %d\n',
+                               dt, N, total))
+        """,
+    ),
+    (
         "read_file_slice_large",
         r"""
         local path = '/tmp/psi-bench-read-large.txt'
@@ -343,16 +364,17 @@ BENCHES: list[tuple[str, str]] = [
         -- tuning matters more.
         local N = 5000
         local base = 'Here is some **text** with `code` and *italics*.'
+        local total = 0
         local start = os.clock()
         for _ = 1, N do
           local s = base .. ' ' .. tostring(math.random(1000))
           s = s:gsub('%*%*(.-)%*%*', '<b>%1</b>')
           s = s:gsub('`(.-)`', '<c>%1</c>')
           s = s:gsub('%*(.-)%*', '<i>%1</i>')
-          _ = #s
+          total = total + #s
         end
         local dt = (os.clock() - start) * 1000
-        io.write(string.format('ms: %.1f  iterations: %d\n', dt, N))
+        io.write(string.format('ms: %.1f  iterations: %d  checksum: %d\n', dt, N, total))
         """,
     ),
     (
