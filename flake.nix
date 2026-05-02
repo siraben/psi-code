@@ -12,9 +12,10 @@
     nixpkgs-cosmo.url = "github:siraben/nixpkgs/siraben/cosmopkgs";
 
     flake-utils.url = "github:numtide/flake-utils";
+    filnix.url = "github:mbrock/filnix";
   };
 
-  outputs = { self, nixpkgs, nixpkgs-cosmo, flake-utils }:
+  outputs = { self, nixpkgs, nixpkgs-cosmo, flake-utils, filnix }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         inherit (pkgs) lib;
@@ -105,7 +106,7 @@
         # glibc cannot be fully statically linked in general (NSS
         # modules, dlopen).
 
-        mkPsi = { p, static ? false, extraMakeFlags ? [], extraNativeBuildInputs ? [] }:
+        mkPsi = { p, static ? false, extraMakeFlags ? [], extraNativeBuildInputs ? [], curlOverride ? null }:
           let
             # When cross-compiling, embed (the host helper that bakes
             # Lua/doc files into a .c) must run on the build machine, so
@@ -130,7 +131,26 @@
             ]
             ++ extraNativeBuildInputs;
 
-          buildInputs = buildDeps p;
+          buildInputs = if curlOverride != null then [
+            p.argtable p.cjson curlOverride p.libedit
+            # filnix's nixpkgs fork predates lua5_5; override lua5_4.
+            (p.lua5_4.overrideAttrs (old: {
+              version = "5.5.0";
+              src = p.fetchurl {
+                url = "https://www.lua.org/ftp/lua-5.5.0.tar.gz";
+                hash = "sha256-V8zDK7vQBcq3W8xSREBSU1r2kXiduiuQFtXFBkDWiz0=";
+              };
+              makeFlags = [
+                "INSTALL_TOP=$(out)"
+                "INSTALL_MAN=$(out)/share/man/man1"
+                "R=5.5.0" "V=5.5" "PLAT=linux"
+                "CC=${p.stdenv.cc.targetPrefix}cc"
+                "RANLIB=${p.stdenv.cc.targetPrefix}ranlib"
+                "MYLIBS=" "LDFLAGS=-fPIC"
+              ];
+            }))
+            p.zlib
+          ] else buildDeps p;
 
           makeFlags = [
             "CC=${p.stdenv.cc.targetPrefix}cc"
@@ -329,6 +349,25 @@
             buildCC = pkgs.stdenv.cc;
             buildZlib = pkgs.zlib;
           };
+
+        # Memory-safe build via Fil-C (https://github.com/mbrock/filnix).
+        # Fil-C compiles C to memory-safe code by treating it as a
+        # cross-compilation target (x86_64-unknown-linux-gnufilc0).
+        # The stock filnix curl uses openssl without a compiled-in CA
+        # bundle, so we wrap the binary with SSL_CERT_FILE pointing at
+        # the nixpkgs cacert bundle.
+        packages.psi-filc = let
+          pkgsFilc = filnix.legacyPackages.${system}.pkgsFilc;
+        in (mkPsi {
+          p = pkgsFilc;
+          curlOverride = pkgsFilc.curl;
+          extraNativeBuildInputs = [ pkgs.makeWrapper ];
+        }).overrideAttrs (old: {
+          postFixup = (old.postFixup or "") + ''
+            wrapProgram $out/bin/psi \
+              --set SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+          '';
+        });
 
         # ---- Apps -------------------------------------------------------
 
