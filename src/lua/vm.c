@@ -641,6 +641,7 @@ static long psi_vm_tui_previous_top = PSI_VM_TUI_FIRST_TERMINAL_CELL;
 static long psi_vm_tui_previous_cursor_row = 0;
 static long psi_vm_tui_previous_cursor_col = 0;
 static int psi_vm_tui_previous_cursor_visible = 0;
+static int psi_vm_tui_discard_escape_final = 0;
 
 static void psi_vm_tui_reset_render_cache(void) {
     if (psi_vm_tui_previous_lines != NULL) {
@@ -692,6 +693,34 @@ static void psi_vm_tui_draw_frame_line(long row, const char *text) {
         text != NULL ? text : "", PSI_VM_TUI_RESET_STYLE, PSI_VM_TUI_CLOSE_OSC8);
 }
 
+static int psi_vm_tui_is_csi_final(int ch) {
+    return ch >= 0x40 && ch <= 0x7e;
+}
+
+static int psi_vm_tui_is_orphan_escape_final(int ch) {
+    return ch == '~' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
+}
+
+static int psi_vm_tui_escape_sequence_complete(const char *buffer, size_t length) {
+    if (buffer == NULL || length == 0u) {
+        return 1;
+    }
+    if (buffer[0] == '[') {
+        size_t i;
+
+        for (i = 1u; i < length; i++) {
+            if (psi_vm_tui_is_csi_final((unsigned char)buffer[i])) {
+                return 1;
+            }
+        }
+        return 0;
+    }
+    if (buffer[0] == 'O') {
+        return length >= 2u;
+    }
+    return 1;
+}
+
 static void psi_vm_tui_suspend(void) {
     struct sigaction dfl;
     struct sigaction prev;
@@ -737,8 +766,7 @@ static int psi_vm_tui_collect_escape_sequence(
         }
         buffer[length++] = (char)ch;
         buffer[length] = '\0';
-        if (ch == '\r' || ch == '\n' || ch == '~' || (ch >= 'A' && ch <= 'Z') ||
-            (ch >= 'a' && ch <= 'z')) {
+        if (psi_vm_tui_escape_sequence_complete(buffer, length)) {
             break;
         }
         timeout_ms = PSI_VM_TUI_ESCAPE_CONTINUE_TIMEOUT_MS;
@@ -906,8 +934,18 @@ static int psi_vm_tui_normalize_key(
     }
     memset(event, 0, sizeof(*event));
 
+    if (psi_vm_tui_discard_escape_final && psi_vm_tui_is_orphan_escape_final(ch)) {
+        psi_vm_tui_discard_escape_final = 0;
+        return 0;
+    }
+    psi_vm_tui_discard_escape_final = 0;
+
     if (ch == PSI_VM_TUI_ESCAPE_BYTE) {
         psi_vm_tui_collect_escape_sequence(sequence, sizeof(sequence), restore_timeout_ms);
+        if (!psi_vm_tui_escape_sequence_complete(sequence, strlen(sequence))) {
+            psi_vm_tui_discard_escape_final = 1;
+            return 0;
+        }
         key_name = psi_vm_tui_escape_sequence_key(sequence);
         if (key_name == NULL) {
             return 0;

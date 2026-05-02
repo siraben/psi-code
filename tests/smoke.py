@@ -1474,6 +1474,26 @@ def t_tui_resume_picker_previews_session(psi: Psi):
     assert_contains(text, "Preview", "resume picker preview heading")
     assert_contains(text, "preview prompt", "resume picker conversation preview")
 
+@test("mode/tui_repeated_arrows_do_not_insert_text")
+def t_tui_repeated_arrows_do_not_insert_text(psi: Psi):
+    # Application-cursor arrows are ESC O A/B. If the decoder leaks the final
+    # byte, the prompt becomes "AAAA.../quit" and the TUI will not exit.
+    arrows = (b"\x1bOA" * 20) + (b"\x1bOB" * 20)
+    raw = run_pty([psi.binary, "--tui"], [(b"", 0.5), (arrows, 0.2), (b"/quit\r", 1.0)])
+    raw.assert_clean_exit()
+
+
+@test("mode/tui_split_arrow_final_byte_does_not_insert_text")
+def t_tui_split_arrow_final_byte_does_not_insert_text(psi: Psi):
+    # Simulate a delayed final byte from CSI Up. The late "A" should be
+    # discarded as terminal input, not inserted before /quit.
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [(b"", 0.5), (b"\x1b[", 0.1), (b"A/quit\r", 1.0)],
+    )
+    raw.assert_clean_exit()
+
+
 @test("mode/tui_theme_applies_to_rendered_colors")
 def t_tui_theme_applies_to_rendered_colors(psi: Psi):
     project = psi.tmp / "theme-tui-project"
