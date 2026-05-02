@@ -80,6 +80,14 @@ struct psi_http_stream {
     int write_failed;
 };
 
+static void psi_http_stream_free_request(struct psi_http_stream *h) {
+    if (h == NULL) return;
+    curl_slist_free_all(h->headers);
+    free(h->url);
+    free(h->body);
+    free(h);
+}
+
 /* ------------------------------------------------------------------
  * Queue management — all under `mu`.
  * ------------------------------------------------------------------ */
@@ -270,14 +278,13 @@ int psi_http_stream_begin(
         h->body = psi_strdup("");
     }
     if (h->url == NULL || h->body == NULL) {
-        free(h->url); free(h->body); free(h);
+        psi_http_stream_free_request(h);
         return PSI_STATUS_ERROR;
     }
 
     for (i = 0u; i < header_count; i++) {
         if (psi_http_slist_append_safe(&h->headers, header_lines[i]) != PSI_STATUS_OK) {
-            curl_slist_free_all(h->headers);
-            free(h->url); free(h->body); free(h);
+            psi_http_stream_free_request(h);
             return PSI_STATUS_ERROR;
         }
     }
@@ -286,14 +293,12 @@ int psi_http_stream_begin(
     h->http_status = 0l;
 
     if (pthread_mutex_init(&h->mu, NULL) != 0) {
-        curl_slist_free_all(h->headers);
-        free(h->url); free(h->body); free(h);
+        psi_http_stream_free_request(h);
         return PSI_STATUS_ERROR;
     }
     if (pthread_cond_init(&h->cond, NULL) != 0) {
         pthread_mutex_destroy(&h->mu);
-        curl_slist_free_all(h->headers);
-        free(h->url); free(h->body); free(h);
+        psi_http_stream_free_request(h);
         return PSI_STATUS_ERROR;
     }
 
@@ -301,8 +306,7 @@ int psi_http_stream_begin(
     if (rc != 0) {
         pthread_cond_destroy(&h->cond);
         pthread_mutex_destroy(&h->mu);
-        curl_slist_free_all(h->headers);
-        free(h->url); free(h->body); free(h);
+        psi_http_stream_free_request(h);
         return PSI_STATUS_ERROR;
     }
     h->thread_started = 1;

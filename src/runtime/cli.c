@@ -8,7 +8,9 @@
 #define PSI_ENABLE_TUI 0
 #endif
 
-#define PSI_CLI_ARGTABLE_CAP 15u
+enum {
+    PSI_CLI_ARGTABLE_MAX = 15
+};
 
 struct psi_cli_argtable {
     struct arg_lit *help;
@@ -26,7 +28,7 @@ struct psi_cli_argtable {
     struct arg_int *compact;
     struct arg_str *session;
     struct arg_end *end;
-    void *table[PSI_CLI_ARGTABLE_CAP];
+    void *table[PSI_CLI_ARGTABLE_MAX];
     size_t table_count;
 };
 
@@ -40,13 +42,17 @@ static int psi_cli_valid_thinking(const char *level) {
            strcmp(level, "xhigh") == 0;
 }
 
-static void psi_cli_argtable_add(struct psi_cli_argtable *args, void *arg) {
-    if (args->table_count < PSI_CLI_ARGTABLE_CAP) {
-        args->table[args->table_count++] = arg;
+static int psi_cli_argtable_add(struct psi_cli_argtable *args, void *arg) {
+    if (args->table_count >= PSI_ARRAY_SIZE(args->table)) {
+        return PSI_STATUS_ERROR;
     }
+    args->table[args->table_count++] = arg;
+    return PSI_STATUS_OK;
 }
 
 static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
+    int status;
+
     args->table_count = 0u;
 
     args->help = arg_lit0("h", "help", "show help");
@@ -65,23 +71,23 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
     args->session = arg_str0(NULL, "session", "FILE", "load and save a JSONL session file");
     args->end = arg_end(20);
 
-    psi_cli_argtable_add(args, args->help);
-    psi_cli_argtable_add(args, args->version);
-    psi_cli_argtable_add(args, args->tui);
-    psi_cli_argtable_add(args, args->repl);
-    psi_cli_argtable_add(args, args->print);
-    psi_cli_argtable_add(args, args->eval);
-    psi_cli_argtable_add(args, args->boot);
-    psi_cli_argtable_add(args, args->system_prompt);
-    psi_cli_argtable_add(args, args->agent);
-    psi_cli_argtable_add(args, args->model);
-    psi_cli_argtable_add(args, args->thinking);
-    psi_cli_argtable_add(args, args->max_tokens);
-    psi_cli_argtable_add(args, args->compact);
-    psi_cli_argtable_add(args, args->session);
-    psi_cli_argtable_add(args, args->end);
+    status = psi_cli_argtable_add(args, args->help);
+    status |= psi_cli_argtable_add(args, args->version);
+    status |= psi_cli_argtable_add(args, args->tui);
+    status |= psi_cli_argtable_add(args, args->repl);
+    status |= psi_cli_argtable_add(args, args->print);
+    status |= psi_cli_argtable_add(args, args->eval);
+    status |= psi_cli_argtable_add(args, args->boot);
+    status |= psi_cli_argtable_add(args, args->system_prompt);
+    status |= psi_cli_argtable_add(args, args->agent);
+    status |= psi_cli_argtable_add(args, args->model);
+    status |= psi_cli_argtable_add(args, args->thinking);
+    status |= psi_cli_argtable_add(args, args->max_tokens);
+    status |= psi_cli_argtable_add(args, args->compact);
+    status |= psi_cli_argtable_add(args, args->session);
+    status |= psi_cli_argtable_add(args, args->end);
 
-    if (args->table_count != PSI_CLI_ARGTABLE_CAP) {
+    if (status != PSI_STATUS_OK) {
         return PSI_STATUS_ERROR;
     }
     return arg_nullcheck(args->table) == 0 ? PSI_STATUS_OK : PSI_STATUS_ERROR;
@@ -135,6 +141,7 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     char **normalized_argv;
     int parse_errors;
     int mode_count;
+    int status;
 
     if (options == NULL) {
         return PSI_STATUS_ERROR;
@@ -153,6 +160,7 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     options->max_tokens = 16384l;
     options->keep_recent = 12l;
 
+    status = PSI_STATUS_ERROR;
     if (psi_cli_build_argtable(&args) != PSI_STATUS_OK) {
         return PSI_STATUS_ERROR;
     }
@@ -160,34 +168,31 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     normalized_argc = 0;
     normalized_argv = NULL;
     if (psi_cli_normalize_argv(argc, argv, &normalized_argc, &normalized_argv) != PSI_STATUS_OK) {
-        psi_cli_free_argtable(&args);
-        return PSI_STATUS_ERROR;
+        goto out;
     }
 
     parse_errors = arg_parse(normalized_argc, normalized_argv, args.table);
     free((void *)normalized_argv);
     if (parse_errors > 0) {
         arg_print_errors(stderr, args.end, argv[0]);
-        psi_cli_free_argtable(&args);
-        return PSI_STATUS_ERROR;
+        goto out;
     }
 
     if (args.help->count > 0) {
         options->mode = PSI_CLI_MODE_HELP;
-        psi_cli_free_argtable(&args);
-        return PSI_STATUS_OK;
+        status = PSI_STATUS_OK;
+        goto out;
     }
     if (args.version->count > 0) {
         options->mode = PSI_CLI_MODE_VERSION;
-        psi_cli_free_argtable(&args);
-        return PSI_STATUS_OK;
+        status = PSI_STATUS_OK;
+        goto out;
     }
 
     mode_count = psi_cli_count_modes(&args);
     if (mode_count > 1) {
         fprintf(stderr, "choose only one primary mode flag\n");
-        psi_cli_free_argtable(&args);
-        return PSI_STATUS_ERROR;
+        goto out;
     }
 
     if (args.print->count > 0) {
@@ -222,26 +227,28 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     if (args.thinking->count > 0) {
         if (!psi_cli_valid_thinking(args.thinking->sval[0])) {
             fprintf(stderr, "invalid value for --thinking\n");
-            psi_cli_free_argtable(&args);
-            return PSI_STATUS_ERROR;
+            goto out;
         }
         options->thinking_level = args.thinking->sval[0];
     }
     if (args.max_tokens->count > 0) {
         options->max_tokens = (long)args.max_tokens->ival[0];
     }
-    psi_cli_free_argtable(&args);
 
     if (options->max_tokens <= 0l) {
         fprintf(stderr, "invalid value for --max-tokens\n");
-        return PSI_STATUS_ERROR;
+        goto out;
     }
     if (options->keep_recent < 0l) {
         fprintf(stderr, "invalid value for --compact\n");
-        return PSI_STATUS_ERROR;
+        goto out;
     }
 
-    return PSI_STATUS_OK;
+    status = PSI_STATUS_OK;
+
+out:
+    psi_cli_free_argtable(&args);
+    return status;
 }
 
 void psi_cli_usage(const char *program_name) {

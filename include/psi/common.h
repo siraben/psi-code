@@ -10,6 +10,7 @@
 #endif
 
 #define PSI_UNUSED(x) ((void)(x))
+#define PSI_ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 enum psi_status {
     PSI_STATUS_OK = 0,
