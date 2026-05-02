@@ -11,6 +11,8 @@
       let
         pkgs = import nixpkgs {
           inherit system;
+          config.allowUnfreePredicate = pkg:
+            builtins.elem (nixpkgs.lib.getName pkg) [ "compcert" ];
         };
 
         curlWithMbedtls = p: (p.curl.override {
@@ -125,6 +127,16 @@
           p = pkgs;
           extraNativeBuildInputs = [ pkgs.gcc pkgs.tinycc ];
           extraMakeFlags = [ "CC=tcc" "HOST_CC=cc" "RPATH_LDFLAGS=$(LOCAL_RPATH_LDFLAGS)" ];
+        };
+
+        # CompCert (ccomp) — formally verified C compiler. CompCert
+        # targets ISO C99 (a superset of the C89 this project uses)
+        # but does not support GCC warning/diagnostic flags or
+        # auto-dependency generation (-MMD/-MP), so both are cleared.
+        packages.psi-compcert = mkPsi {
+          p = pkgs;
+          extraNativeBuildInputs = [ pkgs.gcc pkgs.compcert ];
+          extraMakeFlags = [ "CC=ccomp" "HOST_CC=cc" "STRICT_CFLAGS=" "DEPFLAGS=" ];
         };
 
         # 32-bit x86 build. Requires the host to have 32-bit compat
@@ -273,6 +285,25 @@
           type = "app";
           program = "${script}/bin/psi-cc-diversity";
           meta.description = "Build psi with GCC, Clang, and TinyCC";
+        };
+
+        devShells.compcert = pkgs.mkShell {
+          packages = [
+            pkgs.argtable
+            pkgs.gnumake
+            pkgs.pkg-config
+            pkgs.compcert
+            pkgs.gcc
+            pkgs.cjson
+            curl
+            pkgs.libedit
+            pkgs.lua5_4
+            pkgs.zlib
+          ];
+
+          shellHook = ''
+            export PSI_LUA_BOOT_FILE="$PWD/lua/boot.lua"
+          '';
         };
 
         devShells.default = pkgs.mkShell {
