@@ -1,8 +1,8 @@
--- Differential line renderer for the Lua-owned TUI.
+-- Line-frame renderer for the Lua-owned TUI.
 --
--- The renderer accepts logical screen lines and owns the previous-frame cache.
--- It keeps full redraw as the conservative fallback and uses changed-row writes
--- only when the terminal dimensions are stable.
+-- The runtime builds complete logical frames. The renderer owns normalization,
+-- cursor extraction, previous-frame state, and the choice between full redraw,
+-- differential redraw, and no-op frames.
 
 local tui_text = require("psi.tui_text")
 
@@ -20,6 +20,12 @@ local SHOW_CURSOR = CSI .. "?25h"
 
 local CURSOR_MARKER = ESC .. "_psi:c" .. string.char(7)
 
+local Renderer = {}
+Renderer.__index = Renderer
+
+local Backend = {}
+Backend.__index = Backend
+
 local function clamp(value, low, high)
   if value < low then
     return low
@@ -28,6 +34,15 @@ local function clamp(value, low, high)
     return high
   end
   return value
+end
+
+local function cursor_from_frame(frame, height)
+  local cursor = type(frame.cursor) == "table" and frame.cursor or {}
+  return {
+    row = clamp(tonumber(cursor.row) or tonumber(frame.cursor_row) or 1, 1, height),
+    col = math.max(1, tonumber(cursor.col) or tonumber(frame.cursor_col) or 1),
+    visible = not not (cursor.visible or frame.cursor_visible),
+  }
 end
 
 local function normalize_lines(lines, height)
@@ -56,31 +71,86 @@ local function absolute_frame(lines)
   return table.concat(frame)
 end
 
-local function find_changed_span(previous, next_lines)
+local function find_changed_ranges(previous, next_lines)
+  local ranges = {}
   local first
   local last
+  local row = 1
   local count = math.max(#previous, #next_lines)
-  for i = 1, count do
-    if (previous[i] or "") ~= (next_lines[i] or "") then
-      first = first or i
-      last = i
+
+  while row <= count do
+    if (previous[row] or "") ~= (next_lines[row] or "") then
+      local start = row
+      while row <= count and (previous[row] or "") ~= (next_lines[row] or "") do
+        row = row + 1
+      end
+      ranges[#ranges + 1] = { first = start, last = row - 1 }
+      first = first or start
+      last = row - 1
+    else
+      row = row + 1
     end
   end
-  return first, last
+
+  return ranges, first, last
 end
 
-local function write_diff(lines, first, last, cursor_row, cursor_col, cursor_visible)
+local function normalize_frame(frame)
+  frame = type(frame) == "table" and frame or {}
+  local raw_lines = type(frame.lines) == "table" and frame.lines or {}
+  local width = math.max(1, tonumber(frame.width) or 1)
+  local height = math.max(1, tonumber(frame.height) or #raw_lines or 1)
+  local lines, marker_cursor = M.extract_cursor(normalize_lines(raw_lines, height))
+  local cursor = cursor_from_frame(frame, height)
+
+  if marker_cursor ~= nil then
+    cursor.row = clamp(marker_cursor.row, 1, height)
+    cursor.col = math.max(1, marker_cursor.col)
+  end
+
+  return {
+    width = width,
+    height = height,
+    lines = apply_line_resets(lines),
+    cursor = cursor,
+    force_full = not not frame.force_full,
+  }
+end
+
+function Backend:can_diff()
+  return type(psi.stdout_write) == "function"
+end
+
+function Backend:render_full(frame)
+  local cursor = frame.cursor
+
+  if type(psi.tui_render_frame) == "function" then
+    psi.tui_render_frame(absolute_frame(frame.lines), cursor.row, cursor.col, cursor.visible)
+  elseif type(psi.tui_draw_raw_line) == "function" then
+    psi.tui_set_cursor(1, 1, false)
+    for row, line in ipairs(frame.lines) do
+      psi.tui_draw_raw_line(row, line)
+    end
+    psi.tui_set_cursor(cursor.row, cursor.col, cursor.visible)
+    psi.tui_refresh()
+  end
+end
+
+function Backend:render_diff(frame, ranges)
+  local cursor = frame.cursor
   local out = { SYNC_BEGIN, HIDE_CURSOR }
-  if first ~= nil and last ~= nil then
-    for row = first, last do
+
+  for _, range in ipairs(ranges) do
+    for row = range.first, range.last do
       out[#out + 1] = CSI .. tostring(row) .. ";1H"
       out[#out + 1] = CSI .. "2K"
-      out[#out + 1] = lines[row] or ""
+      out[#out + 1] = frame.lines[row] or ""
       out[#out + 1] = RESET
     end
   end
-  if cursor_visible then
-    out[#out + 1] = CSI .. tostring(cursor_row) .. ";" .. tostring(cursor_col) .. "H"
+
+  if cursor.visible then
+    out[#out + 1] = CSI .. tostring(cursor.row) .. ";" .. tostring(cursor.col) .. "H"
     out[#out + 1] = SHOW_CURSOR
   else
     out[#out + 1] = HIDE_CURSOR
@@ -89,8 +159,84 @@ local function write_diff(lines, first, last, cursor_row, cursor_col, cursor_vis
   psi.stdout_write(table.concat(out))
 end
 
-function M.new()
-  return {
+local function terminal_backend()
+  return setmetatable({}, Backend)
+end
+
+local function cursor_changed(renderer, cursor)
+  return renderer.previous_cursor_row ~= cursor.row
+    or renderer.previous_cursor_col ~= cursor.col
+    or renderer.previous_cursor_visible ~= cursor.visible
+end
+
+function Renderer:reset(reason)
+  self.previous_lines = {}
+  self.previous_width = nil
+  self.previous_height = nil
+  self.previous_cursor_row = nil
+  self.previous_cursor_col = nil
+  self.previous_cursor_visible = nil
+  self.last_changed_first = nil
+  self.last_changed_last = nil
+  self.last_changed_ranges = {}
+  self.last_mode = nil
+  self.last_full_reason = reason
+end
+
+function Renderer:render(frame)
+  local next_frame = normalize_frame(frame)
+  local reason
+  local ranges, first, last = find_changed_ranges(self.previous_lines, next_frame.lines)
+  local cursor_has_changed = cursor_changed(self, next_frame.cursor)
+
+  if next_frame.force_full then
+    reason = "forced"
+  elseif self.previous_width ~= next_frame.width then
+    reason = "width"
+  elseif self.previous_height ~= next_frame.height then
+    reason = "height"
+  elseif #self.previous_lines == 0 then
+    reason = "first"
+  elseif not self.backend:can_diff() then
+    reason = "no-writer"
+  end
+
+  self.last_changed_first = first
+  self.last_changed_last = last
+  self.last_changed_ranges = ranges
+
+  if #ranges == 0 and reason == nil and not cursor_has_changed then
+    self.skipped_redraws = self.skipped_redraws + 1
+    self.last_mode = "skip"
+    self.last_full_reason = nil
+    return self
+  end
+
+  if reason ~= nil then
+    self.full_redraws = self.full_redraws + 1
+    self.last_mode = "full"
+    self.last_full_reason = reason
+    self.backend:render_full(next_frame)
+  else
+    self.diff_redraws = self.diff_redraws + 1
+    self.last_mode = "diff"
+    self.last_full_reason = nil
+    self.backend:render_diff(next_frame, ranges)
+  end
+
+  self.previous_lines = next_frame.lines
+  self.previous_width = next_frame.width
+  self.previous_height = next_frame.height
+  self.previous_cursor_row = next_frame.cursor.row
+  self.previous_cursor_col = next_frame.cursor.col
+  self.previous_cursor_visible = next_frame.cursor.visible
+  return self
+end
+
+function M.new(opts)
+  opts = type(opts) == "table" and opts or {}
+  return setmetatable({
+    backend = opts.backend or terminal_backend(),
     previous_lines = {},
     previous_width = nil,
     previous_height = nil,
@@ -102,102 +248,32 @@ function M.new()
     skipped_redraws = 0,
     last_changed_first = nil,
     last_changed_last = nil,
+    last_changed_ranges = {},
     last_mode = nil,
     last_full_reason = nil,
-  }
+  }, Renderer)
 end
 
-function M.reset(renderer)
-  if type(renderer) ~= "table" then
-    return
+function M.reset(renderer, reason)
+  if type(renderer) == "table" and type(renderer.reset) == "function" then
+    renderer:reset(reason)
   end
-  renderer.previous_lines = {}
-  renderer.previous_width = nil
-  renderer.previous_height = nil
-  renderer.previous_cursor_row = nil
-  renderer.previous_cursor_col = nil
-  renderer.previous_cursor_visible = nil
-  renderer.last_changed_first = nil
-  renderer.last_changed_last = nil
-  renderer.last_mode = nil
-  renderer.last_full_reason = nil
 end
 
 function M.render(renderer, lines, opts)
   renderer = type(renderer) == "table" and renderer or M.new()
   opts = type(opts) == "table" and opts or {}
-
-  local raw_lines = type(lines) == "table" and lines or {}
-  local width = math.max(1, tonumber(opts.width) or 1)
-  local height = math.max(1, tonumber(opts.height) or #raw_lines or 1)
-  local next_lines, marker_cursor = M.extract_cursor(normalize_lines(raw_lines, height))
-  next_lines = apply_line_resets(next_lines)
-  local cursor_row = clamp(tonumber(opts.cursor_row) or 1, 1, height)
-  local cursor_col = math.max(1, tonumber(opts.cursor_col) or 1)
-  local cursor_visible = not not opts.cursor_visible
-  if marker_cursor ~= nil then
-    cursor_row = clamp(marker_cursor.row, 1, height)
-    cursor_col = math.max(1, marker_cursor.col)
-  end
-
-  local can_diff = type(psi.stdout_write) == "function"
-  local reason
-  if opts.force_full then
-    reason = "forced"
-  elseif renderer.previous_width ~= width then
-    reason = "width"
-  elseif renderer.previous_height ~= height then
-    reason = "height"
-  elseif #renderer.previous_lines == 0 then
-    reason = "first"
-  elseif not can_diff then
-    reason = "no-writer"
-  end
-
-  local first, last = find_changed_span(renderer.previous_lines, next_lines)
-
-  renderer.last_changed_first = first
-  renderer.last_changed_last = last
-
-  local cursor_changed = renderer.previous_cursor_row ~= cursor_row
-    or renderer.previous_cursor_col ~= cursor_col
-    or renderer.previous_cursor_visible ~= cursor_visible
-
-  if first == nil and reason == nil and not cursor_changed then
-    renderer.skipped_redraws = renderer.skipped_redraws + 1
-    renderer.last_mode = "skip"
-    renderer.last_full_reason = nil
-    return renderer
-  end
-
-  if reason ~= nil then
-    renderer.full_redraws = renderer.full_redraws + 1
-    renderer.last_mode = "full"
-    renderer.last_full_reason = reason
-    if type(psi.tui_render_frame) == "function" then
-      psi.tui_render_frame(absolute_frame(next_lines), cursor_row, cursor_col, cursor_visible)
-    elseif type(psi.tui_draw_raw_line) == "function" then
-      psi.tui_set_cursor(1, 1, false)
-      for row, line in ipairs(next_lines) do
-        psi.tui_draw_raw_line(row, line)
-      end
-      psi.tui_set_cursor(cursor_row, cursor_col, cursor_visible)
-      psi.tui_refresh()
-    end
-  else
-    renderer.diff_redraws = renderer.diff_redraws + 1
-    renderer.last_mode = "diff"
-    renderer.last_full_reason = nil
-    write_diff(next_lines, first, last, cursor_row, cursor_col, cursor_visible)
-  end
-
-  renderer.previous_lines = next_lines
-  renderer.previous_width = width
-  renderer.previous_height = height
-  renderer.previous_cursor_row = cursor_row
-  renderer.previous_cursor_col = cursor_col
-  renderer.previous_cursor_visible = cursor_visible
-  return renderer
+  return renderer:render({
+    width = opts.width,
+    height = opts.height,
+    lines = lines,
+    cursor = {
+      row = opts.cursor_row,
+      col = opts.cursor_col,
+      visible = opts.cursor_visible,
+    },
+    force_full = opts.force_full,
+  })
 end
 
 function M.cursor_marker()
