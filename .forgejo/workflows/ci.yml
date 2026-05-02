@@ -12,9 +12,7 @@ env:
   LANG: C.UTF-8
   LC_ALL: C.UTF-8
   TERM: xterm-256color
-  # Rootless Docker jobs cannot reach host loopback, so the local runner
-  # exposes Forgejo through a host-only proxy on the Tailscale interface.
-  FORGEJO_CI_URL: http://100.74.54.40:3011
+  FORGEJO_CI_URL: http://127.0.0.1:3010
   FORGEJO_CI_REPOSITORY: siraben/psi-coding-agent
 
 jobs:
