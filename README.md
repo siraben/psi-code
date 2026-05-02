@@ -166,10 +166,10 @@ working directory upward plus global files from `~/.config/psi/`.
 `--agent` is the first real coding-agent loop. It targets Anthropic's Messages
 API, streams text to stdout as it arrives, executes built-in host tools, and
 persists user/tool/assistant events in the session log. Starting `psi` with no
-explicit mode opens the same agent loop in an interactive shell with `/help`,
-`/session`, `/system-prompt`, `/compact`, and `/quit`. `--tui` opens a
-full-screen ANSI view over the same runtime and uses the same Lua hook
-renderers for tool execution blocks and diffs. The default model is
+explicit mode opens the full-screen TUI over the same runtime and uses the same
+Lua hook renderers for tool execution blocks and diffs. `--repl` opens the
+line-editor shell with `/help`, `/session`, `/system-prompt`, `/compact`, and
+`/quit`. The default model is
 `claude-opus-4-7`, overridable via `--model` or `PSI_ANTHROPIC_MODEL`.
 
 Session files are still flat JSONL, but assistant messages can persist an

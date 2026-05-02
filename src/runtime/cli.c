@@ -4,10 +4,17 @@
 #include <argtable3.h>
 #include "psi/runtime.h"
 
+#ifndef PSI_ENABLE_TUI
+#define PSI_ENABLE_TUI 0
+#endif
+
+#define PSI_CLI_ARGTABLE_CAP 15u
+
 struct psi_cli_argtable {
     struct arg_lit *help;
     struct arg_lit *version;
     struct arg_lit *tui;
+    struct arg_lit *repl;
     struct arg_str *print;
     struct arg_str *eval;
     struct arg_str *boot;
@@ -19,7 +26,8 @@ struct psi_cli_argtable {
     struct arg_int *compact;
     struct arg_str *session;
     struct arg_end *end;
-    void *table[14];
+    void *table[PSI_CLI_ARGTABLE_CAP];
+    size_t table_count;
 };
 
 static int psi_cli_valid_thinking(const char *level) {
@@ -32,10 +40,19 @@ static int psi_cli_valid_thinking(const char *level) {
            strcmp(level, "xhigh") == 0;
 }
 
+static void psi_cli_argtable_add(struct psi_cli_argtable *args, void *arg) {
+    if (args->table_count < PSI_CLI_ARGTABLE_CAP) {
+        args->table[args->table_count++] = arg;
+    }
+}
+
 static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
+    args->table_count = 0u;
+
     args->help = arg_lit0("h", "help", "show help");
     args->version = arg_lit0(NULL, "version", "show version");
     args->tui = arg_lit0(NULL, "tui", "run the full-screen interactive TUI");
+    args->repl = arg_lit0(NULL, "repl", "run the interactive line editor shell");
     args->print = arg_str0(NULL, "print", "TEXT", "run the bootstrap print-mode handler");
     args->eval = arg_str0(NULL, "eval", "EXPR", "evaluate a Lua expression and print the result");
     args->boot = arg_str0(NULL, "boot", "FILE", "override the Lua bootstrap file");
@@ -48,26 +65,30 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
     args->session = arg_str0(NULL, "session", "FILE", "load and save a JSONL session file");
     args->end = arg_end(20);
 
-    args->table[0] = args->help;
-    args->table[1] = args->version;
-    args->table[2] = args->tui;
-    args->table[3] = args->print;
-    args->table[4] = args->eval;
-    args->table[5] = args->boot;
-    args->table[6] = args->system_prompt;
-    args->table[7] = args->agent;
-    args->table[8] = args->model;
-    args->table[9] = args->thinking;
-    args->table[10] = args->max_tokens;
-    args->table[11] = args->compact;
-    args->table[12] = args->session;
-    args->table[13] = args->end;
+    psi_cli_argtable_add(args, args->help);
+    psi_cli_argtable_add(args, args->version);
+    psi_cli_argtable_add(args, args->tui);
+    psi_cli_argtable_add(args, args->repl);
+    psi_cli_argtable_add(args, args->print);
+    psi_cli_argtable_add(args, args->eval);
+    psi_cli_argtable_add(args, args->boot);
+    psi_cli_argtable_add(args, args->system_prompt);
+    psi_cli_argtable_add(args, args->agent);
+    psi_cli_argtable_add(args, args->model);
+    psi_cli_argtable_add(args, args->thinking);
+    psi_cli_argtable_add(args, args->max_tokens);
+    psi_cli_argtable_add(args, args->compact);
+    psi_cli_argtable_add(args, args->session);
+    psi_cli_argtable_add(args, args->end);
 
+    if (args->table_count != PSI_CLI_ARGTABLE_CAP) {
+        return PSI_STATUS_ERROR;
+    }
     return arg_nullcheck(args->table) == 0 ? PSI_STATUS_OK : PSI_STATUS_ERROR;
 }
 
 static void psi_cli_free_argtable(struct psi_cli_argtable *args) {
-    arg_freetable(args->table, sizeof(args->table) / sizeof(args->table[0]));
+    arg_freetable(args->table, args->table_count);
 }
 
 static int psi_cli_normalize_argv(int argc, char **argv, int *normalized_argc, char ***normalized_argv) {
@@ -104,6 +125,7 @@ static int psi_cli_count_modes(const struct psi_cli_argtable *args) {
     count += args->agent->count > 0 ? 1 : 0;
     count += args->compact->count > 0 ? 1 : 0;
     count += args->tui->count > 0 ? 1 : 0;
+    count += args->repl->count > 0 ? 1 : 0;
     return count;
 }
 
@@ -118,7 +140,7 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
         return PSI_STATUS_ERROR;
     }
 
-    options->mode = PSI_CLI_MODE_REPL;
+    options->mode = PSI_ENABLE_TUI ? PSI_CLI_MODE_TUI : PSI_CLI_MODE_REPL;
     options->payload = NULL;
     /* Default: use the compile-time path if set. psi_vm_init falls
      * back to the embedded boot.lua when the file doesn't exist on
@@ -173,6 +195,8 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
         options->payload = args.print->sval[0];
     } else if (args.tui->count > 0) {
         options->mode = PSI_CLI_MODE_TUI;
+    } else if (args.repl->count > 0) {
+        options->mode = PSI_CLI_MODE_REPL;
     } else if (args.eval->count > 0) {
         options->mode = PSI_CLI_MODE_EVAL;
         options->payload = args.eval->sval[0];
