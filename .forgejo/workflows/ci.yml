@@ -16,6 +16,26 @@ env:
   FORGEJO_CI_REPOSITORY: siraben/psi-coding-agent
 
 jobs:
+  format:
+    name: C formatting
+    runs-on: docker
+    steps:
+      - name: Checkout
+        run: |
+          token="${FORGEJO_TOKEN:-$GITHUB_TOKEN}"
+          auth_header="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
+          git init .
+          git remote add origin "${FORGEJO_CI_URL%/}/${FORGEJO_CI_REPOSITORY}"
+          GIT_TERMINAL_PROMPT=0 git -c "http.extraHeader=Authorization: Basic $auth_header" fetch --quiet --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+
+      - name: Check C formatting
+        run: |
+          export HOME="$PWD/.home"
+          export XDG_CACHE_HOME="$PWD/.cache"
+          mkdir -p "$HOME" "$XDG_CACHE_HOME"
+          nix develop --command make check-format-c
+
   style:
     name: Style and static analysis
     runs-on: docker

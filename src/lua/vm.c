@@ -62,9 +62,10 @@ static char *psi_vm_current_date(void) {
     char buffer[32];
     time_t now = time(NULL);
     const struct tm *lt = localtime(&now);
-    if (lt == NULL) return NULL;
-    snprintf(buffer, sizeof(buffer), "%04d-%02d-%02d",
-             lt->tm_year + 1900, lt->tm_mon + 1, lt->tm_mday);
+    if (lt == NULL)
+        return NULL;
+    snprintf(
+        buffer, sizeof(buffer), "%04d-%02d-%02d", lt->tm_year + 1900, lt->tm_mon + 1, lt->tm_mday);
     return psi_strdup(buffer);
 }
 
@@ -72,19 +73,23 @@ static char *psi_vm_current_cwd(void) {
     size_t size = 256u;
     for (;;) {
         char *buf = (char *)malloc(size);
-        if (buf == NULL) return NULL;
-        if (getcwd(buf, size) != NULL) return buf;
+        if (buf == NULL)
+            return NULL;
+        if (getcwd(buf, size) != NULL)
+            return buf;
         free(buf);
-        if (size >= 8192u) return psi_strdup(".");
+        if (size >= 8192u)
+            return psi_strdup(".");
         size *= 2u;
     }
 }
 
 static int psi_vm_is_abs_path(const char *path) {
-    if (path == NULL || path[0] == '\0') return 0;
-    if (path[0] == '/') return 1;
-    if (isalpha((unsigned char)path[0]) && path[1] == ':' &&
-        (path[2] == '/' || path[2] == '\\')) {
+    if (path == NULL || path[0] == '\0')
+        return 0;
+    if (path[0] == '/')
+        return 1;
+    if (isalpha((unsigned char)path[0]) && path[1] == ':' && (path[2] == '/' || path[2] == '\\')) {
         return 1;
     }
     return 0;
@@ -96,20 +101,23 @@ static char *psi_vm_path_join(const char *base, const char *name) {
     size_t need_sep;
     char *out;
 
-    if (name == NULL) return base != NULL ? psi_strdup(base) : NULL;
-    if (base == NULL || base[0] == '\0' || psi_vm_is_abs_path(name) ||
-        strcmp(base, ".") == 0) {
+    if (name == NULL)
+        return base != NULL ? psi_strdup(base) : NULL;
+    if (base == NULL || base[0] == '\0' || psi_vm_is_abs_path(name) || strcmp(base, ".") == 0) {
         return psi_strdup(name);
     }
-    if (name[0] == '\0') return psi_strdup(base);
+    if (name[0] == '\0')
+        return psi_strdup(base);
 
     base_len = strlen(base);
     name_len = strlen(name);
     need_sep = (base[base_len - 1u] == '/' || base[base_len - 1u] == '\\') ? 0u : 1u;
     out = (char *)malloc(base_len + need_sep + name_len + 1u);
-    if (out == NULL) return NULL;
+    if (out == NULL)
+        return NULL;
     memcpy(out, base, base_len);
-    if (need_sep) out[base_len] = '/';
+    if (need_sep)
+        out[base_len] = '/';
     memcpy(out + base_len + need_sep, name, name_len + 1u);
     return out;
 }
@@ -119,13 +127,18 @@ static char *psi_vm_expand_path(const char *path) {
     const char *p;
     char *out;
 
-    if (path == NULL) return NULL;
+    if (path == NULL)
+        return NULL;
     p = path;
-    if (p[0] == '@') p++;
-    if (p[0] != '~' || (p[1] != '\0' && p[1] != '/')) return psi_strdup(p);
+    if (p[0] == '@')
+        p++;
+    if (p[0] != '~' || (p[1] != '\0' && p[1] != '/'))
+        return psi_strdup(p);
     home = getenv("HOME");
-    if (home == NULL || home[0] == '\0') return psi_strdup(p);
-    if (p[1] == '\0') return psi_strdup(home);
+    if (home == NULL || home[0] == '\0')
+        return psi_strdup(p);
+    if (p[1] == '\0')
+        return psi_strdup(home);
     out = psi_vm_path_join(home, p + 2);
     return out;
 }
@@ -136,8 +149,10 @@ static char *psi_vm_resolve_path(const char *path) {
     char *out;
 
     expanded = psi_vm_expand_path(path);
-    if (expanded == NULL) return NULL;
-    if (psi_vm_is_abs_path(expanded)) return expanded;
+    if (expanded == NULL)
+        return NULL;
+    if (psi_vm_is_abs_path(expanded))
+        return expanded;
     cwd = psi_vm_current_cwd();
     if (cwd == NULL) {
         free(expanded);
@@ -155,17 +170,24 @@ static char *psi_vm_parent_directory(const char *path) {
     size_t len;
     char *out;
 
-    if (path == NULL || path[0] == '\0') return psi_strdup(".");
+    if (path == NULL || path[0] == '\0')
+        return psi_strdup(".");
     end = strlen(path);
-    while (end > 1u && (path[end - 1u] == '/' || path[end - 1u] == '\\')) end--;
+    while (end > 1u && (path[end - 1u] == '/' || path[end - 1u] == '\\'))
+        end--;
     i = end;
-    while (i > 0u && path[i - 1u] != '/' && path[i - 1u] != '\\') i--;
-    if (i == 0u) return psi_strdup(".");
-    while (i > 1u && (path[i - 1u] == '/' || path[i - 1u] == '\\')) i--;
-    if (i == 1u && (path[0] == '/' || path[0] == '\\')) return psi_strdup("/");
+    while (i > 0u && path[i - 1u] != '/' && path[i - 1u] != '\\')
+        i--;
+    if (i == 0u)
+        return psi_strdup(".");
+    while (i > 1u && (path[i - 1u] == '/' || path[i - 1u] == '\\'))
+        i--;
+    if (i == 1u && (path[0] == '/' || path[0] == '\\'))
+        return psi_strdup("/");
     len = i;
     out = (char *)malloc(len + 1u);
-    if (out == NULL) return NULL;
+    if (out == NULL)
+        return NULL;
     memcpy(out, path, len);
     out[len] = '\0';
     return out;
@@ -173,26 +195,33 @@ static char *psi_vm_parent_directory(const char *path) {
 
 static int psi_vm_file_exists(const char *path) {
     struct stat st;
-    if (path == NULL || path[0] == '\0') return 0;
+    if (path == NULL || path[0] == '\0')
+        return 0;
     return stat(path, &st) == 0 ? 1 : 0;
 }
 
 static const char *psi_vm_file_type_name(const char *path) {
     struct stat st;
-    if (path == NULL || path[0] == '\0') return NULL;
-    if (stat(path, &st) != 0) return NULL;
-    if (S_ISDIR(st.st_mode)) return "directory";
-    if (S_ISREG(st.st_mode)) return "file";
+    if (path == NULL || path[0] == '\0')
+        return NULL;
+    if (stat(path, &st) != 0)
+        return NULL;
+    if (S_ISDIR(st.st_mode))
+        return "directory";
+    if (S_ISREG(st.st_mode))
+        return "file";
     return "other";
 }
 
 static int psi_vm_mkdir_one(const char *path) {
     struct stat st;
-    if (path == NULL || path[0] == '\0') return PSI_STATUS_ERROR;
+    if (path == NULL || path[0] == '\0')
+        return PSI_STATUS_ERROR;
     if (stat(path, &st) == 0) {
         return S_ISDIR(st.st_mode) ? PSI_STATUS_OK : PSI_STATUS_ERROR;
     }
-    if (mkdir(path, 0777) == 0) return PSI_STATUS_OK;
+    if (mkdir(path, 0777) == 0)
+        return PSI_STATUS_OK;
     if (errno == EEXIST && stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
         return PSI_STATUS_OK;
     }
@@ -206,9 +235,11 @@ static int psi_vm_mkdir_p(const char *path) {
     int status;
     char sep;
 
-    if (path == NULL || path[0] == '\0') return PSI_STATUS_ERROR;
+    if (path == NULL || path[0] == '\0')
+        return PSI_STATUS_ERROR;
     buf = psi_strdup(path);
-    if (buf == NULL) return PSI_STATUS_ERROR;
+    if (buf == NULL)
+        return PSI_STATUS_ERROR;
 
     status = PSI_STATUS_OK;
     n = strlen(buf);
@@ -225,7 +256,8 @@ static int psi_vm_mkdir_p(const char *path) {
                 break;
             }
             buf[i] = sep;
-            while (i + 1u < n && (buf[i + 1u] == '/' || buf[i + 1u] == '\\')) i++;
+            while (i + 1u < n && (buf[i + 1u] == '/' || buf[i + 1u] == '\\'))
+                i++;
         }
     }
     if (status == PSI_STATUS_OK && psi_vm_mkdir_one(buf) != PSI_STATUS_OK) {
@@ -240,7 +272,8 @@ static int psi_vm_mkdir_parent(const char *path) {
     int status;
 
     parent = psi_vm_parent_directory(path);
-    if (parent == NULL) return PSI_STATUS_ERROR;
+    if (parent == NULL)
+        return PSI_STATUS_ERROR;
     if (strcmp(parent, ".") == 0 || strcmp(parent, "/") == 0) {
         free(parent);
         return PSI_STATUS_OK;
@@ -251,7 +284,7 @@ static int psi_vm_mkdir_parent(const char *path) {
 }
 
 static const long PSI_VM_FILE_WRITE_MAX_BYTES = 16777216l;
-static const long PSI_VM_READ_FILE_MAX_BYTES  = 262144l;
+static const long PSI_VM_READ_FILE_MAX_BYTES = 262144l;
 
 /* Host context is stored in the Lua state's extraspace so FFI primitives
  * can recover it from their lua_State* rather than a file-static. Keeps
@@ -274,7 +307,8 @@ static const void *volatile psi_vm_infer_session_parent_id;
 
 static void psi_vm_session_mark_retained(const struct psi_session *session) {
 #ifdef __INFER__
-    if (session == NULL) return;
+    if (session == NULL)
+        return;
     psi_vm_infer_session_messages = session->messages;
     psi_vm_infer_session_token_prefix = session->token_prefix;
     psi_vm_infer_session_id = session->id;
@@ -362,11 +396,13 @@ static int psi_vm_table_is_array(lua_State *L, int idx) {
         lua_getfield(L, -1, "__jsontype");
         if (lua_type(L, -1) == LUA_TSTRING) {
             const char *tag = lua_tostring(L, -1);
-            int tag_array  = tag && strcmp(tag, "array")  == 0;
+            int tag_array = tag && strcmp(tag, "array") == 0;
             int tag_object = tag && strcmp(tag, "object") == 0;
             lua_pop(L, 2);
-            if (tag_array)  return 1;
-            if (tag_object) return 0;
+            if (tag_array)
+                return 1;
+            if (tag_object)
+                return 0;
         } else {
             lua_pop(L, 2);
         }
@@ -382,13 +418,15 @@ static int psi_vm_table_is_array(lua_State *L, int idx) {
         count++;
         lua_pop(L, 1);
     }
-    if (count == 0) return 0;
+    if (count == 0)
+        return 0;
     for (i = 1; i <= count; i++) {
         int is_nil;
         lua_rawgeti(L, idx, i);
         is_nil = lua_isnil(L, -1);
         lua_pop(L, 1);
-        if (is_nil) return 0;
+        if (is_nil)
+            return 0;
     }
     return 1;
 }
@@ -418,14 +456,18 @@ static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx) {
             cJSON *arr;
             lua_Integer n, i;
             arr = cJSON_CreateArray();
-            if (arr == NULL) return NULL;
+            if (arr == NULL)
+                return NULL;
             n = (lua_Integer)lua_rawlen(L, idx);
             for (i = 1; i <= n; i++) {
                 cJSON *item;
                 lua_rawgeti(L, idx, i);
                 item = psi_vm_lua_value_to_json(L, -1);
                 lua_pop(L, 1);
-                if (item == NULL) { cJSON_Delete(arr); return NULL; }
+                if (item == NULL) {
+                    cJSON_Delete(arr);
+                    return NULL;
+                }
                 cJSON_AddItemToArray(arr, item);
             }
             return arr;
@@ -433,7 +475,8 @@ static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx) {
         {
             cJSON *obj;
             obj = cJSON_CreateObject();
-            if (obj == NULL) return NULL;
+            if (obj == NULL)
+                return NULL;
             lua_pushnil(L);
             while (lua_next(L, idx) != 0) {
                 /* skip metadata-ish keys, and non-string keys */
@@ -441,7 +484,8 @@ static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx) {
                     const char *key = lua_tostring(L, -2);
                     if (key && strcmp(key, "__kind") != 0 && strcmp(key, "__jsontype") != 0) {
                         cJSON *item = psi_vm_lua_value_to_json(L, -1);
-                        if (item != NULL) cJSON_AddItemToObject(obj, key, item);
+                        if (item != NULL)
+                            cJSON_AddItemToObject(obj, key, item);
                     }
                 }
                 lua_pop(L, 1);
@@ -519,15 +563,8 @@ static void psi_vm_invoke_registry_callback0(lua_State *L, int ref, const char *
     }
 }
 
-static void psi_vm_invoke_registry_callback2(
-    lua_State *L,
-    int ref,
-    const char *label,
-    const char *a,
-    size_t a_len,
-    const char *b,
-    size_t b_len
-) {
+static void psi_vm_invoke_registry_callback2(lua_State *L, int ref, const char *label,
+    const char *a, size_t a_len, const char *b, size_t b_len) {
     if (ref == PSI_VM_NOREF) {
         return;
     }
@@ -595,7 +632,8 @@ static void psi_vm_tui_suspend(void) {
     psi_tui_resume_terminal();
 }
 
-static int psi_vm_tui_collect_escape_sequence(char *buffer, size_t buffer_size, int restore_timeout_ms) {
+static int psi_vm_tui_collect_escape_sequence(
+    char *buffer, size_t buffer_size, int restore_timeout_ms) {
     size_t length;
     int timeout_ms;
 
@@ -618,8 +656,8 @@ static int psi_vm_tui_collect_escape_sequence(char *buffer, size_t buffer_size, 
         }
         buffer[length++] = (char)ch;
         buffer[length] = '\0';
-        if (ch == '\r' || ch == '\n' || ch == '~' ||
-            (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
+        if (ch == '\r' || ch == '\n' || ch == '~' || (ch >= 'A' && ch <= 'Z') ||
+            (ch >= 'a' && ch <= 'z')) {
             break;
         }
         timeout_ms = 5;
@@ -685,8 +723,7 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
     if (strcmp(sequence, "[6~") == 0) {
         return "page-down";
     }
-    if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 &&
-        first == 1u && second == 5u) {
+    if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 && first == 1u && second == 5u) {
         if (final == 'A') {
             return "ctrl-up";
         }
@@ -700,8 +737,7 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
             return "ctrl-left";
         }
     }
-    if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 &&
-        first == 1u && second == 3u) {
+    if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 && first == 1u && second == 3u) {
         if (final == 'A') {
             return "alt-up";
         }
@@ -729,24 +765,19 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
         }
         return NULL;
     }
-    if (sscanf(sequence, "[%u;%u;%u%c", &first, &second, &third, &final) == 4 &&
-        final == '~' && first == 27u && third == 13u && second >= 2u) {
+    if (sscanf(sequence, "[%u;%u;%u%c", &first, &second, &third, &final) == 4 && final == '~' &&
+        first == 27u && third == 13u && second >= 2u) {
         return "shift-enter";
     }
     if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 &&
-        (final == 'u' || final == '~') &&
-        (first == 13u || first == 57414u) &&
-        second >= 2u) {
+        (final == 'u' || final == '~') && (first == 13u || first == 57414u) && second >= 2u) {
         return "shift-enter";
     }
     return NULL;
 }
 
 static int psi_vm_tui_normalize_key(
-    int ch,
-    int restore_timeout_ms,
-    struct psi_vm_tui_key_event *event
-) {
+    int ch, int restore_timeout_ms, struct psi_vm_tui_key_event *event) {
     char sequence[64];
     char ctrl_name[7];
     const char *key_name;
@@ -825,18 +856,39 @@ static int lfn_read_file(lua_State *L) {
     char *buffer;
 
     f = fopen(path, "rb");
-    if (!f) { lua_pushnil(L); return 1; }
-    if (fseek(f, 0l, SEEK_END) != 0) { fclose(f); lua_pushnil(L); return 1; }
+    if (!f) {
+        lua_pushnil(L);
+        return 1;
+    }
+    if (fseek(f, 0l, SEEK_END) != 0) {
+        fclose(f);
+        lua_pushnil(L);
+        return 1;
+    }
     size = ftell(f);
     if (size < 0l || size > PSI_VM_READ_FILE_MAX_BYTES) {
-        fclose(f); lua_pushnil(L); return 1;
+        fclose(f);
+        lua_pushnil(L);
+        return 1;
     }
-    if (fseek(f, 0l, SEEK_SET) != 0) { fclose(f); lua_pushnil(L); return 1; }
+    if (fseek(f, 0l, SEEK_SET) != 0) {
+        fclose(f);
+        lua_pushnil(L);
+        return 1;
+    }
     buffer = (char *)malloc((size_t)size + 1u);
-    if (!buffer) { fclose(f); lua_pushnil(L); return 1; }
+    if (!buffer) {
+        fclose(f);
+        lua_pushnil(L);
+        return 1;
+    }
     read_n = fread(buffer, 1u, (size_t)size, f);
     fclose(f);
-    if ((long)read_n != size) { free(buffer); lua_pushnil(L); return 1; }
+    if ((long)read_n != size) {
+        free(buffer);
+        lua_pushnil(L);
+        return 1;
+    }
     buffer[size] = '\0';
     lua_pushlstring(L, buffer, (size_t)size);
     free(buffer);
@@ -862,17 +914,25 @@ static int lfn_read_file_slice(lua_State *L) {
     size_t next_cap;
     char *next;
 
-    if (offset < 0) offset = 0;
-    if (limit <= 0) limit = 1;
+    if (offset < 0)
+        offset = 0;
+    if (limit <= 0)
+        limit = 1;
     if (max_bytes <= 0 || max_bytes > PSI_VM_FILE_WRITE_MAX_BYTES) {
         max_bytes = PSI_VM_READ_FILE_MAX_BYTES;
     }
 
     f = fopen(path, "rb");
-    if (!f) { lua_pushnil(L); return 1; }
+    if (!f) {
+        lua_pushnil(L);
+        return 1;
+    }
     cap = 4096u;
     buffer = (char *)malloc(cap);
-    if (!buffer) { fclose(f); return luaL_error(L, "out of memory"); }
+    if (!buffer) {
+        fclose(f);
+        return luaL_error(L, "out of memory");
+    }
 
     len = 0u;
     line = 0;
@@ -892,7 +952,8 @@ static int lfn_read_file_slice(lua_State *L) {
                 } else {
                     if (len + 2u > cap) {
                         next_cap = cap * 2u;
-                        if ((long)next_cap > max_bytes + 1l) next_cap = (size_t)max_bytes + 1u;
+                        if ((long)next_cap > max_bytes + 1l)
+                            next_cap = (size_t)max_bytes + 1u;
                         next = (char *)realloc(buffer, next_cap);
                         if (!next) {
                             free(buffer);
@@ -913,8 +974,10 @@ static int lfn_read_file_slice(lua_State *L) {
         }
     }
     fclose(f);
-    if (saw_any && !last_was_nl) total_lines++;
-    while (len > 0u && buffer[len - 1u] == '\n') len--;
+    if (saw_any && !last_was_nl)
+        total_lines++;
+    while (len > 0u && buffer[len - 1u] == '\n')
+        len--;
     buffer[len] = '\0';
 
     lua_newtable(L);
@@ -948,13 +1011,24 @@ static int lfn_file_write(lua_State *L) {
     const char *content = luaL_checklstring(L, 2, &len);
     FILE *f;
 
-    if ((long)len > PSI_VM_FILE_WRITE_MAX_BYTES) { lua_pushboolean(L, 0); return 1; }
-    f = fopen(path, "wb");
-    if (!f) { lua_pushboolean(L, 0); return 1; }
-    if (len > 0 && fwrite(content, 1u, len, f) != len) {
-        fclose(f); lua_pushboolean(L, 0); return 1;
+    if ((long)len > PSI_VM_FILE_WRITE_MAX_BYTES) {
+        lua_pushboolean(L, 0);
+        return 1;
     }
-    if (fclose(f) != 0) { lua_pushboolean(L, 0); return 1; }
+    f = fopen(path, "wb");
+    if (!f) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    if (len > 0 && fwrite(content, 1u, len, f) != len) {
+        fclose(f);
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    if (fclose(f) != 0) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
     lua_pushboolean(L, 1);
     return 1;
 }
@@ -962,7 +1036,8 @@ static int lfn_file_write(lua_State *L) {
 /* O_CREAT|O_EXCL temp file in the destination directory, fsync,
  * rename(2), then fsync the parent directory. The file at `path` is
  * either the old version or the new one — never a partial write. */
-static int psi_vm_file_write_atomic(const char *path, const char *content, size_t len, mode_t mode) {
+static int psi_vm_file_write_atomic(
+    const char *path, const char *content, size_t len, mode_t mode) {
     char tmp_path[1024];
     int fd;
     long pid_l;
@@ -976,21 +1051,24 @@ static int psi_vm_file_write_atomic(const char *path, const char *content, size_
 #endif
     ts = (long)time(NULL);
     atomic_counter++;
-    if ((size_t)snprintf(tmp_path, sizeof(tmp_path), "%s.psi-tmp-%ld-%ld-%lu",
-                         path, pid_l, ts, atomic_counter) >= sizeof(tmp_path)) {
+    if ((size_t)snprintf(tmp_path, sizeof(tmp_path), "%s.psi-tmp-%ld-%ld-%lu", path, pid_l, ts,
+            atomic_counter) >= sizeof(tmp_path)) {
         return PSI_STATUS_ERROR;
     }
 
     fd = open(tmp_path, O_WRONLY | O_CREAT | O_EXCL, mode);
-    if (fd < 0) return PSI_STATUS_ERROR;
+    if (fd < 0)
+        return PSI_STATUS_ERROR;
 
     if (len > 0u) {
         size_t off = 0u;
         while (off < len) {
             ssize_t n = write(fd, content + off, len - off);
             if (n < 0) {
-                if (errno == EINTR) continue;
-                close(fd); unlink(tmp_path);
+                if (errno == EINTR)
+                    continue;
+                close(fd);
+                unlink(tmp_path);
                 return PSI_STATUS_ERROR;
             }
             off += (size_t)n;
@@ -998,11 +1076,15 @@ static int psi_vm_file_write_atomic(const char *path, const char *content, size_
     }
 #ifndef _WIN32
     if (fsync(fd) != 0 && errno != EINVAL) {
-        close(fd); unlink(tmp_path);
+        close(fd);
+        unlink(tmp_path);
         return PSI_STATUS_ERROR;
     }
 #endif
-    if (close(fd) != 0) { unlink(tmp_path); return PSI_STATUS_ERROR; }
+    if (close(fd) != 0) {
+        unlink(tmp_path);
+        return PSI_STATUS_ERROR;
+    }
 
     if (rename(tmp_path, path) != 0) {
         unlink(tmp_path);
@@ -1020,11 +1102,17 @@ static int psi_vm_file_write_atomic(const char *path, const char *content, size_
                 memcpy(dir, path, dlen);
                 dir[dlen] = '\0';
                 dir_fd = open(dir, O_RDONLY);
-                if (dir_fd >= 0) { (void)fsync(dir_fd); close(dir_fd); }
+                if (dir_fd >= 0) {
+                    (void)fsync(dir_fd);
+                    close(dir_fd);
+                }
             }
         } else if (slash == path) {
             dir_fd = open("/", O_RDONLY);
-            if (dir_fd >= 0) { (void)fsync(dir_fd); close(dir_fd); }
+            if (dir_fd >= 0) {
+                (void)fsync(dir_fd);
+                close(dir_fd);
+            }
         }
     }
 #endif
@@ -1039,7 +1127,10 @@ static int lfn_file_write_secure(lua_State *L) {
     size_t len;
     const char *content = luaL_checklstring(L, 2, &len);
 
-    if ((long)len > PSI_VM_FILE_WRITE_MAX_BYTES) { lua_pushboolean(L, 0); return 1; }
+    if ((long)len > PSI_VM_FILE_WRITE_MAX_BYTES) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
     lua_pushboolean(L, psi_vm_file_write_atomic(path, content, len, 0600) == PSI_STATUS_OK);
     return 1;
 }
@@ -1052,7 +1143,10 @@ static int lfn_file_write_atomic(lua_State *L) {
     size_t len;
     const char *content = luaL_checklstring(L, 2, &len);
 
-    if ((long)len > PSI_VM_FILE_WRITE_MAX_BYTES) { lua_pushboolean(L, 0); return 1; }
+    if ((long)len > PSI_VM_FILE_WRITE_MAX_BYTES) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
     lua_pushboolean(L, psi_vm_file_write_atomic(path, content, len, 0644) == PSI_STATUS_OK);
     return 1;
 }
@@ -1066,22 +1160,39 @@ static int lfn_file_append(lua_State *L) {
     const char *content = luaL_checklstring(L, 2, &len);
     FILE *f;
 
-    if ((long)len > PSI_VM_FILE_WRITE_MAX_BYTES) { lua_pushboolean(L, 0); return 1; }
-    f = fopen(path, "ab");
-    if (!f) { lua_pushboolean(L, 0); return 1; }
-    if (len > 0 && fwrite(content, 1u, len, f) != len) {
-        fclose(f); lua_pushboolean(L, 0); return 1;
+    if ((long)len > PSI_VM_FILE_WRITE_MAX_BYTES) {
+        lua_pushboolean(L, 0);
+        return 1;
     }
-    if (fflush(f) != 0) { fclose(f); lua_pushboolean(L, 0); return 1; }
+    f = fopen(path, "ab");
+    if (!f) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    if (len > 0 && fwrite(content, 1u, len, f) != len) {
+        fclose(f);
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    if (fflush(f) != 0) {
+        fclose(f);
+        lua_pushboolean(L, 0);
+        return 1;
+    }
 #ifndef _WIN32
     {
         int fd = fileno(f);
         if (fd >= 0 && fsync(fd) != 0 && errno != EINVAL) {
-            fclose(f); lua_pushboolean(L, 0); return 1;
+            fclose(f);
+            lua_pushboolean(L, 0);
+            return 1;
         }
     }
 #endif
-    if (fclose(f) != 0) { lua_pushboolean(L, 0); return 1; }
+    if (fclose(f) != 0) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
     lua_pushboolean(L, 1);
     return 1;
 }
@@ -1103,21 +1214,24 @@ static int lfn_tempfile_path(lua_State *L) {
     long ts;
 
     tmpdir = getenv("TMPDIR");
-    if (tmpdir == NULL || *tmpdir == '\0') tmpdir = "/tmp";
+    if (tmpdir == NULL || *tmpdir == '\0')
+        tmpdir = "/tmp";
 #ifndef _WIN32
     pid = (long)getpid();
 #endif
     ts = (long)time(NULL);
     counter++;
-    snprintf(buffer, sizeof(buffer), "%s/%s%ld-%ld-%lu",
-             tmpdir, prefix, pid, ts, counter);
+    snprintf(buffer, sizeof(buffer), "%s/%s%ld-%ld-%lu", tmpdir, prefix, pid, ts, counter);
     lua_pushstring(L, buffer);
     return 1;
 }
 
 static int lfn_current_date(lua_State *L) {
     char *d = psi_vm_current_date();
-    if (!d) { lua_pushnil(L); return 1; }
+    if (!d) {
+        lua_pushnil(L);
+        return 1;
+    }
     lua_pushstring(L, d);
     free(d);
     return 1;
@@ -1125,7 +1239,10 @@ static int lfn_current_date(lua_State *L) {
 
 static int lfn_cwd(lua_State *L) {
     char *p = psi_vm_current_cwd();
-    if (!p) { lua_pushnil(L); return 1; }
+    if (!p) {
+        lua_pushnil(L);
+        return 1;
+    }
     lua_pushstring(L, p);
     free(p);
     return 1;
@@ -1134,7 +1251,10 @@ static int lfn_cwd(lua_State *L) {
 static int lfn_parent_directory(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
     char *parent = psi_vm_parent_directory(path);
-    if (!parent) { lua_pushnil(L); return 1; }
+    if (!parent) {
+        lua_pushnil(L);
+        return 1;
+    }
     lua_pushstring(L, parent);
     free(parent);
     return 1;
@@ -1144,7 +1264,10 @@ static int lfn_path_join(lua_State *L) {
     const char *base = luaL_checkstring(L, 1);
     const char *name = luaL_checkstring(L, 2);
     char *out = psi_vm_path_join(base, name);
-    if (!out) { lua_pushnil(L); return 1; }
+    if (!out) {
+        lua_pushnil(L);
+        return 1;
+    }
     lua_pushstring(L, out);
     free(out);
     return 1;
@@ -1153,7 +1276,10 @@ static int lfn_path_join(lua_State *L) {
 static int lfn_path_expand(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
     char *out = psi_vm_expand_path(path);
-    if (!out) { lua_pushnil(L); return 1; }
+    if (!out) {
+        lua_pushnil(L);
+        return 1;
+    }
     lua_pushstring(L, out);
     free(out);
     return 1;
@@ -1162,7 +1288,10 @@ static int lfn_path_expand(lua_State *L) {
 static int lfn_path_resolve(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
     char *out = psi_vm_resolve_path(path);
-    if (!out) { lua_pushnil(L); return 1; }
+    if (!out) {
+        lua_pushnil(L);
+        return 1;
+    }
     lua_pushstring(L, out);
     free(out);
     return 1;
@@ -1213,8 +1342,10 @@ static int lfn_list_dir(lua_State *L) {
 
 static const char *psi_vm_dirent_type_name(const struct dirent *entry) {
 #ifdef DT_DIR
-    if (entry->d_type == DT_DIR) return "directory";
-    if (entry->d_type == DT_REG) return "file";
+    if (entry->d_type == DT_DIR)
+        return "directory";
+    if (entry->d_type == DT_REG)
+        return "file";
 #else
     PSI_UNUSED(entry);
 #endif
@@ -1280,14 +1411,12 @@ static int lfn_mkdir_parent(lua_State *L) {
 
 static void psi_vm_process_progress(void *userdata, const char *chunk, size_t len) {
     struct psi_host_context *host = (struct psi_host_context *)userdata;
-    if (host == NULL || host->active_observer == NULL) return;
-    if (host->active_observer->on_tool_progress == NULL) return;
+    if (host == NULL || host->active_observer == NULL)
+        return;
+    if (host->active_observer->on_tool_progress == NULL)
+        return;
     host->active_observer->on_tool_progress(
-        host->active_observer->userdata,
-        host->active_tool_id,
-        chunk,
-        len
-    );
+        host->active_observer->userdata, host->active_tool_id, chunk, len);
 }
 
 /* psi.tool_progress(tool_id, chunk) — stream an incremental chunk of
@@ -1310,31 +1439,22 @@ static int lfn_tool_progress(lua_State *L) {
 
     tool_id = luaL_optstring(L, 1, NULL);
     chunk = lua_type(L, 2) == LUA_TSTRING ? lua_tolstring(L, 2, &chunk_len) : NULL;
-    if (chunk == NULL || chunk_len == 0u) return 0;
+    if (chunk == NULL || chunk_len == 0u)
+        return 0;
 
     host = PSI_VM_HOST(L);
     if (host != NULL && host->active_observer != NULL &&
         host->active_observer->on_tool_progress != NULL) {
         host->active_observer->on_tool_progress(
-            host->active_observer->userdata,
-            tool_id,
-            chunk,
-            chunk_len
-        );
+            host->active_observer->userdata, tool_id, chunk, chunk_len);
         return 0;
     }
 
     vm = host != NULL ? host->vm : NULL;
     if (vm != NULL) {
-        psi_vm_invoke_registry_callback2(
-            L,
-            vm->tui_tool_progress_callback_ref,
-            "psi.tui_set_tool_progress_handler",
-            tool_id != NULL ? tool_id : "",
-            tool_id != NULL ? strlen(tool_id) : 0u,
-            chunk,
-            chunk_len
-        );
+        psi_vm_invoke_registry_callback2(L, vm->tui_tool_progress_callback_ref,
+            "psi.tui_set_tool_progress_handler", tool_id != NULL ? tool_id : "",
+            tool_id != NULL ? strlen(tool_id) : 0u, chunk, chunk_len);
     }
     return 0;
 }
@@ -1357,9 +1477,7 @@ static int lfn_process_run(lua_State *L) {
         on_chunk_userdata = host;
     }
 
-    if (psi_process_run_shell(
-            command, &output, &status, &truncated,
-            on_chunk, on_chunk_userdata,
+    if (psi_process_run_shell(command, &output, &status, &truncated, on_chunk, on_chunk_userdata,
             host ? host->abort_signal : NULL) != PSI_STATUS_OK) {
         free(output);
         return luaL_error(L, "failed to run shell command");
@@ -1402,11 +1520,7 @@ static int lfn_process_run_argv(lua_State *L) {
     }
 
     status = psi_process_run_argv(
-        argv,
-        &output,
-        &exit_status,
-        &truncated,
-        host ? host->abort_signal : NULL);
+        argv, &output, &exit_status, &truncated, host ? host->abort_signal : NULL);
     psi_vm_argv_free(argv);
 
     lua_newtable(L);
@@ -1464,10 +1578,7 @@ static int lfn_process_begin(lua_State *L) {
     int status;
 
     h = NULL;
-    status = psi_process_begin(
-        command,
-        host ? host->abort_signal : NULL,
-        &h);
+    status = psi_process_begin(command, host ? host->abort_signal : NULL, &h);
     if (status != PSI_STATUS_OK || h == NULL) {
         lua_pushnil(L);
         lua_pushstring(L, "failed to spawn shell");
@@ -1486,7 +1597,8 @@ static char **psi_vm_argv_from_table(lua_State *L, int idx, int *argc_out) {
 
     luaL_checktype(L, idx, LUA_TTABLE);
     n = lua_rawlen(L, idx);
-    if (n <= 0) return NULL;
+    if (n <= 0)
+        return NULL;
 
     /* Pre-validate every entry first. luaL_checkstring would longjmp
      * out of a half-allocated argv loop and leak. */
@@ -1495,11 +1607,13 @@ static char **psi_vm_argv_from_table(lua_State *L, int idx, int *argc_out) {
         lua_rawgeti(L, idx, i);
         t = lua_type(L, -1);
         lua_pop(L, 1);
-        if (t != LUA_TSTRING && t != LUA_TNUMBER) return NULL;
+        if (t != LUA_TSTRING && t != LUA_TNUMBER)
+            return NULL;
     }
 
     argv = (char **)calloc((size_t)n + 1u, sizeof(char *));
-    if (argv == NULL) return NULL;
+    if (argv == NULL)
+        return NULL;
     for (i = 1; i <= n; i++) {
         const char *value;
         lua_rawgeti(L, idx, i);
@@ -1508,19 +1622,22 @@ static char **psi_vm_argv_from_table(lua_State *L, int idx, int *argc_out) {
         lua_pop(L, 1);
         if (argv[i - 1] == NULL) {
             lua_Integer j;
-            for (j = 0; j < i - 1; j++) free(argv[j]);
+            for (j = 0; j < i - 1; j++)
+                free(argv[j]);
             free(argv);
             return NULL;
         }
     }
     argv[n] = NULL;
-    if (argc_out != NULL) *argc_out = (int)n;
+    if (argc_out != NULL)
+        *argc_out = (int)n;
     return argv;
 }
 
 static void psi_vm_argv_free(char **argv) {
     int i;
-    if (argv == NULL) return;
+    if (argv == NULL)
+        return;
     for (i = 0; argv[i] != NULL; i++) {
         free(argv[i]);
     }
@@ -1545,10 +1662,7 @@ static int lfn_process_begin_argv(lua_State *L) {
     }
 
     h = NULL;
-    status = psi_process_begin_argv(
-        argv,
-        host ? host->abort_signal : NULL,
-        &h);
+    status = psi_process_begin_argv(argv, host ? host->abort_signal : NULL, &h);
     psi_vm_argv_free(argv);
     if (status != PSI_STATUS_OK || h == NULL) {
         lua_pushnil(L);
@@ -1615,12 +1729,15 @@ static int lfn_process_finish(lua_State *L) {
     if (h == NULL) {
         /* Idempotent double-finish: return a zero-shaped result. */
         lua_newtable(L);
-        lua_pushstring(L, "");       lua_setfield(L, -2, "output");
-        lua_pushinteger(L, -1);      lua_setfield(L, -2, "status");
-        lua_pushboolean(L, 0);       lua_setfield(L, -2, "truncated");
+        lua_pushstring(L, "");
+        lua_setfield(L, -2, "output");
+        lua_pushinteger(L, -1);
+        lua_setfield(L, -2, "status");
+        lua_pushboolean(L, 0);
+        lua_setfield(L, -2, "truncated");
         return 1;
     }
-    *ud = NULL;  /* consumed before the C call so __gc skips */
+    *ud = NULL; /* consumed before the C call so __gc skips */
     output = NULL;
     status = -1;
     truncated = 0;
@@ -1650,19 +1767,25 @@ static int lfn_session_append(lua_State *L) {
     struct psi_session *s;
     int status;
 
-    if (lua_type(L, 3) == LUA_TSTRING) data = lua_tostring(L, 3);
-    if (lua_type(L, 4) == LUA_TNUMBER) estimate_arg = lua_tointeger(L, 4);
+    if (lua_type(L, 3) == LUA_TSTRING)
+        data = lua_tostring(L, 3);
+    if (lua_type(L, 4) == LUA_TNUMBER)
+        estimate_arg = lua_tointeger(L, 4);
 
     host = PSI_VM_HOST(L);
     s = host ? host->session : NULL;
-    if (!s) { lua_pushboolean(L, 0); return 1; }
+    if (!s) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
     if (estimate_arg >= 0) {
         status = psi_session_append_with_data_and_estimate(
             s, psi_session_role_from_name(role), text, data, (size_t)estimate_arg);
     } else {
         status = psi_session_append_with_data(s, psi_session_role_from_name(role), text, data);
     }
-    if (status == PSI_STATUS_OK) psi_vm_session_mark_retained(s);
+    if (status == PSI_STATUS_OK)
+        psi_vm_session_mark_retained(s);
     lua_pushboolean(L, status == PSI_STATUS_OK ? 1 : 0);
     return 1;
 }
@@ -1712,9 +1835,13 @@ static int lfn_session_set_id(lua_State *L) {
     const char *id = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : NULL;
     int status;
 
-    if (!s) { lua_pushboolean(L, 0); return 1; }
+    if (!s) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
     status = psi_session_set_id(s, id);
-    if (status == PSI_STATUS_OK) psi_vm_session_mark_retained(s);
+    if (status == PSI_STATUS_OK)
+        psi_vm_session_mark_retained(s);
     lua_pushboolean(L, status == PSI_STATUS_OK ? 1 : 0);
     return 1;
 }
@@ -1725,9 +1852,13 @@ static int lfn_session_set_path(lua_State *L) {
     const char *path = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : NULL;
     int status;
 
-    if (!s) { lua_pushboolean(L, 0); return 1; }
+    if (!s) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
     status = psi_session_set_path(s, path);
-    if (status == PSI_STATUS_OK) psi_vm_session_mark_retained(s);
+    if (status == PSI_STATUS_OK)
+        psi_vm_session_mark_retained(s);
     lua_pushboolean(L, status == PSI_STATUS_OK ? 1 : 0);
     return 1;
 }
@@ -1738,9 +1869,13 @@ static int lfn_session_set_parent_id(lua_State *L) {
     const char *pid = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : NULL;
     int status;
 
-    if (!s) { lua_pushboolean(L, 0); return 1; }
+    if (!s) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
     status = psi_session_set_parent_id(s, pid);
-    if (status == PSI_STATUS_OK) psi_vm_session_mark_retained(s);
+    if (status == PSI_STATUS_OK)
+        psi_vm_session_mark_retained(s);
     lua_pushboolean(L, status == PSI_STATUS_OK ? 1 : 0);
     return 1;
 }
@@ -1748,7 +1883,10 @@ static int lfn_session_set_parent_id(lua_State *L) {
 static int lfn_session_path(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
     struct psi_session *s = host ? host->session : NULL;
-    if (!s || !s->path) { lua_pushnil(L); return 1; }
+    if (!s || !s->path) {
+        lua_pushnil(L);
+        return 1;
+    }
     lua_pushstring(L, s->path);
     return 1;
 }
@@ -1756,7 +1894,10 @@ static int lfn_session_path(lua_State *L) {
 static int lfn_session_parent_id(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
     struct psi_session *s = host ? host->session : NULL;
-    if (!s || !s->parent_id) { lua_pushnil(L); return 1; }
+    if (!s || !s->parent_id) {
+        lua_pushnil(L);
+        return 1;
+    }
     lua_pushstring(L, s->parent_id);
     return 1;
 }
@@ -1764,7 +1905,10 @@ static int lfn_session_parent_id(lua_State *L) {
 static int lfn_session_id(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
     struct psi_session *s = host ? host->session : NULL;
-    if (!s || !s->id) { lua_pushnil(L); return 1; }
+    if (!s || !s->id) {
+        lua_pushnil(L);
+        return 1;
+    }
     lua_pushstring(L, s->id);
     return 1;
 }
@@ -1800,7 +1944,8 @@ static int psi_lua_collect_headers(lua_State *L, int idx, char ***out, size_t *o
         return 0;
     }
     headers = (char **)malloc(sizeof(*headers) * (size_t)len);
-    if (headers == NULL) return -1;
+    if (headers == NULL)
+        return -1;
     for (i = 1; i <= len; i++) {
         const char *value;
         lua_rawgeti(L, idx, i);
@@ -1815,8 +1960,10 @@ static int psi_lua_collect_headers(lua_State *L, int idx, char ***out, size_t *o
 
 static void psi_lua_free_headers(char **headers, size_t count) {
     size_t i;
-    if (headers == NULL) return;
-    for (i = 0; i < count; i++) free(headers[i]);
+    if (headers == NULL)
+        return;
+    for (i = 0; i < count; i++)
+        free(headers[i]);
     free((void *)headers);
 }
 
@@ -1845,13 +1992,8 @@ static int lfn_http_post_stream(lua_State *L) {
 
     host = PSI_VM_HOST(L);
     status_code = 0l;
-    status = psi_http_post_stream(
-        url,
-        (const char *const *)headers, header_count,
-        body, body_len,
-        psi_lua_http_stream_cb, &ctx,
-        host ? host->abort_signal : NULL,
-        &status_code);
+    status = psi_http_post_stream(url, (const char *const *)headers, header_count, body, body_len,
+        psi_lua_http_stream_cb, &ctx, host ? host->abort_signal : NULL, &status_code);
 
     luaL_unref(L, LUA_REGISTRYINDEX, ctx.cb_ref);
     psi_lua_free_headers(headers, header_count);
@@ -1917,12 +2059,8 @@ static int lfn_http_stream_begin(lua_State *L) {
 
     host = PSI_VM_HOST(L);
     h = NULL;
-    status = psi_http_stream_begin(
-        url,
-        (const char *const *)headers, header_count,
-        body, body_len,
-        host ? host->abort_signal : NULL,
-        &h);
+    status = psi_http_stream_begin(url, (const char *const *)headers, header_count, body, body_len,
+        host ? host->abort_signal : NULL, &h);
     psi_lua_free_headers(headers, header_count);
 
     if (status != PSI_STATUS_OK || h == NULL) {
@@ -1983,7 +2121,7 @@ static int lfn_http_stream_finish(lua_State *L) {
         lua_pushinteger(L, 0);
         return 1;
     }
-    *ud = NULL;  /* flag consumed before the C call so __gc is a no-op */
+    *ud = NULL; /* flag consumed before the C call so __gc is a no-op */
     status = psi_http_stream_finish(h);
     lua_pushinteger(L, (lua_Integer)status);
     return 1;
@@ -2010,12 +2148,8 @@ static int lfn_http_post(lua_State *L) {
     host = PSI_VM_HOST(L);
     status_code = 0l;
     response = NULL;
-    status = psi_http_post(
-        url,
-        (const char *const *)headers, header_count,
-        body, body_len,
-        host ? host->abort_signal : NULL,
-        &status_code, &response);
+    status = psi_http_post(url, (const char *const *)headers, header_count, body, body_len,
+        host ? host->abort_signal : NULL, &status_code, &response);
 
     psi_lua_free_headers(headers, header_count);
 
@@ -2049,11 +2183,8 @@ static int lfn_http_get(lua_State *L) {
     host = PSI_VM_HOST(L);
     status_code = 0l;
     response = NULL;
-    status = psi_http_get(
-        url,
-        (const char *const *)headers, header_count,
-        host ? host->abort_signal : NULL,
-        &status_code, &response);
+    status = psi_http_get(url, (const char *const *)headers, header_count,
+        host ? host->abort_signal : NULL, &status_code, &response);
 
     psi_lua_free_headers(headers, header_count);
 
@@ -2071,8 +2202,7 @@ static int lfn_http_get(lua_State *L) {
 
 static int lfn_is_aborted(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
-    lua_pushboolean(L,
-        host != NULL && psi_abort_signal_is_triggered(host->abort_signal) ? 1 : 0);
+    lua_pushboolean(L, host != NULL && psi_abort_signal_is_triggered(host->abort_signal) ? 1 : 0);
     return 1;
 }
 
@@ -2103,12 +2233,13 @@ static int lfn_abort_reset(lua_State *L) {
  * record_usage` is the normal caller; `reset_usage` passes zeros. */
 static int lfn_set_usage(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
-    if (host == NULL) return 0;
-    host->usage.input          = (long)luaL_optinteger(L, 1, 0);
-    host->usage.output         = (long)luaL_optinteger(L, 2, 0);
-    host->usage.cache_read     = (long)luaL_optinteger(L, 3, 0);
-    host->usage.cache_write    = (long)luaL_optinteger(L, 4, 0);
-    host->usage.total          = (long)luaL_optinteger(L, 5, 0);
+    if (host == NULL)
+        return 0;
+    host->usage.input = (long)luaL_optinteger(L, 1, 0);
+    host->usage.output = (long)luaL_optinteger(L, 2, 0);
+    host->usage.cache_read = (long)luaL_optinteger(L, 3, 0);
+    host->usage.cache_write = (long)luaL_optinteger(L, 4, 0);
+    host->usage.total = (long)luaL_optinteger(L, 5, 0);
     host->usage.context_window = (long)luaL_optinteger(L, 6, 0);
     return 0;
 }
@@ -2117,15 +2248,16 @@ static int lfn_set_usage(lua_State *L) {
  * PSI_STATUS_OK on success (buffer filled with entry->raw_len bytes).
  * The caller owns the buffer; on error the buffer contents are
  * undefined but no allocation is retained. */
-static int psi_vm_embedded_inflate(const struct psi_embedded_lua *e,
-                                   unsigned char *out, size_t out_len) {
+static int psi_vm_embedded_inflate(
+    const struct psi_embedded_lua *e, unsigned char *out, size_t out_len) {
     uLongf dst_len = (uLongf)out_len;
     int rc;
-    if (e == NULL || e->src == NULL || out == NULL) return PSI_STATUS_ERROR;
+    if (e == NULL || e->src == NULL || out == NULL)
+        return PSI_STATUS_ERROR;
     rc = uncompress(out, &dst_len, e->src, (uLong)e->len);
     if (rc != Z_OK || dst_len != (uLongf)e->raw_len) {
-        fprintf(stderr, "psi: inflate failed for %s (zlib %d, %lu/%lu)\n",
-                e->name, rc, (unsigned long)dst_len, (unsigned long)e->raw_len);
+        fprintf(stderr, "psi: inflate failed for %s (zlib %d, %lu/%lu)\n", e->name, rc,
+            (unsigned long)dst_len, (unsigned long)e->raw_len);
         return PSI_STATUS_ERROR;
     }
     return PSI_STATUS_OK;
@@ -2141,7 +2273,8 @@ static int lfn_embedded_doc(lua_State *L) {
     for (e = psi_embedded_docs_table; e->name != NULL; e++) {
         if (strcmp(e->name, name) == 0) {
             unsigned char *buf = (unsigned char *)malloc(e->raw_len + 1u);
-            if (buf == NULL) return luaL_error(L, "out of memory");
+            if (buf == NULL)
+                return luaL_error(L, "out of memory");
             if (psi_vm_embedded_inflate(e, buf, e->raw_len) != PSI_STATUS_OK) {
                 free(buf);
                 lua_pushnil(L);
@@ -2182,7 +2315,8 @@ static int lfn_embedded_source(lua_State *L) {
     for (e = psi_embedded_lua_table; e->name != NULL; e++) {
         if (strcmp(e->name, name) == 0) {
             unsigned char *buf = (unsigned char *)malloc(e->raw_len + 1u);
-            if (buf == NULL) return luaL_error(L, "out of memory");
+            if (buf == NULL)
+                return luaL_error(L, "out of memory");
             if (psi_vm_embedded_inflate(e, buf, e->raw_len) != PSI_STATUS_OK) {
                 free(buf);
                 lua_pushnil(L);
@@ -2216,7 +2350,10 @@ static int lfn_embedded_source_names(lua_State *L) {
 static int lfn_session_clear(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
     struct psi_session *s = host ? host->session : NULL;
-    if (!s) { lua_pushboolean(L, 0); return 1; }
+    if (!s) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
     lua_pushboolean(L, psi_session_clear(s) == PSI_STATUS_OK ? 1 : 0);
     return 1;
 }
@@ -2228,7 +2365,8 @@ static int lfn_session_messages(lua_State *L) {
 
     lua_newtable(L);
     psi_vm_mark_array(L);
-    if (!s) return 1;
+    if (!s)
+        return 1;
     for (i = 0; i < s->count; i++) {
         lua_newtable(L);
         lua_pushstring(L, psi_message_role_name(s->messages[i].role));
@@ -2254,10 +2392,13 @@ static int lfn_session_messages_from(lua_State *L) {
 
     lua_newtable(L);
     psi_vm_mark_array(L);
-    if (!s) return 1;
-    if (start_arg < 1) start_arg = 1;
+    if (!s)
+        return 1;
+    if (start_arg < 1)
+        start_arg = 1;
     start = (size_t)(start_arg - 1);
-    if (start >= s->count) return 1;
+    if (start >= s->count)
+        return 1;
 
     out_index = 1;
     for (i = start; i < s->count; i++) {
@@ -2285,7 +2426,8 @@ static int lfn_session_token_estimate_from(lua_State *L) {
         lua_pushinteger(L, 0);
         return 1;
     }
-    if (start_arg < 1) start_arg = 1;
+    if (start_arg < 1)
+        start_arg = 1;
     start = (size_t)start_arg;
     lua_pushinteger(L, (lua_Integer)psi_session_token_estimate_from(s, start));
     return 1;
@@ -2313,9 +2455,10 @@ static int lfn_runtime_info(lua_State *L) {
 
     host = PSI_VM_HOST(L);
     date = psi_vm_current_date();
-    cwd  = psi_vm_current_cwd();
+    cwd = psi_vm_current_cwd();
     if (!date || !cwd) {
-        free(date); free(cwd);
+        free(date);
+        free(cwd);
         return luaL_error(L, "failed to collect runtime info");
     }
 
@@ -2363,8 +2506,8 @@ static int lfn_runtime_info(lua_State *L) {
             lua_pushnil(L);
             while (lua_next(L, -2) != 0) {
                 if (lua_type(L, -2) == LUA_TSTRING && lua_type(L, -1) == LUA_TFUNCTION) {
-                    lua_pushvalue(L, -2);          /* key copy */
-                    lua_rawseti(L, -5, next_idx);  /* primitives[next_idx] = key */
+                    lua_pushvalue(L, -2); /* key copy */
+                    lua_rawseti(L, -5, next_idx); /* primitives[next_idx] = key */
                     next_idx++;
                 }
                 lua_pop(L, 1); /* value, keep key for next iter */
@@ -2413,7 +2556,8 @@ static int lfn_readline(lua_State *L) {
 static int lfn_add_history(lua_State *L) {
 #if PSI_ENABLE_REPL_EDITLINE
     const char *line = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : NULL;
-    if (line != NULL && line[0] != '\0') add_history(line);
+    if (line != NULL && line[0] != '\0')
+        add_history(line);
 #else
     PSI_UNUSED(L);
 #endif
@@ -2525,12 +2669,8 @@ static int lfn_tui_render_frame(lua_State *L) {
         col = 1;
     }
     if (visible) {
-        printf(
-            "\033[?2026h\033[?25l%s\033[0m\033[%ld;%ldH\033[?25h\033[?2026l",
-            frame,
-            (long)row,
-            (long)col
-        );
+        printf("\033[?2026h\033[?25l%s\033[0m\033[%ld;%ldH\033[?25h\033[?2026l", frame, (long)row,
+            (long)col);
     } else {
         printf("\033[?2026h\033[?25l%s\033[0m\033[?2026l", frame);
     }
@@ -2607,17 +2747,39 @@ static int lfn_tui_unavailable(lua_State *L) {
     return luaL_error(L, "TUI support is not compiled in");
 }
 
-static int lfn_tui_size(lua_State *L) { return lfn_tui_unavailable(L); }
-static int lfn_tui_poll_key(lua_State *L) { return lfn_tui_unavailable(L); }
-static int lfn_tui_clear(lua_State *L) { return lfn_tui_unavailable(L); }
-static int lfn_tui_draw_line(lua_State *L) { return lfn_tui_unavailable(L); }
-static int lfn_tui_draw_raw_line(lua_State *L) { return lfn_tui_unavailable(L); }
-static int lfn_tui_render_frame(lua_State *L) { return lfn_tui_unavailable(L); }
-static int lfn_tui_set_cursor(lua_State *L) { return lfn_tui_unavailable(L); }
-static int lfn_tui_refresh(lua_State *L) { return lfn_tui_unavailable(L); }
-static int lfn_tui_suspend(lua_State *L) { return lfn_tui_unavailable(L); }
-static int lfn_tui_set_tick_handler(lua_State *L) { return lfn_tui_unavailable(L); }
-static int lfn_tui_set_tool_progress_handler(lua_State *L) { return lfn_tui_unavailable(L); }
+static int lfn_tui_size(lua_State *L) {
+    return lfn_tui_unavailable(L);
+}
+static int lfn_tui_poll_key(lua_State *L) {
+    return lfn_tui_unavailable(L);
+}
+static int lfn_tui_clear(lua_State *L) {
+    return lfn_tui_unavailable(L);
+}
+static int lfn_tui_draw_line(lua_State *L) {
+    return lfn_tui_unavailable(L);
+}
+static int lfn_tui_draw_raw_line(lua_State *L) {
+    return lfn_tui_unavailable(L);
+}
+static int lfn_tui_render_frame(lua_State *L) {
+    return lfn_tui_unavailable(L);
+}
+static int lfn_tui_set_cursor(lua_State *L) {
+    return lfn_tui_unavailable(L);
+}
+static int lfn_tui_refresh(lua_State *L) {
+    return lfn_tui_unavailable(L);
+}
+static int lfn_tui_suspend(lua_State *L) {
+    return lfn_tui_unavailable(L);
+}
+static int lfn_tui_set_tick_handler(lua_State *L) {
+    return lfn_tui_unavailable(L);
+}
+static int lfn_tui_set_tool_progress_handler(lua_State *L) {
+    return lfn_tui_unavailable(L);
+}
 
 #endif
 
@@ -2634,11 +2796,7 @@ static int lfn_host_tick(lua_State *L) {
         host->tick_hook(host->tick_userdata);
     }
     if (vm != NULL) {
-        psi_vm_invoke_registry_callback0(
-            L,
-            vm->tui_tick_callback_ref,
-            "psi.tui_set_tick_handler"
-        );
+        psi_vm_invoke_registry_callback0(L, vm->tui_tick_callback_ref, "psi.tui_set_tick_handler");
     }
     return 0;
 }
@@ -2649,8 +2807,10 @@ static int lfn_host_tick(lua_State *L) {
 static int lfn_sleep_ms(lua_State *L) {
     lua_Integer ms = luaL_optinteger(L, 1, 0);
     struct timespec ts;
-    if (ms <= 0) return 0;
-    if (ms > 3600000l) ms = 3600000l;
+    if (ms <= 0)
+        return 0;
+    if (ms > 3600000l)
+        ms = 3600000l;
     ts.tv_sec = (time_t)(ms / 1000l);
     ts.tv_nsec = (long)((ms % 1000l) * 1000000l);
     nanosleep(&ts, NULL);
@@ -2719,84 +2879,87 @@ static void psi_vm_register_psi(lua_State *L) {
 
     lua_newtable(L);
 
-#define PSI_REG(name, fn) \
-    do { lua_pushcfunction(L, fn); lua_setfield(L, -2, name); } while (0)
+#define PSI_REG(name, fn)                                                                          \
+    do {                                                                                           \
+        lua_pushcfunction(L, fn);                                                                  \
+        lua_setfield(L, -2, name);                                                                 \
+    } while (0)
 
-    PSI_REG("version",               lfn_version);
-    PSI_REG("log",                   lfn_log);
+    PSI_REG("version", lfn_version);
+    PSI_REG("log", lfn_log);
     PSI_REG("session_message_count", lfn_session_message_count);
-    PSI_REG("read_file",             lfn_read_file);
-    PSI_REG("read_file_slice",       lfn_read_file_slice);
-    PSI_REG("file_write",            lfn_file_write);
-    PSI_REG("file_write_secure",     lfn_file_write_secure);
-    PSI_REG("file_write_atomic",     lfn_file_write_atomic);
-    PSI_REG("file_append",           lfn_file_append);
-    PSI_REG("tempfile_path",         lfn_tempfile_path);
-    PSI_REG("current_date",          lfn_current_date);
-    PSI_REG("cwd",                   lfn_cwd);
-    PSI_REG("parent_directory",      lfn_parent_directory);
-    PSI_REG("path_join",             lfn_path_join);
-    PSI_REG("path_expand",           lfn_path_expand);
-    PSI_REG("path_resolve",          lfn_path_resolve);
-    PSI_REG("file_exists",           lfn_file_exists);
-    PSI_REG("file_type",             lfn_file_type);
-    PSI_REG("list_dir",              lfn_list_dir);
-    PSI_REG("list_dir_typed",        lfn_list_dir_typed);
-    PSI_REG("mkdir_p",               lfn_mkdir_p);
-    PSI_REG("mkdir_parent",          lfn_mkdir_parent);
-    PSI_REG("runtime_info",          lfn_runtime_info);
-    PSI_REG("time_ms",               lfn_time_ms);
-    PSI_REG("session_messages",      lfn_session_messages);
+    PSI_REG("read_file", lfn_read_file);
+    PSI_REG("read_file_slice", lfn_read_file_slice);
+    PSI_REG("file_write", lfn_file_write);
+    PSI_REG("file_write_secure", lfn_file_write_secure);
+    PSI_REG("file_write_atomic", lfn_file_write_atomic);
+    PSI_REG("file_append", lfn_file_append);
+    PSI_REG("tempfile_path", lfn_tempfile_path);
+    PSI_REG("current_date", lfn_current_date);
+    PSI_REG("cwd", lfn_cwd);
+    PSI_REG("parent_directory", lfn_parent_directory);
+    PSI_REG("path_join", lfn_path_join);
+    PSI_REG("path_expand", lfn_path_expand);
+    PSI_REG("path_resolve", lfn_path_resolve);
+    PSI_REG("file_exists", lfn_file_exists);
+    PSI_REG("file_type", lfn_file_type);
+    PSI_REG("list_dir", lfn_list_dir);
+    PSI_REG("list_dir_typed", lfn_list_dir_typed);
+    PSI_REG("mkdir_p", lfn_mkdir_p);
+    PSI_REG("mkdir_parent", lfn_mkdir_parent);
+    PSI_REG("runtime_info", lfn_runtime_info);
+    PSI_REG("time_ms", lfn_time_ms);
+    PSI_REG("session_messages", lfn_session_messages);
     PSI_REG("session_messages_from", lfn_session_messages_from);
     PSI_REG("session_token_estimate_from", lfn_session_token_estimate_from);
     PSI_REG("session_keep_recent_by_tokens", lfn_session_keep_recent_by_tokens);
-    PSI_REG("process_run",           lfn_process_run);
-    PSI_REG("process_run_argv",      lfn_process_run_argv);
-    PSI_REG("process_begin",         lfn_process_begin);
-    PSI_REG("process_begin_argv",    lfn_process_begin_argv);
-    PSI_REG("process_poll",          lfn_process_poll);
-    PSI_REG("process_finish",        lfn_process_finish);
-    PSI_REG("session_append",        lfn_session_append);
-    PSI_REG("session_clear",         lfn_session_clear);
-    PSI_REG("session_id",            lfn_session_id);
-    PSI_REG("session_parent_id",     lfn_session_parent_id);
-    PSI_REG("session_path",          lfn_session_path);
-    PSI_REG("session_set_id",        lfn_session_set_id);
-    PSI_REG("session_set_path",      lfn_session_set_path);
+    PSI_REG("process_run", lfn_process_run);
+    PSI_REG("process_run_argv", lfn_process_run_argv);
+    PSI_REG("process_begin", lfn_process_begin);
+    PSI_REG("process_begin_argv", lfn_process_begin_argv);
+    PSI_REG("process_poll", lfn_process_poll);
+    PSI_REG("process_finish", lfn_process_finish);
+    PSI_REG("session_append", lfn_session_append);
+    PSI_REG("session_clear", lfn_session_clear);
+    PSI_REG("session_id", lfn_session_id);
+    PSI_REG("session_parent_id", lfn_session_parent_id);
+    PSI_REG("session_path", lfn_session_path);
+    PSI_REG("session_set_id", lfn_session_set_id);
+    PSI_REG("session_set_path", lfn_session_set_path);
     PSI_REG("session_set_parent_id", lfn_session_set_parent_id);
-    PSI_REG("is_aborted",            lfn_is_aborted);
-    PSI_REG("abort_trigger",         lfn_abort_trigger);
-    PSI_REG("abort_reset",           lfn_abort_reset);
-    PSI_REG("set_usage",             lfn_set_usage);
-    PSI_REG("embedded_doc",          lfn_embedded_doc);
-    PSI_REG("embedded_doc_names",    lfn_embedded_doc_names);
-    PSI_REG("embedded_source",       lfn_embedded_source);
+    PSI_REG("is_aborted", lfn_is_aborted);
+    PSI_REG("abort_trigger", lfn_abort_trigger);
+    PSI_REG("abort_reset", lfn_abort_reset);
+    PSI_REG("set_usage", lfn_set_usage);
+    PSI_REG("embedded_doc", lfn_embedded_doc);
+    PSI_REG("embedded_doc_names", lfn_embedded_doc_names);
+    PSI_REG("embedded_source", lfn_embedded_source);
     PSI_REG("embedded_source_names", lfn_embedded_source_names);
-    PSI_REG("json_encode",           lfn_json_encode);
-    PSI_REG("json_decode",           lfn_json_decode);
-    PSI_REG("http_post",             lfn_http_post);
-    PSI_REG("http_get",              lfn_http_get);
-    PSI_REG("http_post_stream",      lfn_http_post_stream);
-    PSI_REG("http_stream_begin",     lfn_http_stream_begin);
-    PSI_REG("http_stream_poll",      lfn_http_stream_poll);
-    PSI_REG("http_stream_finish",    lfn_http_stream_finish);
-    PSI_REG("tool_call",             lfn_tool_call);
-    PSI_REG("readline",              lfn_readline);
-    PSI_REG("add_history",           lfn_add_history);
-    PSI_REG("stdout_write",          lfn_stdout_write);
-    PSI_REG("sleep_ms",              lfn_sleep_ms);
-    PSI_REG("host_tick",             lfn_host_tick);
-    PSI_REG("tool_progress",         lfn_tool_progress);
-    PSI_REG("tui_size",              lfn_tui_size);
-    PSI_REG("tui_poll_key",          lfn_tui_poll_key);
-    PSI_REG("tui_clear",             lfn_tui_clear);
-    PSI_REG("tui_draw_line",         lfn_tui_draw_line);
-    PSI_REG("tui_draw_raw_line",     lfn_tui_draw_raw_line);
-    PSI_REG("tui_render_frame",      lfn_tui_render_frame);
-    PSI_REG("tui_set_cursor",        lfn_tui_set_cursor);
-    PSI_REG("tui_refresh",           lfn_tui_refresh);
-    PSI_REG("tui_suspend",           lfn_tui_suspend);
-    PSI_REG("tui_set_tick_handler",  lfn_tui_set_tick_handler);
+    PSI_REG("json_encode", lfn_json_encode);
+    PSI_REG("json_decode", lfn_json_decode);
+    PSI_REG("http_post", lfn_http_post);
+    PSI_REG("http_get", lfn_http_get);
+    PSI_REG("http_post_stream", lfn_http_post_stream);
+    PSI_REG("http_stream_begin", lfn_http_stream_begin);
+    PSI_REG("http_stream_poll", lfn_http_stream_poll);
+    PSI_REG("http_stream_finish", lfn_http_stream_finish);
+    PSI_REG("tool_call", lfn_tool_call);
+    PSI_REG("readline", lfn_readline);
+    PSI_REG("add_history", lfn_add_history);
+    PSI_REG("stdout_write", lfn_stdout_write);
+    PSI_REG("sleep_ms", lfn_sleep_ms);
+    PSI_REG("host_tick", lfn_host_tick);
+    PSI_REG("tool_progress", lfn_tool_progress);
+    PSI_REG("tui_size", lfn_tui_size);
+    PSI_REG("tui_poll_key", lfn_tui_poll_key);
+    PSI_REG("tui_clear", lfn_tui_clear);
+    PSI_REG("tui_draw_line", lfn_tui_draw_line);
+    PSI_REG("tui_draw_raw_line", lfn_tui_draw_raw_line);
+    PSI_REG("tui_render_frame", lfn_tui_render_frame);
+    PSI_REG("tui_set_cursor", lfn_tui_set_cursor);
+    PSI_REG("tui_refresh", lfn_tui_refresh);
+    PSI_REG("tui_suspend", lfn_tui_suspend);
+    PSI_REG("tui_set_tick_handler", lfn_tui_set_tick_handler);
     PSI_REG("tui_set_tool_progress_handler", lfn_tui_set_tool_progress_handler);
 
 #undef PSI_REG
@@ -2809,12 +2972,15 @@ static int psi_vm_apply_package_path(lua_State *L, const char *boot_file) {
     char *parent;
     char buffer[4096];
 
-    if (!boot_file) return PSI_STATUS_OK;
+    if (!boot_file)
+        return PSI_STATUS_OK;
     copy = psi_strdup(boot_file);
-    if (!copy) return PSI_STATUS_ERROR;
+    if (!copy)
+        return PSI_STATUS_ERROR;
     parent = psi_vm_parent_directory(copy);
     free(copy);
-    if (!parent) return PSI_STATUS_ERROR;
+    if (!parent)
+        return PSI_STATUS_ERROR;
     snprintf(buffer, sizeof(buffer), "%s/?.lua;%s/?/init.lua", parent, parent);
     free(parent);
 
@@ -2839,14 +3005,16 @@ static int psi_vm_embedded_searcher(lua_State *L) {
         if (strcmp(e->name, name) == 0) {
             unsigned char *buf = (unsigned char *)malloc(e->raw_len);
             int load_rc;
-            if (buf == NULL) return luaL_error(L, "out of memory");
+            if (buf == NULL)
+                return luaL_error(L, "out of memory");
             if (psi_vm_embedded_inflate(e, buf, e->raw_len) != PSI_STATUS_OK) {
                 free(buf);
                 return luaL_error(L, "inflate failed for %s", name);
             }
             load_rc = luaL_loadbuffer(L, (const char *)buf, e->raw_len, e->name);
             free(buf);
-            if (load_rc != LUA_OK) return lua_error(L);
+            if (load_rc != LUA_OK)
+                return lua_error(L);
             return 1;
         }
     }
@@ -2878,17 +3046,20 @@ static void psi_vm_register_embedded(lua_State *L) {
 static const struct psi_embedded_lua *psi_vm_embedded_find(const char *name) {
     const struct psi_embedded_lua *e;
     for (e = psi_embedded_lua_table; e->name != NULL; e++) {
-        if (strcmp(e->name, name) == 0) return e;
+        if (strcmp(e->name, name) == 0)
+            return e;
     }
     return NULL;
 }
 
-int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *output, FILE *error_output) {
+int psi_vm_init(
+    struct psi_vm *vm, const char *boot_file, FILE *input, FILE *output, FILE *error_output) {
     PSI_UNUSED(input);
     PSI_UNUSED(output);
     PSI_UNUSED(error_output);
 
-    if (!vm) return PSI_STATUS_ERROR;
+    if (!vm)
+        return PSI_STATUS_ERROR;
     memset(vm, 0, sizeof(*vm));
     vm->boot_file = boot_file;
     vm->host.vm = vm;
@@ -2896,7 +3067,8 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
     vm->tui_tool_progress_callback_ref = PSI_VM_NOREF;
 
     vm->L = luaL_newstate();
-    if (!vm->L) return PSI_STATUS_ERROR;
+    if (!vm->L)
+        return PSI_STATUS_ERROR;
     luaL_openlibs(vm->L);
 
     PSI_VM_HOST(vm->L) = &vm->host;
@@ -2919,8 +3091,8 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
      * store still finds its Lua without touching the filesystem. */
     if (boot_file != NULL && boot_file[0] != '\0' && psi_vm_file_exists(boot_file)) {
         if (luaL_dofile(vm->L, boot_file) != LUA_OK) {
-            fprintf(stderr, "failed to load Lua bootstrap: %s\n%s\n",
-                    boot_file, lua_tostring(vm->L, -1));
+            fprintf(stderr, "failed to load Lua bootstrap: %s\n%s\n", boot_file,
+                lua_tostring(vm->L, -1));
             lua_close(vm->L);
             vm->L = NULL;
             return PSI_STATUS_ERROR;
@@ -2960,7 +3132,8 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
 }
 
 void psi_vm_destroy(struct psi_vm *vm) {
-    if (!vm || !vm->L) return;
+    if (!vm || !vm->L)
+        return;
     if (vm->tui_tick_callback_ref != PSI_VM_NOREF) {
         luaL_unref(vm->L, LUA_REGISTRYINDEX, vm->tui_tick_callback_ref);
         vm->tui_tick_callback_ref = PSI_VM_NOREF;
@@ -2977,13 +3150,15 @@ void psi_vm_destroy(struct psi_vm *vm) {
 }
 
 void psi_vm_bind_session(struct psi_vm *vm, struct psi_session *session) {
-    if (!vm) return;
+    if (!vm)
+        return;
     vm->host.session = session;
     /* host pointer in extraspace already points at vm->host from init */
 }
 
 void psi_vm_set_tui_active(struct psi_vm *vm, int active) {
-    if (!vm) return;
+    if (!vm)
+        return;
     vm->tui_active = active ? 1 : 0;
 }
 
@@ -3002,7 +3177,8 @@ static int psi_vm_push_dotted(lua_State *L, const char *name) {
             char token[256];
             size_t tok_len = i - start;
             if (tok_len == 0 || tok_len >= sizeof(token)) {
-                if (!first) lua_pop(L, 1);
+                if (!first)
+                    lua_pop(L, 1);
                 return -1;
             }
             memcpy(token, name + start, tok_len);
@@ -3074,13 +3250,16 @@ int psi_vm_eval_to_string(struct psi_vm *vm, const char *expression, char **outp
     char *prefixed;
     int loaded;
 
-    if (!vm || !vm->L || !output_text) return PSI_STATUS_ERROR;
+    if (!vm || !vm->L || !output_text)
+        return PSI_STATUS_ERROR;
     *output_text = NULL;
-    if (!expression) expression = "";
+    if (!expression)
+        expression = "";
 
     n = strlen(expression);
     prefixed = (char *)malloc(n + 8u);
-    if (!prefixed) return PSI_STATUS_ERROR;
+    if (!prefixed)
+        return PSI_STATUS_ERROR;
     memcpy(prefixed, "return ", 7);
     memcpy(prefixed + 7, expression, n + 1u);
     loaded = luaL_loadstring(vm->L, prefixed);
@@ -3165,45 +3344,43 @@ static int psi_vm_ob_tool_call_delta(lua_State *L) {
 }
 
 static int psi_vm_abort_check(lua_State *L) {
-    struct psi_abort_signal *sig = (struct psi_abort_signal *)lua_touserdata(L, lua_upvalueindex(1));
+    struct psi_abort_signal *sig =
+        (struct psi_abort_signal *)lua_touserdata(L, lua_upvalueindex(1));
     lua_pushboolean(L, psi_abort_signal_is_triggered(sig) ? 1 : 0);
     return 1;
 }
 
 static void psi_vm_push_observer_table(lua_State *L, struct psi_agent_observer *observer) {
     lua_newtable(L);
-    if (observer == NULL) return;
-#define PSI_OB_BIND(key, fn) do { \
-    lua_pushlightuserdata(L, observer); \
-    lua_pushcclosure(L, fn, 1); \
-    lua_setfield(L, -2, key); \
-} while (0)
+    if (observer == NULL)
+        return;
+#define PSI_OB_BIND(key, fn)                                                                       \
+    do {                                                                                           \
+        lua_pushlightuserdata(L, observer);                                                        \
+        lua_pushcclosure(L, fn, 1);                                                                \
+        lua_setfield(L, -2, key);                                                                  \
+    } while (0)
     PSI_OB_BIND("on_assistant_text_delta", psi_vm_ob_text_delta);
-    PSI_OB_BIND("on_tool_call",            psi_vm_ob_tool_call);
-    PSI_OB_BIND("on_tool_result",          psi_vm_ob_tool_result);
-    PSI_OB_BIND("on_thinking_delta",       psi_vm_ob_thinking_delta);
-    PSI_OB_BIND("on_tool_call_delta",      psi_vm_ob_tool_call_delta);
+    PSI_OB_BIND("on_tool_call", psi_vm_ob_tool_call);
+    PSI_OB_BIND("on_tool_result", psi_vm_ob_tool_result);
+    PSI_OB_BIND("on_thinking_delta", psi_vm_ob_thinking_delta);
+    PSI_OB_BIND("on_tool_call_delta", psi_vm_ob_tool_call_delta);
 #undef PSI_OB_BIND
 }
 
-static int psi_vm_call_agent(
-    struct psi_vm *vm,
-    const char *procedure,
-    struct psi_agent_observer *observer,
-    struct psi_abort_signal *abort_signal,
-    const char *model,
-    long max_tokens,
-    const char *user_text,
-    long keep_recent,
-    char **output_text
-) {
+static int psi_vm_call_agent(struct psi_vm *vm, const char *procedure,
+    struct psi_agent_observer *observer, struct psi_abort_signal *abort_signal, const char *model,
+    long max_tokens, const char *user_text, long keep_recent, char **output_text) {
     int ok;
     const char *text;
 
-    if (vm == NULL || vm->L == NULL) return PSI_STATUS_ERROR;
-    if (output_text != NULL) *output_text = NULL;
+    if (vm == NULL || vm->L == NULL)
+        return PSI_STATUS_ERROR;
+    if (output_text != NULL)
+        *output_text = NULL;
 
-    if (psi_vm_begin_call(vm->L, procedure) != 0) return PSI_STATUS_ERROR;
+    if (psi_vm_begin_call(vm->L, procedure) != 0)
+        return PSI_STATUS_ERROR;
 
     vm->host.abort_signal = abort_signal;
     /* Stamp the observer on the host context so FFI primitives
@@ -3252,28 +3429,26 @@ static int psi_vm_call_agent(
     return ok ? PSI_STATUS_OK : PSI_STATUS_ERROR;
 }
 
-int psi_vm_run_agent_turn(
-    struct psi_vm *vm,
-    const char *user_text,
-    struct psi_agent_observer *observer,
-    struct psi_abort_signal *abort_signal,
-    const char *model,
-    long max_tokens,
-    char **response_text
-) {
-    return psi_vm_call_agent(
-        vm, "psi.agent.run_turn",
-        observer, abort_signal, model, max_tokens,
-        user_text != NULL ? user_text : "", -1,
-        response_text);
+int psi_vm_run_agent_turn(struct psi_vm *vm, const char *user_text,
+    struct psi_agent_observer *observer, struct psi_abort_signal *abort_signal, const char *model,
+    long max_tokens, char **response_text) {
+    return psi_vm_call_agent(vm, "psi.agent.run_turn", observer, abort_signal, model, max_tokens,
+        user_text != NULL ? user_text : "", -1, response_text);
 }
 
-static int psi_vm_session_call_with_path(struct psi_vm *vm, const char *procedure, const char *path) {
+static int psi_vm_session_call_with_path(
+    struct psi_vm *vm, const char *procedure, const char *path) {
     int ok;
-    if (vm == NULL || vm->L == NULL) return PSI_STATUS_ERROR;
-    if (psi_vm_begin_call(vm->L, procedure) != 0) return PSI_STATUS_ERROR;
-    if (path != NULL) lua_pushstring(vm->L, path); else lua_pushnil(vm->L);
-    if (psi_vm_finish_call(vm->L, 1, 1, procedure) != PSI_STATUS_OK) return PSI_STATUS_ERROR;
+    if (vm == NULL || vm->L == NULL)
+        return PSI_STATUS_ERROR;
+    if (psi_vm_begin_call(vm->L, procedure) != 0)
+        return PSI_STATUS_ERROR;
+    if (path != NULL)
+        lua_pushstring(vm->L, path);
+    else
+        lua_pushnil(vm->L);
+    if (psi_vm_finish_call(vm->L, 1, 1, procedure) != PSI_STATUS_OK)
+        return PSI_STATUS_ERROR;
     ok = lua_toboolean(vm->L, -1);
     lua_pop(vm->L, 1);
     return ok ? PSI_STATUS_OK : PSI_STATUS_ERROR;
@@ -3287,17 +3462,9 @@ int psi_vm_session_load(struct psi_vm *vm, const char *path) {
     return psi_vm_session_call_with_path(vm, "psi.session.load", path);
 }
 
-int psi_vm_run_agent_compact(
-    struct psi_vm *vm,
-    size_t keep_recent,
-    struct psi_abort_signal *abort_signal,
-    const char *model,
-    long max_tokens,
-    char **summary_text
-) {
-    return psi_vm_call_agent(
-        vm, "psi.agent.run_compact",
-        NULL, abort_signal, model, max_tokens,
-        NULL, (long)keep_recent,
-        summary_text);
+int psi_vm_run_agent_compact(struct psi_vm *vm, size_t keep_recent,
+    struct psi_abort_signal *abort_signal, const char *model, long max_tokens,
+    char **summary_text) {
+    return psi_vm_call_agent(vm, "psi.agent.run_compact", NULL, abort_signal, model, max_tokens,
+        NULL, (long)keep_recent, summary_text);
 }

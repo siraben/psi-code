@@ -38,7 +38,8 @@ static void derive_modname(const char *path, char *out, size_t out_size) {
     if (len >= 4 && strcmp(start + len - 4, ".lua") == 0) {
         len -= 4;
     }
-    if (len >= out_size) len = out_size - 1;
+    if (len >= out_size)
+        len = out_size - 1;
     for (i = 0; i < len; i++) {
         out[i] = (start[i] == '/') ? '.' : start[i];
     }
@@ -52,8 +53,7 @@ static void sanitize_symbol(const char *in, char *out, size_t out_size) {
 
     for (i = 0; i + 1 < out_size && in[i]; i++) {
         c = in[i];
-        ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-          || (c >= '0' && c <= '9');
+        ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
         out[i] = ok ? c : '_';
     }
     out[i] = '\0';
@@ -65,7 +65,8 @@ static char *embed_strdup(const char *text) {
 
     len = strlen(text);
     copy = malloc(len + 1u);
-    if (copy == NULL) return NULL;
+    if (copy == NULL)
+        return NULL;
     memcpy(copy, text, len + 1u);
     return copy;
 }
@@ -82,15 +83,19 @@ static unsigned char *slurp(const char *path, size_t *len_out) {
         perror(path);
         return NULL;
     }
-    if (fseek(f, 0, SEEK_END) != 0) goto out_close;
+    if (fseek(f, 0, SEEK_END) != 0)
+        goto out_close;
     size = ftell(f);
-    if (size < 0) goto out_close;
+    if (size < 0)
+        goto out_close;
     rewind(f);
     buf = malloc((size_t)size + 1u);
-    if (!buf) goto out_close;
+    if (!buf)
+        goto out_close;
     got = fread(buf, 1u, (size_t)size, f);
     fclose(f);
-    if (got != (size_t)size) goto out_free;
+    if (got != (size_t)size)
+        goto out_free;
     buf[(size_t)size] = 0;
     *len_out = (size_t)size;
     return buf;
@@ -104,8 +109,7 @@ out_close:
 }
 
 /* Deflate `in` to a newly-malloc'd buffer. Returns length or -1 on error. */
-static long deflate_bytes(const unsigned char *in, size_t in_len,
-                          unsigned char **out_buf) {
+static long deflate_bytes(const unsigned char *in, size_t in_len, unsigned char **out_buf) {
     unsigned char *out;
     uLongf bound;
     int rc;
@@ -114,7 +118,8 @@ static long deflate_bytes(const unsigned char *in, size_t in_len,
      * sizes a comfortable 1.2x + 128 suffices too. */
     bound = compressBound((uLong)in_len);
     out = malloc(bound);
-    if (!out) return -1;
+    if (!out)
+        return -1;
     rc = compress2(out, &bound, in, (uLong)in_len, 9);
     if (rc != Z_OK) {
         free(out);
@@ -130,7 +135,8 @@ static void emit_bytes(const unsigned char *bytes, size_t n) {
     for (i = 0; i < n; i++) {
         if (i > 0) {
             fputc(',', stdout);
-            if (i % 16 == 0) fputs("\n    ", stdout);
+            if (i % 16 == 0)
+                fputs("\n    ", stdout);
         } else {
             fputs("\n    ", stdout);
         }
@@ -176,9 +182,7 @@ int main(int argc, char **argv) {
         }
     }
     if (first_file >= argc) {
-        fprintf(stderr,
-            "usage: %s [--table=NAME] [--raw-keys] <file1> [<file2> ...]\n",
-            argv[0]);
+        fprintf(stderr, "usage: %s [--table=NAME] [--raw-keys] <file1> [<file2> ...]\n", argv[0]);
         return 1;
     }
 
@@ -220,11 +224,13 @@ int main(int argc, char **argv) {
 
         raw_len = 0u;
         raw = slurp(argv[i], &raw_len);
-        if (!raw) goto out;
+        if (!raw)
+            goto out;
         compressed = NULL;
         clen = deflate_bytes(raw, raw_len, &compressed);
         free(raw);
-        if (clen < 0) goto out;
+        if (clen < 0)
+            goto out;
 
         raw_lens[k] = raw_len;
         zlen[k] = (size_t)clen;
@@ -237,8 +243,7 @@ int main(int argc, char **argv) {
 
     printf("const struct psi_embedded_lua %s[] = {\n", table_name);
     for (i = 0; i < (int)count; i++) {
-        printf("    { \"%s\", emb_%s_src, %zuu, %zuu },\n",
-               keys[i], syms[i], zlen[i], raw_lens[i]);
+        printf("    { \"%s\", emb_%s_src, %zuu, %zuu },\n", keys[i], syms[i], zlen[i], raw_lens[i]);
     }
     printf("    { NULL, NULL, 0u, 0u }\n");
     printf("};\n");
@@ -246,10 +251,12 @@ int main(int argc, char **argv) {
 
 out:
     if (keys != NULL) {
-        for (k = 0u; k < count; k++) free(keys[k]);
+        for (k = 0u; k < count; k++)
+            free(keys[k]);
     }
     if (syms != NULL) {
-        for (k = 0u; k < count; k++) free(syms[k]);
+        for (k = 0u; k < count; k++)
+            free(syms[k]);
     }
     free(keys);
     free(syms);

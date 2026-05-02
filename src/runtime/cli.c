@@ -33,13 +33,11 @@ struct psi_cli_argtable {
 };
 
 static int psi_cli_valid_thinking(const char *level) {
-    if (level == NULL) return 0;
-    return strcmp(level, "off") == 0 ||
-           strcmp(level, "minimal") == 0 ||
-           strcmp(level, "low") == 0 ||
-           strcmp(level, "medium") == 0 ||
-           strcmp(level, "high") == 0 ||
-           strcmp(level, "xhigh") == 0;
+    if (level == NULL)
+        return 0;
+    return strcmp(level, "off") == 0 || strcmp(level, "minimal") == 0 ||
+        strcmp(level, "low") == 0 || strcmp(level, "medium") == 0 || strcmp(level, "high") == 0 ||
+        strcmp(level, "xhigh") == 0;
 }
 
 static int psi_cli_argtable_add(struct psi_cli_argtable *args, void *arg) {
@@ -62,12 +60,16 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
     args->print = arg_str0(NULL, "print", "TEXT", "run the bootstrap print-mode handler");
     args->eval = arg_str0(NULL, "eval", "EXPR", "evaluate a Lua expression and print the result");
     args->boot = arg_str0(NULL, "boot", "FILE", "override the Lua bootstrap file");
-    args->system_prompt = arg_lit0(NULL, "system-prompt", "print the default coding-agent system prompt");
-    args->agent = arg_str0(NULL, "agent", "TEXT", "run a single Anthropic-backed coding-agent turn");
+    args->system_prompt =
+        arg_lit0(NULL, "system-prompt", "print the default coding-agent system prompt");
+    args->agent =
+        arg_str0(NULL, "agent", "TEXT", "run a single Anthropic-backed coding-agent turn");
     args->model = arg_str0(NULL, "model", "MODEL", "model to use with --agent");
-    args->thinking = arg_str0(NULL, "thinking", "LEVEL", "thinking level: off, minimal, low, medium, high, xhigh");
+    args->thinking = arg_str0(
+        NULL, "thinking", "LEVEL", "thinking level: off, minimal, low, medium, high, xhigh");
     args->max_tokens = arg_int0(NULL, "max-tokens", "N", "max output tokens for --agent");
-    args->compact = arg_int0(NULL, "compact", "N", "compact the current session, keeping the most recent N messages");
+    args->compact = arg_int0(
+        NULL, "compact", "N", "compact the current session, keeping the most recent N messages");
     args->session = arg_str0(NULL, "session", "FILE", "load and save a JSONL session file");
     args->end = arg_end(20);
 
@@ -97,7 +99,8 @@ static void psi_cli_free_argtable(struct psi_cli_argtable *args) {
     arg_freetable(args->table, args->table_count);
 }
 
-static int psi_cli_normalize_argv(int argc, char **argv, int *normalized_argc, char ***normalized_argv) {
+static int psi_cli_normalize_argv(
+    int argc, char **argv, int *normalized_argc, char ***normalized_argv) {
     char **copy;
     int index;
     int out_index;

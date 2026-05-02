@@ -26,7 +26,8 @@ static const size_t PSI_PROCESS_OUTPUT_MAX_BYTES = 262144u;
  * abort signal stays responsive. */
 static const long PSI_PROCESS_POLL_DELAY_NS = 20L * 1000000L; /* 20 ms */
 
-static int psi_process_append_bytes(char **buffer, size_t *length, size_t *capacity, const char *data, size_t bytes) {
+static int psi_process_append_bytes(
+    char **buffer, size_t *length, size_t *capacity, const char *data, size_t bytes) {
     char *next_buffer;
     size_t next_capacity;
 
@@ -67,11 +68,11 @@ static int psi_process_append_bytes(char **buffer, size_t *length, size_t *capac
 
 struct psi_process_handle {
     pid_t child_pid;
-    int pipe_fd;              /* read end of stdout/stderr pipe */
-    int aborted;              /* 1 if abort_signal fired mid-run */
-    int eof_seen;             /* 1 if read() returned 0 */
-    int reaped;               /* 1 if waitpid already called */
-    int wait_status;          /* waitpid result */
+    int pipe_fd; /* read end of stdout/stderr pipe */
+    int aborted; /* 1 if abort_signal fired mid-run */
+    int eof_seen; /* 1 if read() returned 0 */
+    int reaped; /* 1 if waitpid already called */
+    int wait_status; /* waitpid result */
 
     /* Accumulated output. Grows up to PSI_PROCESS_OUTPUT_MAX_BYTES
      * then `truncated` is set to 1 and further bytes are dropped
@@ -85,21 +86,21 @@ struct psi_process_handle {
     const struct psi_abort_signal *abort_signal;
 };
 
-static int psi_process_begin_exec(
-    char *const argv[],
-    const struct psi_abort_signal *abort_signal,
-    struct psi_process_handle **out
-) {
+static int psi_process_begin_exec(char *const argv[], const struct psi_abort_signal *abort_signal,
+    struct psi_process_handle **out) {
     struct psi_process_handle *h;
     int pipe_fds[2];
     pid_t child_pid;
     int flags;
 
-    if (out == NULL) return PSI_STATUS_ERROR;
+    if (out == NULL)
+        return PSI_STATUS_ERROR;
     *out = NULL;
-    if (argv == NULL || argv[0] == NULL) return PSI_STATUS_ERROR;
+    if (argv == NULL || argv[0] == NULL)
+        return PSI_STATUS_ERROR;
 
-    if (pipe(pipe_fds) != 0) return PSI_STATUS_ERROR;
+    if (pipe(pipe_fds) != 0)
+        return PSI_STATUS_ERROR;
 
     child_pid = fork();
     if (child_pid < 0) {
@@ -120,7 +121,8 @@ static int psi_process_begin_exec(
         int devnull;
         /* New pgrp so abort can signal the whole tree, not just sh. */
         (void)setpgid(0, 0);
-        if (close(pipe_fds[0]) != 0) _exit(127);
+        if (close(pipe_fds[0]) != 0)
+            _exit(127);
         /* Detach the child from the controlling TTY's input so that
          * keypresses (notably ESC, used in TUI mode to interrupt the
          * current turn) reach ncurses in the parent rather than
@@ -129,12 +131,18 @@ static int psi_process_begin_exec(
          * mode under TUI and races with the parent's getch() for
          * each byte the user types. */
         devnull = open("/dev/null", O_RDONLY);
-        if (devnull < 0) _exit(127);
-        if (dup2(devnull, 0) < 0) _exit(127);
-        if (devnull > 2 && close(devnull) != 0) _exit(127);
-        if (dup2(pipe_fds[1], 1) < 0) _exit(127);
-        if (dup2(pipe_fds[1], 2) < 0) _exit(127);
-        if (close(pipe_fds[1]) != 0) _exit(127);
+        if (devnull < 0)
+            _exit(127);
+        if (dup2(devnull, 0) < 0)
+            _exit(127);
+        if (devnull > 2 && close(devnull) != 0)
+            _exit(127);
+        if (dup2(pipe_fds[1], 1) < 0)
+            _exit(127);
+        if (dup2(pipe_fds[1], 2) < 0)
+            _exit(127);
+        if (close(pipe_fds[1]) != 0)
+            _exit(127);
         execvp(argv[0], argv);
         _exit(127);
 #if defined(__GNUC__) && !defined(__clang__) && !defined(__TINYC__) && __GNUC__ >= 13
@@ -167,40 +175,35 @@ static int psi_process_begin_exec(
     return PSI_STATUS_OK;
 }
 
-int psi_process_begin_argv(
-    char *const argv[],
-    const struct psi_abort_signal *abort_signal,
-    struct psi_process_handle **out
-) {
+int psi_process_begin_argv(char *const argv[], const struct psi_abort_signal *abort_signal,
+    struct psi_process_handle **out) {
     return psi_process_begin_exec(argv, abort_signal, out);
 }
 
-int psi_process_begin(
-    const char *command,
-    const struct psi_abort_signal *abort_signal,
-    struct psi_process_handle **out
-) {
+int psi_process_begin(const char *command, const struct psi_abort_signal *abort_signal,
+    struct psi_process_handle **out) {
     char *argv[4];
     argv[0] = (char *)"sh";
     argv[1] = (char *)"-lc";
     argv[2] = (char *)command;
     argv[3] = NULL;
-    if (command == NULL) return PSI_STATUS_ERROR;
+    if (command == NULL)
+        return PSI_STATUS_ERROR;
     return psi_process_begin_exec(argv, abort_signal, out);
 }
 
 int psi_process_poll(
-    struct psi_process_handle *h,
-    int timeout_ms,
-    char **chunk, size_t *chunk_len
-) {
+    struct psi_process_handle *h, int timeout_ms, char **chunk, size_t *chunk_len) {
     char read_buffer[PSI_PROCESS_READ_CHUNK];
     long total_waited_ns;
     long max_wait_ns;
 
-    if (chunk != NULL) *chunk = NULL;
-    if (chunk_len != NULL) *chunk_len = 0u;
-    if (h == NULL) return 2;
+    if (chunk != NULL)
+        *chunk = NULL;
+    if (chunk_len != NULL)
+        *chunk_len = 0u;
+    if (h == NULL)
+        return 2;
 
     if (psi_abort_signal_is_triggered(h->abort_signal) && !h->aborted) {
         h->aborted = 1;
@@ -223,11 +226,13 @@ int psi_process_poll(
 
             if (chunk != NULL) {
                 copy = (char *)malloc((size_t)read_count);
-                if (copy == NULL) return -1;
+                if (copy == NULL)
+                    return -1;
                 memcpy(copy, read_buffer, (size_t)read_count);
                 *chunk = copy;
             }
-            if (chunk_len != NULL) *chunk_len = (size_t)read_count;
+            if (chunk_len != NULL)
+                *chunk_len = (size_t)read_count;
 
             /* Also stash into the internal buffer so finish() can
              * reassemble even if the caller didn't consume every
@@ -239,7 +244,8 @@ int psi_process_poll(
                     h->truncated = 1;
                     to_copy = PSI_PROCESS_OUTPUT_MAX_BYTES - h->output_length;
                 }
-                if (psi_process_append_bytes(&h->output_buffer, &h->output_length, &h->output_capacity, read_buffer, to_copy) != PSI_STATUS_OK) {
+                if (psi_process_append_bytes(&h->output_buffer, &h->output_length,
+                        &h->output_capacity, read_buffer, to_copy) != PSI_STATUS_OK) {
                     /* Keep going — the caller's copy already has the bytes. */
                 }
             } else {
@@ -265,13 +271,15 @@ int psi_process_poll(
                 h->eof_seen = 1;
                 return 2;
             }
-            if (timeout_ms <= 0) return 0; /* non-blocking */
+            if (timeout_ms <= 0)
+                return 0; /* non-blocking */
 
             step_ns = PSI_PROCESS_POLL_DELAY_NS;
             if (max_wait_ns - total_waited_ns < step_ns) {
                 step_ns = max_wait_ns - total_waited_ns;
             }
-            if (step_ns <= 0L) return 0;
+            if (step_ns <= 0L)
+                return 0;
 
             delay.tv_sec = 0;
             delay.tv_nsec = step_ns;
@@ -291,12 +299,9 @@ int psi_process_poll(
 }
 
 int psi_process_finish(
-    struct psi_process_handle *h,
-    char **output_text,
-    int *exit_status,
-    int *truncated
-) {
-    if (h == NULL) return PSI_STATUS_ERROR;
+    struct psi_process_handle *h, char **output_text, int *exit_status, int *truncated) {
+    if (h == NULL)
+        return PSI_STATUS_ERROR;
 
     if (!h->reaped) {
         close(h->pipe_fd);
@@ -346,7 +351,8 @@ int psi_process_finish(
             *exit_status = -1;
         }
     }
-    if (truncated != NULL) *truncated = h->truncated;
+    if (truncated != NULL)
+        *truncated = h->truncated;
     if (output_text != NULL) {
         if (h->output_buffer == NULL) {
             *output_text = psi_strdup("");
@@ -368,28 +374,45 @@ int psi_process_finish(
 
 #else /* _WIN32 */
 
-struct psi_process_handle { int placeholder; };
+struct psi_process_handle {
+    int placeholder;
+};
 
-int psi_process_begin(const char *command, const struct psi_abort_signal *abort_signal, struct psi_process_handle **out) {
-    PSI_UNUSED(command); PSI_UNUSED(abort_signal);
-    if (out != NULL) *out = NULL;
+int psi_process_begin(const char *command, const struct psi_abort_signal *abort_signal,
+    struct psi_process_handle **out) {
+    PSI_UNUSED(command);
+    PSI_UNUSED(abort_signal);
+    if (out != NULL)
+        *out = NULL;
     return PSI_STATUS_ERROR;
 }
-int psi_process_begin_argv(char *const argv[], const struct psi_abort_signal *abort_signal, struct psi_process_handle **out) {
-    PSI_UNUSED(argv); PSI_UNUSED(abort_signal);
-    if (out != NULL) *out = NULL;
+int psi_process_begin_argv(char *const argv[], const struct psi_abort_signal *abort_signal,
+    struct psi_process_handle **out) {
+    PSI_UNUSED(argv);
+    PSI_UNUSED(abort_signal);
+    if (out != NULL)
+        *out = NULL;
     return PSI_STATUS_ERROR;
 }
-int psi_process_poll(struct psi_process_handle *h, int timeout_ms, char **chunk, size_t *chunk_len) {
-    PSI_UNUSED(h); PSI_UNUSED(timeout_ms);
-    if (chunk) *chunk = NULL; if (chunk_len) *chunk_len = 0u;
+int psi_process_poll(
+    struct psi_process_handle *h, int timeout_ms, char **chunk, size_t *chunk_len) {
+    PSI_UNUSED(h);
+    PSI_UNUSED(timeout_ms);
+    if (chunk)
+        *chunk = NULL;
+    if (chunk_len)
+        *chunk_len = 0u;
     return 2;
 }
-int psi_process_finish(struct psi_process_handle *h, char **output_text, int *exit_status, int *truncated) {
+int psi_process_finish(
+    struct psi_process_handle *h, char **output_text, int *exit_status, int *truncated) {
     PSI_UNUSED(h);
-    if (output_text) *output_text = psi_strdup("");
-    if (exit_status) *exit_status = -1;
-    if (truncated) *truncated = 0;
+    if (output_text)
+        *output_text = psi_strdup("");
+    if (exit_status)
+        *exit_status = -1;
+    if (truncated)
+        *truncated = 0;
     return PSI_STATUS_OK;
 }
 
@@ -400,15 +423,8 @@ int psi_process_finish(struct psi_process_handle *h, char **output_text, int *ex
  * loop. Keeps the existing progress-callback contract intact.
  * ------------------------------------------------------------------ */
 
-int psi_process_run_shell(
-    const char *command,
-    char **output_text,
-    int *exit_status,
-    int *truncated,
-    psi_process_progress_cb on_chunk,
-    void *userdata,
-    const struct psi_abort_signal *abort_signal
-) {
+int psi_process_run_shell(const char *command, char **output_text, int *exit_status, int *truncated,
+    psi_process_progress_cb on_chunk, void *userdata, const struct psi_abort_signal *abort_signal) {
 #ifndef _WIN32
     struct psi_process_handle *h;
 
@@ -429,10 +445,12 @@ int psi_process_run_shell(
         chunk_len = 0u;
         r = psi_process_poll(h, 20 /* ms */, &chunk, &chunk_len);
         if (r == 1 && chunk != NULL) {
-            if (on_chunk != NULL) on_chunk(userdata, chunk, chunk_len);
+            if (on_chunk != NULL)
+                on_chunk(userdata, chunk, chunk_len);
             free(chunk);
         }
-        if (r == 2 || r < 0) break;
+        if (r == 2 || r < 0)
+            break;
     }
 
     return psi_process_finish(h, output_text, exit_status, truncated);
@@ -457,17 +475,13 @@ int psi_process_run_shell(
 #endif
 }
 
-int psi_process_run_argv(
-    char *const argv[],
-    char **output_text,
-    int *exit_status,
-    int *truncated,
-    const struct psi_abort_signal *abort_signal
-) {
+int psi_process_run_argv(char *const argv[], char **output_text, int *exit_status, int *truncated,
+    const struct psi_abort_signal *abort_signal) {
 #ifndef _WIN32
     struct psi_process_handle *h;
 
-    if (argv == NULL || argv[0] == NULL || output_text == NULL || exit_status == NULL || truncated == NULL) {
+    if (argv == NULL || argv[0] == NULL || output_text == NULL || exit_status == NULL ||
+        truncated == NULL) {
         return PSI_STATUS_ERROR;
     }
 
@@ -484,7 +498,8 @@ int psi_process_run_argv(
         chunk_len = 0u;
         r = psi_process_poll(h, 20, &chunk, &chunk_len);
         free(chunk);
-        if (r == 2 || r < 0) break;
+        if (r == 2 || r < 0)
+            break;
     }
 
     return psi_process_finish(h, output_text, exit_status, truncated);
@@ -495,7 +510,8 @@ int psi_process_run_argv(
         return PSI_STATUS_ERROR;
     }
     *output_text = psi_strdup("");
-    if (*output_text == NULL) return PSI_STATUS_ERROR;
+    if (*output_text == NULL)
+        return PSI_STATUS_ERROR;
     *exit_status = -1;
     *truncated = 0;
     return PSI_STATUS_OK;

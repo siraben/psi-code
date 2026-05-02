@@ -36,7 +36,8 @@ int psi_http_global_init(void) {
  * prior list; this wrapper assigns through only on success. */
 static int psi_http_slist_append_safe(struct curl_slist **list, const char *line) {
     struct curl_slist *next = curl_slist_append(*list, line);
-    if (next == NULL) return PSI_STATUS_ERROR;
+    if (next == NULL)
+        return PSI_STATUS_ERROR;
     *list = next;
     return PSI_STATUS_OK;
 }
@@ -69,7 +70,7 @@ struct psi_http_stream {
     /* Terminal state: set by helper when curl_easy_perform returns.
      * Main thread reads under `mu`. */
     int done;
-    long http_status;   /* HTTP response code (only meaningful when done) */
+    long http_status; /* HTTP response code (only meaningful when done) */
     CURLcode curl_code; /* CURLE_OK on success */
 
     /* Latch set under `mu` if the helper thread's write callback
@@ -81,7 +82,8 @@ struct psi_http_stream {
 };
 
 static void psi_http_stream_free_request(struct psi_http_stream *h) {
-    if (h == NULL) return;
+    if (h == NULL)
+        return;
     curl_slist_free_all(h->headers);
     free(h->url);
     free(h->body);
@@ -96,9 +98,7 @@ static void psi_http_stream_free_request(struct psi_http_stream *h) {
  * either allocation fails. On failure, `write_failed` is latched
  * under `mu` so the write callback can abort curl rather than
  * silently lose streamed bytes. */
-static int psi_http_queue_push(
-    struct psi_http_stream *h, const char *data, size_t len
-) {
+static int psi_http_queue_push(struct psi_http_stream *h, const char *data, size_t len) {
     struct psi_http_chunk_node *node;
 
     node = (struct psi_http_chunk_node *)malloc(sizeof(*node));
@@ -134,9 +134,7 @@ static int psi_http_queue_push(
     return 1;
 }
 
-static struct psi_http_chunk_node *psi_http_queue_pop_locked(
-    struct psi_http_stream *h
-) {
+static struct psi_http_chunk_node *psi_http_queue_pop_locked(struct psi_http_stream *h) {
     struct psi_http_chunk_node *node;
 
     node = h->queue_head;
@@ -167,9 +165,7 @@ static void psi_http_queue_free_all(struct psi_http_stream *h) {
  * curl callbacks (run on helper thread).
  * ------------------------------------------------------------------ */
 
-static size_t psi_http_stream_write_cb(
-    void *data, size_t size, size_t nmemb, void *userdata
-) {
+static size_t psi_http_stream_write_cb(void *data, size_t size, size_t nmemb, void *userdata) {
     struct psi_http_stream *h = (struct psi_http_stream *)userdata;
     size_t total = size * nmemb;
     if (!psi_http_queue_push(h, (const char *)data, total)) {
@@ -184,12 +180,12 @@ static size_t psi_http_stream_write_cb(
 }
 
 static int psi_http_stream_xferinfo(
-    void *clientp,
-    curl_off_t dltotal, curl_off_t dlnow,
-    curl_off_t ultotal, curl_off_t ulnow
-) {
+    void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow) {
     const struct psi_abort_signal *s = (const struct psi_abort_signal *)clientp;
-    (void)dltotal; (void)dlnow; (void)ultotal; (void)ulnow;
+    (void)dltotal;
+    (void)dlnow;
+    (void)ultotal;
+    (void)ulnow;
     return (s != NULL && psi_abort_signal_is_triggered(s)) ? 1 : 0;
 }
 
@@ -245,20 +241,18 @@ static void *psi_http_stream_thread(void *arg) {
  * Public API.
  * ------------------------------------------------------------------ */
 
-int psi_http_stream_begin(
-    const char *url,
-    const char *const *header_lines, size_t header_count,
-    const char *body, size_t body_len,
-    const struct psi_abort_signal *abort_signal,
-    struct psi_http_stream **out
-) {
+int psi_http_stream_begin(const char *url, const char *const *header_lines, size_t header_count,
+    const char *body, size_t body_len, const struct psi_abort_signal *abort_signal,
+    struct psi_http_stream **out) {
     struct psi_http_stream *h;
     size_t i;
     int rc;
 
-    if (out == NULL) return PSI_STATUS_ERROR;
+    if (out == NULL)
+        return PSI_STATUS_ERROR;
     *out = NULL;
-    if (url == NULL) return PSI_STATUS_ERROR;
+    if (url == NULL)
+        return PSI_STATUS_ERROR;
 
     if (psi_http_global_init() != PSI_STATUS_OK) {
         return PSI_STATUS_ERROR;
@@ -273,7 +267,8 @@ int psi_http_stream_begin(
     h->body_len = body_len;
     if (body != NULL && body_len > 0u) {
         h->body = (char *)malloc(body_len);
-        if (h->body != NULL) memcpy(h->body, body, body_len);
+        if (h->body != NULL)
+            memcpy(h->body, body, body_len);
     } else {
         h->body = psi_strdup("");
     }
@@ -316,16 +311,16 @@ int psi_http_stream_begin(
 }
 
 int psi_http_stream_poll(
-    struct psi_http_stream *h,
-    int timeout_ms,
-    char **chunk, size_t *chunk_len
-) {
+    struct psi_http_stream *h, int timeout_ms, char **chunk, size_t *chunk_len) {
     struct psi_http_chunk_node *node;
     int result;
 
-    if (chunk != NULL) *chunk = NULL;
-    if (chunk_len != NULL) *chunk_len = 0u;
-    if (h == NULL) return 2;
+    if (chunk != NULL)
+        *chunk = NULL;
+    if (chunk_len != NULL)
+        *chunk_len = 0u;
+    if (h == NULL)
+        return 2;
 
     pthread_mutex_lock(&h->mu);
 
@@ -339,8 +334,7 @@ int psi_http_stream_poll(
 
             gettimeofday(&now, NULL);
             sec = (long)now.tv_sec + (long)(timeout_ms / 1000);
-            nsec = (long)(now.tv_usec) * 1000l
-                 + (long)(timeout_ms % 1000) * 1000000l;
+            nsec = (long)(now.tv_usec) * 1000l + (long)(timeout_ms % 1000) * 1000000l;
             if (nsec >= 1000000000l) {
                 sec += 1l;
                 nsec -= 1000000000l;
@@ -362,9 +356,12 @@ int psi_http_stream_poll(
     pthread_mutex_unlock(&h->mu);
 
     if (node != NULL) {
-        if (chunk != NULL) *chunk = node->data;
-        else free(node->data);
-        if (chunk_len != NULL) *chunk_len = node->len;
+        if (chunk != NULL)
+            *chunk = node->data;
+        else
+            free(node->data);
+        if (chunk_len != NULL)
+            *chunk_len = node->len;
         free(node);
     }
     return result;
@@ -374,7 +371,8 @@ long psi_http_stream_finish(struct psi_http_stream *h) {
     long status;
     CURLcode code;
 
-    if (h == NULL) return -1l;
+    if (h == NULL)
+        return -1l;
     if (h->thread_started) {
         pthread_join(h->thread, NULL);
         h->thread_started = 0;

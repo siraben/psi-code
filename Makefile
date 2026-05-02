@@ -16,6 +16,7 @@ INSTALL_PROGRAM ?= $(INSTALL) -m 755
 INSTALL_DATA    ?= $(INSTALL) -m 644
 INSTALL_DIR     ?= $(INSTALL) -d
 CPPCHECK        ?= cppcheck
+CLANG_FORMAT    ?= clang-format
 LUACHECK        ?= luacheck
 STYLUA          ?= stylua
 
@@ -54,6 +55,7 @@ LUA_BOOT_FILE ?= $(abspath lua/boot.lua)
 
 SOURCES := $(sort $(shell find src -name '*.c' 2>/dev/null))
 OBJECTS := $(SOURCES:%.c=$(BUILD_DIR)/%.o)
+C_FORMAT_FILES := $(sort $(shell find include scripts src -type f \( -name '*.c' -o -name '*.h' \) 2>/dev/null))
 
 LUA_SOURCES = lua/boot.lua $(sort $(shell find lua/psi -name '*.lua' 2>/dev/null))
 DOC_SOURCES = README.md $(sort $(wildcard docs/*.md))
@@ -178,6 +180,14 @@ lint-lua:
 format-lua:
 	$(STYLUA) lua
 
+format-c:
+	$(CLANG_FORMAT) -i $(C_FORMAT_FILES)
+
+check-format-c:
+	$(CLANG_FORMAT) --dry-run --Werror $(C_FORMAT_FILES)
+
+format: format-lua format-c
+
 analyze-cppcheck:
 	$(CPPCHECK) --enable=all --inconclusive --std=c89 \
 		--suppressions-list=.cppcheck-suppressions \
@@ -197,6 +207,6 @@ check-build-configs:
 	sh tests/build_configs.sh
 
 .PHONY: all clean install \
-        lint lint-lua lint-c format-lua \
+        lint lint-lua lint-c format format-lua format-c check-format-c \
         analyze analyze-cppcheck analyze-gcc \
         check-build-configs

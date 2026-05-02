@@ -11,36 +11,15 @@ struct psi_abort_signal;
 
 typedef void (*psi_http_chunk_cb)(void *userdata, const char *chunk, size_t len);
 
-int psi_http_post_stream(
-    const char *url,
-    const char *const *header_lines,
-    size_t header_count,
-    const char *body,
-    size_t body_len,
-    psi_http_chunk_cb on_chunk,
-    void *userdata,
-    const struct psi_abort_signal *abort_signal,
-    long *status_code
-);
+int psi_http_post_stream(const char *url, const char *const *header_lines, size_t header_count,
+    const char *body, size_t body_len, psi_http_chunk_cb on_chunk, void *userdata,
+    const struct psi_abort_signal *abort_signal, long *status_code);
 
-int psi_http_post(
-    const char *url,
-    const char *const *header_lines,
-    size_t header_count,
-    const char *body,
-    size_t body_len,
-    const struct psi_abort_signal *abort_signal,
-    long *status_code,
-    char **response_body
-);
+int psi_http_post(const char *url, const char *const *header_lines, size_t header_count,
+    const char *body, size_t body_len, const struct psi_abort_signal *abort_signal,
+    long *status_code, char **response_body);
 
-int psi_http_get(
-    const char *url,
-    const char *const *header_lines,
-    size_t header_count,
-    const struct psi_abort_signal *abort_signal,
-    long *status_code,
-    char **response_body
-);
+int psi_http_get(const char *url, const char *const *header_lines, size_t header_count,
+    const struct psi_abort_signal *abort_signal, long *status_code, char **response_body);
 
 #endif
