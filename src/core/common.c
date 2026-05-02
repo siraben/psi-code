@@ -28,4 +28,3 @@ char *psi_strdup_n(const char *text, size_t length) {
     copy[length] = '\0';
     return copy;
 }
-

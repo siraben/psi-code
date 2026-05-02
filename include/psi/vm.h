@@ -15,7 +15,8 @@ struct psi_vm {
     int tui_tool_progress_callback_ref;
 };
 
-int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *output, FILE *error_output);
+int psi_vm_init(
+    struct psi_vm *vm, const char *boot_file, FILE *input, FILE *output, FILE *error_output);
 void psi_vm_destroy(struct psi_vm *vm);
 void psi_vm_bind_session(struct psi_vm *vm, struct psi_session *session);
 void psi_vm_set_tui_active(struct psi_vm *vm, int active);
@@ -26,23 +27,11 @@ int psi_vm_eval_to_string(struct psi_vm *vm, const char *expression, char **outp
  * and max_tokens/model are forwarded into the Lua opts table. */
 struct psi_agent_observer;
 struct psi_abort_signal;
-int psi_vm_run_agent_turn(
-    struct psi_vm *vm,
-    const char *user_text,
-    struct psi_agent_observer *observer,
-    struct psi_abort_signal *abort_signal,
-    const char *model,
-    long max_tokens,
-    char **response_text
-);
-int psi_vm_run_agent_compact(
-    struct psi_vm *vm,
-    size_t keep_recent,
-    struct psi_abort_signal *abort_signal,
-    const char *model,
-    long max_tokens,
-    char **summary_text
-);
+int psi_vm_run_agent_turn(struct psi_vm *vm, const char *user_text,
+    struct psi_agent_observer *observer, struct psi_abort_signal *abort_signal, const char *model,
+    long max_tokens, char **response_text);
+int psi_vm_run_agent_compact(struct psi_vm *vm, size_t keep_recent,
+    struct psi_abort_signal *abort_signal, const char *model, long max_tokens, char **summary_text);
 
 /* Thin shims onto the Lua session module. Callers still work in C but
  * the actual JSONL I/O lives in lua/psi/session.lua. */

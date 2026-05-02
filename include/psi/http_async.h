@@ -39,15 +39,9 @@ int psi_http_global_init(void);
 
 struct psi_http_stream;
 
-int psi_http_stream_begin(
-    const char *url,
-    const char *const *header_lines,
-    size_t header_count,
-    const char *body,
-    size_t body_len,
-    const struct psi_abort_signal *abort_signal,
-    struct psi_http_stream **out
-);
+int psi_http_stream_begin(const char *url, const char *const *header_lines, size_t header_count,
+    const char *body, size_t body_len, const struct psi_abort_signal *abort_signal,
+    struct psi_http_stream **out);
 
 /* Poll the stream for the next chunk.
  *
@@ -65,11 +59,7 @@ int psi_http_stream_begin(
  *         - call psi_http_stream_finish next to reap exit status.
  */
 int psi_http_stream_poll(
-    struct psi_http_stream *h,
-    int timeout_ms,
-    char **chunk,
-    size_t *chunk_len
-);
+    struct psi_http_stream *h, int timeout_ms, char **chunk, size_t *chunk_len);
 
 /* Join the helper thread, free the handle, and return the HTTP
  * status code. Returns -1 on transport error (curl_easy_perform

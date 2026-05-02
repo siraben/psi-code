@@ -13,23 +13,11 @@ typedef void (*psi_process_progress_cb)(void *userdata, const char *chunk, size_
 /* If abort_signal is non-NULL and becomes triggered during the read
  * loop, the child is SIGTERM'd and the function returns PSI_STATUS_OK
  * with exit_status set to 130 (SIGINT convention). */
-int psi_process_run_shell(
-    const char *command,
-    char **output_text,
-    int *exit_status,
-    int *truncated,
-    psi_process_progress_cb on_chunk,
-    void *userdata,
-    const struct psi_abort_signal *abort_signal
-);
+int psi_process_run_shell(const char *command, char **output_text, int *exit_status, int *truncated,
+    psi_process_progress_cb on_chunk, void *userdata, const struct psi_abort_signal *abort_signal);
 
-int psi_process_run_argv(
-    char *const argv[],
-    char **output_text,
-    int *exit_status,
-    int *truncated,
-    const struct psi_abort_signal *abort_signal
-);
+int psi_process_run_argv(char *const argv[], char **output_text, int *exit_status, int *truncated,
+    const struct psi_abort_signal *abort_signal);
 
 /* ------------------------------------------------------------------
  * Async shell execution.
@@ -57,17 +45,11 @@ struct psi_process_handle;
 /* Start the shell command. On success, *out owns the handle and the
  * child is already forked. On abort-signal-triggered return the
  * handle is still returned and finish will reap with status=130. */
-int psi_process_begin(
-    const char *command,
-    const struct psi_abort_signal *abort_signal,
-    struct psi_process_handle **out
-);
+int psi_process_begin(const char *command, const struct psi_abort_signal *abort_signal,
+    struct psi_process_handle **out);
 
-int psi_process_begin_argv(
-    char *const argv[],
-    const struct psi_abort_signal *abort_signal,
-    struct psi_process_handle **out
-);
+int psi_process_begin_argv(char *const argv[], const struct psi_abort_signal *abort_signal,
+    struct psi_process_handle **out);
 
 /* Drain one read() worth of output.
  *
@@ -83,12 +65,7 @@ int psi_process_begin_argv(
  * code is deliberately negative so a boolean `r == 1` branch can
  * never be entered on failure.
  */
-int psi_process_poll(
-    struct psi_process_handle *h,
-    int timeout_ms,
-    char **chunk,
-    size_t *chunk_len
-);
+int psi_process_poll(struct psi_process_handle *h, int timeout_ms, char **chunk, size_t *chunk_len);
 
 /* Reap the child, close descriptors, free the handle. Returns
  * PSI_STATUS_OK with exit_status / truncated / output_text populated
@@ -97,10 +74,6 @@ int psi_process_poll(
  * separate reconstruction. output_text may be "" but is never NULL
  * on PSI_STATUS_OK; caller must free() it. */
 int psi_process_finish(
-    struct psi_process_handle *h,
-    char **output_text,
-    int *exit_status,
-    int *truncated
-);
+    struct psi_process_handle *h, char **output_text, int *exit_status, int *truncated);
 
 #endif

@@ -25,7 +25,7 @@ struct psi_abort_signal {
 
 void psi_abort_signal_init(struct psi_abort_signal *s);
 void psi_abort_signal_trigger(struct psi_abort_signal *s);
-int  psi_abort_signal_is_triggered(const struct psi_abort_signal *s);
+int psi_abort_signal_is_triggered(const struct psi_abort_signal *s);
 void psi_abort_signal_reset(struct psi_abort_signal *s);
 
 #endif

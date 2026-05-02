@@ -25,7 +25,8 @@ static int g_sigint_installed = 0;
 
 static void psi_print_sigint_handler(int sig) {
     (void)sig;
-    if (g_print_abort != NULL) g_print_abort->flag = 1;
+    if (g_print_abort != NULL)
+        g_print_abort->flag = 1;
 }
 
 static void psi_install_sigint(struct psi_abort_signal *sig) {
@@ -52,13 +53,20 @@ static void psi_restore_sigint(void) {
 
 static const char *psi_mode_name(enum psi_cli_mode mode) {
     switch (mode) {
-        case PSI_CLI_MODE_PRINT:          return "print";
-        case PSI_CLI_MODE_EVAL:           return "eval";
-        case PSI_CLI_MODE_REPL:           return "repl";
-        case PSI_CLI_MODE_SYSTEM_PROMPT:  return "system-prompt";
-        case PSI_CLI_MODE_AGENT:          return "agent";
-        case PSI_CLI_MODE_COMPACT:        return "compact";
-        default:                          return NULL;
+    case PSI_CLI_MODE_PRINT:
+        return "print";
+    case PSI_CLI_MODE_EVAL:
+        return "eval";
+    case PSI_CLI_MODE_REPL:
+        return "repl";
+    case PSI_CLI_MODE_SYSTEM_PROMPT:
+        return "system-prompt";
+    case PSI_CLI_MODE_AGENT:
+        return "agent";
+    case PSI_CLI_MODE_COMPACT:
+        return "compact";
+    default:
+        return NULL;
     }
 }
 
@@ -70,7 +78,8 @@ static int psi_run_via_lua(const struct psi_cli_options *options) {
     int status;
 
     mode_name = psi_mode_name(options->mode);
-    if (mode_name == NULL) return PSI_STATUS_ERROR;
+    if (mode_name == NULL)
+        return PSI_STATUS_ERROR;
 
     psi_session_init(&session);
     status = psi_vm_init(&vm, options->boot_file, stdin, stdout, stderr);
