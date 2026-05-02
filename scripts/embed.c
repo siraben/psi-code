@@ -28,15 +28,17 @@
 static void derive_modname(const char *path, char *out, size_t out_size) {
     const char *start = path;
     size_t prefix_len = 4;
+    size_t len;
+    size_t i;
+
     if (strncmp(start, "lua/", prefix_len) == 0) {
         start += prefix_len;
     }
-    size_t len = strlen(start);
+    len = strlen(start);
     if (len >= 4 && strcmp(start + len - 4, ".lua") == 0) {
         len -= 4;
     }
     if (len >= out_size) len = out_size - 1;
-    size_t i;
     for (i = 0; i < len; i++) {
         out[i] = (start[i] == '/') ? '.' : start[i];
     }
@@ -45,43 +47,80 @@ static void derive_modname(const char *path, char *out, size_t out_size) {
 
 static void sanitize_symbol(const char *in, char *out, size_t out_size) {
     size_t i;
+    char c;
+    int ok;
+
     for (i = 0; i + 1 < out_size && in[i]; i++) {
-        char c = in[i];
-        int ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-              || (c >= '0' && c <= '9');
+        c = in[i];
+        ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+          || (c >= '0' && c <= '9');
         out[i] = ok ? c : '_';
     }
     out[i] = '\0';
 }
 
+static char *embed_strdup(const char *text) {
+    size_t len;
+    char *copy;
+
+    len = strlen(text);
+    copy = malloc(len + 1u);
+    if (copy == NULL) return NULL;
+    memcpy(copy, text, len + 1u);
+    return copy;
+}
+
 /* Read the whole file into memory. Returns 0/size on success, -1 on failure. */
 static unsigned char *slurp(const char *path, size_t *len_out) {
-    FILE *f = fopen(path, "rb");
-    if (!f) { perror(path); return NULL; }
-    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return NULL; }
-    long size = ftell(f);
-    if (size < 0) { fclose(f); return NULL; }
+    FILE *f;
+    long size;
+    unsigned char *buf;
+    size_t got;
+
+    f = fopen(path, "rb");
+    if (!f) {
+        perror(path);
+        return NULL;
+    }
+    if (fseek(f, 0, SEEK_END) != 0) goto out_close;
+    size = ftell(f);
+    if (size < 0) goto out_close;
     rewind(f);
-    unsigned char *buf = (unsigned char *)malloc((size_t)size + 1u);
-    if (!buf) { fclose(f); return NULL; }
-    size_t got = fread(buf, 1u, (size_t)size, f);
+    buf = malloc((size_t)size + 1u);
+    if (!buf) goto out_close;
+    got = fread(buf, 1u, (size_t)size, f);
     fclose(f);
-    if (got != (size_t)size) { free(buf); return NULL; }
-    buf[size] = 0;
+    if (got != (size_t)size) goto out_free;
+    buf[(size_t)size] = 0;
     *len_out = (size_t)size;
     return buf;
+
+out_free:
+    free(buf);
+    return NULL;
+out_close:
+    fclose(f);
+    return NULL;
 }
 
 /* Deflate `in` to a newly-malloc'd buffer. Returns length or -1 on error. */
 static long deflate_bytes(const unsigned char *in, size_t in_len,
                           unsigned char **out_buf) {
+    unsigned char *out;
+    uLongf bound;
+    int rc;
+
     /* Upper bound per zlib manual: compressBound(n). For our input
      * sizes a comfortable 1.2x + 128 suffices too. */
-    uLongf bound = compressBound((uLong)in_len);
-    unsigned char *out = (unsigned char *)malloc(bound);
+    bound = compressBound((uLong)in_len);
+    out = malloc(bound);
     if (!out) return -1;
-    int rc = compress2(out, &bound, in, (uLong)in_len, 9);
-    if (rc != Z_OK) { free(out); fprintf(stderr, "deflate: %d\n", rc); return -1; }
+    rc = compress2(out, &bound, in, (uLong)in_len, 9);
+    if (rc != Z_OK) {
+        free(out);
+        fprintf(stderr, "deflate: %d\n", rc);
+        return -1;
+    }
     *out_buf = out;
     return (long)bound;
 }
@@ -104,19 +143,33 @@ int main(int argc, char **argv) {
     int raw_keys = 0;
     int i;
     int first_file;
+    int status;
+    size_t count;
+    size_t k;
+    size_t *raw_lens;
+    size_t *zlen;
+    char **syms;
+    char **keys;
+    const char *arg;
+    char buf[512];
+    char symbuf[256];
+    size_t raw_len;
+    unsigned char *raw;
+    unsigned char *compressed;
+    long clen;
 
     /* Parse leading options. */
     first_file = 1;
     while (first_file < argc) {
-        const char *a = argv[first_file];
-        if (strncmp(a, "--table=", 8) == 0) {
-            table_name = a + 8;
+        arg = argv[first_file];
+        if (strncmp(arg, "--table=", 8) == 0) {
+            table_name = arg + 8;
             first_file++;
-        } else if (strcmp(a, "--raw-keys") == 0) {
+        } else if (strcmp(arg, "--raw-keys") == 0) {
             raw_keys = 1;
             first_file++;
-        } else if (a[0] == '-' && a[1] == '-') {
-            fprintf(stderr, "unknown option: %s\n", a);
+        } else if (arg[0] == '-' && arg[1] == '-') {
+            fprintf(stderr, "unknown option: %s\n", arg);
             return 1;
         } else {
             break;
@@ -134,36 +187,44 @@ int main(int argc, char **argv) {
     printf("#include \"psi/embedded_lua.h\"\n\n");
 
     /* Track sizes so we can emit the table after the byte arrays. */
-    size_t count = (size_t)(argc - first_file);
-    size_t *raw_lens = (size_t *)calloc(count, sizeof(size_t));
-    size_t *zlen = (size_t *)calloc(count, sizeof(size_t));
-    char **syms = (char **)calloc(count, sizeof(char *));
-    char **keys = (char **)calloc(count, sizeof(char *));
+    status = 1;
+    count = 0u;
+    raw_lens = NULL;
+    zlen = NULL;
+    syms = NULL;
+    keys = NULL;
+    count = (size_t)(argc - first_file);
+    raw_lens = calloc(count, sizeof(*raw_lens));
+    zlen = calloc(count, sizeof(*zlen));
+    syms = calloc(count, sizeof(*syms));
+    keys = calloc(count, sizeof(*keys));
     if (!raw_lens || !zlen || !syms || !keys) {
         fprintf(stderr, "embed_lua: out of memory\n");
-        return 1;
+        goto out;
     }
 
     for (i = first_file; i < argc; i++) {
-        size_t k = (size_t)(i - first_file);
-        char buf[512];
-        char symbuf[256];
+        k = (size_t)(i - first_file);
         if (raw_keys) {
             snprintf(buf, sizeof(buf), "%s", argv[i]);
         } else {
             derive_modname(argv[i], buf, sizeof(buf));
         }
         sanitize_symbol(buf, symbuf, sizeof(symbuf));
-        keys[k] = strdup(buf);
-        syms[k] = strdup(symbuf);
+        keys[k] = embed_strdup(buf);
+        syms[k] = embed_strdup(symbuf);
+        if (!keys[k] || !syms[k]) {
+            fprintf(stderr, "embed_lua: out of memory\n");
+            goto out;
+        }
 
-        size_t raw_len = 0;
-        unsigned char *raw = slurp(argv[i], &raw_len);
-        if (!raw) return 1;
-        unsigned char *compressed = NULL;
-        long clen = deflate_bytes(raw, raw_len, &compressed);
+        raw_len = 0u;
+        raw = slurp(argv[i], &raw_len);
+        if (!raw) goto out;
+        compressed = NULL;
+        clen = deflate_bytes(raw, raw_len, &compressed);
         free(raw);
-        if (clen < 0) return 1;
+        if (clen < 0) goto out;
 
         raw_lens[k] = raw_len;
         zlen[k] = (size_t)clen;
@@ -181,5 +242,18 @@ int main(int argc, char **argv) {
     }
     printf("    { NULL, NULL, 0u, 0u }\n");
     printf("};\n");
-    return 0;
+    status = 0;
+
+out:
+    if (keys != NULL) {
+        for (k = 0u; k < count; k++) free(keys[k]);
+    }
+    if (syms != NULL) {
+        for (k = 0u; k < count; k++) free(syms[k]);
+    }
+    free(keys);
+    free(syms);
+    free(raw_lens);
+    free(zlen);
+    return status;
 }
