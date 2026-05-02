@@ -38,7 +38,7 @@ CPPFLAGS      ?=
 LDFLAGS       ?=
 RPATH_LDFLAGS ?=
 
-# -Wno-long-long suppresses the C90-pedantic warning Lua 5.4 forces
+# -Wno-long-long suppresses the C90-pedantic warning Lua forces
 # via lua_Integer being long long.
 STRICT_CFLAGS ?= -std=c89 -pedantic -Wall -Wextra -Werror -Wno-long-long
 BASE_CFLAGS    = $(STRICT_CFLAGS)
@@ -69,7 +69,7 @@ DEPS       := $(OBJECTS:.o=.d) $(GEN_OBJECTS:.o=.d)
 #
 # Set PSI_CFLAGS_<DEP>= / PSI_LIBS_<DEP>= in the environment to skip
 # pkg-config for a particular package — useful on hosts where the
-# package is named differently (lua5.4 vs lua54 vs lua) or where
+# package is named differently (lua5.5 vs lua55 vs lua) or where
 # pkg-config isn't available at all.
 ifeq ($(STATIC),1)
 PKG_CONFIG_FLAGS = --static
@@ -85,7 +85,8 @@ pkg_libs   = $(if $(PSI_LIBS_$(1)),$(PSI_LIBS_$(1)),$(shell $(PKG_CONFIG) $(PKG_
 dep_cflags = $(call pkg_cflags,$(firstword $(subst :, ,$(1))),$(lastword $(subst :, ,$(1))))
 dep_libs   = $(call pkg_libs,$(firstword $(subst :, ,$(1))),$(lastword $(subst :, ,$(1))))
 
-PKG_DEPS  = LUA:lua5.4 CJSON:libcjson CURL:libcurl ZLIB:zlib
+LUA_PKG_CONFIG ?= lua5.5
+PKG_DEPS  = LUA:$(LUA_PKG_CONFIG) CJSON:libcjson CURL:libcurl ZLIB:zlib
 PKG_DEPS += $(if $(filter 1,$(REPL_EDITLINE)),EDIT:libedit)
 
 LOCAL_CPPFLAGS  = -Iinclude -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600 \

@@ -35,6 +35,28 @@
         });
         curl = curlWithMbedtls pkgs;
 
+        lua55Version = "5.5.0";
+        lua55Hash = "sha256-V8zDK7vQBcq3W8xSREBSU1r2kXiduiuQFtXFBkDWiz0=";
+
+        lua55For = p: p.lua5_4.overrideAttrs (old: {
+          version = lua55Version;
+          src = p.fetchurl {
+            url = "https://www.lua.org/ftp/lua-${lua55Version}.tar.gz";
+            hash = lua55Hash;
+          };
+          makeFlags = [
+            "INSTALL_TOP=$(out)"
+            "INSTALL_MAN=$(out)/share/man/man1"
+            "R=${lua55Version}"
+            "LDFLAGS=-fPIC"
+            "V=5.5"
+            "PLAT=linux"
+            "CC=${p.stdenv.cc.targetPrefix}cc"
+            "RANLIB=${p.stdenv.cc.targetPrefix}ranlib"
+            "MYLIBS="
+          ];
+        });
+
         # ---- Shared dependency sets -------------------------------------
 
         # Target-arch libraries for building psi.  Parameterized by
@@ -44,7 +66,7 @@
           p.cjson
           (curlWithMbedtls p)
           p.libedit
-          p.lua5_4
+          (lua55For p)
           p.zlib
         ];
 
