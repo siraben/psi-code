@@ -1922,97 +1922,133 @@ def t_tui_busy_status_render(psi: Psi):
 
 @test("tui/differential_redraw_uses_changed_rows")
 def t_tui_differential_redraw_uses_changed_rows(psi: Psi):
-    out = psi.eval(
-        'local d = require("psi.tui_runtime")._debug_redraw_counts("hello\\nhi")\n'
-        + 'return table.concat({\n'
-        + '  tostring(d.first_frames),\n'
-        + '  tostring(d.second_frames),\n'
-        + '  tostring(d.second_writes),\n'
-        + '  tostring(d.second_input_draws > 0),\n'
-        + '  tostring(d.second_clears),\n'
-        + '  tostring(d.stale_clears > 0),\n'
-        + '  tostring(d.line_clears),\n'
-        + '  tostring(d.draw_rows),\n'
-        + '  tostring(d.raw_draws),\n'
-        + '  tostring(d.cursor_sets),\n'
-        + '  tostring(d.refreshes),\n'
-        + '  tostring(d.renderer_full),\n'
-        + '  tostring(d.renderer_diff >= 1),\n'
-        + '  tostring(d.renderer_last_mode)\n'
-        + '}, "|")'
-    )
+    out = psi.eval(r"""
+local d = require("psi.tui_runtime")._debug_redraw_counts("hello\nhi")
+return table.concat({
+  tostring(d.first_frames),
+  tostring(d.second_frames),
+  tostring(d.second_writes),
+  tostring(d.second_input_draws > 0),
+  tostring(d.second_clears),
+  tostring(d.stale_clears > 0),
+  tostring(d.line_clears),
+  tostring(d.draw_rows),
+  tostring(d.raw_draws),
+  tostring(d.cursor_sets),
+  tostring(d.refreshes),
+  tostring(d.renderer_full),
+  tostring(d.renderer_diff >= 1),
+  tostring(d.renderer_last_mode)
+}, "|")
+""")
     assert_equals(out, "1|0|1|false|0|true|1|0|0|0|0|1|true|diff",
                   "stable-size redraw uses changed-row diff output")
 
 
 @test("tui/renderer_cursor_marker")
 def t_tui_renderer_cursor_marker(psi: Psi):
-    out = psi.eval(
-        'local r = require("psi.tui_renderer")\n'
-        + 'local lines, cursor = r.extract_cursor({"ab" .. r.cursor_marker() .. "cd", "ef"})\n'
-        + 'return table.concat({lines[1], lines[2], tostring(cursor.row), tostring(cursor.col)}, "|")'
-    )
+    out = psi.eval(r"""
+local r = require("psi.tui_renderer")
+local lines, cursor = r.extract_cursor({"ab" .. r.cursor_marker() .. "cd", "ef"})
+return table.concat({lines[1], lines[2], tostring(cursor.row), tostring(cursor.col)}, "|")
+""")
     assert_equals(out, "abcd|ef|1|3", "renderer strips cursor marker and reports position")
 
 
 @test("tui/renderer_full_redraw_clears_rows")
 def t_tui_renderer_full_redraw_clears_rows(psi: Psi):
-    out = psi.eval(
-        'local r = require("psi.tui_renderer")\n'
-        + 'local old_frame = psi.tui_render_frame\n'
-        + 'local old_write = psi.stdout_write\n'
-        + 'local frame\n'
-        + 'psi.tui_render_frame = function(f) frame = f end\n'
-        + 'psi.stdout_write = function() end\n'
-        + 'local renderer = r.new()\n'
-        + 'r.render(renderer, {"abcdef"}, {width=10, height=1})\n'
-        + 'r.render(renderer, {"x"}, {width=10, height=1, force_full=true})\n'
-        + 'psi.tui_render_frame = old_frame\n'
-        + 'psi.stdout_write = old_write\n'
-        + 'return tostring((frame or ""):find("\\27[2K", 1, true) ~= nil)'
-    )
+    out = psi.eval(r"""
+local r = require("psi.tui_renderer")
+local old_frame = psi.tui_render_frame
+local old_write = psi.stdout_write
+local frame
+psi.tui_render_frame = function(f) frame = f end
+psi.stdout_write = function() end
+local renderer = r.new()
+renderer:render({lines={"abcdef"}, width=10, height=1})
+renderer:render({lines={"x"}, width=10, height=1, force_full=true})
+psi.tui_render_frame = old_frame
+psi.stdout_write = old_write
+return tostring((frame or ""):find("\27[2K", 1, true) ~= nil)
+""")
     assert_equals(out, "true", "full redraw should clear rows before shorter lines")
 
 
 @test("tui/renderer_moves_cursor_without_line_changes")
 def t_tui_renderer_moves_cursor_without_line_changes(psi: Psi):
-    out = psi.eval(
-        'local r = require("psi.tui_renderer")\n'
-        + 'local old_frame = psi.tui_render_frame\n'
-        + 'local old_write = psi.stdout_write\n'
-        + 'local writes = {}\n'
-        + 'psi.tui_render_frame = function() end\n'
-        + 'psi.stdout_write = function(text) writes[#writes + 1] = text or "" end\n'
-        + 'local renderer = r.new()\n'
-        + 'r.render(renderer, {"abc"}, {width=10, height=1, cursor_row=1, cursor_col=1, cursor_visible=true})\n'
-        + 'r.render(renderer, {"abc"}, {width=10, height=1, cursor_row=1, cursor_col=3, cursor_visible=true})\n'
-        + 'psi.tui_render_frame = old_frame\n'
-        + 'psi.stdout_write = old_write\n'
-        + 'return table.concat({renderer.last_mode, tostring(#writes), tostring((writes[1] or ""):find("\\27[1;3H", 1, true) ~= nil)}, "|")'
-    )
+    out = psi.eval(r"""
+local r = require("psi.tui_renderer")
+local old_frame = psi.tui_render_frame
+local old_write = psi.stdout_write
+local writes = {}
+psi.tui_render_frame = function() end
+psi.stdout_write = function(text) writes[#writes + 1] = text or "" end
+local renderer = r.new()
+renderer:render({lines={"abc"}, width=10, height=1, cursor={row=1, col=1, visible=true}})
+renderer:render({lines={"abc"}, width=10, height=1, cursor={row=1, col=3, visible=true}})
+psi.tui_render_frame = old_frame
+psi.stdout_write = old_write
+return table.concat({
+  renderer.last_mode,
+  tostring(#writes),
+  tostring((writes[1] or ""):find("\27[1;3H", 1, true) ~= nil)
+}, "|")
+""")
     assert_equals(out, "diff|1|true", "cursor-only redraw should move hardware cursor")
 
 
 @test("tui/renderer_applies_cursor_marker_and_resets")
 def t_tui_renderer_applies_cursor_marker_and_resets(psi: Psi):
-    out = psi.eval(
-        'local r = require("psi.tui_renderer")\n'
-        + 'local old_frame = psi.tui_render_frame\n'
-        + 'local old_write = psi.stdout_write\n'
-        + 'local frame, row, col, visible\n'
-        + 'psi.tui_render_frame = function(f, r0, c0, v0) frame, row, col, visible = f, r0, c0, v0 end\n'
-        + 'psi.stdout_write = function() end\n'
-        + 'r.render(r.new(), {"ab" .. r.cursor_marker() .. "cd"}, {width=10, height=1, cursor_visible=true})\n'
-        + 'psi.tui_render_frame = old_frame\n'
-        + 'psi.stdout_write = old_write\n'
-        + 'return table.concat({\n'
-        + '  tostring(frame:find(r.cursor_marker(), 1, true) == nil),\n'
-        + '  tostring(frame:find("\\27]8;;\\7", 1, true) ~= nil),\n'
-        + '  tostring(row), tostring(col), tostring(visible)\n'
-        + '}, "|")'
-    )
+    out = psi.eval(r"""
+local r = require("psi.tui_renderer")
+local old_frame = psi.tui_render_frame
+local old_write = psi.stdout_write
+local frame, row, col, visible
+psi.tui_render_frame = function(f, r0, c0, v0) frame, row, col, visible = f, r0, c0, v0 end
+psi.stdout_write = function() end
+r.new():render({lines={"ab" .. r.cursor_marker() .. "cd"}, width=10, height=1, cursor={visible=true}})
+psi.tui_render_frame = old_frame
+psi.stdout_write = old_write
+return table.concat({
+  tostring(frame:find(r.cursor_marker(), 1, true) == nil),
+  tostring(frame:find("\27]8;;\7", 1, true) ~= nil),
+  tostring(row), tostring(col), tostring(visible)
+}, "|")
+""")
     assert_equals(out, "true|true|1|3|true",
                   "renderer strips marker, appends line reset, and uses marker cursor")
+
+
+@test("tui/renderer_uses_discrete_dirty_ranges")
+def t_tui_renderer_uses_discrete_dirty_ranges(psi: Psi):
+    out = psi.eval(r"""
+local r = require("psi.tui_renderer")
+local old_frame = psi.tui_render_frame
+local old_write = psi.stdout_write
+local writes = {}
+psi.tui_render_frame = function() end
+psi.stdout_write = function(text) writes[#writes + 1] = text or "" end
+local renderer = r.new()
+renderer:render({lines={"a", "b", "c", "d"}, width=10, height=4})
+renderer:render({lines={"x", "b", "y", "d"}, width=10, height=4})
+psi.tui_render_frame = old_frame
+psi.stdout_write = old_write
+local out = writes[1] or ""
+local ranges = renderer.last_changed_ranges
+return table.concat({
+  renderer.last_mode,
+  tostring(#ranges),
+  tostring(ranges[1] and ranges[1].first),
+  tostring(ranges[1] and ranges[1].last),
+  tostring(ranges[2] and ranges[2].first),
+  tostring(ranges[2] and ranges[2].last),
+  tostring(out:find("\27[1;1H", 1, true) ~= nil),
+  tostring(out:find("\27[2;1H", 1, true) == nil),
+  tostring(out:find("\27[3;1H", 1, true) ~= nil)
+}, "|")
+""")
+    assert_equals(out, "diff|2|1|1|3|3|true|true|true",
+                  "renderer should emit discrete dirty row ranges")
 
 
 @test("tui/hardware_cursor_uses_input_marker")

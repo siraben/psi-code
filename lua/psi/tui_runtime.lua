@@ -1136,12 +1136,15 @@ local function redraw(state)
   cursor_col = clamp(cursor_col, 1, math.max(1, state.width - 1))
 
   local root = tui_component.stack(components)
-  state.renderer = tui_renderer.render(state.renderer, root:render(frame_width), {
+  state.renderer = state.renderer:render({
     width = frame_width,
     height = state.height,
-    cursor_row = cursor_row,
-    cursor_col = cursor_col,
-    cursor_visible = state.show_hardware_cursor,
+    lines = root:render(frame_width),
+    cursor = {
+      row = cursor_row,
+      col = cursor_col,
+      visible = state.show_hardware_cursor,
+    },
     force_full = state.force_physical_clear,
   })
   state.force_physical_clear = false

@@ -66,10 +66,12 @@ Current psi TUI files:
 - `lua/psi/markdown.lua`: line-oriented markdown styling.
 - `src/lua/vm.c`: terminal primitives exposed to Lua.
 
-`tui_runtime.lua` currently renders by building strings like
-`ESC[row;1H + padded line`, concatenating the full screen, and sending the
-entire frame to `psi.tui_render_frame(...)`. That is simple and robust, but it
-has several costs:
+The current branch has started this migration: `tui_runtime.lua` builds a
+logical line frame from small components, and `tui_renderer.lua` owns
+normalization, cursor marker extraction, full redraw fallback, and dirty-row
+diffing. The remaining cost is that much of the runtime still builds component
+inputs inline, so future overlays/focus/caches would still add pressure to the
+orchestrator if not extracted carefully.
 
 - Every redraw rewrites the header, transcript viewport, status, input box,
   and footer even when only the busy dots changed.
@@ -78,13 +80,10 @@ has several costs:
   cache/focus contract.
 - Future modals, pickers, theme previews, session trees, and overlays would add
   more special cases to the monolith.
-- The root renderer cannot reason about "which logical line changed"; it only
-  knows that `state.dirty` is true.
-
-The recent branch already reduces cursor jumping by letting Lua draw the
-prompt cursor and by keeping the hardware cursor hidden unless requested.
-That is compatible with the pi-mono marker model, but psi does not yet have
-the marker extraction or differential write layer.
+- The branch now reduces cursor jumping by letting Lua draw the prompt cursor,
+  while a marker path can position the hardware cursor when explicitly enabled.
+- The renderer can reason about changed logical rows, but component-level
+  invalidation and focus are still future work.
 
 ## Design constraints for psi
 
@@ -158,51 +157,25 @@ For the current TUI, hardware cursor can remain hidden by default.
 
 ## Differential renderer plan
 
-Implement in phases so the UI can stay working after every commit.
+The base implementation should make the render target explicit without
+committing to a future cell-buffer model:
 
-### Phase 1: line buffer renderer behind the current frame
+- `tui_runtime.lua` renders a complete logical frame:
+  `{ width, height, lines, cursor, force_full }`.
+- `tui_renderer.new()` returns a stateful renderer object.
+- `renderer:render(frame)` normalizes rows, strips cursor markers, appends line
+  resets, compares with the previous frame, and chooses full, diff, or skip.
+- The default Lua backend emits full frames through `psi.tui_render_frame` and
+  differential frames through `psi.stdout_write`.
+- Full redraw remains mandatory for first render, dimension changes, explicit
+  clear, and missing raw-writer support.
+- Stable-size redraws emit contiguous dirty row ranges, not one broad changed
+  span, so disjoint updates do not rewrite unchanged rows in between.
 
-- Add `tui_renderer.render_full(lines, cursor)` that takes plain logical lines
-  rather than `ESC[row;1H` fragments.
-- Have current `redraw(state)` build the same header/transcript/status/input
-  content as logical lines.
-- Preserve current full-frame behavior by converting logical lines to absolute
-  frame output internally.
-- Add smoke tests for exact line arrays and cursor marker stripping.
+This keeps today's implementation line-oriented and small while leaving room
+for a future cell-buffer backend behind the same frame boundary.
 
-This makes the render target testable before introducing diffing.
-
-### Phase 2: root component tree
-
-- Create a root component that renders:
-  header, transcript viewport, optional status, input editor, footer.
-- Move transcript projection into a transcript component.
-- Move input wrapping and cursor rendering into an input editor component.
-- Move busy status/footer into status/footer components.
-- Keep `tui_runtime.lua` state shape stable and pass it into components.
-
-This phase should not change terminal byte strategy yet.
-
-### Phase 3: line-level differential writes
-
-- Store `previous_lines`, `previous_width`, `previous_height`,
-  `previous_viewport_top`, `hardware_cursor_row`, and high-water rendered row.
-- On each render, compare old/new line arrays.
-- Full redraw when:
-  - first render
-  - width changed
-  - height changed outside a known-safe path
-  - forced clear requested
-  - first changed line is above previous viewport
-  - content shrink needs clearing
-  - ANSI/raw TUI capability changed
-- Otherwise emit one synchronized output buffer for the changed visible range.
-- Keep a debug mode similar to pi-mono's render trace, but write under psi's
-  state/cache path or `/tmp/psi-tui` instead of `~/.pi`.
-
-At this point busy dots and shimmer should rewrite only the status/footer row.
-
-### Phase 4: focus and overlay foundation
+### Future: focus and overlay foundation
 
 - Add root focus management for components.
 - Keep input editor as the default focus target.
@@ -213,7 +186,7 @@ At this point busy dots and shimmer should rewrite only the status/footer row.
 
 This should be a foundation only. Do not port every pi-mono overlay at once.
 
-### Phase 5: component-owned caches and invalidation
+### Future: component-owned caches and invalidation
 
 - Add cache keys to text/markdown/transcript/input components.
 - Add a theme generation counter. Theme reload invalidates the component tree.
