@@ -18,20 +18,26 @@ Exit status: 0 on clean, 1 on any failure.
 from __future__ import annotations
 
 import argparse
+import contextvars
 import json
 import os
-import pty
 import re
-import select
 import shlex
-import signal
 import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
 
+import pexpect
+import pyte
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_PTY_COLS = 80
+DEFAULT_PTY_ROWS = 24
+_CURRENT_TEST_ENV: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar(
+    "CURRENT_TEST_ENV", default=None)
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +55,9 @@ def test(name: str, *, live: bool = False):
     return wrap
 
 
+test.__test__ = False
+
+
 class Fail(Exception):
     """Raised inside a test on assertion failure."""
 
@@ -56,6 +65,21 @@ class Fail(Exception):
 def assert_contains(haystack: str, needle: str, what: str = "output") -> None:
     if needle not in haystack:
         raise Fail(f"{what} missing {needle!r}\n--- got ---\n{haystack}")
+
+
+def assert_not_contains(haystack: str, needle: str, what: str = "output") -> None:
+    if needle in haystack:
+        raise Fail(f"{what} unexpectedly contains {needle!r}\n--- got ---\n{haystack}")
+
+
+def assert_bytes_contains(haystack: bytes, needle: bytes, what: str = "output") -> None:
+    if needle not in haystack:
+        raise Fail(f"{what} missing {needle!r}\n--- got ---\n{haystack!r}")
+
+
+def assert_bytes_not_contains(haystack: bytes, needle: bytes, what: str = "output") -> None:
+    if needle in haystack:
+        raise Fail(f"{what} unexpectedly contains {needle!r}\n--- got ---\n{haystack!r}")
 
 
 def assert_regex(haystack: str, pattern: str, what: str = "output") -> None:
@@ -73,6 +97,63 @@ def assert_true(cond, reason: str) -> None:
         raise Fail(reason)
 
 
+def _selected_tests(name_filter: str | None, excludes: list[str]) -> list[tuple[str, callable, dict]]:
+    selected = []
+    for name, fn, meta in TESTS:
+        if name_filter and name_filter not in name:
+            continue
+        if any(excluded in name for excluded in excludes):
+            continue
+        selected.append((name, fn, meta))
+    return selected
+
+
+def _smoke_env(tmp: Path) -> dict[str, str]:
+    home = tmp / "home"
+    config = tmp / "config"
+    state = tmp / "state"
+    cache = tmp / "cache"
+    for path in (home, config, state, cache):
+        path.mkdir(parents=True, exist_ok=True)
+
+    env: dict[str, str] = {}
+    for key in (
+        "PATH",
+        "USER",
+        "LOGNAME",
+        "LANG",
+        "LC_ALL",
+        "TZ",
+        "TERM",
+        "TMPDIR",
+        "SSL_CERT_FILE",
+        "NIX_SSL_CERT_FILE",
+        "SSH_AUTH_SOCK",
+    ):
+        value = os.environ.get(key)
+        if value:
+            env[key] = value
+
+    for key in (
+        "ANTHROPIC_API_KEY",
+        "PSI_ANTHROPIC_MODEL",
+    ):
+        value = os.environ.get(key)
+        if value:
+            env[key] = value
+
+    env.setdefault("PATH", os.defpath)
+    env.setdefault("TERM", "xterm-256color")
+    env.setdefault("LANG", "C.UTF-8")
+    env.setdefault("LC_ALL", "C.UTF-8")
+    env["HOME"] = str(home)
+    env["XDG_CONFIG_HOME"] = str(config)
+    env["XDG_STATE_HOME"] = str(state)
+    env["XDG_CACHE_HOME"] = str(cache)
+    env["PWD"] = str(ROOT)
+    return env
+
+
 # ---------------------------------------------------------------------------
 # Psi helper: thin wrapper around subprocess that knows where the binary
 # lives, keeps a per-test temp dir, and surfaces stdout + stderr + exit.
@@ -80,17 +161,23 @@ def assert_true(cond, reason: str) -> None:
 
 
 class Psi:
-    def __init__(self, binary: str, tmp: Path):
+    def __init__(self, binary: str, tmp: Path, env: dict[str, str] | None = None):
         self.binary = str(Path(binary).resolve())
         self.tmp = tmp
+        self.env = env if env is not None else _smoke_env(tmp)
 
     def run(self, *args: str, input_text: str | None = None,
             check: bool = True, env_extra: dict | None = None,
             cwd: Path | None = None, timeout: float = 60) -> subprocess.CompletedProcess:
         """Run psi and return the completed process. Raises on non-zero when check=True."""
-        env = os.environ.copy()
+        env = self.env.copy()
         if env_extra:
-            env.update(env_extra)
+            for key, value in env_extra.items():
+                if value is None:
+                    env.pop(key, None)
+                else:
+                    env[key] = str(value)
+        env["PWD"] = str(cwd if cwd else ROOT)
         argv = [self.binary] + list(args)
         res = subprocess.run(
             argv,
@@ -126,74 +213,109 @@ class Psi:
 
 
 # ---------------------------------------------------------------------------
-# PTY driver for TUI tests. Uses the stdlib `pty` module — no dependency on
-# `script(1)`. Times out safely if the child hangs.
+# PTY driver for TUI tests. Uses pexpect for process control and pyte for a
+# terminal-screen projection. Existing callers still get byte-like output for
+# raw ANSI checks, plus exit/screen metadata for newer assertions.
 # ---------------------------------------------------------------------------
+
+
+class PtyOutput(bytes):
+    def __new__(cls, raw: bytes, screen_text: str, exitstatus: int | None,
+                signalstatus: int | None, timed_out: bool):
+        obj = bytes.__new__(cls, raw)
+        obj.screen_text = screen_text
+        obj.exitstatus = exitstatus
+        obj.signalstatus = signalstatus
+        obj.timed_out = timed_out
+        return obj
+
+    def assert_clean_exit(self) -> None:
+        if self.timed_out:
+            raise Fail("pty child did not exit before cleanup")
+        if self.exitstatus != 0:
+            raise Fail(f"pty child exit status: {self.exitstatus}, signal: {self.signalstatus}")
+
+
+def _pty_screen_text(raw: bytes, cols: int, rows: int) -> str:
+    screen = pyte.Screen(cols, rows)
+    stream = pyte.Stream(screen)
+    stream.feed(raw.decode("utf-8", "replace"))
+    return "\n".join(screen.display)
 
 
 def run_pty(cmd: list[str], scenario: list[tuple[str, float]],
             env_extra: dict | None = None, idle_drain: float = 2.0,
-            cwd: Path | None = None) -> bytes:
+            cwd: Path | None = None, cols: int = DEFAULT_PTY_COLS,
+            rows: int = DEFAULT_PTY_ROWS) -> PtyOutput:
     """Drive a pty session with a scripted (input, wait_secs) sequence.
 
     Reads everything the child writes and returns it as raw bytes. Sends
     each input after waiting its delay, then idle-drains for `idle_drain`
     seconds after the last input so any trailing output is captured.
     """
-    env = os.environ.copy()
+    fallback_tmp: tempfile.TemporaryDirectory | None = None
+    base_env = _CURRENT_TEST_ENV.get()
+    if base_env is not None:
+        env = base_env.copy()
+    else:
+        fallback_tmp = tempfile.TemporaryDirectory(prefix="psi-smoke-pty-")
+        env = _smoke_env(Path(fallback_tmp.name))
     if env_extra:
-        env.update(env_extra)
+        for key, value in env_extra.items():
+            if value is None:
+                env.pop(key, None)
+            else:
+                env[key] = str(value)
+    env["PWD"] = str(cwd if cwd else ROOT)
 
-    pid, fd = pty.fork()
-    if pid == 0:
-        try:
-            if cwd is not None:
-                os.chdir(cwd)
-            os.execvpe(cmd[0], cmd, env)
-        except Exception as exc:  # noqa: BLE001
-            os.write(2, f"exec failed: {exc}\n".encode())
-            os._exit(127)
-
+    child = pexpect.spawn(
+        cmd[0],
+        cmd[1:],
+        cwd=str(cwd) if cwd else str(ROOT),
+        env=env,
+        dimensions=(rows, cols),
+        encoding=None,
+        timeout=0.1,
+    )
     buf = bytearray()
-    try:
-        for data, delay in scenario:
-            deadline = time.time() + delay
-            while time.time() < deadline:
-                r, _, _ = select.select([fd], [], [], min(0.1, deadline - time.time()))
-                if not r:
-                    continue
-                try:
-                    chunk = os.read(fd, 65536)
-                except OSError:
-                    chunk = b""
-                if not chunk:
-                    break
-                buf.extend(chunk)
-            if data:
-                os.write(fd, data)
 
-        idle_deadline = time.time() + idle_drain
-        while time.time() < idle_deadline:
-            r, _, _ = select.select([fd], [], [], 0.1)
-            if not r:
-                continue
+    def drain(seconds: float) -> None:
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            timeout = max(0.0, min(0.1, deadline - time.monotonic()))
             try:
-                chunk = os.read(fd, 65536)
-            except OSError:
+                chunk = child.read_nonblocking(size=65536, timeout=timeout)
+            except pexpect.TIMEOUT:
+                continue
+            except pexpect.EOF:
                 break
             if not chunk:
                 break
             buf.extend(chunk)
+
+    timed_out = False
+    try:
+        for data, delay in scenario:
+            drain(delay)
+            if data:
+                child.send(data)
+        drain(idle_drain)
+        timed_out = child.isalive()
     finally:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            os.waitpid(pid, 0)
-        except ChildProcessError:
-            pass
-    return bytes(buf)
+        if child.isalive():
+            child.terminate(force=False)
+            deadline = time.monotonic() + 1.0
+            while child.isalive() and time.monotonic() < deadline:
+                drain(0.05)
+            if child.isalive():
+                child.terminate(force=True)
+        child.close(force=False)
+        if fallback_tmp is not None:
+            fallback_tmp.cleanup()
+
+    raw = bytes(buf)
+    return PtyOutput(raw, _pty_screen_text(raw, cols, rows),
+                     child.exitstatus, child.signalstatus, timed_out)
 
 
 def strip_ansi(raw: bytes) -> str:
@@ -539,9 +661,9 @@ def t_prompt_templates(psi: Psi):
     out = psi.run("--eval", expr,
                   env_extra={"PSI_PROMPTS_DIR": str(tmpdir)}).stdout.strip()
     parts = out.strip().split("|", 3)
-    assert parts[0] == "true", f"expected 1 template, got: {out!r}"
-    assert parts[1] == "true", f"description wrong: {out!r}"
-    assert parts[2] == "true", f"argument_hint wrong: {out!r}"
+    assert_equals(parts[0], "true", "template count")
+    assert_equals(parts[1], "true", f"description wrong: {out!r}")
+    assert_equals(parts[2], "true", f"argument_hint wrong: {out!r}")
     body = parts[3]
     assert_contains(body, "Hello Alice", "$1 substituted")
     assert_contains(body, "All: Alice Bob Carol Dave", "$@ substituted")
@@ -665,10 +787,13 @@ def t_tui_rainbow_renders_ansi(psi: Psi):
         env_extra={"NO_COLOR": "", "TERM": "xterm-256color"},
         idle_drain=1.5,
     )
-    assert b"xterm 256 background swatches" in raw, "rainbow header did not render in TUI"
-    assert b"\x1b[38;5;15;48;5;0m000" in raw, "rainbow background colors did not render in TUI"
-    assert b"\x1b[38;5;16;48;5;255m255" in raw, "rainbow high background colors did not render in TUI"
-    assert b"016" in raw and b"231" in raw, "rainbow swatches did not render in TUI"
+    raw.assert_clean_exit()
+    assert_bytes_contains(raw, b"xterm 256 background swatches", "rainbow header did not render in TUI")
+    assert_bytes_contains(raw, b"\x1b[38;5;15;48;5;0m000",
+                          "rainbow background colors did not render in TUI")
+    assert_bytes_contains(raw, b"\x1b[38;5;16;48;5;255m255",
+                          "rainbow high background colors did not render in TUI")
+    assert_true(b"016" in raw and b"231" in raw, "rainbow swatches did not render in TUI")
 
 
 @test("mode/tui_default")
@@ -679,7 +804,8 @@ def t_tui_default(psi: Psi):
         env_extra={"NO_COLOR": "", "TERM": "xterm-256color"},
         idle_drain=1.5,
     )
-    assert b"xterm 256 background swatches" in raw, "bare psi did not launch TUI"
+    raw.assert_clean_exit()
+    assert_bytes_contains(raw, b"xterm 256 background swatches", "bare psi did not launch TUI")
 
 
 @test("mode/tui_rainbow_after_normal_insert")
@@ -696,11 +822,16 @@ def t_tui_rainbow_after_normal_insert(psi: Psi):
         env_extra={"NO_COLOR": "", "TERM": "xterm-256color"},
         idle_drain=1.5,
     )
-    assert b"xterm 256 background swatches" in raw, "normal-mode i/rainbow did not render in TUI"
-    assert b"\x1b[38;5;15;48;5;0m000" in raw, "normal-mode i/rainbow background colors did not render in TUI"
-    assert b"\x1b[38;5;16;48;5;255m255" in raw, "normal-mode i/rainbow high background colors did not render in TUI"
-    assert b"016" in raw and b"231" in raw, "normal-mode i/rainbow swatches did not render in TUI"
-    assert b"i/rainbow" not in raw, "normal-mode i leaked into the submitted command"
+    raw.assert_clean_exit()
+    assert_bytes_contains(raw, b"xterm 256 background swatches",
+                          "normal-mode i/rainbow did not render in TUI")
+    assert_bytes_contains(raw, b"\x1b[38;5;15;48;5;0m000",
+                          "normal-mode i/rainbow background colors did not render in TUI")
+    assert_bytes_contains(raw, b"\x1b[38;5;16;48;5;255m255",
+                          "normal-mode i/rainbow high background colors did not render in TUI")
+    assert_true(b"016" in raw and b"231" in raw,
+                "normal-mode i/rainbow swatches did not render in TUI")
+    assert_bytes_not_contains(raw, b"i/rainbow", "normal-mode i leaked into the submitted command")
 
 
 @test("commands/help_includes_prompt_templates")
@@ -770,10 +901,11 @@ def t_set_active(psi: Psi):
         + 'return string.format("%d|%d|%s|%d", all, narrowed, active, restored)'
     )
     parts = out.strip().split("|")
-    assert int(parts[0]) >= 3 and int(parts[1]) == 2, \
-        f"allowlist didn't narrow: {out!r}"
-    assert "read" in parts[2] and "grep" in parts[2]
-    assert parts[0] == parts[3], "nil didn't restore full set"
+    assert_true(int(parts[0]) >= 3 and int(parts[1]) == 2,
+                f"allowlist didn't narrow: {out!r}")
+    assert_true("read" in parts[2] and "grep" in parts[2],
+                f"allowlist missing expected tools: {out!r}")
+    assert_equals(parts[0], parts[3], "nil didn't restore full set")
 
 
 @test("session/send_message")
@@ -813,8 +945,7 @@ def t_render_thinking(psi: Psi):
     a, b, c = out.strip().split("|")
     assert_contains(a, "thinking: first",
                     "first delta carries the thinking label")
-    assert "thinking:" not in b, \
-        f"label must fire only once per turn, got: {b!r}"
+    assert_not_contains(b, "thinking:", f"label must fire only once per turn, got: {b!r}")
     assert_contains(b, "second", "second delta renders text")
     assert_contains(c, "thinking: turn2",
                     "after-turn resets the one-shot label")
@@ -871,8 +1002,8 @@ def t_compact_snap(psi: Psi):
         + 'end\n'
         + 'return tostring(first_kept_role)'
     )
-    assert out.strip() != "tool-result", \
-        f"orphan tool-result kept after compaction: {out!r}"
+    assert_true(out.strip() != "tool-result",
+                f"orphan tool-result kept after compaction: {out!r}")
 
 
 @test("session/native_token_ranges")
@@ -889,9 +1020,9 @@ def t_session_native_token_ranges(psi: Psi):
         + 'return tostring(full) .. "," .. tostring(tail) .. "," .. tostring(keep)'
     )
     full, tail, keep = [int(x) for x in out.strip().split(",")]
-    assert full == 9 and tail == 4, \
-        f"native token ranges should match calibrated pi-style semantics: {out!r}"
-    assert keep == 1, f"expected one recent message for tail budget: {out!r}"
+    assert_true(full == 9 and tail == 4,
+                f"native token ranges should match calibrated pi-style semantics: {out!r}")
+    assert_equals(keep, 1, f"expected one recent message for tail budget: {out!r}")
 
 
 @test("session/native_token_estimate_matches_pi_shapes")
@@ -912,8 +1043,8 @@ def t_session_native_token_estimate_matches_pi_shapes(psi: Psi):
         + '  .. tostring(psi.session_token_estimate_from(2))'
     )
     total, tool_tail = [int(x) for x in out.strip().split(",")]
-    assert total == 1337 and tool_tail == 1328, \
-        f"native estimator should mirror calibrated pi role/content rules: {out!r}"
+    assert_true(total == 1337 and tool_tail == 1328,
+                f"native estimator should mirror calibrated pi role/content rules: {out!r}")
 
 
 @test("anthropic/drops_orphan_tool_result")
@@ -956,9 +1087,9 @@ def t_anthropic_orphan_drop(psi: Psi):
         + 'return tostring(found) .. "|" .. tostring(#wire)'
     )
     parts = out.strip().split("|")
-    assert parts[0] == "false", f"orphan tool_result still in wire: {out!r}"
+    assert_equals(parts[0], "false", f"orphan tool_result still in wire: {out!r}")
     # Expected wire: compaction-summary-as-user + the real user msg = 2
-    assert int(parts[1]) >= 1
+    assert_true(int(parts[1]) >= 1, f"expected at least one wire message: {out!r}")
 
 
 @test("session/ensure_default_path")
@@ -976,10 +1107,10 @@ def t_session_default_path(psi: Psi):
         + '       .. (first or "<nil>")'
     )
     ok_idem, ok_set, path = out.strip().split("|", 2)
-    assert ok_idem == "true", f"not idempotent: {out!r}"
-    assert ok_set == "true", f"session_path not set: {out!r}"
-    assert "/psi/sessions/" in path, f"unexpected path shape: {path!r}"
-    assert path.endswith(".jsonl"), f"missing .jsonl: {path!r}"
+    assert_equals(ok_idem, "true", f"not idempotent: {out!r}")
+    assert_equals(ok_set, "true", f"session_path not set: {out!r}")
+    assert_contains(path, "/psi/sessions/", f"unexpected path shape: {path!r}")
+    assert_true(path.endswith(".jsonl"), f"missing .jsonl: {path!r}")
 
 
 @test("prompt/transformer")
@@ -1300,7 +1431,7 @@ def t_tui_status_default_model(psi: Psi):
         'local tui = require("psi.tui_status")\n'
         + 'return tui.status_line(psi.json_encode({busy=false, scroll=0}))'
     )
-    assert "model:?" not in out, "status line should show effective default model"
+    assert_not_contains(out, "model:?", "status line should show effective default model")
     assert_contains(out, "model:", "status line includes model")
 
 
@@ -1845,7 +1976,8 @@ def t_tui_tool_call_text_has_no_leading_blank(psi: Psi):
     out = psi.eval(
         'return require("psi.tui_runtime")._debug_tool_call_text_after_assistant()'
     )
-    assert not out.startswith("\n"), "TUI tool calls should not add an extra blank after assistant text"
+    assert_true(not out.startswith("\n"),
+                "TUI tool calls should not add an extra blank after assistant text")
     assert_contains(out, "read README.md", "tool call text still renders")
 
 
@@ -2180,7 +2312,7 @@ def t_render_replace(psi: Psi):
         + 'r.register_hook("before-turn", function() return "tail\\n" end)\n'
         + 'return r.handle_event("before-turn", {})'
     )
-    assert "first" not in out, "first hook's string should have been dropped"
+    assert_not_contains(out, "first", "first hook's string should have been dropped")
     assert_contains(out, "REPLACED", "replacement text present")
     assert_contains(out, "tail", "later hook still appends after replace")
 
@@ -2217,10 +2349,10 @@ def t_embedded_source(psi: Psi):
     )
     # Format: "<src_len>|<name_count>|nil"
     parts = out.strip().split("|")
-    assert len(parts) == 3, f"unexpected shape: {out!r}"
-    assert int(parts[0]) > 100, "render source should be non-trivial"
-    assert int(parts[1]) > 10, "should enumerate many modules"
-    assert parts[2] == "nil", "unknown module must return nil"
+    assert_equals(len(parts), 3, f"unexpected shape: {out!r}")
+    assert_true(int(parts[0]) > 100, "render source should be non-trivial")
+    assert_true(int(parts[1]) > 10, "should enumerate many modules")
+    assert_equals(parts[2], "nil", "unknown module must return nil")
 
 
 @test("prompt/system_lists_tools")
@@ -2273,6 +2405,7 @@ def t_repl_quit(psi: Psi):
 def t_tui_quits(psi: Psi):
     # Drive the TUI through a pty, send /quit, expect a clean exit.
     raw = run_pty([psi.binary, "--tui"], [(b"", 0.5), (b"/quit\r", 1.0)])
+    raw.assert_clean_exit()
     text = strip_ansi(raw)
     # We don't require exact chrome; just confirm the Lua-rendered top
     # bar was painted before accepting /quit.
@@ -2309,7 +2442,8 @@ def t_tui_theme_applies_to_rendered_colors(psi: Psi):
         idle_drain=1.0,
         cwd=project,
     )
-    assert b"38;5;118" in raw, "configured TUI accent color did not reach rendered output"
+    raw.assert_clean_exit()
+    assert_bytes_contains(raw, b"38;5;118", "configured TUI accent color did not reach rendered output")
 
 
 @test("mode/tui_input_box_background")
@@ -2320,12 +2454,17 @@ def t_tui_input_box_background(psi: Psi):
         env_extra={"NO_COLOR": "", "TERM": "xterm-256color"},
         idle_drain=1.0,
     )
-    assert b"\x1b[0;7m" not in raw and b"\x1b[7m" not in raw, "input box should not use reverse-video"
-    assert b"\x1b[?25l" in raw, "redraw should keep the hardware cursor hidden"
-    assert b"\x1b[?2026h" in raw and b"\x1b[?2026l" in raw, "redraw should use synchronized terminal output"
-    assert b"\x1b[4m" in raw, "input box should render a Lua-owned cursor cell"
-    assert b"\x1b[48;5;238m" not in raw, "input box should not paint a filled background"
-    assert b"\x1b[38;5;245m" in raw, "input box border color did not reach rendered output"
+    raw.assert_clean_exit()
+    assert_true(b"\x1b[0;7m" not in raw and b"\x1b[7m" not in raw,
+                "input box should not use reverse-video")
+    assert_bytes_contains(raw, b"\x1b[?25l", "redraw should keep the hardware cursor hidden")
+    assert_true(b"\x1b[?2026h" in raw and b"\x1b[?2026l" in raw,
+                "redraw should use synchronized terminal output")
+    assert_bytes_contains(raw, b"\x1b[4m", "input box should render a Lua-owned cursor cell")
+    assert_bytes_not_contains(raw, b"\x1b[48;5;238m",
+                              "input box should not paint a filled background")
+    assert_bytes_contains(raw, b"\x1b[38;5;245m",
+                          "input box border color did not reach rendered output")
 
 
 @test("mode/tui_lf_submit")
@@ -2337,6 +2476,7 @@ def t_tui_lf_submit(psi: Psi):
             (b"/quit\n", 1.0),
         ],
     )
+    raw.assert_clean_exit()
     text = strip_ansi(raw)
     assert_true(
         ("repo" in text and "worktree" in text) or "cwd" in text,
@@ -2354,6 +2494,7 @@ def t_tui_multiline_prompt(psi: Psi):
             (b"/quit\r", 1.0),
         ],
     )
+    raw.assert_clean_exit()
     text = strip_ansi(raw)
     assert_contains(text, "ANTHROPIC_API_KEY is not set", "multiline input submitted")
 
@@ -2655,7 +2796,7 @@ def t_truncate_tail_partial(psi: Psi):
     )
     parts = out.strip().split("|")
     assert_equals(parts[0], "true", "single huge last line marked partial")
-    assert int(parts[1]) <= 50, f"partial tail exceeds byte cap: {out!r}"
+    assert_true(int(parts[1]) <= 50, f"partial tail exceeds byte cap: {out!r}")
 
 
 @test("truncate/line_clip")
@@ -2885,12 +3026,14 @@ def t_live_parallel_panels(psi: Psi):
                 b"Issue three separate bash tool_use blocks: "
                 b"sleep 3 && echo apple ; sleep 6 && echo banana ; "
                 b"sleep 9 && echo cherry. Then reply done.\r",
-                25.0,
+                60.0,
             ),
-            (b"/quit\r", 1.0),
+            (b"\x07", 2.0),
+            (b"/quit\r", 2.0),
         ],
-        idle_drain=2.0,
+        idle_drain=5.0,
     )
+    raw.assert_clean_exit()
     text = strip_ansi(raw)
     # Each fruit must appear in the rendered output (progress or final).
     # This is the semantic check: if all three appear, three tools ran
@@ -2908,8 +3051,46 @@ def t_live_parallel_panels(psi: Psi):
 
 
 # ---------------------------------------------------------------------------
-# Driver.
+# Pytest driver. The script entrypoint below preserves the old smoke.py CLI by
+# translating it into a pytest invocation.
 # ---------------------------------------------------------------------------
+
+
+def pytest_generate_tests(metafunc):
+    if "smoke_case" not in metafunc.fixturenames:
+        return
+    selected = _selected_tests(
+        metafunc.config.getoption("--filter"),
+        metafunc.config.getoption("--exclude") or [],
+    )
+    metafunc.parametrize("smoke_case", selected, ids=[case[0] for case in selected])
+
+
+@pytest.fixture
+def psi(request, tmp_path: Path):
+    binary = Path(request.config.getoption("--psi")).resolve()
+    if not binary.exists():
+        pytest.fail(f"psi binary not found at {binary}; build it or pass --psi", pytrace=False)
+    env = _smoke_env(tmp_path)
+    token = _CURRENT_TEST_ENV.set(env)
+    try:
+        yield Psi(str(binary), tmp_path, env)
+    finally:
+        _CURRENT_TEST_ENV.reset(token)
+
+
+def _pytest_run_live(config) -> bool:
+    return bool(os.environ.get("ANTHROPIC_API_KEY")) and not config.getoption("--no-live")
+
+
+def test_smoke_case(smoke_case, psi: Psi, request):
+    name, fn, meta = smoke_case
+    if meta["live"] and not _pytest_run_live(request.config):
+        pytest.skip("live smoke test requires ANTHROPIC_API_KEY")
+    try:
+        fn(psi)
+    except Fail as err:
+        pytest.fail(str(err), pytrace=False)
 
 
 def main() -> int:
@@ -2924,69 +3105,33 @@ def main() -> int:
                     help="skip live-agent tests even if ANTHROPIC_API_KEY is set")
     ap.add_argument("--list", action="store_true",
                     help="list test names and exit")
-    args = ap.parse_args()
+    args, pytest_args = ap.parse_known_args()
 
     if args.list:
-        for name, _fn, meta in TESTS:
+        for name, _fn, meta in _selected_tests(args.filter, args.exclude or []):
             tag = "(live)" if meta["live"] else ""
             print(f"{name} {tag}".rstrip())
         return 0
 
-    args.psi = str(Path(args.psi).resolve())
-    if not Path(args.psi).exists():
-        print(f"psi binary not found at {args.psi}; build it or pass --psi", file=sys.stderr)
+    binary = str(Path(args.psi).resolve())
+    if not Path(binary).exists():
+        print(f"psi binary not found at {binary}; build it or pass --psi", file=sys.stderr)
         return 1
 
-    have_key = "ANTHROPIC_API_KEY" in os.environ and os.environ["ANTHROPIC_API_KEY"]
-    run_live = bool(have_key) and not args.no_live
-
-    passed = 0
-    failed = 0
-    skipped = 0
-    total_start = time.time()
-
-    for name, fn, meta in TESTS:
-        if args.filter and args.filter not in name:
-            continue
-        if any(excluded in name for excluded in args.exclude):
-            skipped += 1
-            print(f"SKIP  {name}")
-            continue
-        if meta["live"] and not run_live:
-            skipped += 1
-            print(f"SKIP  {name}")
-            continue
-
-        # Per-test temp dir so each test is isolated.
-        with tempfile.TemporaryDirectory(prefix="psi-smoke-") as td:
-            psi = Psi(args.psi, Path(td))
-            t0 = time.time()
-            try:
-                fn(psi)
-            except Fail as err:
-                failed += 1
-                print(f"FAIL  {name}  ({time.time() - t0:.1f}s)")
-                print("      " + str(err).replace("\n", "\n      "))
-                continue
-            except Exception as err:  # noqa: BLE001
-                failed += 1
-                print(f"FAIL  {name}  ({time.time() - t0:.1f}s) -- unexpected {type(err).__name__}: {err}")
-                import traceback
-                traceback.print_exc()
-                continue
-            passed += 1
-            dt = time.time() - t0
-            extra = ""
-            if name == "live/concurrent_tools_wall_time":
-                el = getattr(t_live_parallel_walltime, "elapsed", None)
-                if el is not None:
-                    extra = f" (agent wall {el:.1f}s)"
-            print(f"ok    {name}  ({dt:.1f}s){extra}")
-
-    total = time.time() - total_start
-    print("---")
-    print(f"{passed} passed, {failed} failed, {skipped} skipped  ({total:.1f}s)")
-    return 0 if failed == 0 else 1
+    argv = [
+        "--rootdir", str(ROOT),
+        str(Path(__file__).resolve()),
+        "--psi", binary,
+        "-q",
+    ]
+    if args.filter:
+        argv.extend(["--filter", args.filter])
+    for excluded in args.exclude or []:
+        argv.extend(["--exclude", excluded])
+    if args.no_live:
+        argv.append("--no-live")
+    argv.extend(pytest_args)
+    return pytest.main(argv)
 
 
 if __name__ == "__main__":

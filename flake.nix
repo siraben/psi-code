@@ -294,7 +294,11 @@
             pkgs.fd
             pkgs.gdb
             pkgs.lua54Packages.luacheck
-            pkgs.python3
+            (pkgs.python3.withPackages (ps: [
+              ps.pexpect
+              ps.pyte
+              ps.pytest
+            ]))
             pkgs.ripgrep
             pkgs.stylua
             pkgs.tinycc
