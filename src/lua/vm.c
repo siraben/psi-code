@@ -262,6 +262,29 @@ static const long PSI_VM_READ_FILE_MAX_BYTES  = 262144l;
 
 #define PSI_VM_NOREF (-2)
 
+/* Infer analyzes Lua callbacks as roots, so make host-owned session fields
+ * visible as retained after mutation. Normal builds compile this to a no-op. */
+#ifdef __INFER__
+static const void *volatile psi_vm_infer_session_messages;
+static const void *volatile psi_vm_infer_session_token_prefix;
+static const void *volatile psi_vm_infer_session_id;
+static const void *volatile psi_vm_infer_session_path;
+static const void *volatile psi_vm_infer_session_parent_id;
+#endif
+
+static void psi_vm_session_mark_retained(const struct psi_session *session) {
+#ifdef __INFER__
+    if (session == NULL) return;
+    psi_vm_infer_session_messages = session->messages;
+    psi_vm_infer_session_token_prefix = session->token_prefix;
+    psi_vm_infer_session_id = session->id;
+    psi_vm_infer_session_path = session->path;
+    psi_vm_infer_session_parent_id = session->parent_id;
+#else
+    PSI_UNUSED(session);
+#endif
+}
+
 /* ------------------------------------------------------------------
  * cJSON <-> Lua table conversion
  * ------------------------------------------------------------------ */
@@ -1639,6 +1662,7 @@ static int lfn_session_append(lua_State *L) {
     } else {
         status = psi_session_append_with_data(s, psi_session_role_from_name(role), text, data);
     }
+    if (status == PSI_STATUS_OK) psi_vm_session_mark_retained(s);
     lua_pushboolean(L, status == PSI_STATUS_OK ? 1 : 0);
     return 1;
 }
@@ -1686,8 +1710,12 @@ static int lfn_session_set_id(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
     struct psi_session *s = host ? host->session : NULL;
     const char *id = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : NULL;
+    int status;
+
     if (!s) { lua_pushboolean(L, 0); return 1; }
-    lua_pushboolean(L, psi_session_set_id(s, id) == PSI_STATUS_OK ? 1 : 0);
+    status = psi_session_set_id(s, id);
+    if (status == PSI_STATUS_OK) psi_vm_session_mark_retained(s);
+    lua_pushboolean(L, status == PSI_STATUS_OK ? 1 : 0);
     return 1;
 }
 
@@ -1695,8 +1723,12 @@ static int lfn_session_set_path(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
     struct psi_session *s = host ? host->session : NULL;
     const char *path = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : NULL;
+    int status;
+
     if (!s) { lua_pushboolean(L, 0); return 1; }
-    lua_pushboolean(L, psi_session_set_path(s, path) == PSI_STATUS_OK ? 1 : 0);
+    status = psi_session_set_path(s, path);
+    if (status == PSI_STATUS_OK) psi_vm_session_mark_retained(s);
+    lua_pushboolean(L, status == PSI_STATUS_OK ? 1 : 0);
     return 1;
 }
 
@@ -1704,8 +1736,12 @@ static int lfn_session_set_parent_id(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
     struct psi_session *s = host ? host->session : NULL;
     const char *pid = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : NULL;
+    int status;
+
     if (!s) { lua_pushboolean(L, 0); return 1; }
-    lua_pushboolean(L, psi_session_set_parent_id(s, pid) == PSI_STATUS_OK ? 1 : 0);
+    status = psi_session_set_parent_id(s, pid);
+    if (status == PSI_STATUS_OK) psi_vm_session_mark_retained(s);
+    lua_pushboolean(L, status == PSI_STATUS_OK ? 1 : 0);
     return 1;
 }
 

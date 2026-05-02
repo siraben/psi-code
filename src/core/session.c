@@ -159,16 +159,46 @@ int psi_session_append_with_data_and_estimate(
     if (session == NULL) return PSI_STATUS_ERROR;
 
     if (session->count == session->capacity) {
-        size_t new_capacity = session->capacity == 0u ? 8u : session->capacity * 2u;
-        struct psi_message *new_messages = (struct psi_message *)realloc(
-            session->messages, new_capacity * sizeof(struct psi_message));
+        size_t max_messages = (size_t)-1 / sizeof(struct psi_message);
+        size_t max_prefixes = ((size_t)-1 / sizeof(size_t)) - 1u;
+        size_t new_capacity;
+        struct psi_message *new_messages;
         size_t *new_prefix;
+
+        if (session->capacity == 0u) {
+            new_capacity = 8u;
+        } else {
+            if (session->capacity > max_messages / 2u ||
+                session->capacity > max_prefixes / 2u) {
+                return PSI_STATUS_ERROR;
+            }
+            new_capacity = session->capacity * 2u;
+        }
+
+        if (new_capacity > max_messages || new_capacity > max_prefixes) {
+            return PSI_STATUS_ERROR;
+        }
+
+        new_messages = malloc(new_capacity * sizeof(*new_messages));
         if (new_messages == NULL) return PSI_STATUS_ERROR;
+
+        new_prefix = malloc((new_capacity + 1u) * sizeof(*new_prefix));
+        if (new_prefix == NULL) {
+            free(new_messages);
+            return PSI_STATUS_ERROR;
+        }
+
+        if (session->count > 0u) {
+            memcpy(new_messages, session->messages, session->count * sizeof(*new_messages));
+            memcpy(new_prefix, session->token_prefix, (session->count + 1u) * sizeof(*new_prefix));
+        } else {
+            new_prefix[0] = 0u;
+        }
+
+        free(session->messages);
+        free(session->token_prefix);
         session->messages = new_messages;
-        new_prefix = (size_t *)realloc(session->token_prefix, (new_capacity + 1u) * sizeof(size_t));
-        if (new_prefix == NULL) return PSI_STATUS_ERROR;
         session->token_prefix = new_prefix;
-        if (session->count == 0u) session->token_prefix[0] = 0u;
         session->capacity = new_capacity;
     }
 
