@@ -671,6 +671,17 @@ def t_tui_rainbow_renders_ansi(psi: Psi):
     assert b"016" in raw and b"231" in raw, "rainbow swatches did not render in TUI"
 
 
+@test("mode/tui_default")
+def t_tui_default(psi: Psi):
+    raw = run_pty(
+        [psi.binary],
+        [(b"", 0.8), (b"/rainbow\r", 1.5), (b"/quit\r", 1.0)],
+        env_extra={"NO_COLOR": "", "TERM": "xterm-256color"},
+        idle_drain=1.5,
+    )
+    assert b"xterm 256 background swatches" in raw, "bare psi did not launch TUI"
+
+
 @test("mode/tui_rainbow_after_normal_insert")
 def t_tui_rainbow_after_normal_insert(psi: Psi):
     raw = run_pty(
@@ -2234,6 +2245,7 @@ def t_agents_md(psi: Psi):
 def t_help(psi: Psi):
     out = psi.run("--help").stdout
     assert_contains(out, "--tui", "--tui in help")
+    assert_contains(out, "--repl", "--repl in help")
     assert_contains(out, "--thinking", "--thinking in help")
 
 
@@ -2253,9 +2265,8 @@ def t_print_text(psi: Psi):
 
 @test("mode/repl_quit")
 def t_repl_quit(psi: Psi):
-    # `:quit` should cleanly exit the REPL; psi also accepts this from
-    # interactive mode at startup.
-    psi.run(input_text=":quit\n")
+    # `:quit` should cleanly exit the line-editor shell.
+    psi.run("--repl", input_text=":quit\n")
 
 
 @test("mode/tui_quits")
