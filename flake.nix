@@ -32,9 +32,26 @@
             builtins.elem (nixpkgs.lib.getName pkg) [ "compcert" ];
         };
 
-        cosmoBase = import nixpkgs-cosmo { inherit system; };
+        # ESP-specific packages live in their own pkgs set built from
+        # the nixpkgs revision nixpkgs-esp-dev was tested against.
+        # Mixing the overlay onto current nixpkgs fails because the
+        # overlay's tools.nix references python310, which newer
+        # nixpkgs has dropped. Keeping two pkgs sets cleanly isolates
+        # the ESP toolchain from the rest of the project.
+        espPkgs = import nixpkgs-esp-dev.inputs.nixpkgs {
+          inherit system;
+          overlays = [ nixpkgs-esp-dev.overlays.default ];
+          # esptool's python deps include an ecdsa version flagged as
+          # insecure (CVE-2024-23342). We don't actually use ecdsa for
+          # anything; permit it so the closure resolves.
+          config.permittedInsecurePackages = [
+            "python3.13-ecdsa-0.19.1"
+            "python3.12-ecdsa-0.19.1"
+            "python3.11-ecdsa-0.19.1"
+          ];
+        };
 
-        espPkgs = nixpkgs-esp-dev.packages.${system} or {};
+        cosmoBase = import nixpkgs-cosmo { inherit system; };
 
         # Lua 5.5 source tarball used by components/lua-cmod. Fetched
         # at build time so we don't vendor Lua's source into the repo.
@@ -55,16 +72,11 @@
           hash = "sha256-TkPLWSN5QcPlL9D0kc/yhH0/puE9bFND24aj5NVDKYs=";
         };
 
-        # Espressif's QEMU fork. Upstream nixpkgs ships a generic
-        # qemu-system-xtensa, but it lacks the ESP32-specific
-        # peripheral models (WiFi simulation via openeth, eFuse,
-        # cache, etc.) the firmware needs to boot. We build the
-        # esp-develop branch of espressif/qemu, which adds those.
-        # Lazy: built only when something forces it (apps.qemu,
-        # tests/test_esp_*.py).
-        espQemu = pkgs.qemu.override {
-          hostCpuTargets = [ "xtensa-softmmu" ];
-        };
+        # nixpkgs-esp-dev's overlay exposes `qemu-esp32` — the
+        # Espressif QEMU fork built with all ESP32 peripheral models.
+        # It's the only QEMU that can actually boot psi's firmware
+        # past WiFi init (upstream qemu-system-xtensa stops there).
+        espQemu = espPkgs.qemu-esp32;
 
         # ---- curl with mbedTLS ------------------------------------------
 
@@ -421,8 +433,7 @@
         # esp-idf-esp32 toolchain provided by nixpkgs-esp-dev. Outputs
         # the merged-flash binary at $out/psi-firmware.bin which can be
         # passed straight to qemu-system-xtensa or esptool.
-        packages.firmware = if espPkgs ? esp-idf-esp32 then
-          pkgs.stdenv.mkDerivation {
+        packages.firmware = pkgs.stdenv.mkDerivation {
             pname = "psi-firmware";
             version = "0.1.0";
             src = ./.;
@@ -469,8 +480,11 @@
               cp build/psi_firmware.bin $out/psi.bin
               cp build/partition_table/partition-table.bin $out/partition-table.bin
               cp build/bootloader/bootloader.bin $out/bootloader.bin
-              # Merged image: bootloader + partition table + app, ready for QEMU.
-              esptool.py --chip esp32 merge_bin -o $out/psi-firmware.bin \
+              # Merged image padded to 4 MiB so qemu-system-xtensa
+              # accepts it (it requires 2/4/8/16 MiB flash images).
+              esptool.py --chip esp32 merge_bin \
+                --fill-flash-size 4MB \
+                -o $out/psi-firmware.bin \
                 0x1000  $out/bootloader.bin \
                 0x8000  $out/partition-table.bin \
                 0x10000 $out/psi.bin || true
@@ -479,12 +493,7 @@
 
             dontStrip = true;
             meta.description = "psi firmware image for ESP32";
-          }
-        else
-          pkgs.runCommand "psi-firmware-unavailable" {} ''
-            echo "nixpkgs-esp-dev did not expose esp-idf-esp32 for ${system}; cannot build firmware" >&2
-            exit 1
-          '';
+        };
 
         # ---- Apps -------------------------------------------------------
 
@@ -505,19 +514,31 @@
               name = "psi-qemu";
               runtimeInputs = [ espQemu self.packages.${system}.firmware ];
               text = ''
-                FW="${self.packages.${system}.firmware}/psi-firmware.bin"
-                echo "psi web chat: http://localhost:8000"
-                echo "firmware:    $FW"
+                FW_RO="${self.packages.${system}.firmware}/psi-firmware.bin"
+                PORT="''${PSI_QEMU_PORT:-8765}"
+                # The Nix store image is read-only but qemu opens
+                # flash read-write so it can persist NVS sectors. Copy
+                # to a writable scratch path on every launch.
+                WORK=$(mktemp -d -t psi-qemu.XXXXXX)
+                trap 'rm -rf "$WORK"' EXIT
+                FW="$WORK/flash.bin"
+                cp "$FW_RO" "$FW"
+                chmod u+w "$FW"
+                echo "psi web chat: http://localhost:$PORT"
+                echo "firmware:    $FW_RO"
+                # Espressif's qemu-system-xtensa accepts a flash image
+                # directly; the WiFi simulator wires up via open_eth
+                # and slirp NATs the guest's traffic to the host.
                 exec qemu-system-xtensa \
                   -nographic \
                   -machine esp32 \
                   -drive file="$FW",if=mtd,format=raw \
-                  -nic user,model=open_eth,hostfwd=tcp::8000-:80 \
+                  -nic "user,model=open_eth,hostfwd=tcp::$PORT-:80" \
                   "$@"
               '';
             };
           in "${qemuApp}/bin/psi-qemu";
-          meta.description = "Run psi firmware in qemu-system-xtensa";
+          meta.description = "Run psi firmware in Espressif QEMU";
         };
 
         # `nix run .#flash` — write the firmware to a connected ESP32.
@@ -527,9 +548,7 @@
           program = let
             flashApp = pkgs.writeShellApplication {
               name = "psi-flash";
-              runtimeInputs = (lib.optionals (espPkgs ? esp-idf-esp32) [
-                espPkgs.esp-idf-esp32
-              ]) ++ [ self.packages.${system}.firmware ];
+              runtimeInputs = [ espPkgs.esp-idf-esp32 self.packages.${system}.firmware ];
               text = ''
                 PORT="''${PSI_FLASH_PORT:-/dev/ttyUSB0}"
                 FW="${self.packages.${system}.firmware}/psi-firmware.bin"
@@ -712,11 +731,9 @@
         # and python test deps so `nix develop .#esp` lands in a
         # working firmware environment.
         devShells.esp = pkgs.mkShell {
-          packages = (lib.optionals (espPkgs ? esp-idf-esp32) [
+          packages = [
             espPkgs.esp-idf-esp32
-          ]) ++ (lib.optionals (espPkgs ? esp-qemu) [
-            espPkgs.esp-qemu
-          ]) ++ [
+            espPkgs.qemu-esp32
             pkgs.cmake
             pkgs.ninja
             pkgs.gcc

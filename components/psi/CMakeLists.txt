@@ -51,6 +51,7 @@ idf_component_register(
     REQUIRES
         json
         esp_event
+        esp_eth
         esp_http_client
         esp_http_server
         esp-tls

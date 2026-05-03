@@ -35,7 +35,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-HOST_PORT = 8000
+HOST_PORT = int(os.environ.get("PSI_QEMU_PORT", "8765"))
 
 
 def _firmware_enabled(request) -> bool:

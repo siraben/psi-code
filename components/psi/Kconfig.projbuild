@@ -1,0 +1,35 @@
+menu "psi firmware"
+
+config PSI_WIFI_SSID
+    string "WiFi SSID for STA mode"
+    default ""
+    help
+        Used when CONFIG_PSI_NET_OPENETH is disabled. Set the SSID of
+        the access point psi should join on real hardware. Leave empty
+        to seed it via NVS at runtime.
+
+config PSI_WIFI_PASS
+    string "WiFi password for STA mode"
+    default ""
+    help
+        Used when CONFIG_PSI_NET_OPENETH is disabled.
+
+config PSI_MDNS_HOSTNAME
+    string "mDNS hostname"
+    default "psi"
+    help
+        Hostname advertised over mDNS. Currently the firmware does not
+        register an mDNS service (the mdns component is in a managed
+        component fetch path the Nix sandbox cannot reach), but this
+        is reserved for future use.
+
+config PSI_NET_OPENETH
+    bool "Use OpenCores Ethernet (QEMU)"
+    default y
+    help
+        Enable the OpenCores Ethernet driver instead of WiFi. Required
+        when running under qemu-system-xtensa: QEMU does not simulate
+        the ESP32 WiFi PHY but does simulate open_eth. Disable on
+        real hardware.
+
+endmenu

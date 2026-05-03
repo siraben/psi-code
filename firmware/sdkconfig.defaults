@@ -8,6 +8,11 @@ CONFIG_PSI_WIFI_SSID=""
 CONFIG_PSI_WIFI_PASS=""
 CONFIG_PSI_MDNS_HOSTNAME="psi"
 
+# Network choice: openeth for QEMU bring-up. Real-hardware builds
+# should override CONFIG_PSI_NET_OPENETH=n + the WiFi creds above.
+CONFIG_PSI_NET_OPENETH=y
+CONFIG_ETH_USE_OPENETH=y
+
 # Bigger main task stack — Lua + cJSON parsing peak well over the
 # 4 KiB default and we crash without this.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
