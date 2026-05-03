@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <termios.h>
 #include <unistd.h>
-#include <lua.h>
 #include "psi/abort.h"
 #include "psi/runtime.h"
 #include "psi/session.h"
@@ -24,6 +23,16 @@ static int psi_tui_has_original_termios = 0;
 
 #define PSI_TUI_ENABLE_MOUSE "\033[?1000h\033[?1006h"
 #define PSI_TUI_DISABLE_MOUSE "\033[?1006l\033[?1000l"
+#define PSI_TUI_ENTER_SEQ "\033[?1049h" PSI_TUI_ENABLE_MOUSE "\033[?25h\033[2J\033[H"
+
+static void psi_tui_apply_raw_mode(struct termios *attrs) {
+    attrs->c_iflag &= (tcflag_t) ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+    attrs->c_oflag &= (tcflag_t) ~(OPOST);
+    attrs->c_cflag |= (tcflag_t)CS8;
+    attrs->c_lflag &= (tcflag_t) ~(ECHO | ICANON | IEXTEN | ISIG);
+    attrs->c_cc[VMIN] = 0;
+    attrs->c_cc[VTIME] = 0;
+}
 
 static int psi_tui_enter_terminal(void) {
     struct termios raw_attrs;
@@ -34,17 +43,12 @@ static int psi_tui_enter_terminal(void) {
     }
     psi_tui_has_original_termios = 1;
     raw_attrs = psi_tui_original_termios;
-    raw_attrs.c_iflag &= (tcflag_t) ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
-    raw_attrs.c_oflag &= (tcflag_t) ~(OPOST);
-    raw_attrs.c_cflag |= (tcflag_t)CS8;
-    raw_attrs.c_lflag &= (tcflag_t) ~(ECHO | ICANON | IEXTEN | ISIG);
-    raw_attrs.c_cc[VMIN] = 0;
-    raw_attrs.c_cc[VTIME] = 0;
+    psi_tui_apply_raw_mode(&raw_attrs);
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_attrs) != 0) {
         perror("tcsetattr");
         return PSI_STATUS_ERROR;
     }
-    fputs("\033[?1049h" PSI_TUI_ENABLE_MOUSE "\033[?25h\033[2J\033[H", stdout);
+    fputs(PSI_TUI_ENTER_SEQ, stdout);
     fflush(stdout);
     return PSI_STATUS_OK;
 }
@@ -72,14 +76,9 @@ void psi_tui_resume_terminal(void) {
         return;
     }
     raw_attrs = psi_tui_original_termios;
-    raw_attrs.c_iflag &= (tcflag_t) ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
-    raw_attrs.c_oflag &= (tcflag_t) ~(OPOST);
-    raw_attrs.c_cflag |= (tcflag_t)CS8;
-    raw_attrs.c_lflag &= (tcflag_t) ~(ECHO | ICANON | IEXTEN | ISIG);
-    raw_attrs.c_cc[VMIN] = 0;
-    raw_attrs.c_cc[VTIME] = 0;
+    psi_tui_apply_raw_mode(&raw_attrs);
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_attrs);
-    fputs("\033[?1049h" PSI_TUI_ENABLE_MOUSE "\033[?25h\033[2J\033[H", stdout);
+    fputs(PSI_TUI_ENTER_SEQ, stdout);
     fflush(stdout);
 }
 
@@ -100,55 +99,6 @@ static int psi_tui_install_atexit(void) {
         installed = 1;
     }
     return PSI_STATUS_OK;
-}
-
-static int psi_tui_run_lua(struct psi_vm *vm, const struct psi_cli_options *options) {
-    int ok;
-
-    lua_getglobal(vm->L, "psi");
-    lua_getfield(vm->L, -1, "modes");
-    lua_getfield(vm->L, -1, "run");
-    lua_remove(vm->L, -2);
-    lua_remove(vm->L, -2);
-    if (lua_type(vm->L, -1) != LUA_TFUNCTION) {
-        fprintf(stderr, "psi.modes.run is not a function\n");
-        lua_pop(vm->L, 1);
-        return PSI_STATUS_ERROR;
-    }
-
-    lua_newtable(vm->L);
-    lua_pushstring(vm->L, "tui");
-    lua_setfield(vm->L, -2, "mode");
-    if (options->payload != NULL) {
-        lua_pushstring(vm->L, options->payload);
-        lua_setfield(vm->L, -2, "payload");
-    }
-    if (options->session_file != NULL) {
-        lua_pushstring(vm->L, options->session_file);
-        lua_setfield(vm->L, -2, "session_file");
-    }
-    if (options->model != NULL) {
-        lua_pushstring(vm->L, options->model);
-        lua_setfield(vm->L, -2, "model");
-    }
-    if (options->thinking_level != NULL) {
-        lua_pushstring(vm->L, options->thinking_level);
-        lua_setfield(vm->L, -2, "thinking_level");
-    }
-    lua_pushinteger(vm->L, (lua_Integer)options->max_tokens);
-    lua_setfield(vm->L, -2, "max_tokens");
-    lua_pushinteger(vm->L, (lua_Integer)options->keep_recent);
-    lua_setfield(vm->L, -2, "keep_recent");
-
-    if (lua_pcall(vm->L, 1, 1, 0) != LUA_OK) {
-        fprintf(stderr, "psi.modes.run error: %s\n", lua_tostring(vm->L, -1));
-        lua_pop(vm->L, 1);
-        return PSI_STATUS_ERROR;
-    }
-
-    ok = lua_toboolean(vm->L, -1);
-    lua_pop(vm->L, 1);
-    return ok ? PSI_STATUS_OK : PSI_STATUS_ERROR;
 }
 
 int psi_run_tui_mode(const struct psi_cli_options *options) {
@@ -187,7 +137,7 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
     }
 
     psi_vm_set_tui_active(&vm, 1);
-    status = psi_tui_run_lua(&vm, options);
+    status = psi_vm_run_lua_mode(&vm, "tui", options);
     psi_vm_set_tui_active(&vm, 0);
 
     psi_tui_leave_terminal();

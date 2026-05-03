@@ -20,7 +20,6 @@ int psi_vm_init(
 void psi_vm_destroy(struct psi_vm *vm);
 void psi_vm_bind_session(struct psi_vm *vm, struct psi_session *session);
 void psi_vm_set_tui_active(struct psi_vm *vm, int active);
-int psi_vm_eval_to_string(struct psi_vm *vm, const char *expression, char **output_text);
 
 /* Bridge into the Lua agent layer. The observer is wrapped as a Lua
  * table whose callbacks invoke the C function pointers. abort_signal
@@ -37,5 +36,10 @@ int psi_vm_run_agent_compact(struct psi_vm *vm, size_t keep_recent,
  * the actual JSONL I/O lives in lua/psi/session.lua. */
 int psi_vm_session_save(struct psi_vm *vm, const char *path);
 int psi_vm_session_load(struct psi_vm *vm, const char *path);
+
+/* Run psi.modes.run(opts) with the given CLI options packed into a Lua
+ * table. Used by both CLI and TUI mode dispatchers. */
+struct psi_cli_options;
+int psi_vm_run_lua_mode(struct psi_vm *vm, const char *mode, const struct psi_cli_options *options);
 
 #endif
