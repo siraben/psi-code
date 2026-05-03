@@ -67,4 +67,9 @@ int psi_http_stream_poll(
  * the caller has decided to abandon the transfer (abort signal). */
 long psi_http_stream_finish(struct psi_http_stream *h, char **error_message);
 
+/* Consume a stream handle slot, clear it before joining/freeing the
+ * stream, and return 0 when the slot is already empty. This is for
+ * owning containers such as Lua userdata finalizers. */
+long psi_http_stream_finish_owned(struct psi_http_stream **slot, char **error_message);
+
 #endif

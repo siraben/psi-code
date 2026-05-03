@@ -374,14 +374,10 @@ int psi_http_stream_poll(
     return result;
 }
 
-long psi_http_stream_finish(struct psi_http_stream *h, char **error_message) {
+static long psi_http_stream_finish_live(struct psi_http_stream *h, char **error_message) {
     long status;
     CURLcode code;
 
-    if (h == NULL)
-        return -1l;
-    if (error_message != NULL)
-        *error_message = NULL;
     if (h->thread_started) {
         pthread_join(h->thread, NULL);
         h->thread_started = 0;
@@ -404,4 +400,24 @@ long psi_http_stream_finish(struct psi_http_stream *h, char **error_message) {
     free(h);
 
     return (code == CURLE_OK) ? status : -1l;
+}
+
+long psi_http_stream_finish(struct psi_http_stream *h, char **error_message) {
+    if (error_message != NULL)
+        *error_message = NULL;
+    if (h == NULL)
+        return -1l;
+    return psi_http_stream_finish_live(h, error_message);
+}
+
+long psi_http_stream_finish_owned(struct psi_http_stream **slot, char **error_message) {
+    struct psi_http_stream *h;
+
+    if (error_message != NULL)
+        *error_message = NULL;
+    if (slot == NULL || *slot == NULL)
+        return 0l;
+    h = *slot;
+    *slot = NULL;
+    return psi_http_stream_finish_live(h, error_message);
 }

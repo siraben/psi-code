@@ -1820,16 +1820,24 @@ static void psi_lua_free_headers(char **headers, size_t count) {
 
 #define PSI_HTTP_STREAM_MT "psi.http_stream"
 
-static struct psi_http_stream **psi_vm_http_stream_ud_check(lua_State *L, int idx) {
-    return (struct psi_http_stream **)luaL_checkudata(L, idx, PSI_HTTP_STREAM_MT);
+struct psi_vm_http_stream_ud {
+    struct psi_http_stream *stream;
+};
+
+static struct psi_vm_http_stream_ud *psi_vm_http_stream_ud_check(lua_State *L, int idx) {
+    struct psi_vm_http_stream_ud *ud;
+
+    ud = (struct psi_vm_http_stream_ud *)luaL_checkudata(L, idx, PSI_HTTP_STREAM_MT);
+    if (ud == NULL) {
+        luaL_error(L, "invalid http stream handle");
+        abort();
+    }
+    return ud;
 }
 
 static int lfn_http_stream_gc(lua_State *L) {
-    struct psi_http_stream **ud = psi_vm_http_stream_ud_check(L, 1);
-    if (*ud != NULL) {
-        psi_http_stream_finish(*ud, NULL);
-        *ud = NULL;
-    }
+    struct psi_vm_http_stream_ud *ud = psi_vm_http_stream_ud_check(L, 1);
+    psi_http_stream_finish_owned(&ud->stream, NULL);
     return 0;
 }
 
@@ -1841,7 +1849,7 @@ static int lfn_http_stream_begin(lua_State *L) {
     size_t header_count;
     const struct psi_host_context *host;
     struct psi_http_stream *h;
-    struct psi_http_stream **ud;
+    struct psi_vm_http_stream_ud *ud;
     int status;
 
     luaL_checktype(L, 2, LUA_TTABLE);
@@ -1863,14 +1871,14 @@ static int lfn_http_stream_begin(lua_State *L) {
         return 2;
     }
 
-    ud = (struct psi_http_stream **)lua_newuserdata(L, sizeof(*ud));
-    *ud = h;
+    ud = (struct psi_vm_http_stream_ud *)lua_newuserdata(L, sizeof(*ud));
+    ud->stream = h;
     luaL_setmetatable(L, PSI_HTTP_STREAM_MT);
     return 1;
 }
 
 static int lfn_http_stream_poll(lua_State *L) {
-    struct psi_http_stream **ud;
+    struct psi_vm_http_stream_ud *ud;
     struct psi_http_stream *h;
     int timeout_ms;
     char *chunk;
@@ -1878,7 +1886,7 @@ static int lfn_http_stream_poll(lua_State *L) {
     int result;
 
     ud = psi_vm_http_stream_ud_check(L, 1);
-    h = *ud;
+    h = ud->stream;
     if (h == NULL) {
         return luaL_error(L, "http_stream_poll: handle already finished");
     }
@@ -1904,24 +1912,17 @@ static int lfn_http_stream_poll(lua_State *L) {
 }
 
 static int lfn_http_stream_finish(lua_State *L) {
-    struct psi_http_stream **ud;
-    struct psi_http_stream *h;
+    struct psi_vm_http_stream_ud *ud;
     long status;
     char *error_message;
 
-    ud = psi_vm_http_stream_ud_check(L, 1);
+    ud = (struct psi_vm_http_stream_ud *)luaL_checkudata(L, 1, PSI_HTTP_STREAM_MT);
     if (ud == NULL) {
         return luaL_error(L, "http_stream_finish: invalid stream handle");
     }
-    h = *ud;
-    if (h == NULL) {
-        /* Idempotent: explicit finish after GC, or double-finish. */
-        lua_pushinteger(L, 0);
-        return 1;
-    }
-    *ud = NULL; /* flag consumed before the C call so __gc is a no-op */
+
     error_message = NULL;
-    status = psi_http_stream_finish(h, &error_message);
+    status = psi_http_stream_finish_owned(&ud->stream, &error_message);
     lua_pushinteger(L, (lua_Integer)status);
     if (status < 0 && error_message != NULL) {
         lua_pushstring(L, error_message);
