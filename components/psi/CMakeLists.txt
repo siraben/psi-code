@@ -44,6 +44,15 @@ option(PSI_GPIO_INTROSPECTION "Expose /gpio endpoint for the host dashboard pin 
 # the embedded Scheme stack; turn off when running the full agent.
 option(PSI_USE_CHIBI_PROMPT "Build the system prompt with chibi-scheme at boot" OFF)
 
+# PSI_USE_FORTH_PROMPT is the same idea as PSI_USE_CHIBI_PROMPT but
+# uses zforth (~10 KiB code + 2 KiB dict + 256 B stacks). zforth's
+# footprint is small enough that the chibi-fragmentation problem
+# doesn't apply — flipping this on leaves the agent's HTTPS path
+# fully working. Off by default only because the baked-in C prompt
+# is the simplest possible thing; flip on to demo the embedded Forth
+# stack alongside a working agent.
+option(PSI_USE_FORTH_PROMPT "Build the system prompt with zforth at boot" OFF)
+
 set(PSI_EMBED_TOOL "${CMAKE_CURRENT_BINARY_DIR}/psi_embed")
 set(PSI_EMBED_LUA  "${CMAKE_CURRENT_BINARY_DIR}/embedded_lua.c")
 set(PSI_EMBED_DOCS "${CMAKE_CURRENT_BINARY_DIR}/embedded_docs.c")
@@ -70,6 +79,7 @@ set(PSI_C_SOURCES
     "${PSI_ROOT}/src/backend/esp/esp_observer.c"
     "${PSI_ROOT}/src/backend/esp/esp_ws_server.c"
     "${PSI_ROOT}/src/backend/esp/esp_chibi.c"
+    "${PSI_ROOT}/src/backend/esp/esp_forth.c"
     ${PSI_EMBED_LUA}
     ${PSI_EMBED_DOCS}
     ${PSI_EMBED_HTML}
@@ -94,6 +104,7 @@ idf_component_register(
     PRIV_REQUIRES
         lua-cmod
         chibi-cmod
+        forth-cmod
 )
 
 # Capability gates and HTTP backend selection. -DPSI_CAP_FILESYSTEM=0
@@ -133,6 +144,12 @@ if(PSI_USE_CHIBI_PROMPT)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_USE_CHIBI_PROMPT=1)
 else()
     target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_USE_CHIBI_PROMPT=0)
+endif()
+
+if(PSI_USE_FORTH_PROMPT)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_USE_FORTH_PROMPT=1)
+else()
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_USE_FORTH_PROMPT=0)
 endif()
 
 # ESP-IDF v5.5+ uses C23-ish dialect for its headers; we let the

@@ -30,4 +30,10 @@ const char *psi_esp_get_system_prompt(void);
  * OOMs (no-PSRAM ESP32 case). */
 char *psi_esp_chibi_build_system_prompt(void);
 
+/* zForth glue. Same shape as the chibi version, but runs the
+ * prompt-builder through a tiny Forth instead. The footprint
+ * (~12 KiB total) is small enough not to starve mbedTLS, so unlike
+ * the chibi path this works alongside a live agent. */
+char *psi_esp_forth_build_system_prompt(void);
+
 #endif

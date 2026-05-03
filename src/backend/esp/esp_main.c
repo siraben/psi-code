@@ -283,14 +283,25 @@ void psi_esp_main_run(void) {
             ESP_LOGW(TAG, "system prompt build (Lua) failed; falling back to baked-in");
         }
     }
+#if PSI_USE_FORTH_PROMPT
+    /* zForth path: tiny stack-based Forth, ~12 KiB total state.
+     * Small enough that mbedTLS still gets its handshake buffers
+     * afterward (the failure mode chibi hits with its 96 KiB
+     * carve). See PSI_USE_FORTH_PROMPT in components/psi/CMakeLists.txt. */
+    if (psi_esp_get_system_prompt() == NULL) {
+        char *fth = psi_esp_forth_build_system_prompt();
+        if (fth != NULL) {
+            ESP_LOGI(TAG, "system prompt: from zforth (%u bytes)", (unsigned)strlen(fth));
+            psi_esp_set_system_prompt(fth);
+        } else {
+            ESP_LOGW(TAG, "system prompt: zforth failed; falling back");
+        }
+    }
+#endif
 #if PSI_USE_CHIBI_PROMPT
-    /* Chibi-Scheme fallback. Lua VM normally builds the prompt via
-     * psi.prompt.system_prompt() but its module graph OOMs on
-     * no-PSRAM hardware. Chibi's runtime has a much smaller fixed
-     * heap (96 KiB, configured in chibi-cmod) and stands up
-     * reliably. Off by default — see the option in
-     * components/psi/CMakeLists.txt for the heap-vs-HTTPS tradeoff.
-     */
+    /* Chibi-Scheme path: fuller scripting language than zforth, but
+     * 96 KiB heap carve fragments the pool enough that
+     * esp_http_client_init starves afterward on a no-PSRAM ESP32. */
     if (psi_esp_get_system_prompt() == NULL) {
         char *scm = psi_esp_chibi_build_system_prompt();
         if (scm != NULL) {
