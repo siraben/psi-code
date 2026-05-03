@@ -82,6 +82,27 @@ jobs:
           mkdir -p "$HOME" "$XDG_CACHE_HOME"
           nix run .#infer
 
+  scan-build:
+    name: Clang static analyzer
+    runs-on: docker
+    steps:
+      - name: Checkout
+        run: |
+          token="${FORGEJO_TOKEN:-$GITHUB_TOKEN}"
+          auth_header="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
+          git init .
+          git remote add origin "${FORGEJO_CI_URL%/}/${FORGEJO_CI_REPOSITORY}"
+          GIT_TERMINAL_PROMPT=0 git -c "http.extraHeader=Authorization: Basic $auth_header" fetch --quiet --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+
+      - name: Run scan-build
+        run: |
+          export HOME="$PWD/.home"
+          export XDG_CACHE_HOME="$PWD/.cache"
+          export SCAN_BUILD_BUILD_DIR="/tmp/psi-ci-${GITHUB_RUN_ID:-local}-${GITHUB_JOB:-scan-build}-${GITHUB_RUN_ATTEMPT:-1}-build"
+          mkdir -p "$HOME" "$XDG_CACHE_HOME"
+          nix run .#scan-build
+
   feature-matrix:
     name: Build and smoke (${{ matrix.name }})
     runs-on: docker

@@ -113,6 +113,10 @@ static char *psi_vm_path_join(const char *base, const char *name) {
     base_len = strlen(base);
     name_len = strlen(name);
     need_sep = (base[base_len - 1u] == '/' || base[base_len - 1u] == '\\') ? 0u : 1u;
+    if (base_len > (size_t)-1 - need_sep)
+        return NULL;
+    if (name_len > (size_t)-1 - base_len - need_sep - 1u)
+        return NULL;
     out = (char *)malloc(base_len + need_sep + name_len + 1u);
     if (out == NULL)
         return NULL;
@@ -853,6 +857,7 @@ static int lfn_read_file(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
     FILE *f;
     long size;
+    size_t size_n;
     size_t read_n;
     char *buffer;
 
@@ -872,26 +877,27 @@ static int lfn_read_file(lua_State *L) {
         lua_pushnil(L);
         return 1;
     }
+    size_n = (size_t)size;
     if (fseek(f, 0l, SEEK_SET) != 0) {
         fclose(f);
         lua_pushnil(L);
         return 1;
     }
-    buffer = (char *)malloc((size_t)size + 1u);
+    buffer = (char *)malloc(size_n + 1u);
     if (!buffer) {
         fclose(f);
         lua_pushnil(L);
         return 1;
     }
-    read_n = fread(buffer, 1u, (size_t)size, f);
+    read_n = fread(buffer, 1u, size_n, f);
     fclose(f);
-    if ((long)read_n != size) {
+    if (read_n != size_n) {
         free(buffer);
         lua_pushnil(L);
         return 1;
     }
-    buffer[size] = '\0';
-    lua_pushlstring(L, buffer, (size_t)size);
+    buffer[size_n] = '\0';
+    lua_pushlstring(L, buffer, size_n);
     free(buffer);
     return 1;
 }
@@ -973,6 +979,14 @@ static int lfn_read_file_slice(lua_State *L) {
                 last_was_nl = 1;
             }
         }
+        if (read_count < sizeof(read_buffer))
+            break;
+    }
+    if (ferror(f)) {
+        free(buffer);
+        fclose(f);
+        lua_pushnil(L);
+        return 1;
     }
     fclose(f);
     if (saw_any && !last_was_nl)

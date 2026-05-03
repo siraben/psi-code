@@ -18,6 +18,9 @@ INSTALL_DIR     ?= $(INSTALL) -d
 CPPCHECK        ?= cppcheck
 CLANG_FORMAT    ?= clang-format
 LUACHECK        ?= luacheck
+SCAN_BUILD      ?= scan-build-py
+SCAN_BUILD_CC   ?= gcc
+SCAN_BUILD_ANALYZER ?= clang
 STYLUA          ?= stylua
 
 # ---- Feature gates ----
@@ -212,6 +215,15 @@ analyze-gcc:
 	$(MAKE) clean
 	$(MAKE) CFLAGS="-O2 -fanalyzer"
 
+analyze-scan-build:
+	rm -rf $(BUILD_DIR) $(BUILD_DIR)-scan-build
+	$(SCAN_BUILD) --status-bugs \
+		--intercept-first \
+		--use-cc=$(SCAN_BUILD_CC) \
+		--use-analyzer=$(SCAN_BUILD_ANALYZER) \
+		--output=$(BUILD_DIR)-scan-build \
+		$(MAKE) CC=$(SCAN_BUILD_CC) HOST_CC=$(SCAN_BUILD_CC)
+
 analyze-infer: $(OBJECTS)
 
 analyze: analyze-cppcheck analyze-gcc
@@ -224,5 +236,5 @@ check-build-configs:
 
 .PHONY: all clean install \
         lint lint-lua lint-c format format-lua format-c check-format-c \
-        analyze analyze-cppcheck analyze-gcc analyze-infer \
+        analyze analyze-cppcheck analyze-gcc analyze-scan-build analyze-infer \
         check-build-configs

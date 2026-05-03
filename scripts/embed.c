@@ -79,7 +79,8 @@ static unsigned char *slurp(const char *path, size_t *len_out) {
     size = ftell(f);
     if (size < 0)
         goto out_close;
-    rewind(f);
+    if (fseek(f, 0, SEEK_SET) != 0)
+        goto out_close;
     buf = malloc((size_t)size + 1u);
     if (!buf)
         goto out_close;
@@ -187,7 +188,6 @@ int main(int argc, char **argv) {
     printf("#include \"psi/embedded_data.h\"\n\n");
 
     status = 1;
-    count = 0u;
     raw_lens = NULL;
     zlen = NULL;
     syms = NULL;

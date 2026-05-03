@@ -413,6 +413,46 @@
           '';
         };
 
+        # `nix run .#scan-build` — Clang Static Analyzer.
+        apps.scan-build = let
+          curl = curlWithMbedtls pkgs;
+          lua = luaFor pkgs;
+        in mkApp {
+          name = "psi-scan-build";
+          description = "Run Clang Static Analyzer";
+          extraInputs = [
+            pkgs.clang
+            pkgs.clang-tools
+            pkgs.gcc
+            pkgs.scan-build-py
+          ];
+          text = ''
+            cd "''${PSI_SRC:-$PWD}"
+            scan_cppflags=()
+            ${lib.optionalString pkgs.stdenv.isLinux ''
+              scan_cppflags+=(
+                "-isystem" "$(${pkgs.gcc}/bin/gcc -print-file-name=include)"
+                "-isystem" "${pkgs.glibc.dev}/include"
+              )
+            ''}
+            make_args=(
+              "BUILD_DIR=''${SCAN_BUILD_BUILD_DIR:-build-scan-build}"
+              "analyze-scan-build"
+              "CPPFLAGS=''${scan_cppflags[*]}"
+              "PSI_CFLAGS_LUA=-I${lib.getDev lua}/include"
+              "PSI_LIBS_LUA=-L${lib.getLib lua}/lib -llua"
+              "PSI_CFLAGS_CJSON=-I${lib.getDev pkgs.cjson}/include -I${lib.getDev pkgs.cjson}/include/cjson"
+              "PSI_CFLAGS_CURL=-I${lib.getDev curl}/include"
+              "PSI_CFLAGS_ZLIB=-I${lib.getDev pkgs.zlib}/include"
+              "PSI_CFLAGS_EDIT=-I${lib.getDev pkgs.libedit}/include -I${lib.getDev pkgs.libedit}/include/editline"
+              "PSI_CFLAGS_ARGTABLE=-I${lib.getDev pkgs.argtable}/include"
+              "HOST_CFLAGS_ZLIB=''${scan_cppflags[*]} -I${lib.getDev pkgs.zlib}/include"
+              "HOST_LIBS_ZLIB=-L${lib.getLib pkgs.zlib}/lib -lz"
+            )
+            make "''${make_args[@]}"
+          '';
+        };
+
         # `nix run .#lint` — Lua formatting/lint + C static analysis.
         apps.lint = mkApp {
           name = "psi-lint";
@@ -474,6 +514,8 @@
             mkdir -p "$build_dir"
             infer run \
               --fail-on-issue \
+              --cost \
+              --print-active-checkers \
               --force-integration make \
               --results-dir "$results_dir" \
               -- make "''${make_args[@]}"

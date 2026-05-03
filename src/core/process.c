@@ -30,8 +30,13 @@ static int psi_process_append_bytes(
     char **buffer, size_t *length, size_t *capacity, const char *data, size_t bytes) {
     char *next_buffer;
     size_t next_capacity;
+    size_t required;
 
-    if (*length + bytes + 1u <= *capacity) {
+    if (*length > (size_t)-1 - bytes - 1u)
+        return PSI_STATUS_ERROR;
+    required = *length + bytes + 1u;
+
+    if (required <= *capacity) {
         memcpy(*buffer + *length, data, bytes);
         *length += bytes;
         (*buffer)[*length] = '\0';
@@ -39,7 +44,9 @@ static int psi_process_append_bytes(
     }
 
     next_capacity = *capacity == 0u ? 4096u : *capacity;
-    while (*length + bytes + 1u > next_capacity) {
+    while (required > next_capacity) {
+        if (next_capacity > (size_t)-1 / 2u)
+            return PSI_STATUS_ERROR;
         next_capacity *= 2u;
     }
 
@@ -223,23 +230,29 @@ int psi_process_poll(
         read_count = read(h->pipe_fd, read_buffer, sizeof(read_buffer));
         if (read_count > 0) {
             char *copy;
+            size_t read_size;
+
+            read_size = (size_t)read_count;
+            if (read_size > sizeof(read_buffer))
+                return -1;
 
             if (chunk != NULL) {
-                copy = (char *)malloc((size_t)read_count);
+                copy = (char *)malloc(read_size + 1u);
                 if (copy == NULL)
                     return -1;
-                memcpy(copy, read_buffer, (size_t)read_count);
+                memcpy(copy, read_buffer, read_size);
+                copy[read_size] = '\0';
                 *chunk = copy;
             }
             if (chunk_len != NULL)
-                *chunk_len = (size_t)read_count;
+                *chunk_len = read_size;
 
             /* Also stash into the internal buffer so finish() can
              * reassemble even if the caller didn't consume every
              * chunk. Respect the 256 KiB ceiling; once full we
              * stop buffering but still return to the caller. */
             if (h->output_length < PSI_PROCESS_OUTPUT_MAX_BYTES) {
-                size_t to_copy = (size_t)read_count;
+                size_t to_copy = read_size;
                 if (h->output_length + to_copy > PSI_PROCESS_OUTPUT_MAX_BYTES) {
                     h->truncated = 1;
                     to_copy = PSI_PROCESS_OUTPUT_MAX_BYTES - h->output_length;
