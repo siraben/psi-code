@@ -6,7 +6,7 @@
 #define PSI_VERSION "0.1.0"
 
 #ifndef PSI_LUA_BOOT_FILE
-#define PSI_LUA_BOOT_FILE "lua/boot.lua"
+#define PSI_LUA_BOOT_FILE ""
 #endif
 
 #define PSI_UNUSED(x) ((void)(x))

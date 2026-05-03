@@ -7,7 +7,7 @@ the same minimal harness philosophy while rebuilding the core around a simpler
 runtime:
 
 - C89 host runtime
-- Lua 5.4 as the embedded extension language
+- Lua 5.5 as the embedded extension language
 - Nix flake based development and packaging
 - A small, explicit core that grows from a working vertical slice
 
@@ -27,8 +27,8 @@ This repository currently contains:
 - `libedit` for interactive line editing without the GPL constraint of GNU Readline
 - ANSI terminal control for the full-screen TUI
 - `zlib` to gzip-compress embedded Lua sources and docs inside the binary
-- an embedded Lua 5.4 runtime with host glue in `src/lua/vm.c` and a
-  compressed embed-table (`include/psi/embedded_lua.h`) so portable
+- an embedded Lua 5.5 runtime with host glue in `src/lua/vm.c` and a
+  compressed embed-table (`include/psi/embedded_data.h`) so portable
   static binaries carry their own Lua bootstrap and documentation
 - a Lua bootstrap layer under `lua/` that owns the tool registry,
   prompt assembly, session records, render/markdown/diff helpers,

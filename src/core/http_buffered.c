@@ -12,6 +12,7 @@
 #include "psi/http_buffered.h"
 #include "psi/common.h"
 #include "psi/http_async.h"
+#include "psi/http_tls.h"
 
 /* curl_slist_append returns NULL on failure without freeing the
  * prior list; this wrapper assigns through only on success. */
@@ -59,6 +60,16 @@ struct psi_http_chunk_ctx {
     void *userdata;
 };
 
+static void psi_http_set_error(char **error_message, CURLcode code, const char *error_buffer) {
+    const char *message;
+
+    if (error_message == NULL)
+        return;
+    message =
+        (error_buffer != NULL && error_buffer[0] != '\0') ? error_buffer : curl_easy_strerror(code);
+    *error_message = psi_strdup(message);
+}
+
 static size_t psi_http_chunk_forward(void *data, size_t size, size_t nmemb, void *userdata) {
     struct psi_http_chunk_ctx *ctx = (struct psi_http_chunk_ctx *)userdata;
     size_t total = size * nmemb;
@@ -70,7 +81,7 @@ static size_t psi_http_chunk_forward(void *data, size_t size, size_t nmemb, void
 
 static CURL *psi_http_build_handle(const char *url, const char *const *header_lines,
     size_t header_count, const char *body, size_t body_len, struct curl_slist **headers_out,
-    const struct psi_abort_signal *abort_signal) {
+    const struct psi_abort_signal *abort_signal, char *error_buffer) {
     CURL *curl;
     struct curl_slist *headers = NULL;
     size_t i;
@@ -89,6 +100,11 @@ static CURL *psi_http_build_handle(const char *url, const char *const *header_li
     *headers_out = headers;
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
+    if (error_buffer != NULL) {
+        error_buffer[0] = '\0';
+        curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, error_buffer);
+    }
+    psi_http_configure_tls(curl);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     if (body != NULL) {
         curl_easy_setopt(curl, CURLOPT_POST, 1L);
@@ -111,13 +127,14 @@ int psi_http_post_stream(const char *url, const char *const *header_lines, size_
     CURLcode code;
     struct curl_slist *headers;
     struct psi_http_chunk_ctx ctx;
+    char error_buffer[CURL_ERROR_SIZE];
 
     if (status_code != NULL)
         *status_code = 0l;
     if (psi_http_global_init() != PSI_STATUS_OK)
         return PSI_STATUS_ERROR;
     curl = psi_http_build_handle(
-        url, header_lines, header_count, body, body_len, &headers, abort_signal);
+        url, header_lines, header_count, body, body_len, &headers, abort_signal, error_buffer);
     if (curl == NULL)
         return PSI_STATUS_ERROR;
 
@@ -138,23 +155,26 @@ int psi_http_post_stream(const char *url, const char *const *header_lines, size_
 
 int psi_http_post(const char *url, const char *const *header_lines, size_t header_count,
     const char *body, size_t body_len, const struct psi_abort_signal *abort_signal,
-    long *status_code, char **response_body) {
+    long *status_code, char **response_body, char **error_message) {
     CURL *curl;
     CURLcode code;
     struct curl_slist *headers;
     struct psi_http_buffer buffer;
+    char error_buffer[CURL_ERROR_SIZE];
 
     if (status_code != NULL)
         *status_code = 0l;
     if (response_body != NULL)
         *response_body = NULL;
+    if (error_message != NULL)
+        *error_message = NULL;
     buffer.data = NULL;
     buffer.length = 0u;
 
     if (psi_http_global_init() != PSI_STATUS_OK)
         return PSI_STATUS_ERROR;
     curl = psi_http_build_handle(
-        url, header_lines, header_count, body, body_len, &headers, abort_signal);
+        url, header_lines, header_count, body, body_len, &headers, abort_signal, error_buffer);
     if (curl == NULL)
         return PSI_STATUS_ERROR;
 
@@ -171,6 +191,7 @@ int psi_http_post(const char *url, const char *const *header_lines, size_t heade
 
     if (code != CURLE_OK) {
         free(buffer.data);
+        psi_http_set_error(error_message, code, error_buffer);
         return PSI_STATUS_ERROR;
     }
     if (response_body != NULL) {
@@ -188,22 +209,27 @@ int psi_http_post(const char *url, const char *const *header_lines, size_t heade
 }
 
 int psi_http_get(const char *url, const char *const *header_lines, size_t header_count,
-    const struct psi_abort_signal *abort_signal, long *status_code, char **response_body) {
+    const struct psi_abort_signal *abort_signal, long *status_code, char **response_body,
+    char **error_message) {
     CURL *curl;
     CURLcode code;
     struct curl_slist *headers;
     struct psi_http_buffer buffer;
+    char error_buffer[CURL_ERROR_SIZE];
 
     if (status_code != NULL)
         *status_code = 0l;
     if (response_body != NULL)
         *response_body = NULL;
+    if (error_message != NULL)
+        *error_message = NULL;
     buffer.data = NULL;
     buffer.length = 0u;
 
     if (psi_http_global_init() != PSI_STATUS_OK)
         return PSI_STATUS_ERROR;
-    curl = psi_http_build_handle(url, header_lines, header_count, NULL, 0u, &headers, abort_signal);
+    curl = psi_http_build_handle(
+        url, header_lines, header_count, NULL, 0u, &headers, abort_signal, error_buffer);
     if (curl == NULL)
         return PSI_STATUS_ERROR;
 
@@ -220,6 +246,7 @@ int psi_http_get(const char *url, const char *const *header_lines, size_t header
 
     if (code != CURLE_OK) {
         free(buffer.data);
+        psi_http_set_error(error_message, code, error_buffer);
         return PSI_STATUS_ERROR;
     }
     if (response_body != NULL) {

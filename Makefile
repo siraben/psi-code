@@ -52,6 +52,7 @@ DEPFLAGS ?= -MMD -MP
 BUILD_DIR      = build
 TARGET         = $(BUILD_DIR)/psi
 LUA_BOOT_FILE ?= $(abspath lua/boot.lua)
+CA_BUNDLE_FILE ?= $(CURL_CA_BUNDLE)
 
 SOURCES := $(sort $(shell find src -name '*.c' 2>/dev/null))
 OBJECTS := $(SOURCES:%.c=$(BUILD_DIR)/%.o)
@@ -62,7 +63,15 @@ DOC_SOURCES = README.md $(sort $(wildcard docs/*.md))
 EMBED_TOOL  = $(BUILD_DIR)/embed
 EMBED_LUA   = $(BUILD_DIR)/embedded_lua.c
 EMBED_DOCS  = $(BUILD_DIR)/embedded_docs.c
+EMBED_CA_FILE ?=
+EMBED_CA_KEY ?= ca-bundle
+EMBED_CA    = $(BUILD_DIR)/embedded_ca.c
 GEN_OBJECTS = $(EMBED_LUA:.c=.o) $(EMBED_DOCS:.c=.o)
+ifneq ($(EMBED_CA_FILE),)
+GEN_OBJECTS += $(EMBED_CA:.c=.o)
+EMBED_CA_CPPFLAGS = -DPSI_HAVE_EMBEDDED_CA=1
+endif
+CA_BUNDLE_CPPFLAGS = $(if $(CA_BUNDLE_FILE),-DPSI_CA_BUNDLE_FILE=\"$(CA_BUNDLE_FILE)\")
 DEPS       := $(OBJECTS:.o=.d) $(GEN_OBJECTS:.o=.d)
 
 # ---- Dependencies via pkg-config ----
@@ -95,6 +104,8 @@ LOCAL_CPPFLAGS  = -Iinclude -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600 \
                   -DPSI_ENABLE_ANSI=$(ANSI) \
                   -DPSI_ENABLE_COLOR=$(COLOR) \
                   -DPSI_ENABLE_REPL_EDITLINE=$(REPL_EDITLINE)
+LOCAL_CPPFLAGS += $(EMBED_CA_CPPFLAGS)
+LOCAL_CPPFLAGS += $(CA_BUNDLE_CPPFLAGS)
 LOCAL_CPPFLAGS += $(foreach d,$(PKG_DEPS),$(call dep_cflags,$(d)))
 LOCAL_CPPFLAGS += $(call pkg_cflags,ARGTABLE,argtable3)
 
@@ -127,7 +138,7 @@ $(OBJECTS): $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
-# Generated blobs only need psi/embedded_lua.h.
+# Generated blobs only need psi/embedded_data.h.
 $(GEN_OBJECTS): $(BUILD_DIR)/%.o: $(BUILD_DIR)/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -Iinclude $(BASE_CFLAGS) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
@@ -147,13 +158,15 @@ $(EMBED_LUA): $(EMBED_TOOL) $(LUA_SOURCES)
 $(EMBED_DOCS): $(EMBED_TOOL) $(DOC_SOURCES)
 	$(EMBED_TOOL) --table=psi_embedded_docs_table --raw-keys $(DOC_SOURCES) > $@
 
+$(EMBED_CA): $(EMBED_TOOL) $(EMBED_CA_FILE)
+	$(EMBED_TOOL) --table=psi_embedded_ca_table --key=$(EMBED_CA_KEY) $(EMBED_CA_FILE) > $@
+
 # ---- Link ----
 .PHONY: check-curl-ca
 check-curl-ca:
-	@if printf '%s\n' "$(CURL_SSL_BACKENDS)" | grep -qi 'mbedTLS' && [ -z "$(CURL_CA_BUNDLE)" ]; then \
-		echo "error: libcurl is built with mbedTLS but has no default CA bundle"; \
-		echo "       enter a fresh nix develop shell so curl picks up the flake cacert build"; \
-		echo "       or rebuild/provide libcurl with curl-config --ca set"; \
+	@if printf '%s\n' "$(CURL_SSL_BACKENDS)" | grep -qi 'mbedTLS' && [ -z "$(CA_BUNDLE_FILE)" ] && [ -z "$(EMBED_CA_FILE)" ]; then \
+		echo "error: libcurl is built with mbedTLS but no CA bundle was configured"; \
+		echo "       set CA_BUNDLE_FILE, EMBED_CA_FILE, or rebuild libcurl with curl-config --ca"; \
 		exit 1; \
 	fi
 

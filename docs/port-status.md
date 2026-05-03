@@ -26,7 +26,7 @@ architecture it is porting.
 
 ## Dependency audit
 
-- `lua5.4`: embedded as the extension language. Small, embeddable, and
+- `lua5.5`: embedded as the extension language. Small, embeddable, and
   aligned with the extension model.
 - `cJSON`: acceptable. Small enough for the current JSONL and tool payload needs.
 - `libedit`: replaces GNU Readline. Keeps the interactive dependency BSD-style

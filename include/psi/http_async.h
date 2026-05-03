@@ -25,7 +25,7 @@ struct psi_abort_signal;
  *         if (r == 1) { feed(chunk, len); free(chunk); }
  *         if (r == 2) break;
  *     }
- *     long status = psi_http_stream_finish(h);
+ *     long status = psi_http_stream_finish(h, NULL);
  *
  * Return codes:
  *   PSI_STATUS_OK on successful begin; *out owns the handle.
@@ -65,6 +65,6 @@ int psi_http_stream_poll(
  * status code. Returns -1 on transport error (curl_easy_perform
  * failed). Must only be called after poll has returned 2, or after
  * the caller has decided to abandon the transfer (abort signal). */
-long psi_http_stream_finish(struct psi_http_stream *h);
+long psi_http_stream_finish(struct psi_http_stream *h, char **error_message);
 
 #endif

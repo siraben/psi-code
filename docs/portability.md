@@ -61,21 +61,21 @@ can replace any one bit and keep the rest.
 | `nanosleep`                           | POSIX-1b; universal on modern Unices |
 | `sigaction` / `sigemptyset`           | POSIX; universal |
 | `fork` / `execl` / `pipe` / `waitpid` | POSIX; gated by `#ifndef _WIN32` |
-| Vendored vs system deps               | Lua 5.4, cJSON, argtable3, libedit, libcurl, zlib are system-supplied via pkg-config on Linux/Haiku. Hosts without pkg-config can vendor or override per-dep — see "untested-OS predictions" below. |
+| Vendored vs system deps               | Lua 5.5, cJSON, argtable3, libedit, libcurl, zlib are system-supplied via pkg-config on Linux/Haiku. Hosts without pkg-config can vendor or override per-dep — see "untested-OS predictions" below. |
 
 ## Untested-OS predictions
 
 | OS                         | Predicted state | What would likely break |
 |----------------------------|-----------------|---|
 | **FreeBSD / OpenBSD / NetBSD** | should build out-of-box | `pkg-config` is `pkgconf` on BSDs — `PKG_CONFIG=pkgconf make` works. clang's `-Werror` flags vs GCC's may differ; if so, drop `-Werror`. libedit on OpenBSD is `libedit` package, same as Linux. |
-| **macOS**                  | should build with Homebrew deps | Homebrew installs lua@5.4 and libcjson under `/opt/homebrew`; user must set `PKG_CONFIG_PATH`. Apple Clang's `-Wno-unknown-warning-option` may eat newer flags silently. `-Wl,-static` is partly broken on macOS, so static builds fail — that's documented. |
+| **macOS**                  | should build with Homebrew deps | Homebrew installs Lua and libcjson under `/opt/homebrew`; user must set `PKG_CONFIG_PATH`. Apple Clang's `-Wno-unknown-warning-option` may eat newer flags silently. `-Wl,-static` is partly broken on macOS, so static builds fail — that's documented. |
 | **illumos / Solaris**      | needs minor work | `gettimeofday` still present but Solaris `pthread_cond_timedwait` semantics differ subtly around CLOCK choice. More importantly, Solaris `getopt_long` is in `libgetopt`; argtable3 vendors getopt so this is fine. |
 | **Cygwin / MSYS2**         | should build, slowly | fork is emulated and slow; agent feels sluggish but works. libcurl and pthread present via packages. PE-format static linking has gotchas. |
 | **Haiku**                  | already works | port committed under `haiku/`. |
 | **Windows (MSVC native)**  | does not build | `process.c`'s `_WIN32` arm is empty. Need CreateProcess-based replacement plus a libcurl-or-WinHTTP HTTP backend. ~500 LoC of C. |
 | **plain MS-DOS / DJGPP**   | unsupported | no fork, no pthread, no full POSIX. Out of scope. |
 | **Embedded (no fork/exec)**| unsupported | tool-call path requires process spawning. Could in theory build a `--no-tools` mode — not a stated goal. |
-| **Plain ANSI C (no POSIX)**| only `lua/` runs   | the `lua/psi/*` agent runtime itself only depends on Lua 5.4. You could embed psi's brain into a C++ host that supplies HTTP and shell-exec via its own primitives. Outside scope of `psi` proper. |
+| **Plain ANSI C (no POSIX)**| only `lua/` runs   | the `lua/psi/*` agent runtime itself only depends on Lua 5.5. You could embed psi's brain into a C++ host that supplies HTTP and shell-exec via its own primitives. Outside scope of `psi` proper. |
 
 ## How to port to a new OS
 
@@ -94,7 +94,7 @@ The pattern from `haiku/`:
    - `src/runtime/tui_mode.c` — TUI (termios + ANSI on POSIX; skip on
      constrained platforms).
 3. Vendor what isn't already present:
-   - Lua 5.4: vendor source, build statically. Watch for the
+   - Lua 5.5: vendor source, build statically. Watch for the
      `lstrlib.c get_onecapture` size_t/ptrdiff_t bug if your
      platform's `size_t` differs from `ptrdiff_t`.
    - cJSON, argtable3: amalgamation single-file builds, vendor.
@@ -111,7 +111,7 @@ portability bug — file it.
 The Makefile assumes:
 - GNU `make` (or BSD make with `?=` and `:=`)
 - `pkg-config` (or `pkgconf`)
-- `lua5.4`, `libcjson`, `libedit`, `libcurl`, `zlib`,
+- `lua5.5`, `libcjson`, `libedit`, `libcurl`, `zlib`,
   `argtable3` discoverable via pkg-config
 
 For platforms without pkg-config, override per-dependency via

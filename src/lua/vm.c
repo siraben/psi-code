@@ -1,4 +1,4 @@
-/* psi Lua 5.4 VM and FFI bridge. */
+/* psi Lua 5.5 VM and FFI bridge. */
 
 #include <ctype.h>
 #include <signal.h>
@@ -32,7 +32,7 @@
 #include "psi/http_buffered.h"
 #include "psi/http_async.h"
 #include "psi/common.h"
-#include "psi/embedded_lua.h"
+#include "psi/embedded_data.h"
 #include "psi/host_ops.h"
 #include "psi/message.h"
 #include "psi/process.h"
@@ -2033,7 +2033,7 @@ static struct psi_http_stream **psi_vm_http_stream_ud_check(lua_State *L, int id
 static int lfn_http_stream_gc(lua_State *L) {
     struct psi_http_stream **ud = psi_vm_http_stream_ud_check(L, 1);
     if (*ud != NULL) {
-        psi_http_stream_finish(*ud);
+        psi_http_stream_finish(*ud, NULL);
         *ud = NULL;
     }
     return 0;
@@ -2113,6 +2113,7 @@ static int lfn_http_stream_finish(lua_State *L) {
     struct psi_http_stream **ud;
     struct psi_http_stream *h;
     long status;
+    char *error_message;
 
     ud = psi_vm_http_stream_ud_check(L, 1);
     h = *ud;
@@ -2122,8 +2123,14 @@ static int lfn_http_stream_finish(lua_State *L) {
         return 1;
     }
     *ud = NULL; /* flag consumed before the C call so __gc is a no-op */
-    status = psi_http_stream_finish(h);
+    error_message = NULL;
+    status = psi_http_stream_finish(h, &error_message);
     lua_pushinteger(L, (lua_Integer)status);
+    if (status < 0 && error_message != NULL) {
+        lua_pushstring(L, error_message);
+        free(error_message);
+        return 2;
+    }
     return 1;
 }
 
@@ -2136,6 +2143,7 @@ static int lfn_http_post(lua_State *L) {
     struct psi_host_context *host;
     long status_code;
     char *response;
+    char *error_message;
     int status;
 
     luaL_checktype(L, 2, LUA_TTABLE);
@@ -2148,15 +2156,17 @@ static int lfn_http_post(lua_State *L) {
     host = PSI_VM_HOST(L);
     status_code = 0l;
     response = NULL;
+    error_message = NULL;
     status = psi_http_post(url, (const char *const *)headers, header_count, body, body_len,
-        host ? host->abort_signal : NULL, &status_code, &response);
+        host ? host->abort_signal : NULL, &status_code, &response, &error_message);
 
     psi_lua_free_headers(headers, header_count);
 
     if (status != PSI_STATUS_OK) {
         free(response);
         lua_pushnil(L);
-        lua_pushstring(L, "http request failed");
+        lua_pushstring(L, error_message != NULL ? error_message : "http request failed");
+        free(error_message);
         return 2;
     }
     lua_pushinteger(L, status_code);
@@ -2172,6 +2182,7 @@ static int lfn_http_get(lua_State *L) {
     struct psi_host_context *host;
     long status_code;
     char *response;
+    char *error_message;
     int status;
 
     luaL_checktype(L, 2, LUA_TTABLE);
@@ -2183,15 +2194,17 @@ static int lfn_http_get(lua_State *L) {
     host = PSI_VM_HOST(L);
     status_code = 0l;
     response = NULL;
+    error_message = NULL;
     status = psi_http_get(url, (const char *const *)headers, header_count,
-        host ? host->abort_signal : NULL, &status_code, &response);
+        host ? host->abort_signal : NULL, &status_code, &response, &error_message);
 
     psi_lua_free_headers(headers, header_count);
 
     if (status != PSI_STATUS_OK) {
         free(response);
         lua_pushnil(L);
-        lua_pushstring(L, "http request failed");
+        lua_pushstring(L, error_message != NULL ? error_message : "http request failed");
+        free(error_message);
         return 2;
     }
     lua_pushinteger(L, status_code);
@@ -2249,7 +2262,7 @@ static int lfn_set_usage(lua_State *L) {
  * The caller owns the buffer; on error the buffer contents are
  * undefined but no allocation is retained. */
 static int psi_vm_embedded_inflate(
-    const struct psi_embedded_lua *e, unsigned char *out, size_t out_len) {
+    const struct psi_embedded_data *e, unsigned char *out, size_t out_len) {
     uLongf dst_len = (uLongf)out_len;
     int rc;
     if (e == NULL || e->src == NULL || out == NULL)
@@ -2269,7 +2282,7 @@ static int psi_vm_embedded_inflate(
  * Entries are DEFLATE-compressed; we inflate on demand. */
 static int lfn_embedded_doc(lua_State *L) {
     const char *name = luaL_checkstring(L, 1);
-    const struct psi_embedded_lua *e;
+    const struct psi_embedded_data *e;
     for (e = psi_embedded_docs_table; e->name != NULL; e++) {
         if (strcmp(e->name, name) == 0) {
             unsigned char *buf = (unsigned char *)malloc(e->raw_len + 1u);
@@ -2294,7 +2307,7 @@ static int lfn_embedded_doc(lua_State *L) {
  * List every doc embedded in the binary. Handy for a `/docs` command
  * or an agent discovering what docs are available. */
 static int lfn_embedded_doc_names(lua_State *L) {
-    const struct psi_embedded_lua *e;
+    const struct psi_embedded_data *e;
     int i = 1;
     lua_newtable(L);
     for (e = psi_embedded_docs_table; e->name != NULL; e++, i++) {
@@ -2311,7 +2324,7 @@ static int lfn_embedded_doc_names(lua_State *L) {
  * path. Parallel to embedded_doc but over psi_embedded_lua_table. */
 static int lfn_embedded_source(lua_State *L) {
     const char *name = luaL_checkstring(L, 1);
-    const struct psi_embedded_lua *e;
+    const struct psi_embedded_data *e;
     for (e = psi_embedded_lua_table; e->name != NULL; e++) {
         if (strcmp(e->name, name) == 0) {
             unsigned char *buf = (unsigned char *)malloc(e->raw_len + 1u);
@@ -2337,7 +2350,7 @@ static int lfn_embedded_source(lua_State *L) {
  * embedded_doc_names; useful for extension authors wanting to know
  * what they can introspect. */
 static int lfn_embedded_source_names(lua_State *L) {
-    const struct psi_embedded_lua *e;
+    const struct psi_embedded_data *e;
     int i = 1;
     lua_newtable(L);
     for (e = psi_embedded_lua_table; e->name != NULL; e++, i++) {
@@ -2972,7 +2985,7 @@ static int psi_vm_apply_package_path(lua_State *L, const char *boot_file) {
     char *parent;
     char buffer[4096];
 
-    if (!boot_file)
+    if (boot_file == NULL || boot_file[0] == '\0')
         return PSI_STATUS_OK;
     copy = psi_strdup(boot_file);
     if (!copy)
@@ -3000,7 +3013,7 @@ static int psi_vm_apply_package_path(lua_State *L, const char *boot_file) {
  * copies what it needs), then free. */
 static int psi_vm_embedded_searcher(lua_State *L) {
     const char *name = luaL_checkstring(L, 1);
-    const struct psi_embedded_lua *e;
+    const struct psi_embedded_data *e;
     for (e = psi_embedded_lua_table; e->name != NULL; e++) {
         if (strcmp(e->name, name) == 0) {
             unsigned char *buf = (unsigned char *)malloc(e->raw_len);
@@ -3043,8 +3056,8 @@ static void psi_vm_register_embedded(lua_State *L) {
     lua_pop(L, 2); /* searchers + package */
 }
 
-static const struct psi_embedded_lua *psi_vm_embedded_find(const char *name) {
-    const struct psi_embedded_lua *e;
+static const struct psi_embedded_data *psi_vm_embedded_find(const char *name) {
+    const struct psi_embedded_data *e;
     for (e = psi_embedded_lua_table; e->name != NULL; e++) {
         if (strcmp(e->name, name) == 0)
             return e;
@@ -3098,7 +3111,7 @@ int psi_vm_init(
             return PSI_STATUS_ERROR;
         }
     } else {
-        const struct psi_embedded_lua *boot = psi_vm_embedded_find("boot");
+        const struct psi_embedded_data *boot = psi_vm_embedded_find("boot");
         unsigned char *buf;
         int load_rc;
         if (boot == NULL) {

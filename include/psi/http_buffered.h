@@ -17,9 +17,10 @@ int psi_http_post_stream(const char *url, const char *const *header_lines, size_
 
 int psi_http_post(const char *url, const char *const *header_lines, size_t header_count,
     const char *body, size_t body_len, const struct psi_abort_signal *abort_signal,
-    long *status_code, char **response_body);
+    long *status_code, char **response_body, char **error_message);
 
 int psi_http_get(const char *url, const char *const *header_lines, size_t header_count,
-    const struct psi_abort_signal *abort_signal, long *status_code, char **response_body);
+    const struct psi_abort_signal *abort_signal, long *status_code, char **response_body,
+    char **error_message);
 
 #endif

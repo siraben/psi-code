@@ -248,14 +248,15 @@ function M.run_turn(opts, cfg)
         break
       end
     end
-    local status = psi.http_stream_finish(handle)
+    local status, transport_error = psi.http_stream_finish(handle)
     local content, tool_calls = cfg.finalize(state)
     local stream_error = cfg.stream_error and cfg.stream_error(state)
 
     if status < 0 then
       local aborted = abort_check()
       local reason = aborted and "aborted" or "error"
-      local emsg = aborted and "Request was aborted" or "http transport error"
+      local emsg = aborted and "Request was aborted"
+        or ("http transport error: " .. tostring(transport_error or "unknown error"))
       if cfg.save_failed_partial then
         cfg.save_failed_partial(state, model, reason, emsg)
       elseif cfg.has_partial(state, tool_calls) then

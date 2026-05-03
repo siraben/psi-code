@@ -19,6 +19,7 @@
 #include "psi/abort.h"
 #include "psi/common.h"
 #include "psi/http_async.h"
+#include "psi/http_tls.h"
 
 static pthread_once_t psi_http_init_once = PTHREAD_ONCE_INIT;
 static int psi_http_init_status = 1; /* non-zero = unattempted/failed */
@@ -72,6 +73,7 @@ struct psi_http_stream {
     int done;
     long http_status; /* HTTP response code (only meaningful when done) */
     CURLcode curl_code; /* CURLE_OK on success */
+    char curl_error[CURL_ERROR_SIZE];
 
     /* Latch set under `mu` if the helper thread's write callback
      * fails to enqueue a chunk (OOM). When set, the next callback
@@ -215,6 +217,9 @@ static void *psi_http_stream_thread(void *arg) {
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, h->body);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)h->body_len);
+    h->curl_error[0] = '\0';
+    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, h->curl_error);
+    psi_http_configure_tls(curl);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, psi_http_stream_write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)h);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
@@ -285,6 +290,7 @@ int psi_http_stream_begin(const char *url, const char *const *header_lines, size
     }
     h->abort_signal = abort_signal;
     h->curl_code = CURLE_OK;
+    h->curl_error[0] = '\0';
     h->http_status = 0l;
 
     if (pthread_mutex_init(&h->mu, NULL) != 0) {
@@ -367,12 +373,14 @@ int psi_http_stream_poll(
     return result;
 }
 
-long psi_http_stream_finish(struct psi_http_stream *h) {
+long psi_http_stream_finish(struct psi_http_stream *h, char **error_message) {
     long status;
     CURLcode code;
 
     if (h == NULL)
         return -1l;
+    if (error_message != NULL)
+        *error_message = NULL;
     if (h->thread_started) {
         pthread_join(h->thread, NULL);
         h->thread_started = 0;
@@ -380,6 +388,11 @@ long psi_http_stream_finish(struct psi_http_stream *h) {
 
     status = h->http_status;
     code = h->curl_code;
+    if (code != CURLE_OK && error_message != NULL) {
+        const char *message;
+        message = h->curl_error[0] != '\0' ? h->curl_error : curl_easy_strerror(code);
+        *error_message = psi_strdup(message);
+    }
 
     psi_http_queue_free_all(h);
     pthread_cond_destroy(&h->cond);
