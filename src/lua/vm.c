@@ -1371,6 +1371,7 @@ static int lfn_mkdir_parent(lua_State *L) {
 }
 #endif /* PSI_CAP_FILESYSTEM */
 
+#if PSI_CAP_PROCESS
 static void psi_vm_process_progress(void *userdata, const char *chunk, size_t len) {
     struct psi_host_context *host = (struct psi_host_context *)userdata;
     if (host == NULL || host->active_observer == NULL)
@@ -1380,6 +1381,7 @@ static void psi_vm_process_progress(void *userdata, const char *chunk, size_t le
     host->active_observer->on_tool_progress(
         host->active_observer->userdata, host->active_tool_id, chunk, len);
 }
+#endif
 
 /* psi.tool_progress(tool_id, chunk) — stream an incremental chunk of
  * tool output to the currently-active observer. Used by the Lua
@@ -1421,6 +1423,7 @@ static int lfn_tool_progress(lua_State *L) {
     return 0;
 }
 
+#if PSI_CAP_PROCESS
 static char **psi_vm_argv_from_table(lua_State *L, int idx, int *argc_out);
 static void psi_vm_argv_free(char **argv);
 
@@ -1694,6 +1697,7 @@ static int lfn_process_finish(lua_State *L) {
     free(output);
     return 1;
 }
+#endif /* PSI_CAP_PROCESS */
 
 static int lfn_session_append(lua_State *L) {
     const char *role = luaL_checkstring(L, 1);
@@ -2680,7 +2684,9 @@ static void psi_vm_register_psi(lua_State *L) {
     /* Handle metatables. Must be registered BEFORE any begin() can
      * fire so luaL_setmetatable always finds them. */
     psi_vm_register_gc_mt(L, PSI_HTTP_STREAM_MT, lfn_http_stream_gc);
+#if PSI_CAP_PROCESS
     psi_vm_register_gc_mt(L, PSI_PROCESS_HANDLE_MT, lfn_process_gc);
+#endif
 
     lua_newtable(L);
 
@@ -2725,12 +2731,14 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("session_messages_from", lfn_session_messages_from);
     PSI_REG("session_token_estimate_from", lfn_session_token_estimate_from);
     PSI_REG("session_keep_recent_by_tokens", lfn_session_keep_recent_by_tokens);
+#if PSI_CAP_PROCESS
     PSI_REG("process_run", lfn_process_run);
     PSI_REG("process_run_argv", lfn_process_run_argv);
     PSI_REG("process_begin", lfn_process_begin);
     PSI_REG("process_begin_argv", lfn_process_begin_argv);
     PSI_REG("process_poll", lfn_process_poll);
     PSI_REG("process_finish", lfn_process_finish);
+#endif
     PSI_REG("session_append", lfn_session_append);
     PSI_REG("session_clear", lfn_session_clear);
     PSI_REG("session_id", lfn_session_id);

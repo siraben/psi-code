@@ -1,3 +1,16 @@
+#include "psi/common.h"
+
+/* Capability gate: when PSI_CAP_PROCESS=0 the entire fork/exec layer
+ * is compiled away. The Lua bridge in src/lua/vm.c is gated the same
+ * way, so nothing should call into this file when the capability is
+ * off. We define the gate here too in case process.c is reached
+ * through a different translation unit in some constrained build. */
+#ifndef PSI_CAP_PROCESS
+#define PSI_CAP_PROCESS 1
+#endif
+
+#if PSI_CAP_PROCESS
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,7 +24,6 @@
 #include <unistd.h>
 #endif
 #include "psi/abort.h"
-#include "psi/common.h"
 #include "psi/process.h"
 
 static const size_t PSI_PROCESS_OUTPUT_MAX_BYTES = 262144u;
@@ -530,3 +542,5 @@ int psi_process_run_argv(char *const argv[], char **output_text, int *exit_statu
     return PSI_STATUS_OK;
 #endif
 }
+
+#endif /* PSI_CAP_PROCESS */

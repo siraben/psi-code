@@ -672,4 +672,29 @@ end
 install_stdlib_shims()
 M.install_stdlib_shims = install_stdlib_shims
 
+-- Lock down Lua's `os.execute` and `io.popen` when PSI_CAP_PROCESS=0.
+-- The C primitives (psi.process_run et al.) are already #ifdef'd out
+-- of the binary; these stdlib entry points still go through libc and
+-- must be neutralized in Lua. With process capability on, leave them
+-- alone — desktop builds use os.execute in places (extension scripts).
+local function install_process_shims()
+  local caps = (psi.runtime_info().capabilities) or {}
+  if caps.process then
+    return
+  end
+  M.host_os_execute = os.execute
+  os.execute = function()
+    return nil, "exit", -1
+  end
+  if io.popen then
+    M.host_io_popen = io.popen
+    io.popen = function()
+      return nil, "process disabled: io.popen requires PSI_CAP_PROCESS"
+    end
+  end
+end
+
+install_process_shims()
+M.install_process_shims = install_process_shims
+
 return M
