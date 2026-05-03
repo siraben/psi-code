@@ -40,9 +40,9 @@ idf_component_register(
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE
-    # Build zlib in "solo" mode so it doesn't try to pull in stdio.h
-    # at all, which is what zutil.h does for the gz* paths we dropped.
-    -DZ_SOLO=1
+    # Don't enable Z_SOLO: that compiles out zutil.c's default
+    # zcalloc/zcfree, which uncompress() needs. ESP-IDF newlib has
+    # malloc()/calloc(), so the default allocators just work.
     -Wno-implicit-function-declaration
     -Wno-deprecated-non-prototype
 )

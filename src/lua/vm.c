@@ -2098,17 +2098,48 @@ static int lfn_set_usage(lua_State *L) {
  * PSI_STATUS_OK on success (buffer filled with entry->raw_len bytes).
  * The caller owns the buffer; on error the buffer contents are
  * undefined but no allocation is retained. Public so the ESP
- * backend can reuse it for the embedded HTML page. */
+ * backend can reuse it for the embedded HTML page.
+ *
+ * On constrained targets (ESP32) the default uncompress() allocates
+ * ~9 KiB of inflate state per call, which fragments the heap and
+ * eventually fails. We keep a single z_stream initialized at first
+ * call and reset it for subsequent inflates — same allocation, many
+ * uses. Desktop builds also benefit (slightly faster repeated
+ * inflate, no behavioral difference). */
+static z_stream g_psi_inflate_stream;
+static int g_psi_inflate_inited = 0;
+
 int psi_embedded_inflate(
     const struct psi_embedded_data *e, unsigned char *out, size_t out_len) {
-    uLongf dst_len = (uLongf)out_len;
     int rc;
     if (e == NULL || e->src == NULL || out == NULL)
         return PSI_STATUS_ERROR;
-    rc = uncompress(out, &dst_len, e->src, (uLong)e->len);
-    if (rc != Z_OK || dst_len != (uLongf)e->raw_len) {
+    if (out_len < e->raw_len)
+        return PSI_STATUS_ERROR;
+
+    if (!g_psi_inflate_inited) {
+        memset(&g_psi_inflate_stream, 0, sizeof(g_psi_inflate_stream));
+        g_psi_inflate_stream.zalloc = Z_NULL;
+        g_psi_inflate_stream.zfree = Z_NULL;
+        g_psi_inflate_stream.opaque = Z_NULL;
+        if (inflateInit(&g_psi_inflate_stream) != Z_OK) {
+            fprintf(stderr, "psi: inflateInit failed\n");
+            return PSI_STATUS_ERROR;
+        }
+        g_psi_inflate_inited = 1;
+    } else {
+        inflateReset(&g_psi_inflate_stream);
+    }
+
+    g_psi_inflate_stream.next_in = (Bytef *)e->src;
+    g_psi_inflate_stream.avail_in = (uInt)e->len;
+    g_psi_inflate_stream.next_out = (Bytef *)out;
+    g_psi_inflate_stream.avail_out = (uInt)out_len;
+
+    rc = inflate(&g_psi_inflate_stream, Z_FINISH);
+    if (rc != Z_STREAM_END || g_psi_inflate_stream.total_out != (uLong)e->raw_len) {
         fprintf(stderr, "psi: inflate failed for %s (zlib %d, %lu/%lu)\n", e->name, rc,
-            (unsigned long)dst_len, (unsigned long)e->raw_len);
+            (unsigned long)g_psi_inflate_stream.total_out, (unsigned long)e->raw_len);
         return PSI_STATUS_ERROR;
     }
     return PSI_STATUS_OK;

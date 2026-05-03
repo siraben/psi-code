@@ -13,6 +13,38 @@ CONFIG_PSI_MDNS_HOSTNAME="psi"
 CONFIG_PSI_NET_OPENETH=y
 CONFIG_ETH_USE_OPENETH=y
 
+# QEMU build does not need WiFi; turning it off frees ~70 KiB of RAM
+# that the embedded Lua interpreter desperately wants. Real-hardware
+# builds should override this with CONFIG_ESP_WIFI_ENABLED=y.
+CONFIG_ESP_WIFI_ENABLED=n
+CONFIG_ESP_WIFI_NVS_ENABLED=n
+
+# Tighter lwIP defaults — psi runs one HTTP server with a few open
+# sockets and one outgoing TLS stream per WS connection.
+CONFIG_LWIP_MAX_SOCKETS=10
+CONFIG_LWIP_MAX_ACTIVE_TCP=8
+
+# Dynamic mbedTLS buffers cut TLS heap cost by ~16 KiB/connection.
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_PEER_CERT=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
+
+# PSRAM. Without external SPIRAM (esp32-wrover or QEMU's -m 4M),
+# ESP32's internal SRAM is too small for psi's Lua module graph.
+# Routing malloc through PSRAM gives us multi-MiB of contiguous
+# heap, which Lua (and zlib's inflate) need to parse modules.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=0
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
+CONFIG_SPIRAM_BOOT_INIT=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+
+# Flash is 4 MiB (matches QEMU -m 4M and the merged image size).
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+
 # Bigger main task stack — Lua + cJSON parsing peak well over the
 # 4 KiB default and we crash without this.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384

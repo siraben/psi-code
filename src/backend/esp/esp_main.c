@@ -20,6 +20,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "freertos/FreeRTOS.h"
+#include "esp_heap_caps.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
@@ -53,6 +54,7 @@ static const char *TAG = "psi_main";
 #define PSI_NET_BIT_FAIL BIT1
 
 void psi_ws_server_start(void);
+int psi_esp_vm_bootstrap(void);
 
 static EventGroupHandle_t g_net_events = NULL;
 
@@ -190,6 +192,22 @@ void psi_esp_main_run(void) {
     }
     ESP_ERROR_CHECK(err);
 
+    /* Bring up the Lua VM BEFORE the network stack so the boot
+     * module set sees the maximum free heap. Network bring-up
+     * (lwIP buffers, esp_eth driver, HTTP server) carves out ~80
+     * KiB of contiguous space that Lua otherwise can't allocate
+     * inside. The VM is then shared across all WebSocket
+     * connections — there's not enough RAM for a per-connection
+     * state and the agent is single-threaded by design. */
+    ESP_LOGI(TAG, "free heap before VM init: %lu",
+        (unsigned long)heap_caps_get_free_size(MALLOC_CAP_8BIT));
+    ESP_LOGI(TAG, "largest free block:        %lu",
+        (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    if (psi_esp_vm_bootstrap() != 0) {
+        ESP_LOGE(TAG, "psi_vm_init failed; agent will not be available");
+    }
+    ESP_LOGI(TAG, "free heap after VM init:  %lu",
+        (unsigned long)heap_caps_get_free_size(MALLOC_CAP_8BIT));
     if (psi_net_init() != 0) {
         ESP_LOGE(TAG, "network init failed; refusing to start server");
         return;

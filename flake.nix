@@ -532,6 +532,7 @@
                 exec qemu-system-xtensa \
                   -nographic \
                   -machine esp32 \
+                  -m 4M \
                   -drive file="$FW",if=mtd,format=raw \
                   -nic "user,model=open_eth,hostfwd=tcp::$PORT-:80" \
                   "$@"

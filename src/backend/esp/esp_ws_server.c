@@ -44,12 +44,24 @@ extern const struct psi_embedded_data psi_embedded_html_table[];
 static const char *TAG = "psi_ws";
 
 #define PSI_WS_INBOX_DEPTH 4
-#define PSI_WS_OUTBOX_DEPTH 64
+#define PSI_WS_OUTBOX_DEPTH 32
+/* The worker task drives the agent turn through psi_vm_run_agent_turn,
+ * which recurses C ↔ Lua several times during streaming. We need
+ * generous stack for the recursion plus Lua's parser. */
 #define PSI_WS_TURN_TASK_STACK 24576
 
 struct psi_ws_inbound {
     char *json; /* owned; receiver frees */
 };
+
+/* The agent VM and session are process-wide singletons: ESP32's
+ * heap is too small to host a Lua state per WS connection, and the
+ * agent is single-threaded by design (one turn at a time). The
+ * connection just owns the queues and observer. */
+static struct psi_vm g_psi_vm;
+static struct psi_session g_psi_session;
+static struct psi_abort_signal g_psi_abort;
+static int g_psi_vm_inited = 0;
 
 struct psi_ws_session {
     httpd_handle_t server;
@@ -59,16 +71,24 @@ struct psi_ws_session {
     QueueHandle_t outbox;    /* of char * (json text) */
     EventGroupHandle_t flags;
 
-    struct psi_abort_signal abort_signal;
     struct psi_esp_observer observer;
-    struct psi_vm vm;
-    struct psi_session session;
-    int vm_inited;
 
     TaskHandle_t worker_task;
     TaskHandle_t sender_task;
     int closed;
 };
+
+int psi_esp_vm_bootstrap(void) {
+    if (g_psi_vm_inited)
+        return 0;
+    psi_session_init(&g_psi_session);
+    psi_abort_signal_init(&g_psi_abort);
+    if (psi_vm_init(&g_psi_vm, NULL, NULL, NULL, NULL) != PSI_STATUS_OK)
+        return -1;
+    psi_vm_bind_session(&g_psi_vm, &g_psi_session);
+    g_psi_vm_inited = 1;
+    return 0;
+}
 
 #define PSI_WS_BIT_CLOSE 0x01u
 
@@ -159,6 +179,7 @@ static void psi_ws_worker_task(void *arg) {
                 break;
             continue;
         }
+        ESP_LOGI(TAG, "worker got frame: %.80s", msg.json);
         root = cJSON_Parse(msg.json);
         free(msg.json);
         if (root == NULL) {
@@ -175,22 +196,33 @@ static void psi_ws_worker_task(void *arg) {
                 const char *m = (cJSON_IsString(model) ? model->valuestring : "claude-haiku-4-5");
                 long mx = (cJSON_IsNumber(max) ? (long)max->valuedouble : 1024L);
                 char *response = NULL;
-                psi_abort_signal_reset(&s->abort_signal);
-                if (!s->vm_inited) {
-                    psi_session_init(&s->session);
-                    if (psi_vm_init(&s->vm, NULL, NULL, NULL, NULL) != PSI_STATUS_OK) {
-                        psi_ws_emit_error(s, "psi_vm_init failed");
-                        cJSON_Delete(root);
-                        continue;
-                    }
-                    psi_vm_bind_session(&s->vm, &s->session);
-                    s->vm_inited = 1;
+                if (!g_psi_vm_inited) {
+                    psi_ws_emit_error(s, "psi VM not initialized");
+                    cJSON_Delete(root);
+                    continue;
                 }
-                psi_vm_run_agent_turn(&s->vm, u, &s->observer.base, &s->abort_signal, m, mx,
-                    &response);
-                free(response);
+                psi_abort_signal_reset(&g_psi_abort);
+                /* Sanity ping: emit an assistant_delta with the
+                 * received user text and turn_end, without invoking
+                 * the agent loop. Once this round-trip works in QEMU
+                 * we'll re-enable the real psi_vm_run_agent_turn. */
+                {
+                    struct psi_agent_observer *o = &s->observer.base;
+                    if (o->on_assistant_text_delta) {
+                        char buf[160];
+                        int n = snprintf(buf, sizeof(buf), "echo: %s", u);
+                        if (n > 0)
+                            o->on_assistant_text_delta(o->userdata, buf);
+                    }
+                    if (o->on_turn_end)
+                        o->on_turn_end(o->userdata);
+                }
+                (void)psi_vm_run_agent_turn;
+                (void)response;
+                (void)m;
+                (void)mx;
             } else if (cJSON_IsString(type) && strcmp(type->valuestring, "abort") == 0) {
-                psi_esp_request_abort(&s->abort_signal);
+                psi_esp_request_abort(&g_psi_abort);
             } else {
                 psi_ws_emit_error(s, "unknown frame type");
             }
@@ -198,11 +230,7 @@ static void psi_ws_worker_task(void *arg) {
         cJSON_Delete(root);
     }
 
-    if (s->vm_inited) {
-        psi_vm_destroy(&s->vm);
-        psi_session_clear(&s->session);
-        s->vm_inited = 0;
-    }
+    /* The VM is a process-wide singleton; we don't tear it down here. */
     s->worker_task = NULL;
     vTaskDelete(NULL);
 }
@@ -232,7 +260,6 @@ static esp_err_t psi_ws_handler(httpd_req_t *req) {
         memset(&g_ws_session, 0, sizeof(g_ws_session));
         g_ws_session.server = req->handle;
         g_ws_session.fd = httpd_req_to_sockfd(req);
-        psi_abort_signal_init(&g_ws_session.abort_signal);
         g_ws_session.inbox =
             xQueueCreate(PSI_WS_INBOX_DEPTH, sizeof(struct psi_ws_inbound));
         g_ws_session.outbox = xQueueCreate(PSI_WS_OUTBOX_DEPTH, sizeof(char *));
@@ -276,8 +303,10 @@ static esp_err_t psi_ws_handler(httpd_req_t *req) {
             return err;
         }
         m.json[frame.len] = '\0';
+        ESP_LOGI(TAG, "rx frame, %u bytes", (unsigned)frame.len);
         if (xQueueSend(g_ws_session.inbox, &m, 0) != pdTRUE) {
             free(m.json);
+            ESP_LOGE(TAG, "inbox send failed");
             return ESP_ERR_NO_MEM;
         }
     }
@@ -301,7 +330,11 @@ void psi_ws_server_start(void) {
     };
     cfg.lru_purge_enable = true;
     cfg.max_open_sockets = 4;
-    cfg.stack_size = 8192;
+    /* The WS upgrade handler spawns FreeRTOS queues and event groups,
+     * which call deep into the kernel; 8 KiB of stack on this task
+     * was not enough and triggered an InstrFetchProhibited at PC=0
+     * (stack chain corruption). 16 KiB is comfortable. */
+    cfg.stack_size = 16384;
 
     if (httpd_start(&server, &cfg) != ESP_OK) {
         ESP_LOGE(TAG, "httpd_start failed");

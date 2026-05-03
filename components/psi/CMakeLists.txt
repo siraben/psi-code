@@ -56,7 +56,6 @@ idf_component_register(
         esp_http_server
         esp-tls
         esp_netif
-        esp_wifi
         mbedtls
         nvs_flash
     PRIV_REQUIRES
