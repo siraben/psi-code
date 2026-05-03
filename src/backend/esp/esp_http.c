@@ -388,7 +388,11 @@ int psi_http_stream_begin(const char *url, const char *const *header_lines, size
     if (h->flags == NULL)
         goto fail;
 
-    rc = xTaskCreate(psi_stream_worker, "psi_http", 8192, h, tskIDLE_PRIORITY + 5, &h->task);
+    /* TLS handshake to api.anthropic.com nests deep through mbedtls
+     * + esp_tls. 8 KiB stack was too tight; the agent turn crashed
+     * with LoadProhibited on the streaming task. 24 KiB matches what
+     * the espressif/esp-idf https example uses. */
+    rc = xTaskCreate(psi_stream_worker, "psi_http", 24576, h, tskIDLE_PRIORITY + 5, &h->task);
     if (rc != pdPASS)
         goto fail;
 

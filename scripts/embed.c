@@ -136,6 +136,7 @@ int main(int argc, char **argv) {
     const char *table_name = "psi_embedded_lua_table";
     const char *fixed_key = NULL;
     int raw_keys = 0;
+    int no_compress = 0;
     int i;
     int first_file;
     int status;
@@ -164,6 +165,15 @@ int main(int argc, char **argv) {
             first_file++;
         } else if (strcmp(arg, "--raw-keys") == 0) {
             raw_keys = 1;
+            first_file++;
+        } else if (strcmp(arg, "--no-compress") == 0) {
+            /* Emit entries with len == raw_len holding the original
+             * bytes verbatim. The runtime inflater detects this and
+             * skips zlib entirely — saves ~9 KiB inflate state, the
+             * intermediate decompress buffer, and the zlib component
+             * itself. Trades flash space for a much simpler load
+             * path; the embedded ESP build prefers it. */
+            no_compress = 1;
             first_file++;
         } else if (arg[0] == '-' && arg[1] == '-') {
             fprintf(stderr, "unknown option: %s\n", arg);
@@ -222,19 +232,31 @@ int main(int argc, char **argv) {
         raw = slurp(argv[i], &raw_len);
         if (!raw)
             goto out;
-        compressed = NULL;
-        clen = deflate_bytes(raw, raw_len, &compressed);
-        free(raw);
-        if (clen < 0)
-            goto out;
 
-        raw_lens[k] = raw_len;
-        zlen[k] = (size_t)clen;
+        if (no_compress) {
+            /* Sentinel: equal len/raw_len signals "raw payload" to
+             * the runtime, which then skips zlib and memcpys. */
+            raw_lens[k] = raw_len;
+            zlen[k] = raw_len;
+            printf("static const unsigned char emb_%s_src[] = {", syms[k]);
+            emit_bytes(raw, raw_len);
+            printf("\n};\n\n");
+            free(raw);
+        } else {
+            compressed = NULL;
+            clen = deflate_bytes(raw, raw_len, &compressed);
+            free(raw);
+            if (clen < 0)
+                goto out;
 
-        printf("static const unsigned char emb_%s_src[] = {", syms[k]);
-        emit_bytes(compressed, (size_t)clen);
-        printf("\n};\n\n");
-        free(compressed);
+            raw_lens[k] = raw_len;
+            zlen[k] = (size_t)clen;
+
+            printf("static const unsigned char emb_%s_src[] = {", syms[k]);
+            emit_bytes(compressed, (size_t)clen);
+            printf("\n};\n\n");
+            free(compressed);
+        }
     }
 
     printf("const struct psi_embedded_data %s[] = {\n", table_name);

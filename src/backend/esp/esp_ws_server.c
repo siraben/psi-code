@@ -46,9 +46,9 @@ static const char *TAG = "psi_ws";
 #define PSI_WS_INBOX_DEPTH 4
 #define PSI_WS_OUTBOX_DEPTH 32
 /* The worker task drives the agent turn through psi_vm_run_agent_turn,
- * which recurses C ↔ Lua several times during streaming. We need
- * generous stack for the recursion plus Lua's parser. */
-#define PSI_WS_TURN_TASK_STACK 24576
+ * which recurses C ↔ Lua several times during streaming. mbedTLS's
+ * handshake nests deep too; 32 KiB has been reliable so far. */
+#define PSI_WS_TURN_TASK_STACK 32768
 
 struct psi_ws_inbound {
     char *json; /* owned; receiver frees */
@@ -196,31 +196,27 @@ static void psi_ws_worker_task(void *arg) {
                 const char *m = (cJSON_IsString(model) ? model->valuestring : "claude-haiku-4-5");
                 long mx = (cJSON_IsNumber(max) ? (long)max->valuedouble : 1024L);
                 char *response = NULL;
-                if (!g_psi_vm_inited) {
-                    psi_ws_emit_error(s, "psi VM not initialized");
-                    cJSON_Delete(root);
-                    continue;
-                }
                 psi_abort_signal_reset(&g_psi_abort);
-                /* Sanity ping: emit an assistant_delta with the
-                 * received user text and turn_end, without invoking
-                 * the agent loop. Once this round-trip works in QEMU
-                 * we'll re-enable the real psi_vm_run_agent_turn. */
+                /* C-native agent path: bypasses the Lua VM entirely.
+                 * The Lua machinery (anthropic.lua + provider_loop +
+                 * stream_parser + transform_messages...) allocates
+                 * far more than ESP32's heap can give us reliably,
+                 * even with PSRAM. The C path streams Anthropic SSE
+                 * straight to the WS observer with one cJSON parse
+                 * per event, no GC, no per-turn module loads. */
                 {
-                    struct psi_agent_observer *o = &s->observer.base;
-                    if (o->on_assistant_text_delta) {
-                        char buf[160];
-                        int n = snprintf(buf, sizeof(buf), "echo: %s", u);
-                        if (n > 0)
-                            o->on_assistant_text_delta(o->userdata, buf);
+                    char *err_msg = NULL;
+                    int prc = psi_esp_agent_turn(u, m, mx, &s->observer.base, &g_psi_abort,
+                        &err_msg);
+                    if (prc != PSI_STATUS_OK) {
+                        psi_ws_emit_error(s,
+                            err_msg != NULL ? err_msg : "agent turn failed");
                     }
-                    if (o->on_turn_end)
-                        o->on_turn_end(o->userdata);
+                    free(err_msg);
                 }
                 (void)psi_vm_run_agent_turn;
                 (void)response;
-                (void)m;
-                (void)mx;
+                (void)g_psi_vm_inited;
             } else if (cJSON_IsString(type) && strcmp(type->valuestring, "abort") == 0) {
                 psi_esp_request_abort(&g_psi_abort);
             } else {

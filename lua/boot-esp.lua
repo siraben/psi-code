@@ -30,6 +30,14 @@ psi.prompt = load_module("psi.prompt")
 psi.anthropic = load_module("psi.providers.anthropic")
 psi.agent = load_module("psi.agent_session")
 
+-- Stub primitives that the desktop boot expects but the
+-- filesystem-capability gate compiled out. resource_loader.lua walks
+-- the cwd looking for context files; on ESP there's no working
+-- directory, so return "/" and the loader naturally finds nothing.
+if psi.cwd == nil then
+    psi.cwd = function() return "/" end
+end
+
 function psi.tool_call(name, input)
     return psi.tools.dispatch_alist(name, input)
 end

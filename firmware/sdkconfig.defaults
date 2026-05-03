@@ -24,10 +24,33 @@ CONFIG_ESP_WIFI_NVS_ENABLED=n
 CONFIG_LWIP_MAX_SOCKETS=10
 CONFIG_LWIP_MAX_ACTIVE_TCP=8
 
-# Dynamic mbedTLS buffers cut TLS heap cost by ~16 KiB/connection.
-CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
-CONFIG_MBEDTLS_DYNAMIC_FREE_PEER_CERT=y
-CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
+# Disable mbedTLS hardware acceleration. QEMU does not emulate
+# ESP32's SHA/AES/RSA peripherals fully and the crypto path crashes
+# inside mbedtls_ecp_* with a StoreProhibited at a NULL peripheral
+# base. Pure-software mbedtls is portable and runs fine; it's slower
+# on real hardware (still milliseconds) but correctness > speed for
+# the QEMU bring-up.
+CONFIG_MBEDTLS_HARDWARE_AES=n
+CONFIG_MBEDTLS_HARDWARE_MPI=n
+CONFIG_MBEDTLS_HARDWARE_SHA=n
+CONFIG_MBEDTLS_HARDWARE_GCM=n
+
+# Route mbedTLS allocations to external PSRAM. ESP-IDF's official
+# https_mbedtls example does this for the same reason: TLS buffers
+# (~16-32 KiB per session) blow the internal-DRAM budget once Lua
+# is also resident. Matches the known-working example config.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
+# Trim TLS in/out buffers to defaults that fit alongside Lua. Some
+# servers send big handshake messages but anthropic.com fits in 16K.
+CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384
+CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
+
+# TLS handshake recurses deep into mbedtls; the worker task driving
+# psi_vm_run_agent_turn was hitting the 16 KiB stack ceiling and
+# crashing with StoreProhibited. ESP-IDF's pthread shim defaults
+# also matter for some stack-related paths.
+CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=16384
 
 # PSRAM. Without external SPIRAM (esp32-wrover or QEMU's -m 4M),
 # ESP32's internal SRAM is too small for psi's Lua module graph.
@@ -44,6 +67,12 @@ CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 # Flash is 4 MiB (matches QEMU -m 4M and the merged image size).
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+
+# QEMU's ESP32 model has flaky multi-core PSRAM cache coherency;
+# the agent turn on Core 1 panics with StoreProhibited at a NULL
+# peripheral base. Pin everything to Core 0. Real-hardware builds
+# can re-enable dual-core with =n.
+CONFIG_FREERTOS_UNICORE=y
 
 # Bigger main task stack — Lua + cJSON parsing peak well over the
 # 4 KiB default and we crash without this.

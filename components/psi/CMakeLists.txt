@@ -37,6 +37,7 @@ set(PSI_C_SOURCES
     "${PSI_ROOT}/src/lua/vm.c"
     "${PSI_ROOT}/src/backend/esp/esp_main.c"
     "${PSI_ROOT}/src/backend/esp/esp_abort.c"
+    "${PSI_ROOT}/src/backend/esp/esp_agent.c"
     "${PSI_ROOT}/src/backend/esp/esp_http.c"
     "${PSI_ROOT}/src/backend/esp/esp_observer.c"
     "${PSI_ROOT}/src/backend/esp/esp_ws_server.c"
@@ -60,7 +61,6 @@ idf_component_register(
         nvs_flash
     PRIV_REQUIRES
         lua-cmod
-        zlib-cmod
 )
 
 # Capability gates and HTTP backend selection. -DPSI_CAP_FILESYSTEM=0
@@ -81,6 +81,7 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     PSI_ENABLE_COLOR=0
     PSI_ENABLE_REPL_EDITLINE=0
     PSI_LUA_BOOT_FILE=""
+    PSI_NO_ZLIB=1
 )
 
 # ESP-IDF v5.5+ uses C23-ish dialect for its headers; we let the
@@ -114,51 +115,98 @@ add_custom_command(
 
 # ---- Embedded blobs ----
 # scripts/embed.c keys Lua modules by stripping the leading "lua/"
-# segment of each input path. To produce the canonical "psi/foo.lua"
-# keys (matching what the desktop Makefile generates), we run the
-# embed tool from PSI_ROOT and pass path arguments relative to it.
-file(GLOB_RECURSE _psi_lua_abs "${PSI_ROOT}/lua/*.lua")
-list(SORT _psi_lua_abs)
-set(PSI_LUA_RELATIVE)
-foreach(_p IN LISTS _psi_lua_abs)
-    file(RELATIVE_PATH _r "${PSI_ROOT}" "${_p}")
-    list(APPEND PSI_LUA_RELATIVE "${_r}")
+# segment of each input path; we run from PSI_ROOT with relative
+# paths so the keys come out as "psi/foo.lua" instead of absolute
+# build-tree paths.
+#
+# --no-compress emits the source verbatim (len == raw_len). The
+# runtime inflater memcpy's the bytes instead of allocating an
+# inflate state + intermediate buffer; on ESP32 the heap pressure
+# from compressed loads bricked module loading mid-boot. Trades ~700
+# KiB of flash for a much simpler load path; the 2 MiB factory
+# partition has plenty of headroom.
+#
+# We also drop unused modules: TUI, slash commands, alternative
+# providers, markdown rendering, theming, prompt templates,
+# extensions. A real-hardware build that wants those can extend
+# PSI_LUA_RELATIVE here.
+set(PSI_LUA_RELATIVE
+    lua/boot.lua
+    lua/boot-esp.lua
+    lua/psi/agent_control.lua
+    lua/psi/agent_session.lua
+    lua/psi/api_registry.lua
+    lua/psi/context.lua
+    lua/psi/diff.lua
+    lua/psi/event_bus.lua
+    lua/psi/file_mutation_queue.lua
+    lua/psi/json_pure.lua
+    lua/psi/path_utils.lua
+    lua/psi/prelude.lua
+    lua/psi/prompt.lua
+    lua/psi/provider_loop.lua
+    lua/psi/providers/anthropic.lua
+    lua/psi/providers/openai_compat.lua
+    lua/psi/ramfs.lua
+    lua/psi/records.lua
+    lua/psi/resource_loader.lua
+    lua/psi/sched.lua
+    lua/psi/session_manager.lua
+    lua/psi/settings_manager.lua
+    lua/psi/storage.lua
+    lua/psi/stream_parser.lua
+    lua/psi/thinking.lua
+    lua/psi/tool_helpers.lua
+    lua/psi/tool_registry.lua
+    lua/psi/tool_shell.lua
+    lua/psi/tools.lua
+    lua/psi/tools/edit.lua
+    lua/psi/tools/ls.lua
+    lua/psi/tools/lua.lua
+    lua/psi/tools/read.lua
+    lua/psi/tools/write.lua
+    lua/psi/transform_messages.lua
+    lua/psi/truncate.lua
+    lua/psi/auth_storage.lua
+)
+set(_psi_lua_abs)
+foreach(_r IN LISTS PSI_LUA_RELATIVE)
+    list(APPEND _psi_lua_abs "${PSI_ROOT}/${_r}")
 endforeach()
 add_custom_command(
     OUTPUT "${PSI_EMBED_LUA}"
-    COMMAND "${PSI_EMBED_TOOL}" ${PSI_LUA_RELATIVE} > "${PSI_EMBED_LUA}"
+    COMMAND "${PSI_EMBED_TOOL}" --no-compress ${PSI_LUA_RELATIVE} > "${PSI_EMBED_LUA}"
     WORKING_DIRECTORY "${PSI_ROOT}"
     DEPENDS "${PSI_EMBED_TOOL}" ${_psi_lua_abs}
-    COMMENT "Embedding psi Lua sources"
+    COMMENT "Embedding psi Lua sources (uncompressed)"
     VERBATIM
 )
 
-set(PSI_DOC_RELATIVE
-    "README.md"
-    "docs/architecture.md"
-    "docs/extensions.md"
-    "docs/port-status.md"
-    "docs/portability.md"
-    "docs/providers.md"
-)
+# Docs are not used by the firmware agent; emit a stub table so
+# psi_embedded_docs_table is defined for the linker. (The C side
+# references it from lfn_embedded_doc.)
 add_custom_command(
     OUTPUT "${PSI_EMBED_DOCS}"
-    COMMAND "${PSI_EMBED_TOOL}" --table=psi_embedded_docs_table --raw-keys
-            ${PSI_DOC_RELATIVE} > "${PSI_EMBED_DOCS}"
-    WORKING_DIRECTORY "${PSI_ROOT}"
-    DEPENDS "${PSI_EMBED_TOOL}"
-    COMMENT "Embedding psi docs"
+    COMMAND ${CMAKE_COMMAND} -E echo "/* auto-generated stub */"
+        > "${PSI_EMBED_DOCS}"
+    COMMAND ${CMAKE_COMMAND} -E echo "#include <stddef.h>"
+        >> "${PSI_EMBED_DOCS}"
+    COMMAND ${CMAKE_COMMAND} -E echo "#include \"psi/embedded_data.h\""
+        >> "${PSI_EMBED_DOCS}"
+    COMMAND ${CMAKE_COMMAND} -E echo "const struct psi_embedded_data psi_embedded_docs_table[] = { { NULL, NULL, 0u, 0u } };"
+        >> "${PSI_EMBED_DOCS}"
+    COMMENT "Stubbing psi docs table (firmware doesn't embed docs)"
     VERBATIM
 )
 
 add_custom_command(
     OUTPUT "${PSI_EMBED_HTML}"
-    COMMAND "${PSI_EMBED_TOOL}" --table=psi_embedded_html_table
+    COMMAND "${PSI_EMBED_TOOL}" --no-compress --table=psi_embedded_html_table
             --key=index.html assets/web/index.html
             > "${PSI_EMBED_HTML}"
     WORKING_DIRECTORY "${PSI_ROOT}"
     DEPENDS "${PSI_EMBED_TOOL}" "${PSI_ROOT}/assets/web/index.html"
-    COMMENT "Embedding psi web SPA"
+    COMMENT "Embedding psi web SPA (uncompressed)"
     VERBATIM
 )
 

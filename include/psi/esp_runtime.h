@@ -26,6 +26,21 @@ void psi_esp_main_run(void);
  * FreeRTOS task; reads the flag use volatile semantics. */
 void psi_esp_request_abort(struct psi_abort_signal *abort_signal);
 
+struct psi_agent_observer;
+
+/* Run a single Anthropic turn entirely in C. Builds the JSON request,
+ * streams the SSE response, and forwards text deltas to the observer.
+ * Bypasses Lua entirely — necessary on ESP32 where the full Lua agent
+ * loop allocates beyond the available heap.
+ *
+ * Returns PSI_STATUS_OK on success, PSI_STATUS_ERROR on transport or
+ * API failure (in which case *error_message is a heap string the
+ * caller must free). The observer's on_turn_end is fired on success;
+ * the caller fires the error frame on its own. */
+int psi_esp_agent_turn(const char *user_text, const char *model, long max_tokens,
+    struct psi_agent_observer *observer, struct psi_abort_signal *abort_signal,
+    char **error_message);
+
 #ifdef __cplusplus
 }
 #endif

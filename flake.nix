@@ -512,23 +512,51 @@
           program = let
             qemuApp = pkgs.writeShellApplication {
               name = "psi-qemu";
-              runtimeInputs = [ espQemu self.packages.${system}.firmware ];
+              runtimeInputs = [
+                espQemu
+                self.packages.${system}.firmware
+                espPkgs.esp-idf-esp32
+                pkgs.python3
+                pkgs.coreutils
+              ];
               text = ''
                 FW_RO="${self.packages.${system}.firmware}/psi-firmware.bin"
                 PORT="''${PSI_QEMU_PORT:-8765}"
                 # The Nix store image is read-only but qemu opens
                 # flash read-write so it can persist NVS sectors. Copy
-                # to a writable scratch path on every launch.
+                # to a writable scratch path on every launch, and
+                # seed ANTHROPIC_API_KEY into the NVS region if set.
                 WORK=$(mktemp -d -t psi-qemu.XXXXXX)
                 trap 'rm -rf "$WORK"' EXIT
                 FW="$WORK/flash.bin"
                 cp "$FW_RO" "$FW"
                 chmod u+w "$FW"
+                if [ -n "''${ANTHROPIC_API_KEY:-}" ]; then
+                  # NVS limits keys to 15 chars, so we store the API
+                  # key under "anthropic_key"; esp_main.c reads it
+                  # back and re-exports as ANTHROPIC_API_KEY for Lua's
+                  # os.getenv. nvs_partition_gen.py ships with ESP-IDF
+                  # but invokes itself via subprocess.run with the
+                  # bundled Python env; we have to call that python
+                  # explicitly because the system python3 is missing
+                  # the esp_idf_nvs_partition_gen module.
+                  echo "key,type,encoding,value" > "$WORK/nvs.csv"
+                  echo "psi,namespace,," >> "$WORK/nvs.csv"
+                  echo "anthropic_key,data,string,$ANTHROPIC_API_KEY" >> "$WORK/nvs.csv"
+                  NVS_GEN="${espPkgs.esp-idf-esp32}/components/nvs_flash/nvs_partition_generator/nvs_partition_gen.py"
+                  IDF_PY=$(head -1 "$NVS_GEN" | sed 's|^#!||; s| .*||')
+                  if [ -x "$IDF_PY" ] && "$IDF_PY" -m esp_idf_nvs_partition_gen \
+                       generate "$WORK/nvs.csv" "$WORK/nvs.bin" 0x6000 \
+                       >/dev/null 2>&1 && [ -f "$WORK/nvs.bin" ]; then
+                    dd if="$WORK/nvs.bin" of="$FW" bs=1 seek=$((0x9000)) \
+                       conv=notrunc status=none
+                    echo "seeded NVS with anthropic_key"
+                  else
+                    echo "warning: nvs partition gen failed; key not seeded"
+                  fi
+                fi
                 echo "psi web chat: http://localhost:$PORT"
                 echo "firmware:    $FW_RO"
-                # Espressif's qemu-system-xtensa accepts a flash image
-                # directly; the WiFi simulator wires up via open_eth
-                # and slirp NATs the guest's traffic to the host.
                 exec qemu-system-xtensa \
                   -nographic \
                   -machine esp32 \

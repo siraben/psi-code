@@ -14,15 +14,19 @@
  * loop after this returns.
  */
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_event.h"
+#include "esp_http_client.h"
+#include "esp_crt_bundle.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "freertos/FreeRTOS.h"
 #include "esp_heap_caps.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
+#include "nvs.h"
 #include "nvs_flash.h"
 
 /* Network choice: WiFi for real hardware, openeth for QEMU. The
@@ -192,6 +196,41 @@ void psi_esp_main_run(void) {
     }
     ESP_ERROR_CHECK(err);
 
+    /* Surface secrets stored in NVS as environment variables before
+     * the Lua VM starts. anthropic.lua reads ANTHROPIC_API_KEY via
+     * os.getenv; on ESP-IDF newlib that goes through libc's environ,
+     * which we populate from the "psi" NVS namespace here. The QEMU
+     * test harness writes the key into NVS before launching the
+     * firmware. Real-hardware builds use idf.py nvs-partition-gen. */
+    {
+        nvs_handle_t h;
+        if (nvs_open("psi", NVS_READONLY, &h) == ESP_OK) {
+            /* NVS limits keys to 15 chars, so we store under short
+             * keys here and surface them as their full env-var
+             * names (which Lua expects via os.getenv). */
+            static const struct { const char *nvs_key; const char *env_name; } keys[] = {
+                { "anthropic_key",  "ANTHROPIC_API_KEY" },
+                { "anthropic_base", "PSI_ANTHROPIC_BASE_URL" },
+                { NULL, NULL },
+            };
+            size_t i;
+            for (i = 0; keys[i].nvs_key != NULL; i++) {
+                size_t len = 0;
+                if (nvs_get_str(h, keys[i].nvs_key, NULL, &len) == ESP_OK && len > 0) {
+                    char *buf = (char *)malloc(len);
+                    if (buf != NULL &&
+                        nvs_get_str(h, keys[i].nvs_key, buf, &len) == ESP_OK) {
+                        setenv(keys[i].env_name, buf, 1);
+                        ESP_LOGI(TAG, "loaded %s from NVS (%u bytes)",
+                            keys[i].env_name, (unsigned)len);
+                    }
+                    free(buf);
+                }
+            }
+            nvs_close(h);
+        }
+    }
+
     /* Bring up the Lua VM BEFORE the network stack so the boot
      * module set sees the maximum free heap. Network bring-up
      * (lwIP buffers, esp_eth driver, HTTP server) carves out ~80
@@ -212,5 +251,6 @@ void psi_esp_main_run(void) {
         ESP_LOGE(TAG, "network init failed; refusing to start server");
         return;
     }
+
     psi_ws_server_start();
 }

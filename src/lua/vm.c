@@ -5,7 +5,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef PSI_NO_ZLIB
 #include <zlib.h>
+#endif
 #if defined(__has_include) && __has_include(<cjson/cJSON.h>)
 #include <cjson/cJSON.h>
 #else
@@ -2106,17 +2108,39 @@ static int lfn_set_usage(lua_State *L) {
  * call and reset it for subsequent inflates — same allocation, many
  * uses. Desktop builds also benefit (slightly faster repeated
  * inflate, no behavioral difference). */
+#ifndef PSI_NO_ZLIB
 static z_stream g_psi_inflate_stream;
 static int g_psi_inflate_inited = 0;
+#endif
 
 int psi_embedded_inflate(
     const struct psi_embedded_data *e, unsigned char *out, size_t out_len) {
-    int rc;
     if (e == NULL || e->src == NULL || out == NULL)
         return PSI_STATUS_ERROR;
     if (out_len < e->raw_len)
         return PSI_STATUS_ERROR;
 
+    /* "Uncompressed" sentinel: when the embed tool was run with
+     * --no-compress, len equals raw_len and the bytes are stored
+     * verbatim. Skip zlib entirely. The ESP firmware embeds with
+     * --no-compress to avoid the heap pressure of inflate state +
+     * intermediate buffer; the desktop build still uses DEFLATE. */
+    if (e->len == e->raw_len) {
+        memcpy(out, e->src, e->raw_len);
+        return PSI_STATUS_OK;
+    }
+
+#ifdef PSI_NO_ZLIB
+    /* Desktop builds always link zlib; the no-zlib path only fires
+     * on constrained targets that promised --no-compress everywhere.
+     * Reaching it here means an entry slipped through with DEFLATE
+     * data and we have no way to inflate it. */
+    fprintf(stderr, "psi: compressed embed entry %s but no zlib linked\n",
+        e->name ? e->name : "?");
+    return PSI_STATUS_ERROR;
+#else
+    {
+    int rc;
     if (!g_psi_inflate_inited) {
         memset(&g_psi_inflate_stream, 0, sizeof(g_psi_inflate_stream));
         g_psi_inflate_stream.zalloc = Z_NULL;
@@ -2143,6 +2167,8 @@ int psi_embedded_inflate(
         return PSI_STATUS_ERROR;
     }
     return PSI_STATUS_OK;
+    }
+#endif /* PSI_NO_ZLIB */
 }
 
 /* Local alias preserves the historical name used in this file. */
