@@ -1121,9 +1121,7 @@ static int psi_vm_file_write_atomic(
     return PSI_STATUS_OK;
 }
 
-/* psi.file_write_secure(path, content) -> bool
- * Atomic 0600 write — for credential / token storage. */
-static int lfn_file_write_secure(lua_State *L) {
+static int psi_vm_lfn_atomic_write(lua_State *L, mode_t mode) {
     const char *path = luaL_checkstring(L, 1);
     size_t len;
     const char *content = luaL_checklstring(L, 2, &len);
@@ -1132,24 +1130,16 @@ static int lfn_file_write_secure(lua_State *L) {
         lua_pushboolean(L, 0);
         return 1;
     }
-    lua_pushboolean(L, psi_vm_file_write_atomic(path, content, len, 0600) == PSI_STATUS_OK);
+    lua_pushboolean(L, psi_vm_file_write_atomic(path, content, len, mode) == PSI_STATUS_OK);
     return 1;
 }
 
-/* psi.file_write_atomic(path, content) -> bool
- * Atomic 0644 write — for files whose on-disk shape can't survive a
- * partial write (e.g. session JSONL rewrites). */
-static int lfn_file_write_atomic(lua_State *L) {
-    const char *path = luaL_checkstring(L, 1);
-    size_t len;
-    const char *content = luaL_checklstring(L, 2, &len);
+static int lfn_file_write_secure(lua_State *L) {
+    return psi_vm_lfn_atomic_write(L, 0600);
+}
 
-    if ((long)len > PSI_VM_FILE_WRITE_MAX_BYTES) {
-        lua_pushboolean(L, 0);
-        return 1;
-    }
-    lua_pushboolean(L, psi_vm_file_write_atomic(path, content, len, 0644) == PSI_STATUS_OK);
-    return 1;
+static int lfn_file_write_atomic(lua_State *L) {
+    return psi_vm_lfn_atomic_write(L, 0644);
 }
 
 /* psi.file_append(path, content) -> bool
@@ -1777,37 +1767,31 @@ static int lfn_session_set_parent_id(lua_State *L) {
     return psi_vm_session_set(L, psi_session_set_parent_id);
 }
 
+static int psi_vm_session_get_string(lua_State *L, size_t offset) {
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    struct psi_session *s = host ? host->session : NULL;
+    const char *val;
+    if (!s) {
+        lua_pushnil(L);
+        return 1;
+    }
+    val = *(const char **)((const char *)s + offset);
+    if (!val) {
+        lua_pushnil(L);
+        return 1;
+    }
+    lua_pushstring(L, val);
+    return 1;
+}
+
 static int lfn_session_path(lua_State *L) {
-    struct psi_host_context *host = PSI_VM_HOST(L);
-    struct psi_session *s = host ? host->session : NULL;
-    if (!s || !s->path) {
-        lua_pushnil(L);
-        return 1;
-    }
-    lua_pushstring(L, s->path);
-    return 1;
+    return psi_vm_session_get_string(L, offsetof(struct psi_session, path));
 }
-
 static int lfn_session_parent_id(lua_State *L) {
-    struct psi_host_context *host = PSI_VM_HOST(L);
-    struct psi_session *s = host ? host->session : NULL;
-    if (!s || !s->parent_id) {
-        lua_pushnil(L);
-        return 1;
-    }
-    lua_pushstring(L, s->parent_id);
-    return 1;
+    return psi_vm_session_get_string(L, offsetof(struct psi_session, parent_id));
 }
-
 static int lfn_session_id(lua_State *L) {
-    struct psi_host_context *host = PSI_VM_HOST(L);
-    struct psi_session *s = host ? host->session : NULL;
-    if (!s || !s->id) {
-        lua_pushnil(L);
-        return 1;
-    }
-    lua_pushstring(L, s->id);
-    return 1;
+    return psi_vm_session_get_string(L, offsetof(struct psi_session, id));
 }
 
 static int psi_lua_collect_headers(lua_State *L, int idx, char ***out, size_t *out_count) {
@@ -1973,10 +1957,10 @@ static int lfn_http_stream_finish(lua_State *L) {
     return 1;
 }
 
-static int lfn_http_post(lua_State *L) {
-    const char *url = luaL_checkstring(L, 1);
-    size_t body_len;
-    const char *body;
+/* Shared buffered HTTP request: collect headers from arg 2, call
+ * psi_http_post (body=NULL acts as GET), push (status_code, body)
+ * or (nil, error_message). */
+static int psi_vm_http_request(lua_State *L, const char *url, const char *body, size_t body_len) {
     char **headers;
     size_t header_count;
     struct psi_host_context *host;
@@ -1984,9 +1968,6 @@ static int lfn_http_post(lua_State *L) {
     char *response;
     char *error_message;
     int status;
-
-    luaL_checktype(L, 2, LUA_TTABLE);
-    body = luaL_checklstring(L, 3, &body_len);
 
     if (psi_lua_collect_headers(L, 2, &headers, &header_count) != 0) {
         return luaL_error(L, "failed to collect headers");
@@ -2014,42 +1995,19 @@ static int lfn_http_post(lua_State *L) {
     return 2;
 }
 
+static int lfn_http_post(lua_State *L) {
+    const char *url = luaL_checkstring(L, 1);
+    size_t body_len;
+    const char *body;
+    luaL_checktype(L, 2, LUA_TTABLE);
+    body = luaL_checklstring(L, 3, &body_len);
+    return psi_vm_http_request(L, url, body, body_len);
+}
+
 static int lfn_http_get(lua_State *L) {
     const char *url = luaL_checkstring(L, 1);
-    char **headers;
-    size_t header_count;
-    struct psi_host_context *host;
-    long status_code;
-    char *response;
-    char *error_message;
-    int status;
-
     luaL_checktype(L, 2, LUA_TTABLE);
-
-    if (psi_lua_collect_headers(L, 2, &headers, &header_count) != 0) {
-        return luaL_error(L, "failed to collect headers");
-    }
-
-    host = PSI_VM_HOST(L);
-    status_code = 0l;
-    response = NULL;
-    error_message = NULL;
-    status = psi_http_get(url, (const char *const *)headers, header_count,
-        host ? host->abort_signal : NULL, &status_code, &response, &error_message);
-
-    psi_lua_free_headers(headers, header_count);
-
-    if (status != PSI_STATUS_OK) {
-        free(response);
-        lua_pushnil(L);
-        lua_pushstring(L, error_message != NULL ? error_message : "http request failed");
-        free(error_message);
-        return 2;
-    }
-    lua_pushinteger(L, status_code);
-    lua_pushstring(L, response != NULL ? response : "");
-    free(response);
-    return 2;
+    return psi_vm_http_request(L, url, NULL, 0u);
 }
 
 static int lfn_is_aborted(lua_State *L) {
