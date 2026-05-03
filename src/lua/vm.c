@@ -1406,6 +1406,17 @@ static int lfn_tool_progress(lua_State *L) {
 static char **psi_vm_argv_from_table(lua_State *L, int idx, int *argc_out);
 static void psi_vm_argv_free(char **argv);
 
+static void psi_vm_push_process_result(
+    lua_State *L, const char *output, int exit_status, int truncated) {
+    lua_newtable(L);
+    lua_pushstring(L, output ? output : "");
+    lua_setfield(L, -2, "output");
+    lua_pushinteger(L, (lua_Integer)exit_status);
+    lua_setfield(L, -2, "status");
+    lua_pushboolean(L, truncated ? 1 : 0);
+    lua_setfield(L, -2, "truncated");
+}
+
 static int lfn_process_run(lua_State *L) {
     const char *command = luaL_checkstring(L, 1);
     char *output = NULL;
@@ -1426,13 +1437,7 @@ static int lfn_process_run(lua_State *L) {
         free(output);
         return luaL_error(L, "failed to run shell command");
     }
-    lua_newtable(L);
-    lua_pushstring(L, output ? output : "");
-    lua_setfield(L, -2, "output");
-    lua_pushinteger(L, (lua_Integer)status);
-    lua_setfield(L, -2, "status");
-    lua_pushboolean(L, truncated ? 1 : 0);
-    lua_setfield(L, -2, "truncated");
+    psi_vm_push_process_result(L, output, status, truncated);
     free(output);
     return 1;
 }
@@ -1450,13 +1455,7 @@ static int lfn_process_run_argv(lua_State *L) {
     argv = psi_vm_argv_from_table(L, 1, &argc);
     if (argv == NULL || argc <= 0) {
         psi_vm_argv_free(argv);
-        lua_newtable(L);
-        lua_pushstring(L, "invalid argv");
-        lua_setfield(L, -2, "output");
-        lua_pushinteger(L, -1);
-        lua_setfield(L, -2, "status");
-        lua_pushboolean(L, 0);
-        lua_setfield(L, -2, "truncated");
+        psi_vm_push_process_result(L, "invalid argv", -1, 0);
         return 1;
     }
 
@@ -1464,17 +1463,8 @@ static int lfn_process_run_argv(lua_State *L) {
         argv, &output, &exit_status, &truncated, host ? host->abort_signal : NULL);
     psi_vm_argv_free(argv);
 
-    lua_newtable(L);
-    if (status == PSI_STATUS_OK && output != NULL) {
-        lua_pushstring(L, output);
-    } else {
-        lua_pushstring(L, "");
-    }
-    lua_setfield(L, -2, "output");
-    lua_pushinteger(L, exit_status);
-    lua_setfield(L, -2, "status");
-    lua_pushboolean(L, truncated ? 1 : 0);
-    lua_setfield(L, -2, "truncated");
+    psi_vm_push_process_result(
+        L, (status == PSI_STATUS_OK && output != NULL) ? output : "", exit_status, truncated);
     free(output);
     return 1;
 }
@@ -1669,13 +1659,7 @@ static int lfn_process_finish(lua_State *L) {
     h = *ud;
     if (h == NULL) {
         /* Idempotent double-finish: return a zero-shaped result. */
-        lua_newtable(L);
-        lua_pushstring(L, "");
-        lua_setfield(L, -2, "output");
-        lua_pushinteger(L, -1);
-        lua_setfield(L, -2, "status");
-        lua_pushboolean(L, 0);
-        lua_setfield(L, -2, "truncated");
+        psi_vm_push_process_result(L, "", -1, 0);
         return 1;
     }
     *ud = NULL; /* consumed before the C call so __gc skips */
@@ -1688,13 +1672,7 @@ static int lfn_process_finish(lua_State *L) {
         return luaL_error(L, "process_finish failed");
     }
 
-    lua_newtable(L);
-    lua_pushstring(L, output ? output : "");
-    lua_setfield(L, -2, "output");
-    lua_pushinteger(L, (lua_Integer)status);
-    lua_setfield(L, -2, "status");
-    lua_pushboolean(L, truncated ? 1 : 0);
-    lua_setfield(L, -2, "truncated");
+    psi_vm_push_process_result(L, output, status, truncated);
     free(output);
     return 1;
 }
@@ -1770,55 +1748,33 @@ static int lfn_json_decode(lua_State *L) {
     return 1;
 }
 
+typedef int (*psi_session_set_fn)(struct psi_session *, const char *);
+
+static int psi_vm_session_set(lua_State *L, psi_session_set_fn fn) {
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    struct psi_session *s = host ? host->session : NULL;
+    const char *val = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : NULL;
+    int status;
+
+    if (!s) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    status = fn(s, val);
+    if (status == PSI_STATUS_OK)
+        psi_vm_session_mark_retained(s);
+    lua_pushboolean(L, status == PSI_STATUS_OK ? 1 : 0);
+    return 1;
+}
+
 static int lfn_session_set_id(lua_State *L) {
-    struct psi_host_context *host = PSI_VM_HOST(L);
-    struct psi_session *s = host ? host->session : NULL;
-    const char *id = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : NULL;
-    int status;
-
-    if (!s) {
-        lua_pushboolean(L, 0);
-        return 1;
-    }
-    status = psi_session_set_id(s, id);
-    if (status == PSI_STATUS_OK)
-        psi_vm_session_mark_retained(s);
-    lua_pushboolean(L, status == PSI_STATUS_OK ? 1 : 0);
-    return 1;
+    return psi_vm_session_set(L, psi_session_set_id);
 }
-
 static int lfn_session_set_path(lua_State *L) {
-    struct psi_host_context *host = PSI_VM_HOST(L);
-    struct psi_session *s = host ? host->session : NULL;
-    const char *path = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : NULL;
-    int status;
-
-    if (!s) {
-        lua_pushboolean(L, 0);
-        return 1;
-    }
-    status = psi_session_set_path(s, path);
-    if (status == PSI_STATUS_OK)
-        psi_vm_session_mark_retained(s);
-    lua_pushboolean(L, status == PSI_STATUS_OK ? 1 : 0);
-    return 1;
+    return psi_vm_session_set(L, psi_session_set_path);
 }
-
 static int lfn_session_set_parent_id(lua_State *L) {
-    struct psi_host_context *host = PSI_VM_HOST(L);
-    struct psi_session *s = host ? host->session : NULL;
-    const char *pid = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : NULL;
-    int status;
-
-    if (!s) {
-        lua_pushboolean(L, 0);
-        return 1;
-    }
-    status = psi_session_set_parent_id(s, pid);
-    if (status == PSI_STATUS_OK)
-        psi_vm_session_mark_retained(s);
-    lua_pushboolean(L, status == PSI_STATUS_OK ? 1 : 0);
-    return 1;
+    return psi_vm_session_set(L, psi_session_set_parent_id);
 }
 
 static int lfn_session_path(lua_State *L) {
@@ -2601,39 +2557,17 @@ static int lfn_tui_unavailable(lua_State *L) {
     return luaL_error(L, "TUI support is not compiled in");
 }
 
-static int lfn_tui_size(lua_State *L) {
-    return lfn_tui_unavailable(L);
-}
-static int lfn_tui_poll_key(lua_State *L) {
-    return lfn_tui_unavailable(L);
-}
-static int lfn_tui_clear(lua_State *L) {
-    return lfn_tui_unavailable(L);
-}
-static int lfn_tui_draw_line(lua_State *L) {
-    return lfn_tui_unavailable(L);
-}
-static int lfn_tui_draw_raw_line(lua_State *L) {
-    return lfn_tui_unavailable(L);
-}
-static int lfn_tui_render_frame(lua_State *L) {
-    return lfn_tui_unavailable(L);
-}
-static int lfn_tui_set_cursor(lua_State *L) {
-    return lfn_tui_unavailable(L);
-}
-static int lfn_tui_refresh(lua_State *L) {
-    return lfn_tui_unavailable(L);
-}
-static int lfn_tui_suspend(lua_State *L) {
-    return lfn_tui_unavailable(L);
-}
-static int lfn_tui_set_tick_handler(lua_State *L) {
-    return lfn_tui_unavailable(L);
-}
-static int lfn_tui_set_tool_progress_handler(lua_State *L) {
-    return lfn_tui_unavailable(L);
-}
+#define lfn_tui_size lfn_tui_unavailable
+#define lfn_tui_poll_key lfn_tui_unavailable
+#define lfn_tui_clear lfn_tui_unavailable
+#define lfn_tui_draw_line lfn_tui_unavailable
+#define lfn_tui_draw_raw_line lfn_tui_unavailable
+#define lfn_tui_render_frame lfn_tui_unavailable
+#define lfn_tui_set_cursor lfn_tui_unavailable
+#define lfn_tui_refresh lfn_tui_unavailable
+#define lfn_tui_suspend lfn_tui_unavailable
+#define lfn_tui_set_tick_handler lfn_tui_unavailable
+#define lfn_tui_set_tool_progress_handler lfn_tui_unavailable
 
 #endif
 
