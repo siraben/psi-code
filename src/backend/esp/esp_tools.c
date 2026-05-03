@@ -274,6 +274,53 @@ static char *tool_gpio_read(const cJSON *input, char **err) {
     return json_to_string(r);
 }
 
+/* Blink a pin N times on-chip. The agent's tool round-trip is too
+ * coarse for visible blinking (each gpio_write is microseconds and
+ * the Anthropic loop fires them back-to-back), so this does the
+ * timing locally with vTaskDelay. Pin must already be in output
+ * mode (caller's responsibility — gpio_mode first). */
+static char *tool_gpio_blink(const cJSON *input, char **err) {
+    int pin = json_int(input, "pin", -1);
+    int count = json_int(input, "count", 5);
+    int period_ms = json_int(input, "period_ms", 400);
+    cJSON *r;
+    int i;
+
+    if (pin < 0 || pin >= GPIO_NUM_MAX) {
+        if (err)
+            *err = err_text("invalid pin %d", pin);
+        return NULL;
+    }
+    if (count < 1)
+        count = 1;
+    if (count > 200)
+        count = 200; /* cap so the WS doesn't time out */
+    if (period_ms < 20)
+        period_ms = 20;
+    if (period_ms > 5000)
+        period_ms = 5000;
+
+    /* Pin should already be configured as output. Don't reconfigure
+     * — let the agent see an error if it skipped gpio_mode. */
+    for (i = 0; i < count; i++) {
+        gpio_set_level(pin, 1);
+        vTaskDelay(pdMS_TO_TICKS(period_ms / 2));
+        gpio_set_level(pin, 0);
+        vTaskDelay(pdMS_TO_TICKS(period_ms / 2));
+    }
+#if PSI_GPIO_INTROSPECTION
+    if (pin < PSI_ESP_GPIO_COUNT)
+        g_gpio_level[pin] = 0;
+#endif
+
+    r = cJSON_CreateObject();
+    cJSON_AddBoolToObject(r, "ok", 1);
+    cJSON_AddNumberToObject(r, "pin", pin);
+    cJSON_AddNumberToObject(r, "count", count);
+    cJSON_AddNumberToObject(r, "period_ms", period_ms);
+    return json_to_string(r);
+}
+
 static char *tool_gpio_write(const cJSON *input, char **err) {
     int pin = json_int(input, "pin", -1);
     int level = json_int(input, "level", -1);
@@ -870,6 +917,21 @@ const struct psi_esp_tool psi_esp_tool_table[] = {
                              "\"level\":{\"type\":\"integer\",\"enum\":[0,1]}},"
                              "\"required\":[\"pin\",\"level\"]}",
         .handler = tool_gpio_write,
+    },
+    {
+        .name = "gpio_blink",
+        .description = "Blink a GPIO pin on-chip with vTaskDelay so it's actually "
+                       "visible. Pin must already be in output mode (call "
+                       "gpio_mode first). Defaults: count=5 cycles, period_ms=400 "
+                       "(half on, half off). count is capped at 200, period_ms "
+                       "clamped to [20,5000]. Returns when finished.",
+        .input_schema_json = "{\"type\":\"object\","
+                             "\"properties\":{"
+                             "\"pin\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":48},"
+                             "\"count\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":200},"
+                             "\"period_ms\":{\"type\":\"integer\",\"minimum\":20,\"maximum\":5000}},"
+                             "\"required\":[\"pin\"]}",
+        .handler = tool_gpio_blink,
     },
     {
         .name = "nvs_get",
