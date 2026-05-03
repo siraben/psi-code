@@ -22,9 +22,11 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#if PSI_USE_LUA_VM
 #include "lua.h"
 #include "lauxlib.h"
 #include "lualib.h"
+#endif
 #include "nvs.h"
 
 /* GPIO is available on every ESP32 SoC variant. ESP-IDF v5.x has
@@ -32,9 +34,11 @@
 #include "driver/gpio.h"
 
 #include "psi/common.h"
+#if PSI_USE_LUA_VM
 #include "psi/vm.h"
+#endif
 #include "esp_tools.h"
-#include "esp_obs_internal.h" /* psi_esp_vm() */
+#include "esp_obs_internal.h" /* psi_esp_vm(), psi_esp_forth_eval() */
 
 static const char *TAG_NS = "psi";
 
@@ -130,7 +134,7 @@ static char *tool_system_info(const cJSON *input, char **err) {
 /* GPIO direction can't be read back through driver/gpio.h, so when
  * PSI_GPIO_INTROSPECTION is on we shadow the last requested mode +
  * commanded output level for every pin. The agent could bypass our
- * tools via lua_eval — in that case the grid lags until the next
+ * tools via forth_eval — in that case the grid lags until the next
  * gpio_mode call. */
 #define PSI_ESP_GPIO_COUNT 40
 
@@ -426,6 +430,38 @@ static char *tool_restart(const cJSON *input, char **err) {
 }
 
 /* ------------------------------------------------------------------ */
+/* forth_eval                                                           */
+/* ------------------------------------------------------------------ */
+
+/* Evaluate a Forth source line against the firmware's persistent
+ * zforth context. The Forth `tell` word (defined at boot) routes
+ * stack-string output into a captured buffer that we return as the
+ * tool result. State persists across calls — a `: foo ... ;`
+ * definition stays available for the next invocation, which makes
+ * Forth a real dictionary the agent can extend. */
+static char *tool_forth_eval(const cJSON *input, char **err) {
+    const char *code = json_str(input, "code", NULL);
+    char *out = NULL;
+    int rc;
+    cJSON *r;
+
+    if (code == NULL || *code == '\0') {
+        if (err)
+            *err = err_text("missing string field: code");
+        return NULL;
+    }
+    rc = psi_esp_forth_eval(code, &out);
+    r = cJSON_CreateObject();
+    cJSON_AddBoolToObject(r, "ok", rc == 0);
+    cJSON_AddStringToObject(r, "output", out != NULL ? out : "");
+    if (rc != 0)
+        cJSON_AddNumberToObject(r, "error_code", (double)rc);
+    free(out);
+    return json_to_string(r);
+}
+
+#if PSI_USE_LUA_VM
+/* ------------------------------------------------------------------ */
 /* lua_eval                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -522,6 +558,7 @@ static char *tool_lua_eval(const cJSON *input, char **err) {
     lua_settop(L, top);
     return json_to_string(r);
 }
+#endif /* PSI_USE_LUA_VM */
 
 /* ------------------------------------------------------------------ */
 /* http_fetch                                                           */
@@ -872,17 +909,35 @@ const struct psi_esp_tool psi_esp_tool_table[] = {
         .handler = tool_restart,
     },
     {
+        .name = "forth_eval",
+        .description = "Evaluate Forth source against the firmware's persistent "
+                       "zforth dictionary. Definitions stick across calls (`: foo "
+                       "1 2 + ;` is callable next time). Output is whatever the "
+                       "Forth program writes via `tell` (a stack of (addr len) "
+                       "string emit). Useful for sequencing low-level peripheral "
+                       "pokes or building tiny custom primitives the agent can "
+                       "compose with later. Tip: `tell` and `emit` are wired up; "
+                       "`.` prints a number; named primitives in core.zf aren't "
+                       "loaded — define them inline if you need them.",
+        .input_schema_json = "{\"type\":\"object\","
+                             "\"properties\":{\"code\":{\"type\":\"string\"}},"
+                             "\"required\":[\"code\"]}",
+        .handler = tool_forth_eval,
+    },
+#if PSI_USE_LUA_VM
+    {
         .name = "lua_eval",
         .description = "Evaluate a Lua expression or short script in the firmware's "
-                       "psi VM. Returns {ok, result} where result is the "
-                       "stringified return value. The VM has psi.* primitives "
-                       "loaded; e.g. psi.runtime_info(), psi.json_encode(t), "
-                       "psi.ramfs.read('@mem/foo'). Run untrusted code with care.",
+                       "psi VM. Only built when the firmware was compiled with "
+                       "PSI_USE_LUA_VM=ON (typically WROVER chips with PSRAM). "
+                       "Returns {ok, result} where result is the stringified "
+                       "return value.",
         .input_schema_json = "{\"type\":\"object\","
                              "\"properties\":{\"code\":{\"type\":\"string\"}},"
                              "\"required\":[\"code\"]}",
         .handler = tool_lua_eval,
     },
+#endif
     {
         .name = "wifi_scan",
         .description = "Scan for nearby WiFi access points. Returns {count, aps[]} where "

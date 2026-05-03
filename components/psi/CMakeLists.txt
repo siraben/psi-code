@@ -35,23 +35,22 @@ option(PSI_INCLUDE_SPA "Embed the chat SPA into the firmware" ON)
 # firmware image; pass -DPSI_GPIO_INTROSPECTION=OFF for production.
 option(PSI_GPIO_INTROSPECTION "Expose /gpio endpoint for the host dashboard pin grid" ON)
 
-# PSI_USE_CHIBI_PROMPT swaps the agent's system prompt source from
-# a baked-in C string (the safe default) to one built at boot by
-# chibi-scheme calling C foreign procedures. Demonstrates the
-# C↔Scheme bridge, but on a no-PSRAM ESP32 chibi's ~96 KiB heap
-# carve fragments the pool enough that esp_http_client_init starves
-# afterward — agent turns over WiFi will fail. Useful for inspecting
-# the embedded Scheme stack; turn off when running the full agent.
-option(PSI_USE_CHIBI_PROMPT "Build the system prompt with chibi-scheme at boot" OFF)
+# PSI_USE_FORTH_PROMPT uses zforth (~10 KiB code + 2 KiB dict + 256 B
+# stacks) to build the system prompt at boot. Default ON: zforth is
+# the chosen extension language for the ESP build (see PSI_USE_LUA_VM
+# below), so the prompt-builder using zforth keeps everything in one
+# story.
+option(PSI_USE_FORTH_PROMPT "Build the system prompt with zforth at boot" ON)
 
-# PSI_USE_FORTH_PROMPT is the same idea as PSI_USE_CHIBI_PROMPT but
-# uses zforth (~10 KiB code + 2 KiB dict + 256 B stacks). zforth's
-# footprint is small enough that the chibi-fragmentation problem
-# doesn't apply — flipping this on leaves the agent's HTTPS path
-# fully working. Off by default only because the baked-in C prompt
-# is the simplest possible thing; flip on to demo the embedded Forth
-# stack alongside a working agent.
-option(PSI_USE_FORTH_PROMPT "Build the system prompt with zforth at boot" OFF)
+# PSI_USE_LUA_VM compiles in psi's full Lua VM + embedded module
+# graph. On no-PSRAM ESP32 (D0WD-V3 etc.) the module graph OOMs
+# during boot, so the VM bootstrap fails and ~150 KiB of code +
+# ~1.3 MiB of generated source carry no value at runtime. Default
+# OFF for the ESP build: drop src/lua/vm.c, lua-cmod, and the
+# embedded blobs — the Lua-eval tool gets replaced with forth_eval.
+# Turn ON when running on a WROVER (ESP32 with PSRAM) where the
+# module graph actually fits.
+option(PSI_USE_LUA_VM "Compile psi's Lua VM + embedded module graph" OFF)
 
 set(PSI_EMBED_TOOL "${CMAKE_CURRENT_BINARY_DIR}/psi_embed")
 set(PSI_EMBED_LUA  "${CMAKE_CURRENT_BINARY_DIR}/embedded_lua.c")
@@ -70,7 +69,6 @@ set(PSI_C_SOURCES
     "${PSI_ROOT}/src/core/http_tls.c"
     "${PSI_ROOT}/src/core/process.c"
     "${PSI_ROOT}/src/core/session.c"
-    "${PSI_ROOT}/src/lua/vm.c"
     "${PSI_ROOT}/src/backend/esp/esp_main.c"
     "${PSI_ROOT}/src/backend/esp/esp_abort.c"
     "${PSI_ROOT}/src/backend/esp/esp_agent.c"
@@ -78,12 +76,23 @@ set(PSI_C_SOURCES
     "${PSI_ROOT}/src/backend/esp/esp_http.c"
     "${PSI_ROOT}/src/backend/esp/esp_observer.c"
     "${PSI_ROOT}/src/backend/esp/esp_ws_server.c"
-    "${PSI_ROOT}/src/backend/esp/esp_chibi.c"
     "${PSI_ROOT}/src/backend/esp/esp_forth.c"
     ${PSI_EMBED_LUA}
     ${PSI_EMBED_DOCS}
     ${PSI_EMBED_HTML}
 )
+if(PSI_USE_LUA_VM)
+    list(APPEND PSI_C_SOURCES "${PSI_ROOT}/src/lua/vm.c")
+else()
+    # vm.c also defines psi_embedded_inflate (used by the SPA loader);
+    # supply a tiny memcpy-only version when it's compiled out.
+    list(APPEND PSI_C_SOURCES "${PSI_ROOT}/src/core/embedded_inflate.c")
+endif()
+
+set(PSI_PRIV_REQUIRES forth-cmod)
+if(PSI_USE_LUA_VM)
+    list(APPEND PSI_PRIV_REQUIRES lua-cmod)
+endif()
 
 idf_component_register(
     SRCS ${PSI_C_SOURCES}
@@ -102,9 +111,7 @@ idf_component_register(
         mbedtls
         nvs_flash
     PRIV_REQUIRES
-        lua-cmod
-        chibi-cmod
-        forth-cmod
+        ${PSI_PRIV_REQUIRES}
 )
 
 # Capability gates and HTTP backend selection. -DPSI_CAP_FILESYSTEM=0
@@ -140,16 +147,16 @@ else()
     target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_GPIO_INTROSPECTION=0)
 endif()
 
-if(PSI_USE_CHIBI_PROMPT)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_USE_CHIBI_PROMPT=1)
-else()
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_USE_CHIBI_PROMPT=0)
-endif()
-
 if(PSI_USE_FORTH_PROMPT)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_USE_FORTH_PROMPT=1)
 else()
     target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_USE_FORTH_PROMPT=0)
+endif()
+
+if(PSI_USE_LUA_VM)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_USE_LUA_VM=1)
+else()
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_USE_LUA_VM=0)
 endif()
 
 # ESP-IDF v5.5+ uses C23-ish dialect for its headers; we let the
@@ -241,14 +248,35 @@ set(_psi_lua_abs)
 foreach(_r IN LISTS PSI_LUA_RELATIVE)
     list(APPEND _psi_lua_abs "${PSI_ROOT}/${_r}")
 endforeach()
-add_custom_command(
-    OUTPUT "${PSI_EMBED_LUA}"
-    COMMAND "${PSI_EMBED_TOOL}" --no-compress ${PSI_LUA_RELATIVE} > "${PSI_EMBED_LUA}"
-    WORKING_DIRECTORY "${PSI_ROOT}"
-    DEPENDS "${PSI_EMBED_TOOL}" ${_psi_lua_abs}
-    COMMENT "Embedding psi Lua sources (uncompressed)"
-    VERBATIM
-)
+if(PSI_USE_LUA_VM)
+    add_custom_command(
+        OUTPUT "${PSI_EMBED_LUA}"
+        COMMAND "${PSI_EMBED_TOOL}" --no-compress ${PSI_LUA_RELATIVE} > "${PSI_EMBED_LUA}"
+        WORKING_DIRECTORY "${PSI_ROOT}"
+        DEPENDS "${PSI_EMBED_TOOL}" ${_psi_lua_abs}
+        COMMENT "Embedding psi Lua sources (uncompressed)"
+        VERBATIM
+    )
+else()
+    # Lua VM compiled out — generate an empty embedded-source table so
+    # the linker still sees psi_embedded_lua_table. Saves ~1.3 MiB of
+    # generated source compilation and ~150 KiB of flash. Note: also
+    # depends on PSI_EMBED_TOOL only as a no-op so add_dependencies()
+    # below still has a valid target to chain.
+    add_custom_command(
+        OUTPUT "${PSI_EMBED_LUA}"
+        COMMAND ${CMAKE_COMMAND} -E echo "/* auto-generated stub — Lua VM disabled */"
+            > "${PSI_EMBED_LUA}"
+        COMMAND ${CMAKE_COMMAND} -E echo "#include <stddef.h>"
+            >> "${PSI_EMBED_LUA}"
+        COMMAND ${CMAKE_COMMAND} -E echo "#include \"psi/embedded_data.h\""
+            >> "${PSI_EMBED_LUA}"
+        COMMAND ${CMAKE_COMMAND} -E echo "const struct psi_embedded_data psi_embedded_lua_table[] = { { NULL, NULL, 0u, 0u } };"
+            >> "${PSI_EMBED_LUA}"
+        COMMENT "Stubbing psi Lua sources table (PSI_USE_LUA_VM=OFF)"
+        VERBATIM
+    )
+endif()
 
 # Docs are not used by the firmware agent; emit a stub table so
 # psi_embedded_docs_table is defined for the linker. (The C side

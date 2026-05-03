@@ -28,8 +28,10 @@
 #include "freertos/event_groups.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#if PSI_USE_LUA_VM
 #include "lua.h"
 #include "lauxlib.h"
+#endif
 
 #include "psi/abort.h"
 #include "psi/agent_runtime.h"
@@ -37,7 +39,9 @@
 #include "psi/embedded_data.h"
 #include "psi/esp_runtime.h"
 #include "psi/session.h"
+#if PSI_USE_LUA_VM
 #include "psi/vm.h"
+#endif
 
 #include "esp_obs_internal.h"
 #include "esp_tools.h"
@@ -62,14 +66,19 @@ struct psi_ws_inbound {
     char *json; /* owned; receiver frees */
 };
 
-/* The agent VM and session are process-wide singletons: ESP32's
- * heap is too small to host a Lua state per WS connection, and the
- * agent is single-threaded by design (one turn at a time). The
- * connection just owns the queues and observer. */
+/* The agent VM and session are process-wide singletons: when Lua
+ * is in the build, ESP32's heap is too small to host a Lua state
+ * per WS connection, and the agent is single-threaded by design
+ * (one turn at a time). When PSI_USE_LUA_VM=0 (default for the
+ * ESP build) only the abort signal lives here; the VM/session
+ * stubs go away. The connection still owns the queues and
+ * observer either way. */
+#if PSI_USE_LUA_VM
 static struct psi_vm g_psi_vm;
 static struct psi_session g_psi_session;
-static struct psi_abort_signal g_psi_abort;
 static int g_psi_vm_inited = 0;
+#endif
+static struct psi_abort_signal g_psi_abort;
 
 /* Cached system prompt built from psi.prompt.system_prompt() in Lua
  * at boot. The C agent injects it as the Anthropic `system` field
@@ -79,9 +88,14 @@ static int g_psi_vm_inited = 0;
  * runs, the model just gets a default-empty system. */
 static char *g_psi_system_prompt = NULL;
 
-/* Accessor used by app_main after psi_esp_vm_bootstrap. */
+/* Accessor used by app_main after psi_esp_vm_bootstrap. NULL when
+ * the Lua VM is compiled out (the ESP build's default). */
 struct psi_vm *psi_esp_vm(void) {
+#if PSI_USE_LUA_VM
     return g_psi_vm_inited ? &g_psi_vm : NULL;
+#else
+    return NULL;
+#endif
 }
 
 void psi_esp_set_system_prompt(char *prompt) {
@@ -108,11 +122,18 @@ struct psi_ws_session {
     int closed;
 };
 
+/* Initialize state the C agent always needs (the abort signal is
+ * polled by every WS turn). Independent of the Lua VM, which gets
+ * its own bootstrap below. */
+void psi_esp_runtime_init(void) {
+    psi_abort_signal_init(&g_psi_abort);
+}
+
+#if PSI_USE_LUA_VM
 int psi_esp_vm_bootstrap(void) {
     if (g_psi_vm_inited)
         return 0;
     psi_session_init(&g_psi_session);
-    psi_abort_signal_init(&g_psi_abort);
     if (psi_vm_init(&g_psi_vm, NULL, NULL, NULL, NULL) != PSI_STATUS_OK)
         return -1;
     psi_vm_bind_session(&g_psi_vm, &g_psi_session);
@@ -121,15 +142,10 @@ int psi_esp_vm_bootstrap(void) {
 }
 
 /* Call psi.prompt.system_prompt() in the given VM and return a
- * heap-allocated copy. The Lua side knows about the active tool set,
- * the embedded docs reference, the current date, and any context
- * files that happened to land in @mem/ — same shape as the desktop
- * --system-prompt mode. The C agent injects this as the Anthropic
- * `system` field so embedded chat behaves consistently with the CLI.
- *
- * Touches the Lua state and is therefore not safe to call from a
- * task other than the one that owns the VM. We invoke this once at
- * boot from app_main; the cached result feeds every WS turn. */
+ * heap-allocated copy. Touches the Lua state and so isn't safe to
+ * call from a task other than the one that owns the VM. We invoke
+ * this once at boot from app_main; the cached result feeds every
+ * WS turn. Only available when PSI_USE_LUA_VM=ON. */
 char *psi_esp_build_system_prompt(struct psi_vm *vm) {
     lua_State *L;
     int top;
@@ -169,6 +185,14 @@ out:
     lua_settop(L, top);
     return copy;
 }
+#else
+/* Stubs for the default ESP build (Lua VM compiled out). */
+int psi_esp_vm_bootstrap(void) { return -1; }
+char *psi_esp_build_system_prompt(struct psi_vm *vm) {
+    (void)vm;
+    return NULL;
+}
+#endif
 
 #define PSI_WS_BIT_CLOSE 0x01u
 
@@ -315,9 +339,11 @@ static void psi_ws_worker_task(void *arg) {
                     }
                     free(err_msg);
                 }
-                (void)psi_vm_run_agent_turn;
                 (void)response;
+#if PSI_USE_LUA_VM
+                (void)psi_vm_run_agent_turn;
                 (void)g_psi_vm_inited;
+#endif
             } else if (cJSON_IsString(type) && strcmp(type->valuestring, "abort") == 0) {
                 psi_esp_request_abort(&g_psi_abort);
             } else {

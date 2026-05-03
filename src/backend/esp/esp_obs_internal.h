@@ -21,19 +21,24 @@ void psi_esp_observer_emit_error(struct psi_esp_observer *obs, const char *messa
  * in esp_ws_server.c and called from esp_main.c at boot. */
 struct psi_vm;
 struct psi_vm *psi_esp_vm(void);
+
+/* Initialize state the C agent always needs (abort signal). Called
+ * from esp_main once before any WS connection. */
+void psi_esp_runtime_init(void);
 void psi_esp_set_system_prompt(char *prompt); /* takes ownership */
 const char *psi_esp_get_system_prompt(void);
 
-/* Chibi-Scheme glue. Returns a heap-allocated system prompt produced
- * by evaluating a baked-in Scheme expression, or NULL if chibi failed
- * to bring up a context. The agent uses this when the Lua VM bootstrap
- * OOMs (no-PSRAM ESP32 case). */
-char *psi_esp_chibi_build_system_prompt(void);
-
-/* zForth glue. Same shape as the chibi version, but runs the
- * prompt-builder through a tiny Forth instead. The footprint
- * (~12 KiB total) is small enough not to starve mbedTLS, so unlike
- * the chibi path this works alongside a live agent. */
+/* zForth glue. Builds the agent system prompt at boot by running
+ * a tiny Forth program that calls back into C via custom syscalls.
+ * Footprint is ~12 KiB total (10 KiB code + 2 KiB dict + 256 B
+ * stacks), which sits comfortably alongside mbedTLS handshake
+ * buffers. Returns malloc'd string, NULL on error. */
 char *psi_esp_forth_build_system_prompt(void);
+
+/* Evaluate Forth source `code` against the persistent zforth
+ * context. Captured TELL output is returned as a malloc'd string
+ * (caller frees); zf_result is non-zero on Forth-side failure and
+ * the function returns NULL. Used by the forth_eval tool. */
+int psi_esp_forth_eval(const char *code, char **out);
 
 #endif

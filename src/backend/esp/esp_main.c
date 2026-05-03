@@ -256,64 +256,55 @@ void psi_esp_main_run(void) {
         }
     }
 
-    /* Bring up the Lua VM BEFORE the network stack so the boot
-     * module set sees the maximum free heap. Network bring-up
-     * (lwIP buffers, esp_eth driver, HTTP server) carves out ~80
+    /* Initialize the abort signal the C agent uses on every WS turn. */
+    psi_esp_runtime_init();
+
+    /* Bring up the optional Lua VM BEFORE the network stack so the
+     * boot module set sees the maximum free heap. Network bring-up
+     * (lwIP buffers, eth/wifi drivers, HTTP server) carves out ~80
      * KiB of contiguous space that Lua otherwise can't allocate
-     * inside. The VM is then shared across all WebSocket
-     * connections — there's not enough RAM for a per-connection
-     * state and the agent is single-threaded by design. */
+     * inside. With PSI_USE_LUA_VM=0 (the ESP default) this whole
+     * block compiles out and we go straight to the zforth-built
+     * prompt below. */
     ESP_LOGI(TAG, "free heap before VM init: %lu",
         (unsigned long)heap_caps_get_free_size(MALLOC_CAP_8BIT));
     ESP_LOGI(TAG, "largest free block:        %lu",
         (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+#if PSI_USE_LUA_VM
+    /* Lua VM path. Only built when PSI_USE_LUA_VM=ON (typically only
+     * on WROVER ESP32s where the embedded module graph fits). Builds
+     * the desktop-equivalent system prompt by calling
+     * psi.prompt.system_prompt() in Lua, then caches the result for
+     * the WS turn loop. */
     if (psi_esp_vm_bootstrap() != 0) {
         ESP_LOGE(TAG, "psi_vm_init failed; agent will run without Lua-built prompt");
     } else {
-        /* Build the desktop-equivalent system prompt now while the
-         * Lua VM is still warm and we own its task; cache the result
-         * for the WS turn loop to inject as Anthropic's `system`
-         * field. Without this the embedded chat sees a default-empty
-         * system message and behaves unlike the CLI/TUI agents. */
         char *prompt = psi_esp_build_system_prompt(psi_esp_vm());
         if (prompt != NULL) {
             ESP_LOGI(TAG, "system prompt cached from Lua (%u bytes)", (unsigned)strlen(prompt));
             psi_esp_set_system_prompt(prompt);
         } else {
-            ESP_LOGW(TAG, "system prompt build (Lua) failed; falling back to baked-in");
+            ESP_LOGW(TAG, "system prompt build (Lua) failed; falling back");
         }
     }
+#endif
 #if PSI_USE_FORTH_PROMPT
     /* zForth path: tiny stack-based Forth, ~12 KiB total state.
      * Small enough that mbedTLS still gets its handshake buffers
-     * afterward (the failure mode chibi hits with its 96 KiB
-     * carve). See PSI_USE_FORTH_PROMPT in components/psi/CMakeLists.txt. */
+     * afterward. Default extension language for the ESP build. */
     if (psi_esp_get_system_prompt() == NULL) {
         char *fth = psi_esp_forth_build_system_prompt();
         if (fth != NULL) {
             ESP_LOGI(TAG, "system prompt: from zforth (%u bytes)", (unsigned)strlen(fth));
             psi_esp_set_system_prompt(fth);
         } else {
-            ESP_LOGW(TAG, "system prompt: zforth failed; falling back");
+            ESP_LOGW(TAG, "system prompt: zforth failed; falling back to baked-in C");
         }
     }
 #endif
-#if PSI_USE_CHIBI_PROMPT
-    /* Chibi-Scheme path: fuller scripting language than zforth, but
-     * 96 KiB heap carve fragments the pool enough that
-     * esp_http_client_init starves afterward on a no-PSRAM ESP32. */
-    if (psi_esp_get_system_prompt() == NULL) {
-        char *scm = psi_esp_chibi_build_system_prompt();
-        if (scm != NULL) {
-            ESP_LOGI(TAG, "system prompt: from chibi-scheme (%u bytes)", (unsigned)strlen(scm));
-            psi_esp_set_system_prompt(scm);
-        } else {
-            ESP_LOGW(TAG, "system prompt: chibi failed; falling back to baked-in C");
-        }
-    }
-#endif
-    /* Baked-in C fallback. Last resort if both Lua VM and chibi fail
-     * to build a prompt — ensures the agent never runs unframed. */
+    /* Baked-in C fallback. Last resort if zforth (and the optional
+     * Lua VM) fail to build a prompt — ensures the agent never runs
+     * unframed. */
     if (psi_esp_get_system_prompt() == NULL) {
         char *baked = (char *)malloc(1024u);
         if (baked != NULL) {
@@ -325,13 +316,12 @@ void psi_esp_main_run(void) {
             }
             snprintf(baked, 1024u,
                 "You are psi, a coding-agent runtime running on an ESP32 microcontroller "
-                "(MAC %s) reachable over the local network. You have a small set of tools "
-                "for inspecting the chip and the world around it: system_info, wifi_scan, "
-                "http_fetch (HTTPS via mbedTLS), gpio_mode/read/write, nvs_get/set, "
-                "time_now, restart, uart_log (write to the operator's serial console), "
-                "and lua_eval (only if the Lua VM is up). Prefer using tools to find "
-                "ground truth instead of guessing. Keep replies short — the user is "
-                "reading them on a phone or terminal.",
+                "(MAC %s) reachable over the local network. Tools: system_info, "
+                "wifi_scan, http_fetch (HTTPS via mbedTLS), gpio_mode/read/write, "
+                "nvs_get/set, time_now, restart, uart_log (write to the operator's "
+                "serial console), and forth_eval (evaluate zforth source against the "
+                "firmware's persistent Forth dictionary). Prefer tools over guessing. "
+                "Keep replies short — the user is on a phone or terminal.",
                 mac_str);
             psi_esp_set_system_prompt(baked);
             ESP_LOGI(TAG, "system prompt: baked-in default (%u bytes)", (unsigned)strlen(baked));
