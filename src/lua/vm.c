@@ -1910,6 +1910,9 @@ static int lfn_http_stream_finish(lua_State *L) {
     char *error_message;
 
     ud = psi_vm_http_stream_ud_check(L, 1);
+    if (ud == NULL) {
+        return luaL_error(L, "http_stream_finish: invalid stream handle");
+    }
     h = *ud;
     if (h == NULL) {
         /* Idempotent: explicit finish after GC, or double-finish. */

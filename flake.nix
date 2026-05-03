@@ -13,9 +13,10 @@
 
     flake-utils.url = "github:numtide/flake-utils";
     filnix.url = "github:mbrock/filnix";
+    sirabenOverlay.url = "github:siraben/overlay";
   };
 
-  outputs = { self, nixpkgs, nixpkgs-cosmo, flake-utils, filnix }:
+  outputs = { self, nixpkgs, nixpkgs-cosmo, flake-utils, filnix, sirabenOverlay }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         inherit (pkgs) lib;
@@ -428,6 +429,46 @@
             luacheck lua
             echo "=== c analyze ==="
             make analyze
+          '';
+        };
+
+        # `nix run .#infer` — Infer static analysis from siraben/overlay.
+        apps.infer = let
+          lua = luaFor pkgs;
+        in mkApp {
+          name = "psi-infer";
+          description = "Run Infer static analysis";
+          extraInputs = [
+            sirabenOverlay.packages.${system}.infer
+            pkgs.gcc
+          ];
+          text = ''
+            cd "''${PSI_SRC:-$PWD}"
+            build_dir="''${INFER_BUILD_DIR:-/tmp/psi-infer-build}"
+            results_dir="''${INFER_RESULTS_DIR:-/tmp/psi-infer-out}"
+            infer_cppflags=()
+            export PSI_CFLAGS_LUA="-I${lua}/include"
+            export PSI_LIBS_LUA="-L${lua}/lib -llua"
+            ${lib.optionalString pkgs.stdenv.isLinux ''
+              infer_cppflags+=(
+                "-isystem" "$(${pkgs.gcc}/bin/gcc -print-file-name=include)"
+                "-isystem" "${pkgs.glibc.dev}/include"
+              )
+            ''}
+            host_cflags_zlib="$(pkg-config --cflags zlib)"
+            host_libs_zlib="$(pkg-config --libs zlib)"
+            rm -rf "$build_dir" "$results_dir"
+            mkdir -p "$build_dir"
+            infer run \
+              --fail-on-issue \
+              --force-integration make \
+              --results-dir "$results_dir" \
+              -- make \
+                BUILD_DIR="$build_dir" \
+                analyze-infer \
+                CPPFLAGS="''${infer_cppflags[*]}" \
+                HOST_CFLAGS_ZLIB="''${infer_cppflags[*]} $host_cflags_zlib" \
+                HOST_LIBS_ZLIB="$host_libs_zlib"
           '';
         };
 

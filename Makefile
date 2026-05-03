@@ -212,6 +212,8 @@ analyze-gcc:
 	$(MAKE) clean
 	$(MAKE) CFLAGS="-O2 -fanalyzer"
 
+analyze-infer: $(OBJECTS)
+
 analyze: analyze-cppcheck analyze-gcc
 
 lint-c: analyze
@@ -222,5 +224,5 @@ check-build-configs:
 
 .PHONY: all clean install \
         lint lint-lua lint-c format format-lua format-c check-format-c \
-        analyze analyze-cppcheck analyze-gcc \
+        analyze analyze-cppcheck analyze-gcc analyze-infer \
         check-build-configs

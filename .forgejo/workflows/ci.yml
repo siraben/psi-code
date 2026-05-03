@@ -60,6 +60,28 @@ jobs:
           ln -s "$CI_BUILD_DIR" build
           nix develop --command make BUILD_DIR="$CI_BUILD_DIR" lint
 
+  infer:
+    name: Infer static analysis
+    runs-on: docker
+    steps:
+      - name: Checkout
+        run: |
+          token="${FORGEJO_TOKEN:-$GITHUB_TOKEN}"
+          auth_header="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
+          git init .
+          git remote add origin "${FORGEJO_CI_URL%/}/${FORGEJO_CI_REPOSITORY}"
+          GIT_TERMINAL_PROMPT=0 git -c "http.extraHeader=Authorization: Basic $auth_header" fetch --quiet --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+
+      - name: Run Infer
+        run: |
+          export HOME="$PWD/.home"
+          export XDG_CACHE_HOME="$PWD/.cache"
+          export INFER_BUILD_DIR="/tmp/psi-ci-${GITHUB_RUN_ID:-local}-${GITHUB_JOB:-infer}-${GITHUB_RUN_ATTEMPT:-1}-build"
+          export INFER_RESULTS_DIR="/tmp/psi-ci-${GITHUB_RUN_ID:-local}-${GITHUB_JOB:-infer}-${GITHUB_RUN_ATTEMPT:-1}-infer-out"
+          mkdir -p "$HOME" "$XDG_CACHE_HOME"
+          nix run .#infer
+
   feature-matrix:
     name: Build and smoke (${{ matrix.name }})
     runs-on: docker
