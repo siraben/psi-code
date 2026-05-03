@@ -5,8 +5,8 @@
 
 struct psi_abort_signal;
 
-/* Generic HTTP primitives exposed to Lua. The agent turn loop lives
- * in lua/psi/anthropic.lua; this header is just the minimum C surface
+/* Generic HTTP primitives exposed to Lua. Provider loops live under
+ * lua/psi/providers; this header is just the minimum C surface
  * needed for Lua to POST to Anthropic's API (or any other provider). */
 
 int psi_http_post(const char *url, const char *const *header_lines, size_t header_count,

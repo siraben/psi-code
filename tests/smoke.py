@@ -2251,15 +2251,18 @@ def t_tui_osc52_clipboard(psi: Psi):
         + 'local wrote = tui.write_clipboard("hi", {source="test", force=true})\n'
         + 'local direct = osc52._debug_osc52_sequence("hi", {TMUX=""})\n'
         + 'local tmux = osc52._debug_osc52_sequence("hi", {TMUX="/tmp/tmux"})\n'
+        + 'local capped = osc52.write_clipboard(string.rep("a", 75001), {source="test"})\n'
         + 'return table.concat({\n'
         + '  osc52._debug_base64_encode("hello"),\n'
         + '  tostring(wrote),\n'
         + '  tostring((writes[1] or ""):find("52;", 1, true) ~= nil and (writes[1] or ""):find(";aGk=", 1, true) ~= nil),\n'
         + '  tostring(direct:sub(1, 2) == "\\27]"),\n'
-        + '  tostring(tmux:sub(1, 7) == "\\27Ptmux;")\n'
+        + '  tostring(tmux:sub(1, 7) == "\\27Ptmux;"),\n'
+        + '  tostring(capped),\n'
+        + '  tostring(#writes)\n'
         + '}, "|")'
     )
-    assert_equals(out, "aGVsbG8=|true|true|true|true", "OSC 52 clipboard writer")
+    assert_equals(out, "aGVsbG8=|true|true|true|true|false|1", "OSC 52 clipboard writer")
 
 
 @test("tui/vim_yank_writes_clipboard")

@@ -157,7 +157,7 @@ extensions cannot shadow them. Full list:
 /export [path]  /fork [N]  /clone [path]  /compact [N]  /queue [...]
 ```
 
-Canonical source: `lua/psi/commands.lua` (`BUILTIN_COMMANDS` plus the
+Canonical source: `lua/psi/slash_commands.lua` (`BUILTIN_COMMANDS` plus the
 registered extension command table). `lua/psi/prompt.lua` delegates to
 the generated command help for compatibility.
 

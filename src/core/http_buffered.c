@@ -1,5 +1,5 @@
 /* HTTP primitives. The agent turn loop used to live here; it's now in
- * lua/psi/anthropic.lua. This file is intentionally minimal — just
+ * provider modules under lua/psi/providers. This file is intentionally minimal — just
  * libcurl plumbing for the HTTP operations Lua needs: a streamed POST
  * (for SSE Messages endpoint), buffered POST (one-shot completion),
  * and buffered GET (metadata refresh). The abort_signal hook is wired via curl's transfer-info

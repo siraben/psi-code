@@ -257,7 +257,7 @@ local function handle_slash_command(opts, line)
     print("thinking set to " .. tostring(level))
     return true, false
   end
-  -- "new-session" / "reload" are now handled inside commands.lua and
+  -- "new-session" / "reload" are now handled inside slash_commands.lua and
   -- come back as "print" actions; no REPL-specific arms needed.
   if kind == "resume" then
     local path = action.payload

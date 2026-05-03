@@ -211,7 +211,7 @@ local function cmd_copy()
   end
   return records.new_command_action(
     "print",
-    "clipboard unavailable (tried xclip, pbcopy, wl-copy, xsel)"
+    "clipboard unavailable: " .. tostring(tool or "osc52 unavailable")
   )
 end
 
@@ -310,7 +310,7 @@ local function cmd_export(rest)
 end
 
 -- /new, /clear, /reload are side-effect-only commands. Running them in
--- commands.lua and returning a plain "print" action lets them work in
+-- slash_commands.lua and returning a plain "print" action lets them work in
 -- both the REPL and the TUI uniformly — the TUI's C dispatcher only
 -- understands "print" and "compact" kinds, so everything else must
 -- resolve here.

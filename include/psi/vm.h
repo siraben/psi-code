@@ -33,7 +33,7 @@ int psi_vm_run_agent_compact(struct psi_vm *vm, size_t keep_recent,
     struct psi_abort_signal *abort_signal, const char *model, long max_tokens, char **summary_text);
 
 /* Thin shims onto the Lua session module. Callers still work in C but
- * the actual JSONL I/O lives in lua/psi/session.lua. */
+ * the actual JSONL I/O lives in lua/psi/session_manager.lua. */
 int psi_vm_session_save(struct psi_vm *vm, const char *path);
 int psi_vm_session_load(struct psi_vm *vm, const char *path);
 

@@ -50,9 +50,10 @@ session semantics, rendering policy, or slash-command behavior.
 Lua owns the runtime model:
 
 - top-level mode dispatch in `lua/psi/modes.lua`
-- session loading, saving, projection, and metadata in `lua/psi/session.lua`
-- provider loops in `lua/psi/anthropic.lua`, `lua/psi/openai_compat.lua`,
-  `lua/psi/openrouter.lua`, and `lua/psi/ollama.lua`
+- session loading, saving, projection, and metadata in `lua/psi/session_manager.lua`
+- provider loops in `lua/psi/providers/anthropic.lua`,
+  `lua/psi/providers/openai_compat.lua`, `lua/psi/providers/openrouter.lua`,
+  and `lua/psi/providers/ollama.lua`
 - cooperative scheduling in `lua/psi/sched.lua`
 - tool registry and built-in tool implementations
 - prompt assembly, context shaping, render hooks, and event hooks
@@ -182,7 +183,9 @@ C owns only the terminal boundary:
 - `src/runtime/tui_mode.c` switches the terminal into raw mode and delegates to Lua mode
 - `src/lua/vm.c` exposes the `psi.tui_*` host primitives
 - `lua/psi/tui_runtime.lua` owns the runtime state machine for `--tui`
-- `lua/psi/tui.lua` maps semantic keys to edit/navigation actions
+- `lua/psi/tui_status.lua` exposes TUI hook/status/key APIs, while
+  `lua/psi/tui_runtime.lua` owns the runtime state machine and default
+  edit/navigation actions
 - `lua/psi/tui_layout.lua` owns layout policy such as prefixes, footer text,
   and row caps
 

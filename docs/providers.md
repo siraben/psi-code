@@ -13,10 +13,10 @@ with one provider can be resumed with another, provided the tool names
 line up. Cross-provider resumes are best-effort: provider-specific
 thinking/signature/cache details may be downgraded during replay.
 
-Routing metadata lives in `lua/psi/providers.lua`. API-specific wire
-adapters live in `lua/psi/anthropic.lua`, `lua/psi/openai_compat.lua`,
-`lua/psi/openrouter.lua`, `lua/psi/openai_codex.lua`, and
-`lua/psi/ollama.lua`.
+Routing metadata lives in `lua/psi/api_registry.lua`. API-specific wire
+adapters live in `lua/psi/providers/anthropic.lua`,
+`lua/psi/providers/openai_compat.lua`, `lua/psi/providers/openrouter.lua`,
+`lua/psi/providers/openai_codex.lua`, and `lua/psi/providers/ollama.lua`.
 
 ## Selection
 
@@ -65,7 +65,7 @@ In priority order:
   - `PSI_OPENROUTER_REFERER`
   - `PSI_OPENROUTER_TITLE`
 - Uses the shared OpenAI-compatible adapter in
-  `lua/psi/openai_compat.lua`.
+  `lua/psi/providers/openai_compat.lua`.
 
 ## OpenAI Codex
 

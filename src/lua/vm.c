@@ -1826,7 +1826,7 @@ static void psi_lua_free_headers(char **headers, size_t count) {
  * metatable that has a __gc finaliser. If the Lua caller explicitly
  * calls finish (the normal path), the pointer is nulled out so the
  * finaliser is a no-op. If the coroutine errors between begin and
- * finish (OOM mid-sse_feed, bug in anthropic.lua), the userdata
+ * finish (OOM mid-sse_feed, bug in a provider module), the userdata
  * becomes unreachable and __gc reaps the pthread + curl handle +
  * queued chunks. Before this change the handle was light userdata
  * with no GC — errors leaked everything.

@@ -1,5 +1,5 @@
 /* Session + message storage primitives. JSONL I/O, compaction, and
- * fork are all implemented in lua/psi/session.lua — this file just
+ * fork are all implemented in lua/psi/session_manager.lua — this file just
  * keeps the in-memory message array alive and the role enum mapped
  * to its JSON string form. */
 

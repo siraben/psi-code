@@ -30,7 +30,7 @@ can replace any one bit and keep the rest.
    header that callers might not need POSIX for.
 
 4. **Platform-specific code lives in dedicated files.** Linux/Haiku
-   uses `src/core/anthropic.c` (libcurl) and `src/core/http_async.c`
+   uses `src/core/http_buffered.c` (libcurl) and `src/core/http_async.c`
    (pthread). Any new platform adds its own `<plat>/src/*.c` and the
    upstream sources stay untouched. This mirrors S9fES's `s9core` +
    `s9-unix.c` / `s9-win32.c` split.
@@ -68,7 +68,7 @@ can replace any one bit and keep the rest.
 | OS                         | Predicted state | What would likely break |
 |----------------------------|-----------------|---|
 | **FreeBSD / OpenBSD / NetBSD** | should build out-of-box | `pkg-config` is `pkgconf` on BSDs — `PKG_CONFIG=pkgconf make` works. clang's `-Werror` flags vs GCC's may differ; if so, drop `-Werror`. libedit on OpenBSD is `libedit` package, same as Linux. |
-| **macOS**                  | should build with Homebrew deps | Homebrew installs Lua and libcjson under `/opt/homebrew`; user must set `PKG_CONFIG_PATH`. Apple Clang's `-Wno-unknown-warning-option` may eat newer flags silently. `-Wl,-static` is partly broken on macOS, so static builds fail — that's documented. |
+| **macOS**                  | should build with Homebrew deps | Homebrew installs Lua and libcjson under `/opt/homebrew`; user must set `PKG_CONFIG_PATH` for a Lua 5.5 package or override `LUA_PKG_CONFIG`. Apple Clang's `-Wno-unknown-warning-option` may eat newer flags silently. `-Wl,-static` is partly broken on macOS, so static builds fail — that's documented. |
 | **illumos / Solaris**      | needs minor work | `gettimeofday` still present but Solaris `pthread_cond_timedwait` semantics differ subtly around CLOCK choice. More importantly, Solaris `getopt_long` is in `libgetopt`; argtable3 vendors getopt so this is fine. |
 | **Cygwin / MSYS2**         | should build, slowly | fork is emulated and slow; agent feels sluggish but works. libcurl and pthread present via packages. PE-format static linking has gotchas. |
 | **Haiku**                  | already works | port committed under `haiku/`. |
@@ -83,7 +83,7 @@ The pattern from `haiku/`:
 
 1. Read `docs/architecture.md` to identify the C↔Lua boundary.
 2. Identify the platform shims you need to replace:
-   - `src/core/anthropic.c` — HTTP transport (libcurl on POSIX,
+   - `src/core/http_buffered.c` — blocking HTTP transport (libcurl on POSIX,
      WinHTTP on Windows, etc.).
    - `src/core/http_async.c` — async streaming transport (pthread
      on POSIX, IO completion ports on Win, etc.).
