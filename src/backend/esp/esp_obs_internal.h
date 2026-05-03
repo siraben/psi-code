@@ -24,4 +24,10 @@ struct psi_vm *psi_esp_vm(void);
 void psi_esp_set_system_prompt(char *prompt); /* takes ownership */
 const char *psi_esp_get_system_prompt(void);
 
+/* Chibi-Scheme glue. Returns a heap-allocated system prompt produced
+ * by evaluating a baked-in Scheme expression, or NULL if chibi failed
+ * to bring up a context. The agent uses this when the Lua VM bootstrap
+ * OOMs (no-PSRAM ESP32 case). */
+char *psi_esp_chibi_build_system_prompt(void);
+
 #endif

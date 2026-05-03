@@ -283,12 +283,26 @@ void psi_esp_main_run(void) {
             ESP_LOGW(TAG, "system prompt build (Lua) failed; falling back to baked-in");
         }
     }
-    /* Baked-in fallback. On no-PSRAM ESP32s the Lua VM bootstrap OOMs
-     * during module load, so g_psi_system_prompt would otherwise stay
-     * NULL and the agent would chat with no framing at all. This
-     * minimal prompt names the tools the firmware actually ships so
-     * the model knows what's available without touching Lua. The
-     * "%s"-style chip detail is filled in below. */
+#if PSI_USE_CHIBI_PROMPT
+    /* Chibi-Scheme fallback. Lua VM normally builds the prompt via
+     * psi.prompt.system_prompt() but its module graph OOMs on
+     * no-PSRAM hardware. Chibi's runtime has a much smaller fixed
+     * heap (96 KiB, configured in chibi-cmod) and stands up
+     * reliably. Off by default — see the option in
+     * components/psi/CMakeLists.txt for the heap-vs-HTTPS tradeoff.
+     */
+    if (psi_esp_get_system_prompt() == NULL) {
+        char *scm = psi_esp_chibi_build_system_prompt();
+        if (scm != NULL) {
+            ESP_LOGI(TAG, "system prompt: from chibi-scheme (%u bytes)", (unsigned)strlen(scm));
+            psi_esp_set_system_prompt(scm);
+        } else {
+            ESP_LOGW(TAG, "system prompt: chibi failed; falling back to baked-in C");
+        }
+    }
+#endif
+    /* Baked-in C fallback. Last resort if both Lua VM and chibi fail
+     * to build a prompt — ensures the agent never runs unframed. */
     if (psi_esp_get_system_prompt() == NULL) {
         char *baked = (char *)malloc(1024u);
         if (baked != NULL) {

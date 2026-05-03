@@ -35,6 +35,15 @@ option(PSI_INCLUDE_SPA "Embed the chat SPA into the firmware" ON)
 # firmware image; pass -DPSI_GPIO_INTROSPECTION=OFF for production.
 option(PSI_GPIO_INTROSPECTION "Expose /gpio endpoint for the host dashboard pin grid" ON)
 
+# PSI_USE_CHIBI_PROMPT swaps the agent's system prompt source from
+# a baked-in C string (the safe default) to one built at boot by
+# chibi-scheme calling C foreign procedures. Demonstrates the
+# C↔Scheme bridge, but on a no-PSRAM ESP32 chibi's ~96 KiB heap
+# carve fragments the pool enough that esp_http_client_init starves
+# afterward — agent turns over WiFi will fail. Useful for inspecting
+# the embedded Scheme stack; turn off when running the full agent.
+option(PSI_USE_CHIBI_PROMPT "Build the system prompt with chibi-scheme at boot" OFF)
+
 set(PSI_EMBED_TOOL "${CMAKE_CURRENT_BINARY_DIR}/psi_embed")
 set(PSI_EMBED_LUA  "${CMAKE_CURRENT_BINARY_DIR}/embedded_lua.c")
 set(PSI_EMBED_DOCS "${CMAKE_CURRENT_BINARY_DIR}/embedded_docs.c")
@@ -60,6 +69,7 @@ set(PSI_C_SOURCES
     "${PSI_ROOT}/src/backend/esp/esp_http.c"
     "${PSI_ROOT}/src/backend/esp/esp_observer.c"
     "${PSI_ROOT}/src/backend/esp/esp_ws_server.c"
+    "${PSI_ROOT}/src/backend/esp/esp_chibi.c"
     ${PSI_EMBED_LUA}
     ${PSI_EMBED_DOCS}
     ${PSI_EMBED_HTML}
@@ -83,6 +93,7 @@ idf_component_register(
         nvs_flash
     PRIV_REQUIRES
         lua-cmod
+        chibi-cmod
 )
 
 # Capability gates and HTTP backend selection. -DPSI_CAP_FILESYSTEM=0
@@ -116,6 +127,12 @@ if(PSI_GPIO_INTROSPECTION)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_GPIO_INTROSPECTION=1)
 else()
     target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_GPIO_INTROSPECTION=0)
+endif()
+
+if(PSI_USE_CHIBI_PROMPT)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_USE_CHIBI_PROMPT=1)
+else()
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_USE_CHIBI_PROMPT=0)
 endif()
 
 # ESP-IDF v5.5+ uses C23-ish dialect for its headers; we let the
