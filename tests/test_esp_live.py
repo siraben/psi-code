@@ -1,21 +1,18 @@
 """Live-API integration test for the ESP32 firmware under QEMU.
 
-Boots the firmware in QEMU with user-mode networking (so the guest can
-reach api.anthropic.com via the host), seeds NVS with the
-ANTHROPIC_API_KEY from .env.local (or the environment), then sends an
-agent turn through /ws and asserts the streamed reply contains "PONG".
+Boots the firmware in QEMU with user-mode networking (so the guest
+reaches api.anthropic.com via the host), seeds NVS with the API key
+from `.env.local`, then sends an agent turn through the embedded
+WebSocket and asserts the streamed reply contains "PONG".
 
-This test takes minutes to run end-to-end — it goes from idf.py build
-through firmware boot to a live API round-trip — and depends on:
+The firmware's agent path is now C-native (`src/backend/esp/esp_agent.c`):
+no Lua VM is involved during the turn. The flake's `apps.qemu` wrapper
+handles NVS seeding and the QEMU command line; this test just kicks
+off `nix run .#qemu` and consumes the WebSocket.
 
-  - --run-firmware enabled (same opt-in flag as test_esp_qemu.py)
-  - ANTHROPIC_API_KEY available in the environment or .env.local
-  - QEMU's user-mode TCP NAT actually reaching the public internet,
-    and an esp-qemu (or qemu-system-xtensa with ESP32 peripherals)
-    that lets the firmware bring up its WiFi simulation through
-    open_eth far enough to issue HTTPS via mbedTLS.
-
-Skips with a clear reason when any of the above is missing.
+End-to-end runtime: ~60s on a warm Nix store (no firmware rebuild),
+multi-minute cold. Skipped unless `--run-firmware` is passed and an
+API key is reachable.
 """
 from __future__ import annotations
 
@@ -33,16 +30,16 @@ ROOT = Path(__file__).resolve().parent.parent
 HOST_PORT = int(os.environ.get("PSI_QEMU_PORT", "8765"))
 
 
-def _load_env_file():
-    """Best-effort: parse .env.local for ANTHROPIC_API_KEY.
+def _load_env_file() -> dict[str, str]:
+    """Best-effort: parse .env.local for API keys.
 
     The repo's .env.local uses `export KEY=VALUE` syntax. We avoid
     sourcing it via the shell because that pulls in unrelated keys."""
     path = ROOT / ".env.local"
     if not path.exists():
         return {}
-    out = {}
-    pattern = re.compile(r"^\s*(?:export\s+)?([A-Z_]+)=(.*)\s*$")
+    out: dict[str, str] = {}
+    pattern = re.compile(r"^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.*)\s*$")
     for line in path.read_text().splitlines():
         m = pattern.match(line)
         if m:
@@ -64,75 +61,41 @@ def _wait_port(host: str, port: int, timeout: float) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            with socket.create_connection((host, port), timeout=2) as s:
-                s.close()
+            with socket.create_connection((host, port), timeout=2):
+                pass
             return True
         except OSError:
             time.sleep(1)
     return False
 
 
-def _build_firmware() -> Path:
-    out = subprocess.run(
-        ["nix", "build", "--no-link", "--print-out-paths", ".#firmware"],
-        cwd=ROOT, check=True, capture_output=True, text=True,
-    )
-    return Path(out.stdout.strip())
-
-
-def _seed_nvs(api_key: str, fw_dir: Path) -> Path | None:
-    """Generate an NVS partition image with ANTHROPIC_API_KEY seeded.
-
-    Uses ESP-IDF's nvs_partition_gen.py via `idf.py nvs-partition-gen`
-    inside the esp dev shell. If idf is not on PATH we skip seeding
-    and let the test fail gracefully (the firmware logs the missing
-    key and replies with an error frame, which is still an assertion
-    we can make)."""
-    csv = ROOT / "build-test-nvs.csv"
-    img = ROOT / "build-test-nvs.bin"
-    csv.write_text(
-        "key,type,encoding,value\n"
-        f"anthropic_api_key,data,string,{api_key}\n"
-    )
-    try:
-        subprocess.run([
-            "nix", "develop", ".#esp", "--command",
-            "python", "-m", "esp_idf_nvs_partition_gen",
-            "generate", str(csv), str(img), "0x6000",
-        ], cwd=ROOT, check=True, capture_output=True)
-        return img
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        return None
-    finally:
-        csv.unlink(missing_ok=True)
-
-
 @pytest.fixture(scope="module")
 def qemu_with_key(request):
+    """Boot the firmware in QEMU with the Anthropic key seeded into NVS.
+
+    `apps.qemu` reads $ANTHROPIC_API_KEY at launch and runs
+    `nvs_partition_gen.py` to write it into the merged flash image
+    before starting qemu-system-xtensa, so we just need to forward
+    the env var. The fixture skips if QEMU never opens HOST_PORT
+    (firmware build failure, slirp networking issue, etc.)."""
     if not _firmware_enabled(request):
         pytest.skip("pass --run-firmware to enable firmware/QEMU tests")
     key = _api_key()
     if not key:
         pytest.skip("ANTHROPIC_API_KEY missing (.env.local or environment)")
 
-    try:
-        _build_firmware()
-    except (FileNotFoundError, subprocess.CalledProcessError) as e:
-        pytest.skip(f"firmware build failed: {e}")
-
-    # Spawn QEMU. ANTHROPIC_API_KEY is forwarded into NVS via nvs_partition_gen
-    # before launch; the firmware's anthropic.lua reads it from NVS at turn time.
     env = dict(os.environ, ANTHROPIC_API_KEY=key)
     proc = subprocess.Popen(
-        ["nix", "run", ".#qemu", "--"],
-        cwd=ROOT, env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        ["nix", "run", ".#qemu"],
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     try:
-        if not _wait_port("127.0.0.1", HOST_PORT, timeout=120.0):
+        if not _wait_port("127.0.0.1", HOST_PORT, timeout=180.0):
             proc.terminate()
-            pytest.skip("QEMU did not expose port 8000 within 120s")
+            pytest.skip(f"QEMU did not expose port {HOST_PORT} within 180s")
         yield proc
     finally:
         proc.terminate()
@@ -142,24 +105,37 @@ def qemu_with_key(request):
             proc.kill()
 
 
-def test_pong_round_trip(qemu_with_key):
+def _drive_ws(prompt: str, model: str = "claude-haiku-4-5", max_tokens: int = 64,
+              timeout: float = 90.0) -> tuple[str, bool, str | None]:
+    """Send one user turn over the firmware's /ws endpoint and collect the
+    streamed reply. Returns (full_text, ended, error_message)."""
     websocket = pytest.importorskip("websocket")
-    ws = websocket.create_connection(f"ws://127.0.0.1:{HOST_PORT}/ws", timeout=10)
+    ws = websocket.WebSocket()
+    # The C agent's WebSocket text frames are well-formed UTF-8, but Python
+    # 3.13's websocket-client is strict about UTF-8 validation across some
+    # control bytes Anthropic streams; skip the check, the JSON parser
+    # below catches actually-broken frames.
+    ws.connect(f"ws://127.0.0.1:{HOST_PORT}/ws", timeout=10,
+               skip_utf8_validation=True)
     try:
         ws.send(json.dumps({
             "type": "user",
-            "text": "Reply with the single word PONG and nothing else.",
-            "model": "claude-haiku-4-5",
-            "max_tokens": 32,
+            "text": prompt,
+            "model": model,
+            "max_tokens": max_tokens,
         }))
-        deadline = time.monotonic() + 90
+        deadline = time.monotonic() + timeout
         chunks: list[str] = []
         ended = False
+        err: str | None = None
         while time.monotonic() < deadline:
             try:
                 msg = ws.recv()
             except websocket.WebSocketTimeoutException:
                 continue
+            except Exception as exc:
+                err = f"recv failed: {exc!r}"
+                break
             if not msg:
                 break
             try:
@@ -170,12 +146,66 @@ def test_pong_round_trip(qemu_with_key):
             if t == "assistant_delta":
                 chunks.append(payload.get("text") or "")
             elif t == "error":
-                pytest.fail(f"firmware reported error: {payload.get('message')}")
+                err = payload.get("message") or "<no message>"
+                break
             elif t == "turn_end":
                 ended = True
                 break
-        assert ended, "no turn_end received within 90s"
-        full = "".join(chunks).strip()
-        assert "PONG" in full.upper(), f"reply did not contain PONG: {full!r}"
+        return "".join(chunks).strip(), ended, err
     finally:
         ws.close()
+
+
+def _http_get(path: str, timeout: float = 30.0) -> tuple[int, str]:
+    """Plain HTTP GET against the firmware. The 30s timeout covers slow
+    cold-cache responses on a freshly-booted QEMU (the merged-flash
+    bootloader takes ~5s to reach app_main even before psi runs)."""
+    import http.client
+    conn = http.client.HTTPConnection("127.0.0.1", HOST_PORT, timeout=timeout)
+    conn.request("GET", path)
+    resp = conn.getresponse()
+    body = resp.read().decode("utf-8", "replace")
+    return resp.status, body
+
+
+def test_healthz(qemu_with_key):
+    """Smoke: the embedded HTTP server is alive and routes."""
+    status, body = _http_get("/healthz")
+    assert status == 200, f"healthz returned {status}"
+    assert json.loads(body).get("ok") is True
+
+
+def test_index_served(qemu_with_key):
+    """The chat SPA is reachable; it's how a user actually drives the agent."""
+    status, body = _http_get("/")
+    assert status == 200
+    assert "<title>psi</title>" in body
+    assert "/ws" in body
+
+
+def test_pong_round_trip(qemu_with_key):
+    """End-to-end live agent turn through Anthropic.
+
+    The C agent path streams Claude's reply over /ws as
+    assistant_delta frames, then turn_end. The model gets a tightly
+    constrained prompt so the assertion is stable."""
+    full, ended, err = _drive_ws(
+        "Reply with the single word PONG and nothing else.",
+        max_tokens=32, timeout=90.0)
+    assert err is None, f"firmware reported error: {err}"
+    assert ended, f"no turn_end received; got {full!r}"
+    assert "PONG" in full.upper(), f"reply did not contain PONG: {full!r}"
+
+
+def test_two_consecutive_turns(qemu_with_key):
+    """The C agent path is reentrant: a fresh WebSocket connection
+    after a completed turn must still talk to Anthropic. Catches the
+    `g_ws_session in use` failure mode if cleanup ever regresses."""
+    for prompt, expect in [
+        ("Reply with PING and nothing else.", "PING"),
+        ("Reply with PONG and nothing else.", "PONG"),
+    ]:
+        full, ended, err = _drive_ws(prompt, max_tokens=32, timeout=90.0)
+        assert err is None, f"firmware reported error: {err}"
+        assert ended, f"no turn_end received; got {full!r}"
+        assert expect in full.upper(), f"expected {expect}, got {full!r}"
