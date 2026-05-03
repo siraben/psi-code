@@ -314,15 +314,57 @@ static void psi_ws_worker_task(void *arg) {
 static struct psi_ws_session g_ws_session;
 static int g_ws_inited = 0;
 
+/* Tear down the current WS session: signal close, wait briefly for
+ * the worker + sender tasks to exit, drain queues, and free their
+ * FreeRTOS objects. After this returns, g_ws_inited is 0 and a
+ * fresh session can be set up safely.
+ *
+ * Used when the user reloads the page: the old TCP socket has gone
+ * away (the new GET on /ws is from a fresh socket fd), but the old
+ * worker / sender / queues are still allocated and try to write to
+ * a dead fd. Resetting cleanly is much simpler than trying to detect
+ * the disconnect via httpd's close callback. */
+static void psi_ws_session_teardown(void) {
+    int waited = 0;
+    if (!g_ws_inited)
+        return;
+    if (g_ws_session.flags != NULL)
+        xEventGroupSetBits(g_ws_session.flags, PSI_WS_BIT_CLOSE);
+    /* Wait up to 2 s for the tasks to exit. They poll their inbox
+     * with a 200/500 ms timeout, so this lands quickly. */
+    while ((g_ws_session.worker_task != NULL || g_ws_session.sender_task != NULL)
+           && waited < 2000) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+        waited += 50;
+    }
+    if (g_ws_session.outbox != NULL) {
+        char *json;
+        while (xQueueReceive(g_ws_session.outbox, &json, 0) == pdTRUE)
+            free(json);
+        vQueueDelete(g_ws_session.outbox);
+    }
+    if (g_ws_session.inbox != NULL) {
+        struct psi_ws_inbound m;
+        while (xQueueReceive(g_ws_session.inbox, &m, 0) == pdTRUE)
+            free(m.json);
+        vQueueDelete(g_ws_session.inbox);
+    }
+    if (g_ws_session.flags != NULL)
+        vEventGroupDelete(g_ws_session.flags);
+    memset(&g_ws_session, 0, sizeof(g_ws_session));
+    g_ws_inited = 0;
+}
+
 static esp_err_t psi_ws_handler(httpd_req_t *req) {
     httpd_ws_frame_t frame;
     esp_err_t err;
     if (req->method == HTTP_GET) {
-        /* Initial upgrade. Set up the session and spawn worker tasks. */
-        if (g_ws_inited) {
-            httpd_resp_set_status(req, "503 Service Unavailable");
-            return httpd_resp_send(req, "session in use", HTTPD_RESP_USE_STRLEN);
-        }
+        /* Initial upgrade. Tear down any prior session (a page reload
+         * leaves the old worker/sender alive on a dead socket); the
+         * fresh GET always wins. Single-tab semantics; if we ever want
+         * concurrent sessions we'd key by sock-fd here. */
+        if (g_ws_inited)
+            psi_ws_session_teardown();
         memset(&g_ws_session, 0, sizeof(g_ws_session));
         g_ws_session.server = req->handle;
         g_ws_session.fd = httpd_req_to_sockfd(req);
@@ -345,6 +387,7 @@ static esp_err_t psi_ws_handler(httpd_req_t *req) {
             return ESP_FAIL;
         }
         g_ws_inited = 1;
+        ESP_LOGI(TAG, "ws session opened (fd=%d)", g_ws_session.fd);
         return ESP_OK;
     }
 

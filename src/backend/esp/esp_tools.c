@@ -10,14 +10,20 @@
 
 #include "cJSON.h"
 #include "esp_chip_info.h"
+#include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
+#include "esp_http_client.h"
 #include "esp_idf_version.h"
+#include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "lua.h"
+#include "lauxlib.h"
+#include "lualib.h"
 #include "nvs.h"
 
 /* GPIO is available on every ESP32 SoC variant. ESP-IDF v5.x has
@@ -25,7 +31,9 @@
 #include "driver/gpio.h"
 
 #include "psi/common.h"
+#include "psi/vm.h"
 #include "esp_tools.h"
+#include "esp_obs_internal.h" /* psi_esp_vm() */
 
 static const char *TAG_NS = "psi";
 
@@ -330,6 +338,273 @@ static char *tool_restart(const cJSON *input, char **err) {
 }
 
 /* ------------------------------------------------------------------ */
+/* lua_eval                                                             */
+/* ------------------------------------------------------------------ */
+
+/* Run a Lua snippet against the firmware's shared psi_vm. Tries the
+ * input as an expression first ("return <code>") so simple lookups
+ * like "psi.runtime_info().version" return their value; on parse
+ * failure, falls back to running it as a statement so longer scripts
+ * still work. The Lua state is single-threaded — only the worker task
+ * dispatches tools, and it does so serially — so concurrent access
+ * isn't a concern.
+ *
+ * The result is stringified via luaL_tolstring (which calls __tostring
+ * if defined, otherwise gives a sensible default for nil/bool/number/
+ * string/table). Tool output is wrapped in a JSON object {ok, result,
+ * stdout?} so the model can act on it. */
+static char *tool_lua_eval(const cJSON *input, char **err) {
+    const char *code = json_str(input, "code", NULL);
+    struct psi_vm *vm = psi_esp_vm();
+    lua_State *L;
+    int top;
+    int rc;
+    cJSON *r;
+    char *wrapped;
+    size_t code_len;
+    const char *result_str;
+    size_t result_len;
+
+    if (vm == NULL || vm->L == NULL) {
+        if (err)
+            *err = err_text("psi VM not initialized");
+        return NULL;
+    }
+    if (code == NULL || *code == '\0') {
+        if (err)
+            *err = err_text("missing string field: code");
+        return NULL;
+    }
+    L = vm->L;
+    top = lua_gettop(L);
+
+    /* Try expression form first: "return (<code>)". */
+    code_len = strlen(code);
+    wrapped = (char *)malloc(code_len + 16u);
+    if (wrapped == NULL) {
+        if (err)
+            *err = err_text("out of memory");
+        return NULL;
+    }
+    snprintf(wrapped, code_len + 16u, "return (%s)", code);
+    rc = luaL_loadbuffer(L, wrapped, strlen(wrapped), "=lua_eval");
+    free(wrapped);
+    if (rc != LUA_OK) {
+        /* Drop the expression-form error, retry as a statement. */
+        lua_pop(L, 1);
+        rc = luaL_loadbuffer(L, code, code_len, "=lua_eval");
+    }
+    if (rc != LUA_OK) {
+        const char *e = lua_tostring(L, -1);
+        char *msg = err_text("compile: %s", e ? e : "?");
+        lua_settop(L, top);
+        if (err)
+            *err = msg;
+        else
+            free(msg);
+        return NULL;
+    }
+
+    rc = lua_pcall(L, 0, LUA_MULTRET, 0);
+    if (rc != LUA_OK) {
+        const char *e = lua_tostring(L, -1);
+        char *msg = err_text("runtime: %s", e ? e : "?");
+        lua_settop(L, top);
+        if (err)
+            *err = msg;
+        else
+            free(msg);
+        return NULL;
+    }
+
+    /* Stringify whatever's on top (may be nil for statement form). */
+    if (lua_gettop(L) > top) {
+        result_str = luaL_tolstring(L, -1, &result_len);
+    } else {
+        result_str = "";
+        result_len = 0u;
+    }
+
+    r = cJSON_CreateObject();
+    cJSON_AddBoolToObject(r, "ok", 1);
+    {
+        char *copy = (char *)malloc(result_len + 1u);
+        if (copy != NULL) {
+            memcpy(copy, result_str, result_len);
+            copy[result_len] = '\0';
+            cJSON_AddStringToObject(r, "result", copy);
+            free(copy);
+        } else {
+            cJSON_AddStringToObject(r, "result", "");
+        }
+    }
+    lua_settop(L, top);
+    return json_to_string(r);
+}
+
+/* ------------------------------------------------------------------ */
+/* http_fetch                                                           */
+/* ------------------------------------------------------------------ */
+
+struct fetch_collector {
+    char *data;
+    size_t len;
+    size_t cap;
+    int oom;
+    int truncated;
+    size_t cap_max;
+};
+
+static esp_err_t fetch_event_cb(esp_http_client_event_t *evt) {
+    struct fetch_collector *c = (struct fetch_collector *)evt->user_data;
+    size_t need;
+    if (c == NULL || evt->event_id != HTTP_EVENT_ON_DATA)
+        return ESP_OK;
+    if (evt->data_len <= 0)
+        return ESP_OK;
+    if (c->truncated)
+        return ESP_OK;
+    need = c->len + (size_t)evt->data_len + 1u;
+    if (need > c->cap_max) {
+        size_t take = c->cap_max > c->len ? c->cap_max - c->len - 1u : 0u;
+        if (take > 0u) {
+            if (need > c->cap) {
+                char *n = (char *)realloc(c->data, c->cap_max);
+                if (n == NULL) {
+                    c->oom = 1;
+                    return ESP_OK;
+                }
+                c->data = n;
+                c->cap = c->cap_max;
+            }
+            memcpy(c->data + c->len, evt->data, take);
+            c->len += take;
+            c->data[c->len] = '\0';
+        }
+        c->truncated = 1;
+        return ESP_OK;
+    }
+    if (need > c->cap) {
+        size_t cap = c->cap ? c->cap * 2u : 1024u;
+        char *n;
+        while (cap < need)
+            cap *= 2u;
+        if (cap > c->cap_max)
+            cap = c->cap_max;
+        n = (char *)realloc(c->data, cap);
+        if (n == NULL) {
+            c->oom = 1;
+            return ESP_OK;
+        }
+        c->data = n;
+        c->cap = cap;
+    }
+    memcpy(c->data + c->len, evt->data, (size_t)evt->data_len);
+    c->len += (size_t)evt->data_len;
+    c->data[c->len] = '\0';
+    return ESP_OK;
+}
+
+static char *tool_http_fetch(const cJSON *input, char **err) {
+    const char *url = json_str(input, "url", NULL);
+    const char *method = json_str(input, "method", "GET");
+    const char *body = json_str(input, "body", NULL);
+    const cJSON *headers = cJSON_GetObjectItemCaseSensitive(input, "headers");
+    int max_bytes = json_int(input, "max_bytes", 8192);
+    esp_http_client_method_t m = HTTP_METHOD_GET;
+    esp_http_client_config_t cfg;
+    esp_http_client_handle_t cli;
+    struct fetch_collector c;
+    esp_err_t e;
+    cJSON *r;
+
+    if (url == NULL || *url == '\0') {
+        if (err)
+            *err = err_text("missing string field: url");
+        return NULL;
+    }
+    if (max_bytes <= 0)
+        max_bytes = 8192;
+    if (max_bytes > 65536)
+        max_bytes = 65536; /* keep memory bounded */
+
+    if (strcmp(method, "POST") == 0)
+        m = HTTP_METHOD_POST;
+    else if (strcmp(method, "PUT") == 0)
+        m = HTTP_METHOD_PUT;
+    else if (strcmp(method, "DELETE") == 0)
+        m = HTTP_METHOD_DELETE;
+    else if (strcmp(method, "HEAD") == 0)
+        m = HTTP_METHOD_HEAD;
+
+    memset(&c, 0, sizeof(c));
+    c.cap_max = (size_t)max_bytes + 1u;
+
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.url = url;
+    cfg.method = m;
+    cfg.event_handler = fetch_event_cb;
+    cfg.user_data = &c;
+    cfg.timeout_ms = 30000;
+    cfg.crt_bundle_attach = esp_crt_bundle_attach;
+    cfg.buffer_size = 4096;
+    cfg.buffer_size_tx = 4096;
+
+    cli = esp_http_client_init(&cfg);
+    if (cli == NULL) {
+        if (err)
+            *err = err_text("esp_http_client_init failed");
+        free(c.data);
+        return NULL;
+    }
+    if (cJSON_IsArray(headers)) {
+        cJSON *h;
+        cJSON_ArrayForEach(h, headers) {
+            if (cJSON_IsString(h) && h->valuestring != NULL) {
+                const char *colon = strchr(h->valuestring, ':');
+                if (colon != NULL) {
+                    char name[128];
+                    size_t nl = (size_t)(colon - h->valuestring);
+                    const char *v = colon + 1;
+                    if (nl >= sizeof(name))
+                        nl = sizeof(name) - 1u;
+                    memcpy(name, h->valuestring, nl);
+                    name[nl] = '\0';
+                    while (*v == ' ' || *v == '\t')
+                        v++;
+                    esp_http_client_set_header(cli, name, v);
+                }
+            }
+        }
+    }
+    if (body != NULL && *body != '\0' &&
+        (m == HTTP_METHOD_POST || m == HTTP_METHOD_PUT))
+        esp_http_client_set_post_field(cli, body, (int)strlen(body));
+
+    e = esp_http_client_perform(cli);
+    {
+        int status = esp_http_client_get_status_code(cli);
+        r = cJSON_CreateObject();
+        cJSON_AddBoolToObject(r, "ok", e == ESP_OK && status >= 200 && status < 300);
+        cJSON_AddNumberToObject(r, "status", (double)status);
+        cJSON_AddStringToObject(r, "url", url);
+        if (e != ESP_OK)
+            cJSON_AddStringToObject(r, "transport_error", esp_err_to_name(e));
+        if (c.oom)
+            cJSON_AddBoolToObject(r, "oom", 1);
+        if (c.truncated) {
+            cJSON_AddBoolToObject(r, "truncated", 1);
+            cJSON_AddNumberToObject(r, "max_bytes", (double)max_bytes);
+        }
+        cJSON_AddNumberToObject(r, "bytes", (double)c.len);
+        cJSON_AddStringToObject(r, "body", c.data ? c.data : "");
+    }
+    esp_http_client_cleanup(cli);
+    free(c.data);
+    return json_to_string(r);
+}
+
+/* ------------------------------------------------------------------ */
 /* registry                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -411,6 +686,36 @@ const struct psi_esp_tool psi_esp_tool_table[] = {
                        "device comes back up in ~5s. Use sparingly.",
         .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}",
         .handler = tool_restart,
+    },
+    {
+        .name = "lua_eval",
+        .description = "Evaluate a Lua expression or short script in the firmware's "
+                       "psi VM. Returns {ok, result} where result is the "
+                       "stringified return value. The VM has psi.* primitives "
+                       "loaded; e.g. psi.runtime_info(), psi.json_encode(t), "
+                       "psi.ramfs.read('@mem/foo'). Run untrusted code with care.",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{\"code\":{\"type\":\"string\"}},"
+            "\"required\":[\"code\"]}",
+        .handler = tool_lua_eval,
+    },
+    {
+        .name = "http_fetch",
+        .description = "Make an HTTP/HTTPS request from the device. Returns "
+                       "{ok, status, body, bytes, truncated?}. Useful for IoT "
+                       "webhooks, weather APIs, ifconfig.io, etc. body is "
+                       "capped at max_bytes (default 8 KiB, max 64 KiB).",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{"
+              "\"url\":{\"type\":\"string\"},"
+              "\"method\":{\"type\":\"string\",\"enum\":[\"GET\",\"POST\",\"PUT\",\"DELETE\",\"HEAD\"]},"
+              "\"body\":{\"type\":\"string\"},"
+              "\"headers\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},"
+              "\"max_bytes\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":65536}},"
+            "\"required\":[\"url\"]}",
+        .handler = tool_http_fetch,
     },
     { NULL, NULL, NULL, NULL },
 };
