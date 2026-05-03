@@ -2939,7 +2939,20 @@ int psi_vm_init(
     } else
 #endif /* PSI_CAP_FILESYSTEM */
     {
-        const struct psi_embedded_data *boot = psi_vm_embedded_find("boot.lua");
+        /* Prefer the slim "boot-esp.lua" when the filesystem capability
+         * is compiled out — embedded targets don't need the desktop
+         * boot's TUI / slash-command / multi-provider stack, and the
+         * slim boot's smaller require graph trims peak heap usage.
+         * Falls through to the full boot.lua when boot-esp isn't
+         * embedded (host-style builds with PSI_CAP_FILESYSTEM=0). */
+        const struct psi_embedded_data *boot = NULL;
+#if !PSI_CAP_FILESYSTEM
+        boot = psi_vm_embedded_find("boot-esp.lua");
+#endif
+        if (boot == NULL) {
+            boot = psi_vm_embedded_find("boot.lua");
+        }
+        {
         unsigned char *buf;
         int load_rc;
         if (boot == NULL) {
@@ -2960,13 +2973,14 @@ int psi_vm_init(
             vm->L = NULL;
             return PSI_STATUS_ERROR;
         }
-        load_rc = luaL_loadbuffer(vm->L, (const char *)buf, boot->raw_len, "=boot");
+        load_rc = luaL_loadbuffer(vm->L, (const char *)buf, boot->raw_len, boot->name);
         free(buf);
         if (load_rc != LUA_OK || lua_pcall(vm->L, 0, 0, 0) != LUA_OK) {
             fprintf(stderr, "psi: embedded boot failed: %s\n", lua_tostring(vm->L, -1));
             lua_close(vm->L);
             vm->L = NULL;
             return PSI_STATUS_ERROR;
+        }
         }
     }
     return PSI_STATUS_OK;

@@ -3,7 +3,19 @@
  * libcurl plumbing for the HTTP operations Lua needs: a streamed POST
  * (for SSE Messages endpoint), buffered POST (one-shot completion),
  * and buffered GET (metadata refresh). The abort_signal hook is wired via curl's transfer-info
- * callback so UI cancellation bypasses any network stall. */
+ * callback so UI cancellation bypasses any network stall.
+ *
+ * Backend gate: this file implements the public psi_http_buffered.h
+ * interface against libcurl. ESP-IDF firmware builds set
+ * PSI_HTTP_BACKEND_CURL=0 and provide a parallel implementation in
+ * src/backend/esp/esp_http.c. The header surface is identical, so the
+ * Lua provider loop is portable across backends. */
+
+#ifndef PSI_HTTP_BACKEND_CURL
+#define PSI_HTTP_BACKEND_CURL 1
+#endif
+
+#if PSI_HTTP_BACKEND_CURL
 
 #include <stdlib.h>
 #include <string.h>
@@ -167,3 +179,5 @@ int psi_http_get(const char *url, const char *const *header_lines, size_t header
     return psi_http_post(url, header_lines, header_count, NULL, 0u, abort_signal, status_code,
         response_body, error_message);
 }
+
+#endif /* PSI_HTTP_BACKEND_CURL */

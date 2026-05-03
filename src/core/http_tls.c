@@ -1,3 +1,9 @@
+#ifndef PSI_HTTP_BACKEND_CURL
+#define PSI_HTTP_BACKEND_CURL 1
+#endif
+
+#if PSI_HTTP_BACKEND_CURL
+
 #include <stdlib.h>
 #include <unistd.h>
 #include <zlib.h>
@@ -69,3 +75,5 @@ void psi_http_configure_tls(CURL *curl) {
     }
 #endif
 }
+
+#endif /* PSI_HTTP_BACKEND_CURL */

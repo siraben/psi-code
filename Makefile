@@ -30,6 +30,14 @@ COLOR         ?= 1
 REPL_EDITLINE ?= 1
 STATIC        ?= 0
 
+# HTTP backend selector. "curl" links libcurl (desktop default).
+# "esp" expects an alternate implementation provided by the ESP-IDF
+# component build (src/backend/esp/esp_http.c) and drops libcurl from
+# PKG_DEPS. The Makefile only knows about "curl" today; the ESP build
+# is driven from CMake but reuses these flag names so the C sources
+# carry one set of preprocessor gates.
+HTTP_BACKEND  ?= curl
+
 # Lua TUI is ANSI-terminal-only; ANSI=0 implies TUI=0.
 ifeq ($(ANSI),0)
 TUI := 0
@@ -61,7 +69,7 @@ SOURCES := $(sort $(shell find src -name '*.c' 2>/dev/null))
 OBJECTS := $(SOURCES:%.c=$(BUILD_DIR)/%.o)
 C_FORMAT_FILES := $(sort $(shell find include scripts src -type f \( -name '*.c' -o -name '*.h' \) 2>/dev/null))
 
-LUA_SOURCES = lua/boot.lua $(sort $(shell find lua/psi -name '*.lua' 2>/dev/null))
+LUA_SOURCES = lua/boot.lua lua/boot-esp.lua $(sort $(shell find lua/psi -name '*.lua' 2>/dev/null))
 DOC_SOURCES = README.md $(sort $(wildcard docs/*.md))
 EMBED_TOOL  = $(BUILD_DIR)/embed
 EMBED_LUA   = $(BUILD_DIR)/embedded_lua.c
@@ -98,7 +106,13 @@ dep_cflags = $(call pkg_cflags,$(firstword $(subst :, ,$(1))),$(lastword $(subst
 dep_libs   = $(call pkg_libs,$(firstword $(subst :, ,$(1))),$(lastword $(subst :, ,$(1))))
 
 LUA_PKG_CONFIG ?= lua5.5
-PKG_DEPS  = LUA:$(LUA_PKG_CONFIG) CJSON:libcjson CURL:libcurl ZLIB:zlib
+PKG_DEPS  = LUA:$(LUA_PKG_CONFIG) CJSON:libcjson ZLIB:zlib
+ifeq ($(HTTP_BACKEND),curl)
+PKG_DEPS += CURL:libcurl
+HTTP_BACKEND_CPPFLAGS = -DPSI_HTTP_BACKEND_CURL=1
+else
+HTTP_BACKEND_CPPFLAGS = -DPSI_HTTP_BACKEND_CURL=0
+endif
 PKG_DEPS += $(if $(filter 1,$(REPL_EDITLINE)),EDIT:libedit)
 
 LOCAL_CPPFLAGS  = -Iinclude -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600 \
@@ -106,7 +120,8 @@ LOCAL_CPPFLAGS  = -Iinclude -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600 \
                   -DPSI_ENABLE_TUI=$(TUI) \
                   -DPSI_ENABLE_ANSI=$(ANSI) \
                   -DPSI_ENABLE_COLOR=$(COLOR) \
-                  -DPSI_ENABLE_REPL_EDITLINE=$(REPL_EDITLINE)
+                  -DPSI_ENABLE_REPL_EDITLINE=$(REPL_EDITLINE) \
+                  $(HTTP_BACKEND_CPPFLAGS)
 LOCAL_CPPFLAGS += $(EMBED_CA_CPPFLAGS)
 LOCAL_CPPFLAGS += $(CA_BUNDLE_CPPFLAGS)
 LOCAL_CPPFLAGS += $(foreach d,$(PKG_DEPS),$(call dep_cflags,$(d)))

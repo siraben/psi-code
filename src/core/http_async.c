@@ -11,6 +11,12 @@
  * helper thread returns, the main thread joins it during finish.
  */
 
+#ifndef PSI_HTTP_BACKEND_CURL
+#define PSI_HTTP_BACKEND_CURL 1
+#endif
+
+#if PSI_HTTP_BACKEND_CURL
+
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -421,3 +427,5 @@ long psi_http_stream_finish_owned(struct psi_http_stream **slot, char **error_me
     *slot = NULL;
     return psi_http_stream_finish_live(h, error_message);
 }
+
+#endif /* PSI_HTTP_BACKEND_CURL */
