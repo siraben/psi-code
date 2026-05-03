@@ -38,6 +38,7 @@ set(PSI_C_SOURCES
     "${PSI_ROOT}/src/backend/esp/esp_main.c"
     "${PSI_ROOT}/src/backend/esp/esp_abort.c"
     "${PSI_ROOT}/src/backend/esp/esp_agent.c"
+    "${PSI_ROOT}/src/backend/esp/esp_tools.c"
     "${PSI_ROOT}/src/backend/esp/esp_http.c"
     "${PSI_ROOT}/src/backend/esp/esp_observer.c"
     "${PSI_ROOT}/src/backend/esp/esp_ws_server.c"
@@ -57,6 +58,8 @@ idf_component_register(
         esp_http_server
         esp-tls
         esp_netif
+        esp_driver_gpio
+        esp_timer
         mbedtls
         nvs_flash
     PRIV_REQUIRES
