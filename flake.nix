@@ -70,6 +70,8 @@
 
         devShellHook = ''
           export PSI_LUA_BOOT_FILE="$PWD/lua/boot.lua"
+          export HOST_CFLAGS_ZLIB="-I${pkgs.zlib.dev}/include"
+          export HOST_LIBS_ZLIB="-L${pkgs.zlib.out}/lib -lz"
         '';
 
         # ---- Helpers ----------------------------------------------------
@@ -455,8 +457,8 @@
                 "-isystem" "${pkgs.glibc.dev}/include"
               )
             ''}
-            host_cflags_zlib="$(pkg-config --cflags zlib)"
-            host_libs_zlib="$(pkg-config --libs zlib)"
+            host_cflags_zlib="-I${pkgs.zlib.dev}/include"
+            host_libs_zlib="-L${pkgs.zlib.out}/lib -lz"
             rm -rf "$build_dir" "$results_dir"
             mkdir -p "$build_dir"
             infer run \
