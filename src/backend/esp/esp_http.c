@@ -32,6 +32,7 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_tls.h"
+#include "esp_crt_bundle.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -124,7 +125,7 @@ static void psi_apply_headers(esp_http_client_handle_t client,
     }
 }
 
-static int psi_buffered_perform(esp_http_method_t method, const char *url,
+static int psi_buffered_perform(esp_http_client_method_t method, const char *url,
     const char *const *header_lines, size_t header_count, const char *body, size_t body_len,
     const struct psi_abort_signal *abort_signal, long *status_code, char **response_body,
     char **error_message) {

@@ -82,7 +82,7 @@ static char *psi_ws_inflate_html(size_t *len_out) {
     if (buf == NULL)
         return NULL;
     raw_len = e->raw_len;
-    if (psi_vm_embedded_inflate(e, buf, raw_len) != PSI_STATUS_OK) {
+    if (psi_embedded_inflate(e, buf, raw_len) != PSI_STATUS_OK) {
         free(buf);
         return NULL;
     }
@@ -226,7 +226,8 @@ static esp_err_t psi_ws_handler(httpd_req_t *req) {
     if (req->method == HTTP_GET) {
         /* Initial upgrade. Set up the session and spawn worker tasks. */
         if (g_ws_inited) {
-            return httpd_resp_send_err(req, HTTPD_503_SERVICE_UNAVAILABLE, "session in use");
+            httpd_resp_set_status(req, "503 Service Unavailable");
+            return httpd_resp_send(req, "session in use", HTTPD_RESP_USE_STRLEN);
         }
         memset(&g_ws_session, 0, sizeof(g_ws_session));
         g_ws_session.server = req->handle;

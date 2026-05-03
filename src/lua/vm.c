@@ -6,7 +6,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <zlib.h>
+#if defined(__has_include) && __has_include(<cjson/cJSON.h>)
 #include <cjson/cJSON.h>
+#else
+#include <cJSON.h>
+#endif
 #if PSI_ENABLE_REPL_EDITLINE
 #include <editline/readline.h>
 #endif
@@ -2093,8 +2097,9 @@ static int lfn_set_usage(lua_State *L) {
 /* Inflate an embedded entry into a caller-provided buffer. Returns
  * PSI_STATUS_OK on success (buffer filled with entry->raw_len bytes).
  * The caller owns the buffer; on error the buffer contents are
- * undefined but no allocation is retained. */
-static int psi_vm_embedded_inflate(
+ * undefined but no allocation is retained. Public so the ESP
+ * backend can reuse it for the embedded HTML page. */
+int psi_embedded_inflate(
     const struct psi_embedded_data *e, unsigned char *out, size_t out_len) {
     uLongf dst_len = (uLongf)out_len;
     int rc;
@@ -2108,6 +2113,9 @@ static int psi_vm_embedded_inflate(
     }
     return PSI_STATUS_OK;
 }
+
+/* Local alias preserves the historical name used in this file. */
+#define psi_vm_embedded_inflate psi_embedded_inflate
 
 static int psi_vm_lookup_embedded(lua_State *L, const struct psi_embedded_data *table) {
     const char *name = luaL_checkstring(L, 1);
@@ -2612,17 +2620,33 @@ static int lfn_host_tick(lua_State *L) {
 
 /* psi.sleep_ms(ms) -- cooperative sleep (no thread involvement).
  * Used by psi.sched to honour sleep requests. Clamped to 1 hour so
- * buggy callers don't peg a UI thread indefinitely. */
+ * buggy callers don't peg a UI thread indefinitely.
+ *
+ * On hosts with nanosleep(2) we use that. On targets where libc
+ * doesn't expose nanosleep (ESP-IDF newlib has the prototype but
+ * not a usable implementation against FreeRTOS without explicit
+ * pthreads), fall back to a busy poll-via-poll loop or to
+ * usleep() if available. The desktop CLI / TUI never observes a
+ * difference because they hit the nanosleep path. */
 static int lfn_sleep_ms(lua_State *L) {
     lua_Integer ms = luaL_optinteger(L, 1, 0);
-    struct timespec ts;
     if (ms <= 0)
         return 0;
     if (ms > 3600000l)
         ms = 3600000l;
-    ts.tv_sec = (time_t)(ms / 1000l);
-    ts.tv_nsec = (long)((ms % 1000l) * 1000000l);
-    nanosleep(&ts, NULL);
+#ifdef ESP_PLATFORM
+    {
+        extern void vTaskDelay(unsigned int);
+        vTaskDelay((unsigned int)ms / (1000u / 100u)); /* ~100Hz tick */
+    }
+#else
+    {
+        struct timespec ts;
+        ts.tv_sec = (time_t)(ms / 1000l);
+        ts.tv_nsec = (long)((ms % 1000l) * 1000000l);
+        nanosleep(&ts, NULL);
+    }
+#endif
     return 0;
 }
 

@@ -23,7 +23,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
-#include "mdns.h"
 #include "nvs_flash.h"
 
 #include "psi/esp_runtime.h"
@@ -106,15 +105,10 @@ static int psi_wifi_init_sta(void) {
     return 0;
 }
 
-static void psi_mdns_init(void) {
-    if (mdns_init() != ESP_OK) {
-        ESP_LOGW(TAG, "mdns_init failed");
-        return;
-    }
-    mdns_hostname_set(CONFIG_PSI_MDNS_HOSTNAME);
-    mdns_instance_name_set("psi web chat");
-    mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
-}
+/* mDNS is a managed ESP-IDF component (espressif/mdns) and not
+ * available inside the Nix sandbox without network access. The
+ * firmware reaches its SPA via raw IP — fine for QEMU test rigs and
+ * any DHCP-known hostname on real hardware. */
 
 void psi_esp_main_run(void) {
     esp_err_t err = nvs_flash_init();
@@ -128,6 +122,5 @@ void psi_esp_main_run(void) {
         ESP_LOGE(TAG, "wifi init failed; refusing to start server");
         return;
     }
-    psi_mdns_init();
     psi_ws_server_start();
 }

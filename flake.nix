@@ -43,6 +43,18 @@
           hash = "sha256-V8zDK7vQBcq3W8xSREBSU1r2kXiduiuQFtXFBkDWiz0=";
         };
 
+        # zlib source tarball for components/zlib-cmod. ESP-IDF v5.5
+        # moved zlib to a managed component (espressif/zlib), which
+        # the Nix sandbox can't fetch. Vendoring sidesteps that.
+        # zlib.net periodically rotates filenames; pin the GitHub
+        # mirror to a stable release tag.
+        zlibSrc = pkgs.fetchFromGitHub {
+          owner = "madler";
+          repo = "zlib";
+          rev = "v1.3.1";
+          hash = "sha256-TkPLWSN5QcPlL9D0kc/yhH0/puE9bFND24aj5NVDKYs=";
+        };
+
         # Espressif's QEMU fork. Upstream nixpkgs ships a generic
         # qemu-system-xtensa, but it lacks the ESP32-specific
         # peripheral models (WiFi simulation via openeth, eFuse,
@@ -419,25 +431,39 @@
               espPkgs.esp-idf-esp32
               pkgs.gcc
               pkgs.zlib
-              pkgs.cmake
-              pkgs.ninja
-              pkgs.python3
             ];
 
-            # ESP-IDF's setup_idf hook expects $IDF_TOOLS_PATH writable.
+            # ESP-IDF supplies its own cmake + ninja via the wrapper.
+            # Skip stdenv's cmake configure hook so it doesn't try to
+            # cmake the project root.
+            dontUseCmakeConfigure = true;
+            dontConfigure = true;
+
             preBuild = ''
               export HOST_CC=${pkgs.stdenv.cc}/bin/cc
-              export LUA_SRC_DIR=$(mktemp -d)/lua-5.5.0/src
-              tar -xzf ${luaSrc} -C $(dirname $(dirname $LUA_SRC_DIR))
+              # Unpack Lua 5.5 sources for components/lua-cmod.
+              mkdir -p lua-src
+              tar -xzf ${luaSrc} -C lua-src
+              export LUA_SRC_DIR=$PWD/lua-src/lua-5.5.0/src
+              # zlib comes as a directory (fetchFromGitHub).
+              export ZLIB_SRC_DIR=${zlibSrc}
               echo "Lua sources at $LUA_SRC_DIR"
+              echo "zlib sources at $ZLIB_SRC_DIR"
+              # ESP-IDF wants HOME writable for idf-component-manager
+              # state; the Nix sandbox starts with HOME unset.
+              export HOME=$PWD/.home
+              mkdir -p $HOME
             '';
 
             buildPhase = ''
+              runHook preBuild
               cd firmware
               idf.py --no-ccache build
+              runHook postBuild
             '';
 
             installPhase = ''
+              runHook preInstall
               mkdir -p $out
               cp build/psi_firmware.elf $out/psi.elf
               cp build/psi_firmware.bin $out/psi.bin
@@ -448,6 +474,7 @@
                 0x1000  $out/bootloader.bin \
                 0x8000  $out/partition-table.bin \
                 0x10000 $out/psi.bin || true
+              runHook postInstall
             '';
 
             dontStrip = true;
