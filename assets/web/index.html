@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>psi</title>
+<style>
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, sans-serif;
+  background: #0e1014; color: #d8dde6; height: 100dvh; display: flex; flex-direction: column; }
+header { padding: 10px 14px; border-bottom: 1px solid #1d2230; display: flex; align-items: center; gap: 10px; }
+header h1 { font-size: 13px; font-weight: 600; margin: 0; letter-spacing: .2px; }
+header .dot { width: 8px; height: 8px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 6px #4ade80; }
+header .dot.off { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
+header .meta { color: #6b7280; font-size: 12px; margin-left: auto; }
+main { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.bubble { max-width: 80ch; border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, monospace; font-size: 13px; }
+.bubble.user { align-self: flex-end; background: #1f2937; color: #f3f4f6; }
+.bubble.assistant { align-self: flex-start; background: #11151c; border: 1px solid #1d2230; }
+.bubble.thinking { align-self: flex-start; background: transparent; color: #6b7280; font-style: italic; border-left: 2px solid #374151; padding-left: 10px; }
+.bubble.system { align-self: center; color: #9ca3af; font-size: 12px; }
+.bubble.error { align-self: center; color: #fca5a5; background: #1a0b0d; border: 1px solid #5a1d23; }
+.tool { align-self: flex-start; max-width: 80ch; background: #0d1218; border: 1px solid #1d2230; border-radius: 8px; padding: 8px 10px; font-family: ui-monospace, monospace; font-size: 12px; color: #9ca3af; }
+.tool .name { color: #93c5fd; font-weight: 600; }
+.tool pre { margin: 6px 0 0 0; white-space: pre-wrap; color: #d1d5db; }
+form { display: flex; gap: 8px; padding: 10px; border-top: 1px solid #1d2230; }
+form textarea { flex: 1; resize: none; padding: 8px 10px; font: inherit; color: inherit; background: #0a0c12; border: 1px solid #1d2230; border-radius: 6px; outline: none; min-height: 38px; max-height: 200px; }
+form button { padding: 0 14px; font: inherit; color: #f3f4f6; background: #2563eb; border: none; border-radius: 6px; cursor: pointer; }
+form button.abort { background: #b91c1c; }
+form button:disabled { opacity: .4; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <h1>psi</h1>
+  <span class="meta" id="meta"></span>
+</header>
+<main id="log"></main>
+<form id="f">
+  <textarea id="t" rows="1" placeholder="message…" autofocus></textarea>
+  <button id="send" type="submit">send</button>
+</form>
+<script>
+(() => {
+  const log = document.getElementById('log');
+  const dot = document.getElementById('dot');
+  const meta = document.getElementById('meta');
+  const ta = document.getElementById('t');
+  const send = document.getElementById('send');
+  const form = document.getElementById('f');
+  let ws, current = null, busy = false;
+
+  function bubble(cls, text) {
+    const el = document.createElement('div');
+    el.className = 'bubble ' + cls;
+    el.textContent = text || '';
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+    return el;
+  }
+  function tool(name, body) {
+    const el = document.createElement('div');
+    el.className = 'tool';
+    const head = document.createElement('div');
+    head.innerHTML = '<span class="name"></span>';
+    head.firstChild.textContent = name;
+    el.appendChild(head);
+    if (body) {
+      const pre = document.createElement('pre');
+      pre.textContent = body;
+      el.appendChild(pre);
+    }
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+    return el;
+  }
+  function setBusy(b) {
+    busy = b;
+    send.textContent = b ? 'abort' : 'send';
+    send.classList.toggle('abort', b);
+    send.disabled = false;
+  }
+  function ensureCurrent() {
+    if (!current) current = bubble('assistant', '');
+    return current;
+  }
+  function connect() {
+    const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+    ws = new WebSocket(url);
+    ws.onopen = () => { dot.classList.remove('off'); meta.textContent = 'connected'; };
+    ws.onclose = () => { dot.classList.add('off'); meta.textContent = 'disconnected — reconnecting…'; setBusy(false); setTimeout(connect, 1500); };
+    ws.onerror = () => { meta.textContent = 'error'; };
+    ws.onmessage = ev => {
+      let m;
+      try { m = JSON.parse(ev.data); } catch { return; }
+      switch (m.type) {
+        case 'assistant_delta':
+          ensureCurrent().textContent += m.text || '';
+          log.scrollTop = log.scrollHeight;
+          break;
+        case 'thinking_delta':
+          if (!current || current.classList.contains('thinking') === false) {
+            current = bubble('thinking', '');
+          }
+          current.textContent += m.text || '';
+          break;
+        case 'tool_call': {
+          current = null;
+          const body = m.input ? JSON.stringify(m.input, null, 2) : '';
+          tool(m.name + '(' + (m.id || '') + ')', body);
+          break;
+        }
+        case 'tool_result':
+          current = null;
+          tool('→ ' + (m.id || '') + (m.ok ? '' : ' (error)'), m.output || '');
+          break;
+        case 'turn_end':
+          current = null;
+          setBusy(false);
+          break;
+        case 'error':
+          bubble('error', m.message || 'error');
+          setBusy(false);
+          break;
+      }
+    };
+  }
+  function submit() {
+    const text = ta.value.trim();
+    if (busy) {
+      ws && ws.send(JSON.stringify({ type: 'abort' }));
+      return;
+    }
+    if (!text || !ws || ws.readyState !== 1) return;
+    bubble('user', text);
+    ta.value = '';
+    ta.style.height = 'auto';
+    current = null;
+    setBusy(true);
+    ws.send(JSON.stringify({ type: 'user', text: text }));
+  }
+  form.addEventListener('submit', e => { e.preventDefault(); submit(); });
+  ta.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
+  });
+  ta.addEventListener('input', () => {
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
+  });
+  connect();
+})();
+</script>
+</body>
+</html>

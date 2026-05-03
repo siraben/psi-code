@@ -1,0 +1,30 @@
+# Firmware defaults consumed by `idf.py build`.
+# Most are kept at their ESP-IDF defaults; only the entries below
+# need to be present for psi to function as designed.
+
+# WiFi creds. Override at build time, or via menuconfig, or seed via
+# NVS in tests/test_esp_qemu.py.
+CONFIG_PSI_WIFI_SSID=""
+CONFIG_PSI_WIFI_PASS=""
+CONFIG_PSI_MDNS_HOSTNAME="psi"
+
+# Bigger main task stack — Lua + cJSON parsing peak well over the
+# 4 KiB default and we crash without this.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+
+# Allow the agent task to spend up to 30 s without yielding before
+# the FreeRTOS task watchdog complains. Long Anthropic SSE streams
+# can block on a single recv() that long if the network is slow.
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+CONFIG_ESP_TASK_WDT_INIT=y
+
+# WebSocket support in esp_http_server.
+CONFIG_HTTPD_WS_SUPPORT=y
+
+# mbedTLS bundled certs for HTTPS to api.anthropic.com.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+
+# Use a 1.5 MiB app partition (see partitions.csv).
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

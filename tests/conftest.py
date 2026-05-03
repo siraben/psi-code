@@ -8,3 +8,5 @@ def pytest_addoption(parser):
                     help="skip smoke tests whose name contains this substring; may be repeated")
     group.addoption("--no-live", action="store_true",
                     help="skip live-agent smoke tests even if ANTHROPIC_API_KEY is set")
+    group.addoption("--run-firmware", action="store_true",
+                    help="run firmware/QEMU integration tests (test_esp_*.py)")

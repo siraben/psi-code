@@ -1,0 +1,7 @@
+# psi firmware partition table.
+# Single 1.5 MiB app partition + 64 KiB NVS for WiFi creds and the
+# Anthropic API key. No OTA partition for now.
+# Name,   Type, SubType, Offset,  Size, Flags
+nvs,      data, nvs,     0x9000,  0x6000,
+phy_init, data, phy,     0xf000,  0x1000,
+factory,  app,  factory, 0x10000, 0x180000,
