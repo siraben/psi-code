@@ -22,5 +22,6 @@ void psi_esp_observer_emit_error(struct psi_esp_observer *obs, const char *messa
 struct psi_vm;
 struct psi_vm *psi_esp_vm(void);
 void psi_esp_set_system_prompt(char *prompt); /* takes ownership */
+const char *psi_esp_get_system_prompt(void);
 
 #endif

@@ -89,6 +89,10 @@ void psi_esp_set_system_prompt(char *prompt) {
     g_psi_system_prompt = prompt;
 }
 
+const char *psi_esp_get_system_prompt(void) {
+    return g_psi_system_prompt;
+}
+
 struct psi_ws_session {
     httpd_handle_t server;
     int fd;

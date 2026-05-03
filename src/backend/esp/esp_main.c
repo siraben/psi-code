@@ -21,6 +21,7 @@
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_netif.h"
 #include "freertos/FreeRTOS.h"
 #include "esp_heap_caps.h"
@@ -164,6 +165,29 @@ static int psi_net_init(void) {
     strncpy((char *)wifi_cfg.sta.ssid, CONFIG_PSI_WIFI_SSID, sizeof(wifi_cfg.sta.ssid) - 1u);
     strncpy(
         (char *)wifi_cfg.sta.password, CONFIG_PSI_WIFI_PASS, sizeof(wifi_cfg.sta.password) - 1u);
+
+    /* NVS fallback: when sdkconfig didn't bake in the SSID/password
+     * (the committed default), read them from NVS namespace "psi"
+     * under keys "wifi_ssid" / "wifi_pass". Lets a fresh build run on
+     * any AP without recompiling, mirroring how anthropic_key is
+     * shipped. NVS keys are <= 15 chars. */
+    {
+        nvs_handle_t h;
+        if (nvs_open("psi", NVS_READONLY, &h) == ESP_OK) {
+            size_t len;
+            if (wifi_cfg.sta.ssid[0] == '\0') {
+                len = sizeof(wifi_cfg.sta.ssid);
+                if (nvs_get_str(h, "wifi_ssid", (char *)wifi_cfg.sta.ssid, &len) == ESP_OK)
+                    ESP_LOGI(TAG, "wifi ssid from NVS: %s", (const char *)wifi_cfg.sta.ssid);
+            }
+            if (wifi_cfg.sta.password[0] == '\0') {
+                len = sizeof(wifi_cfg.sta.password);
+                if (nvs_get_str(h, "wifi_pass", (char *)wifi_cfg.sta.password, &len) == ESP_OK)
+                    ESP_LOGI(TAG, "wifi password from NVS (%u bytes)", (unsigned)len);
+            }
+            nvs_close(h);
+        }
+    }
     wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
@@ -244,7 +268,7 @@ void psi_esp_main_run(void) {
     ESP_LOGI(TAG, "largest free block:        %lu",
         (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     if (psi_esp_vm_bootstrap() != 0) {
-        ESP_LOGE(TAG, "psi_vm_init failed; agent will not be available");
+        ESP_LOGE(TAG, "psi_vm_init failed; agent will run without Lua-built prompt");
     } else {
         /* Build the desktop-equivalent system prompt now while the
          * Lua VM is still warm and we own its task; cache the result
@@ -253,10 +277,39 @@ void psi_esp_main_run(void) {
          * system message and behaves unlike the CLI/TUI agents. */
         char *prompt = psi_esp_build_system_prompt(psi_esp_vm());
         if (prompt != NULL) {
-            ESP_LOGI(TAG, "system prompt cached (%u bytes)", (unsigned)strlen(prompt));
+            ESP_LOGI(TAG, "system prompt cached from Lua (%u bytes)", (unsigned)strlen(prompt));
             psi_esp_set_system_prompt(prompt);
         } else {
-            ESP_LOGW(TAG, "system prompt build failed; turns will go unframed");
+            ESP_LOGW(TAG, "system prompt build (Lua) failed; falling back to baked-in");
+        }
+    }
+    /* Baked-in fallback. On no-PSRAM ESP32s the Lua VM bootstrap OOMs
+     * during module load, so g_psi_system_prompt would otherwise stay
+     * NULL and the agent would chat with no framing at all. This
+     * minimal prompt names the tools the firmware actually ships so
+     * the model knows what's available without touching Lua. The
+     * "%s"-style chip detail is filled in below. */
+    if (psi_esp_get_system_prompt() == NULL) {
+        char *baked = (char *)malloc(1024u);
+        if (baked != NULL) {
+            uint8_t mac[6];
+            char mac_str[18] = "??:??:??:??:??:??";
+            if (esp_efuse_mac_get_default(mac) == ESP_OK) {
+                snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1],
+                    mac[2], mac[3], mac[4], mac[5]);
+            }
+            snprintf(baked, 1024u,
+                "You are psi, a coding-agent runtime running on an ESP32 microcontroller "
+                "(MAC %s) reachable over the local network. You have a small set of tools "
+                "for inspecting the chip and the world around it: system_info, wifi_scan, "
+                "http_fetch (HTTPS via mbedTLS), gpio_mode/read/write, nvs_get/set, "
+                "time_now, restart, uart_log (write to the operator's serial console), "
+                "and lua_eval (only if the Lua VM is up). Prefer using tools to find "
+                "ground truth instead of guessing. Keep replies short — the user is "
+                "reading them on a phone or terminal.",
+                mac_str);
+            psi_esp_set_system_prompt(baked);
+            ESP_LOGI(TAG, "system prompt: baked-in default (%u bytes)", (unsigned)strlen(baked));
         }
     }
     ESP_LOGI(TAG, "free heap after VM init:  %lu",

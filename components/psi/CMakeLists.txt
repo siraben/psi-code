@@ -72,6 +72,7 @@ idf_component_register(
         json
         esp_event
         esp_eth
+        esp_wifi
         esp_http_client
         esp_http_server
         esp-tls

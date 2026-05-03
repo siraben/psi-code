@@ -11,6 +11,19 @@ result-*
 apr*.jsonl
 pi-mono/
 
+# Forgejo / git push tokens (kept in a per-user file).
+forgejo_token.txt
+*.token
+
+# ESP-IDF generates these from sdkconfig.defaults + sdkconfig.hardware
+# at build time; nothing in this directory should be committed.
+firmware/sdkconfig
+firmware/sdkconfig.old
+
+# Stray build artifacts that occasionally land at the repo root.
+/psi
+/psi-*
+
 # Per-user bench target config (hostnames, ssh jump hops, binary paths).
 # Template lives at tests/bench.targets.example.json.
 tests/bench.targets.json

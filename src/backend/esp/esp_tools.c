@@ -19,6 +19,7 @@
 #include "esp_netif.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lua.h"
@@ -684,6 +685,110 @@ static char *tool_http_fetch(const cJSON *input, char **err) {
 }
 
 /* ------------------------------------------------------------------ */
+/* wifi_scan — list nearby APs, blocking scan ~2 s                      */
+/* ------------------------------------------------------------------ */
+
+static char *tool_wifi_scan(const cJSON *input, char **err) {
+    wifi_scan_config_t cfg;
+    uint16_t n = 0u;
+    wifi_ap_record_t *aps = NULL;
+    cJSON *root, *arr;
+    esp_err_t e;
+    int max_results = json_int(input, "max_results", 10);
+    if (max_results <= 0)
+        max_results = 10;
+    if (max_results > 32)
+        max_results = 32;
+
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.show_hidden = false;
+    cfg.scan_type = WIFI_SCAN_TYPE_ACTIVE;
+    cfg.scan_time.active.min = 100;
+    cfg.scan_time.active.max = 200;
+
+    e = esp_wifi_scan_start(&cfg, true);
+    if (e != ESP_OK) {
+        if (err)
+            *err = err_text("esp_wifi_scan_start: %s", esp_err_to_name(e));
+        return NULL;
+    }
+    esp_wifi_scan_get_ap_num(&n);
+    if ((int)n > max_results)
+        n = (uint16_t)max_results;
+    if (n > 0u) {
+        aps = (wifi_ap_record_t *)calloc(n, sizeof(wifi_ap_record_t));
+        if (aps == NULL) {
+            if (err)
+                *err = err_text("oom (n=%u)", (unsigned)n);
+            return NULL;
+        }
+        esp_wifi_scan_get_ap_records(&n, aps);
+    }
+
+    root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "count", (double)n);
+    arr = cJSON_AddArrayToObject(root, "aps");
+    {
+        uint16_t i;
+        char bssid[18];
+        const char *auth_name;
+        for (i = 0; i < n; i++) {
+            cJSON *o = cJSON_CreateObject();
+            cJSON_AddStringToObject(o, "ssid", (const char *)aps[i].ssid);
+            cJSON_AddNumberToObject(o, "rssi", (double)aps[i].rssi);
+            cJSON_AddNumberToObject(o, "channel", (double)aps[i].primary);
+            snprintf(bssid, sizeof(bssid), "%02x:%02x:%02x:%02x:%02x:%02x", aps[i].bssid[0],
+                aps[i].bssid[1], aps[i].bssid[2], aps[i].bssid[3], aps[i].bssid[4], aps[i].bssid[5]);
+            cJSON_AddStringToObject(o, "bssid", bssid);
+            switch (aps[i].authmode) {
+                case WIFI_AUTH_OPEN: auth_name = "open"; break;
+                case WIFI_AUTH_WEP: auth_name = "wep"; break;
+                case WIFI_AUTH_WPA_PSK: auth_name = "wpa"; break;
+                case WIFI_AUTH_WPA2_PSK: auth_name = "wpa2"; break;
+                case WIFI_AUTH_WPA_WPA2_PSK: auth_name = "wpa/wpa2"; break;
+                case WIFI_AUTH_WPA3_PSK: auth_name = "wpa3"; break;
+                case WIFI_AUTH_WPA2_WPA3_PSK: auth_name = "wpa2/wpa3"; break;
+                default: auth_name = "?"; break;
+            }
+            cJSON_AddStringToObject(o, "auth", auth_name);
+            cJSON_AddItemToArray(arr, o);
+        }
+    }
+    free(aps);
+    return json_to_string(root);
+}
+
+/* ------------------------------------------------------------------ */
+/* uart_log — print to the firmware's stdout (visible on serial)        */
+/* ------------------------------------------------------------------ */
+
+static char *tool_uart_log(const cJSON *input, char **err) {
+    const char *level = json_str(input, "level", "info");
+    const char *message = json_str(input, "message", NULL);
+    cJSON *r;
+    (void)err;
+    if (message == NULL) {
+        if (err)
+            *err = err_text("missing string field: message");
+        return NULL;
+    }
+    /* Route through ESP_LOG so it gets a timestamp + tag, then also
+     * printf so it shows up unconditionally regardless of log level. */
+    if (strcmp(level, "warn") == 0)
+        ESP_LOGW("agent_uart", "%s", message);
+    else if (strcmp(level, "error") == 0)
+        ESP_LOGE("agent_uart", "%s", message);
+    else
+        ESP_LOGI("agent_uart", "%s", message);
+    fflush(stdout);
+    r = cJSON_CreateObject();
+    cJSON_AddBoolToObject(r, "ok", 1);
+    cJSON_AddStringToObject(r, "level", level);
+    cJSON_AddNumberToObject(r, "bytes", (double)strlen(message));
+    return json_to_string(r);
+}
+
+/* ------------------------------------------------------------------ */
 /* registry                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -777,6 +882,29 @@ const struct psi_esp_tool psi_esp_tool_table[] = {
                              "\"properties\":{\"code\":{\"type\":\"string\"}},"
                              "\"required\":[\"code\"]}",
         .handler = tool_lua_eval,
+    },
+    {
+        .name = "wifi_scan",
+        .description = "Scan for nearby WiFi access points. Returns {count, aps[]} where "
+                       "each AP has ssid, rssi (dBm), channel, bssid, and auth mode. "
+                       "Blocking scan, ~2 s. Optional max_results (default 10, max 32).",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{\"max_results\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":32}}}",
+        .handler = tool_wifi_scan,
+    },
+    {
+        .name = "uart_log",
+        .description = "Write a line to the firmware's UART console (the physical "
+                       "serial output someone watches with screen/minicom). Useful "
+                       "when the agent wants to leave a trace for the operator. "
+                       "Level is 'info', 'warn', or 'error'.",
+        .input_schema_json = "{\"type\":\"object\","
+                             "\"properties\":{"
+                             "\"message\":{\"type\":\"string\"},"
+                             "\"level\":{\"type\":\"string\",\"enum\":[\"info\",\"warn\",\"error\"]}},"
+                             "\"required\":[\"message\"]}",
+        .handler = tool_uart_log,
     },
     {
         .name = "http_fetch",

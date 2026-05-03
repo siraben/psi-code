@@ -1,0 +1,37 @@
+# Real-hardware overlay over sdkconfig.defaults. Layered via
+# SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.hardware" or via
+# the flake's packages.firmware-prod recipe.
+#
+# Flips the QEMU-friendly defaults to a configuration that actually
+# runs on a real ESP32 (an ESP32-D0WD-V3 with WiFi + BT). WiFi creds
+# are NOT baked here — they're seeded into NVS at flash time so the
+# password doesn't end up in the repo.
+
+# Network: WiFi station, no openeth.
+CONFIG_PSI_NET_OPENETH=n
+CONFIG_ETH_USE_OPENETH=n
+CONFIG_ESP_WIFI_ENABLED=y
+CONFIG_ESP_WIFI_NVS_ENABLED=y
+
+# Real silicon has both cores; let psi's worker scheduling use them.
+CONFIG_FREERTOS_UNICORE=n
+
+# 4 MiB flash matches the modules we ship; partitions.csv expects it.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+
+# Plain ESP32-D0WD-V3 modules have no external PSRAM. The QEMU defaults
+# enable SPIRAM (qemu fakes it via -m 4M), which on this hardware fails
+# init at boot AND drags WiFi/LWIP into a half-broken state where the
+# STA associates but never completes DHCP. Turn it off cleanly so the
+# heap allocator stays internal-only. If you flash this firmware to a
+# WROVER (with PSRAM), drop these overrides.
+CONFIG_SPIRAM=n
+CONFIG_SPIRAM_USE_MALLOC=n
+CONFIG_SPIRAM_BOOT_INIT=n
+CONFIG_SPIRAM_IGNORE_NOTFOUND=n
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=n
+
+# Reverts the QEMU build's mbedTLS-via-PSRAM allocation; on internal
+# heap mbedtls allocates from the regular pool.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=n
