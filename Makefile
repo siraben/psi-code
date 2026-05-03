@@ -65,7 +65,10 @@ TARGET         = $(BUILD_DIR)/psi
 LUA_BOOT_FILE ?= $(abspath lua/boot.lua)
 CA_BUNDLE_FILE ?= $(CURL_CA_BUNDLE)
 
-SOURCES := $(sort $(shell find src -name '*.c' 2>/dev/null))
+# src/backend/esp/ is the ESP-IDF firmware backend; it includes
+# ESP-IDF-only headers (esp_http_client, freertos/*, etc.) and is
+# compiled by the firmware CMake build, not the desktop Makefile.
+SOURCES := $(sort $(shell find src -name '*.c' -not -path 'src/backend/*' 2>/dev/null))
 OBJECTS := $(SOURCES:%.c=$(BUILD_DIR)/%.o)
 C_FORMAT_FILES := $(sort $(shell find include scripts src -type f \( -name '*.c' -o -name '*.h' \) 2>/dev/null))
 
