@@ -95,28 +95,28 @@ static char *tool_system_info(const cJSON *input, char **err) {
     }
 
     if (esp_efuse_mac_get_default(mac) == ESP_OK) {
-        snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
-            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2],
+            mac[3], mac[4], mac[5]);
     }
 
     root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "chip_model",
-        chip.model == CHIP_ESP32 ? "esp32"
-        : chip.model == CHIP_ESP32S2 ? "esp32s2"
-        : chip.model == CHIP_ESP32S3 ? "esp32s3"
-        : chip.model == CHIP_ESP32C3 ? "esp32c3"
-        : chip.model == CHIP_ESP32C6 ? "esp32c6"
-        : "unknown");
+        chip.model == CHIP_ESP32       ? "esp32" :
+            chip.model == CHIP_ESP32S2 ? "esp32s2" :
+            chip.model == CHIP_ESP32S3 ? "esp32s3" :
+            chip.model == CHIP_ESP32C3 ? "esp32c3" :
+            chip.model == CHIP_ESP32C6 ? "esp32c6" :
+                                         "unknown");
     cJSON_AddNumberToObject(root, "chip_revision", chip.revision);
     cJSON_AddNumberToObject(root, "cores", chip.cores);
     cJSON_AddStringToObject(root, "idf_version", esp_get_idf_version());
     cJSON_AddStringToObject(root, "mac", mac_str);
     cJSON_AddStringToObject(root, "ip", ip_str);
     cJSON_AddStringToObject(root, "gateway", gw_str);
-    cJSON_AddNumberToObject(root, "free_heap_bytes",
-        (double)heap_caps_get_free_size(MALLOC_CAP_8BIT));
-    cJSON_AddNumberToObject(root, "largest_free_block",
-        (double)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    cJSON_AddNumberToObject(
+        root, "free_heap_bytes", (double)heap_caps_get_free_size(MALLOC_CAP_8BIT));
+    cJSON_AddNumberToObject(
+        root, "largest_free_block", (double)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     cJSON_AddNumberToObject(root, "uptime_ms", (double)(esp_timer_get_time() / 1000));
     cJSON_AddNumberToObject(root, "reset_reason", (double)esp_reset_reason());
     return json_to_string(root);
@@ -310,8 +310,7 @@ static char *tool_time_now(const cJSON *input, char **err) {
     r = cJSON_CreateObject();
     cJSON_AddNumberToObject(r, "epoch_seconds", (double)now);
     cJSON_AddStringToObject(r, "iso_utc", iso);
-    cJSON_AddNumberToObject(r, "uptime_ms",
-        (double)(esp_timer_get_time() / 1000));
+    cJSON_AddNumberToObject(r, "uptime_ms", (double)(esp_timer_get_time() / 1000));
     return json_to_string(r);
 }
 
@@ -577,8 +576,7 @@ static char *tool_http_fetch(const cJSON *input, char **err) {
             }
         }
     }
-    if (body != NULL && *body != '\0' &&
-        (m == HTTP_METHOD_POST || m == HTTP_METHOD_PUT))
+    if (body != NULL && *body != '\0' && (m == HTTP_METHOD_POST || m == HTTP_METHOD_PUT))
         esp_http_client_set_post_field(cli, body, (int)strlen(body));
 
     e = esp_http_client_perform(cli);
@@ -613,7 +611,8 @@ const struct psi_esp_tool psi_esp_tool_table[] = {
         .name = "system_info",
         .description = "Return ESP32 chip + network state: model, cores, MAC, IP, "
                        "free heap, uptime, reset reason. No arguments.",
-        .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}",
+        .input_schema_json =
+            "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}",
         .handler = tool_system_info,
     },
     {
@@ -623,8 +622,8 @@ const struct psi_esp_tool psi_esp_tool_table[] = {
         .input_schema_json =
             "{\"type\":\"object\","
             "\"properties\":{"
-              "\"pin\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":48},"
-              "\"mode\":{\"type\":\"string\",\"enum\":[\"in\",\"out\",\"pullup\",\"pulldown\"]}},"
+            "\"pin\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":48},"
+            "\"mode\":{\"type\":\"string\",\"enum\":[\"in\",\"out\",\"pullup\",\"pulldown\"]}},"
             "\"required\":[\"pin\",\"mode\"]}",
         .handler = tool_gpio_mode,
     },
@@ -642,12 +641,11 @@ const struct psi_esp_tool psi_esp_tool_table[] = {
         .name = "gpio_write",
         .description = "Drive a GPIO pin high or low. Pin must already be in "
                        "output mode. Required: pin (int), level (0 or 1).",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{"
-              "\"pin\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":48},"
-              "\"level\":{\"type\":\"integer\",\"enum\":[0,1]}},"
-            "\"required\":[\"pin\",\"level\"]}",
+        .input_schema_json = "{\"type\":\"object\","
+                             "\"properties\":{"
+                             "\"pin\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":48},"
+                             "\"level\":{\"type\":\"integer\",\"enum\":[0,1]}},"
+                             "\"required\":[\"pin\",\"level\"]}",
         .handler = tool_gpio_write,
     },
     {
@@ -655,36 +653,36 @@ const struct psi_esp_tool psi_esp_tool_table[] = {
         .description = "Read a string value from the device's persistent key/value "
                        "store (NVS). Returns {value, found}; value is null when missing. "
                        "Keys are <= 15 chars, namespace is 'psi'.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{\"key\":{\"type\":\"string\",\"maxLength\":15}},"
-            "\"required\":[\"key\"]}",
+        .input_schema_json = "{\"type\":\"object\","
+                             "\"properties\":{\"key\":{\"type\":\"string\",\"maxLength\":15}},"
+                             "\"required\":[\"key\"]}",
         .handler = tool_nvs_get,
     },
     {
         .name = "nvs_set",
         .description = "Write a string value to NVS so it survives reboots. "
                        "Required: key (<= 15 chars), value (string).",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{"
-              "\"key\":{\"type\":\"string\",\"maxLength\":15},"
-              "\"value\":{\"type\":\"string\"}},"
-            "\"required\":[\"key\",\"value\"]}",
+        .input_schema_json = "{\"type\":\"object\","
+                             "\"properties\":{"
+                             "\"key\":{\"type\":\"string\",\"maxLength\":15},"
+                             "\"value\":{\"type\":\"string\"}},"
+                             "\"required\":[\"key\",\"value\"]}",
         .handler = tool_nvs_set,
     },
     {
         .name = "time_now",
         .description = "Return the current time. Without an SNTP sync the epoch "
                        "starts at boot, so prefer uptime_ms for relative timing.",
-        .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}",
+        .input_schema_json =
+            "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}",
         .handler = tool_time_now,
     },
     {
         .name = "restart",
         .description = "Reboot the ESP32. The WebSocket connection drops; the "
                        "device comes back up in ~5s. Use sparingly.",
-        .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}",
+        .input_schema_json =
+            "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}",
         .handler = tool_restart,
     },
     {
@@ -694,10 +692,9 @@ const struct psi_esp_tool psi_esp_tool_table[] = {
                        "stringified return value. The VM has psi.* primitives "
                        "loaded; e.g. psi.runtime_info(), psi.json_encode(t), "
                        "psi.ramfs.read('@mem/foo'). Run untrusted code with care.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{\"code\":{\"type\":\"string\"}},"
-            "\"required\":[\"code\"]}",
+        .input_schema_json = "{\"type\":\"object\","
+                             "\"properties\":{\"code\":{\"type\":\"string\"}},"
+                             "\"required\":[\"code\"]}",
         .handler = tool_lua_eval,
     },
     {
@@ -709,15 +706,16 @@ const struct psi_esp_tool psi_esp_tool_table[] = {
         .input_schema_json =
             "{\"type\":\"object\","
             "\"properties\":{"
-              "\"url\":{\"type\":\"string\"},"
-              "\"method\":{\"type\":\"string\",\"enum\":[\"GET\",\"POST\",\"PUT\",\"DELETE\",\"HEAD\"]},"
-              "\"body\":{\"type\":\"string\"},"
-              "\"headers\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},"
-              "\"max_bytes\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":65536}},"
+            "\"url\":{\"type\":\"string\"},"
+            "\"method\":{\"type\":\"string\",\"enum\":[\"GET\",\"POST\",\"PUT\",\"DELETE\","
+            "\"HEAD\"]},"
+            "\"body\":{\"type\":\"string\"},"
+            "\"headers\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},"
+            "\"max_bytes\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":65536}},"
             "\"required\":[\"url\"]}",
         .handler = tool_http_fetch,
     },
-    { NULL, NULL, NULL, NULL },
+    {NULL, NULL, NULL, NULL},
 };
 
 const struct psi_esp_tool *psi_esp_tool_find(const char *name) {

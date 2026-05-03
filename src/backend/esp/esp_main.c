@@ -115,8 +115,7 @@ static int psi_net_init(void) {
 
     {
         EventBits_t bits = xEventGroupWaitBits(g_net_events,
-            PSI_NET_BIT_CONNECTED | PSI_NET_BIT_FAIL, pdFALSE, pdFALSE,
-            pdMS_TO_TICKS(15000));
+            PSI_NET_BIT_CONNECTED | PSI_NET_BIT_FAIL, pdFALSE, pdFALSE, pdMS_TO_TICKS(15000));
         if ((bits & PSI_NET_BIT_CONNECTED) == 0u) {
             ESP_LOGE(TAG, "ethernet failed to acquire IP");
             return -1;
@@ -163,8 +162,8 @@ static int psi_net_init(void) {
 
     memset(&wifi_cfg, 0, sizeof(wifi_cfg));
     strncpy((char *)wifi_cfg.sta.ssid, CONFIG_PSI_WIFI_SSID, sizeof(wifi_cfg.sta.ssid) - 1u);
-    strncpy((char *)wifi_cfg.sta.password, CONFIG_PSI_WIFI_PASS,
-        sizeof(wifi_cfg.sta.password) - 1u);
+    strncpy(
+        (char *)wifi_cfg.sta.password, CONFIG_PSI_WIFI_PASS, sizeof(wifi_cfg.sta.password) - 1u);
     wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
@@ -173,8 +172,7 @@ static int psi_net_init(void) {
 
     {
         EventBits_t bits = xEventGroupWaitBits(g_net_events,
-            PSI_NET_BIT_CONNECTED | PSI_NET_BIT_FAIL, pdFALSE, pdFALSE,
-            pdMS_TO_TICKS(30000));
+            PSI_NET_BIT_CONNECTED | PSI_NET_BIT_FAIL, pdFALSE, pdFALSE, pdMS_TO_TICKS(30000));
         if ((bits & PSI_NET_BIT_CONNECTED) == 0u) {
             ESP_LOGE(TAG, "wifi failed to associate");
             return -1;
@@ -209,21 +207,23 @@ void psi_esp_main_run(void) {
             /* NVS limits keys to 15 chars, so we store under short
              * keys here and surface them as their full env-var
              * names (which Lua expects via os.getenv). */
-            static const struct { const char *nvs_key; const char *env_name; } keys[] = {
-                { "anthropic_key",  "ANTHROPIC_API_KEY" },
-                { "anthropic_base", "PSI_ANTHROPIC_BASE_URL" },
-                { NULL, NULL },
+            static const struct {
+                const char *nvs_key;
+                const char *env_name;
+            } keys[] = {
+                {"anthropic_key", "ANTHROPIC_API_KEY"},
+                {"anthropic_base", "PSI_ANTHROPIC_BASE_URL"},
+                {NULL, NULL},
             };
             size_t i;
             for (i = 0; keys[i].nvs_key != NULL; i++) {
                 size_t len = 0;
                 if (nvs_get_str(h, keys[i].nvs_key, NULL, &len) == ESP_OK && len > 0) {
                     char *buf = (char *)malloc(len);
-                    if (buf != NULL &&
-                        nvs_get_str(h, keys[i].nvs_key, buf, &len) == ESP_OK) {
+                    if (buf != NULL && nvs_get_str(h, keys[i].nvs_key, buf, &len) == ESP_OK) {
                         setenv(keys[i].env_name, buf, 1);
-                        ESP_LOGI(TAG, "loaded %s from NVS (%u bytes)",
-                            keys[i].env_name, (unsigned)len);
+                        ESP_LOGI(
+                            TAG, "loaded %s from NVS (%u bytes)", keys[i].env_name, (unsigned)len);
                     }
                     free(buf);
                 }

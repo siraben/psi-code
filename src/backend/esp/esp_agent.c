@@ -90,7 +90,12 @@ static void buf_free(struct buf *b) {
 /* per-message accumulator                                              */
 /* ------------------------------------------------------------------ */
 
-enum block_kind { BLK_NONE, BLK_TEXT, BLK_THINKING, BLK_TOOL_USE };
+enum block_kind {
+    BLK_NONE,
+    BLK_TEXT,
+    BLK_THINKING,
+    BLK_TOOL_USE
+};
 
 struct content_block {
     enum block_kind kind;
@@ -137,8 +142,8 @@ static struct content_block *turn_open(struct turn_state *t, enum block_kind kin
     struct content_block *b;
     if (t->n_blocks >= t->cap) {
         int cap = t->cap ? t->cap * 2 : 4;
-        struct content_block *p = (struct content_block *)realloc(t->blocks,
-            (size_t)cap * sizeof(*p));
+        struct content_block *p =
+            (struct content_block *)realloc(t->blocks, (size_t)cap * sizeof(*p));
         if (p == NULL)
             return NULL;
         t->blocks = p;
@@ -178,8 +183,8 @@ static void sse_destroy(struct sse_state *s) {
 
 /* dispatch_event runs after a blank line completes a frame; it
  * routes each Anthropic event type into the turn state and observer. */
-static void dispatch_event(struct sse_state *s, struct turn_state *turn,
-    struct psi_agent_observer *obs) {
+static void dispatch_event(
+    struct sse_state *s, struct turn_state *turn, struct psi_agent_observer *obs) {
     cJSON *root;
     cJSON *type_node;
     const char *type_str;
@@ -200,9 +205,8 @@ static void dispatch_event(struct sse_state *s, struct turn_state *turn,
     if (strcmp(type_str, "content_block_start") == 0) {
         cJSON *cb = cJSON_GetObjectItemCaseSensitive(root, "content_block");
         cJSON *cb_type = cJSON_GetObjectItemCaseSensitive(cb, "type");
-        const char *kind_str = (cJSON_IsString(cb_type) && cb_type->valuestring)
-                                   ? cb_type->valuestring
-                                   : "text";
+        const char *kind_str =
+            (cJSON_IsString(cb_type) && cb_type->valuestring) ? cb_type->valuestring : "text";
         enum block_kind kind = BLK_TEXT;
         struct content_block *b;
         if (strcmp(kind_str, "thinking") == 0)
@@ -221,9 +225,8 @@ static void dispatch_event(struct sse_state *s, struct turn_state *turn,
     } else if (strcmp(type_str, "content_block_delta") == 0) {
         cJSON *delta = cJSON_GetObjectItemCaseSensitive(root, "delta");
         cJSON *delta_type = cJSON_GetObjectItemCaseSensitive(delta, "type");
-        const char *dt = (cJSON_IsString(delta_type) && delta_type->valuestring)
-                             ? delta_type->valuestring
-                             : "";
+        const char *dt =
+            (cJSON_IsString(delta_type) && delta_type->valuestring) ? delta_type->valuestring : "";
         if (turn->current >= 0 && turn->current < turn->n_blocks) {
             struct content_block *b = &turn->blocks[turn->current];
             if (strcmp(dt, "text_delta") == 0) {
@@ -259,8 +262,8 @@ static void dispatch_event(struct sse_state *s, struct turn_state *turn,
     } else if (strcmp(type_str, "error") == 0) {
         cJSON *err = cJSON_GetObjectItemCaseSensitive(root, "error");
         cJSON *msg = cJSON_GetObjectItemCaseSensitive(err, "message");
-        const char *m = (cJSON_IsString(msg) && msg->valuestring) ? msg->valuestring
-                                                                  : "anthropic error";
+        const char *m =
+            (cJSON_IsString(msg) && msg->valuestring) ? msg->valuestring : "anthropic error";
         free(turn->server_error);
         turn->server_error = psi_strdup(m);
     }
@@ -270,8 +273,8 @@ static void dispatch_event(struct sse_state *s, struct turn_state *turn,
     sse_reset_event(s);
 }
 
-static void handle_line(struct sse_state *s, struct turn_state *turn,
-    struct psi_agent_observer *obs) {
+static void handle_line(
+    struct sse_state *s, struct turn_state *turn, struct psi_agent_observer *obs) {
     char *line = s->line;
     size_t len = s->line_len;
     if (len > 0u && line[len - 1u] == '\r') {
@@ -309,8 +312,8 @@ static void handle_line(struct sse_state *s, struct turn_state *turn,
     s->line_len = 0u;
 }
 
-static void sse_feed(struct sse_state *s, const char *bytes, size_t len,
-    struct turn_state *turn, struct psi_agent_observer *obs) {
+static void sse_feed(struct sse_state *s, const char *bytes, size_t len, struct turn_state *turn,
+    struct psi_agent_observer *obs) {
     size_t i;
     for (i = 0u; i < len; i++) {
         char c = bytes[i];
@@ -349,8 +352,7 @@ static esp_err_t round_event_cb(esp_http_client_event_t *evt) {
     }
     if (evt->data_len <= 0)
         return ESP_OK;
-    sse_feed(&ctx->sse, (const char *)evt->data, (size_t)evt->data_len,
-        ctx->turn, ctx->observer);
+    sse_feed(&ctx->sse, (const char *)evt->data, (size_t)evt->data_len, ctx->turn, ctx->observer);
     return ESP_OK;
 }
 
@@ -419,10 +421,8 @@ static cJSON *run_tools(struct turn_state *turn, struct psi_agent_observer *obs)
         if (b->kind != BLK_TOOL_USE)
             continue;
         if (obs != NULL && obs->on_tool_call != NULL) {
-            obs->on_tool_call(obs->userdata,
-                b->tool_id ? b->tool_id : "",
-                b->tool_name ? b->tool_name : "",
-                b->tool_input.data ? b->tool_input.data : "{}");
+            obs->on_tool_call(obs->userdata, b->tool_id ? b->tool_id : "",
+                b->tool_name ? b->tool_name : "", b->tool_input.data ? b->tool_input.data : "{}");
         }
         if (b->tool_input.data != NULL && b->tool_input.len > 0u)
             input = cJSON_Parse(b->tool_input.data);
@@ -447,13 +447,11 @@ static cJSON *run_tools(struct turn_state *turn, struct psi_agent_observer *obs)
             }
             free(out);
         } else {
-            cJSON_AddStringToObject(result, "content",
-                err != NULL ? err : "tool failed");
+            cJSON_AddStringToObject(result, "content", err != NULL ? err : "tool failed");
             cJSON_AddBoolToObject(result, "is_error", 1);
             if (obs != NULL && obs->on_tool_result != NULL) {
                 obs->on_tool_result(obs->userdata, b->tool_id ? b->tool_id : "",
-                    b->tool_name ? b->tool_name : "",
-                    err != NULL ? err : "tool failed");
+                    b->tool_name ? b->tool_name : "", err != NULL ? err : "tool failed");
             }
             free(err);
         }
@@ -469,8 +467,8 @@ static cJSON *run_tools(struct turn_state *turn, struct psi_agent_observer *obs)
 /* Send the current `messages` array to Anthropic, parse the streamed
  * response, populate `turn`. Returns PSI_STATUS_OK on a clean turn,
  * PSI_STATUS_ERROR otherwise (fills *err_out). */
-static int run_round(const char *system_prompt, const char *model, long max_tokens,
-    cJSON *messages, struct turn_state *turn, struct psi_agent_observer *observer,
+static int run_round(const char *system_prompt, const char *model, long max_tokens, cJSON *messages,
+    struct turn_state *turn, struct psi_agent_observer *observer,
     const struct psi_abort_signal *abort_signal, char **err_out) {
     cJSON *root = cJSON_CreateObject();
     cJSON *tools;
@@ -562,8 +560,7 @@ static int run_round(const char *system_prompt, const char *model, long max_toke
         } else if (err != ESP_OK || status < 200 || status >= 300) {
             if (err_out != NULL) {
                 char buf[160];
-                snprintf(buf, sizeof(buf), "anthropic %s status=%d",
-                    esp_err_to_name(err), status);
+                snprintf(buf, sizeof(buf), "anthropic %s status=%d", esp_err_to_name(err), status);
                 *err_out = psi_strdup(buf);
             }
             rc = PSI_STATUS_ERROR;
@@ -583,8 +580,8 @@ static int run_round(const char *system_prompt, const char *model, long max_toke
 /* ------------------------------------------------------------------ */
 
 int psi_esp_agent_turn(const char *user_text, const char *system_prompt, const char *model,
-    long max_tokens, struct psi_agent_observer *observer,
-    struct psi_abort_signal *abort_signal, char **error_message) {
+    long max_tokens, struct psi_agent_observer *observer, struct psi_abort_signal *abort_signal,
+    char **error_message) {
     cJSON *messages;
     cJSON *user_msg;
     int round;
@@ -618,8 +615,8 @@ int psi_esp_agent_turn(const char *user_text, const char *system_prompt, const c
         int i;
 
         turn_init(&turn);
-        prc = run_round(system_prompt, model, max_tokens, messages, &turn,
-            observer, abort_signal, &err);
+        prc = run_round(
+            system_prompt, model, max_tokens, messages, &turn, observer, abort_signal, &err);
         if (prc != PSI_STATUS_OK) {
             if (error_message != NULL)
                 *error_message = err != NULL ? err : psi_strdup("agent round failed");
@@ -663,8 +660,8 @@ int psi_esp_agent_turn(const char *user_text, const char *system_prompt, const c
 
     /* Hit the round cap. Return success but let the SPA know. */
     if (observer != NULL && observer->on_assistant_text_delta != NULL) {
-        observer->on_assistant_text_delta(observer->userdata,
-            "\n[agent: tool-use round cap reached]\n");
+        observer->on_assistant_text_delta(
+            observer->userdata, "\n[agent: tool-use round cap reached]\n");
     }
     rc = PSI_STATUS_OK;
 

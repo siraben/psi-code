@@ -87,8 +87,8 @@ struct psi_ws_session {
     httpd_handle_t server;
     int fd;
 
-    QueueHandle_t inbox;     /* of struct psi_ws_inbound */
-    QueueHandle_t outbox;    /* of char * (json text) */
+    QueueHandle_t inbox; /* of struct psi_ws_inbound */
+    QueueHandle_t outbox; /* of char * (json text) */
     EventGroupHandle_t flags;
 
     struct psi_esp_observer observer;
@@ -276,11 +276,10 @@ static void psi_ws_worker_task(void *arg) {
                  * per event, no GC, no per-turn module loads. */
                 {
                     char *err_msg = NULL;
-                    int prc = psi_esp_agent_turn(u, g_psi_system_prompt, m, mx,
-                        &s->observer.base, &g_psi_abort, &err_msg);
+                    int prc = psi_esp_agent_turn(
+                        u, g_psi_system_prompt, m, mx, &s->observer.base, &g_psi_abort, &err_msg);
                     if (prc != PSI_STATUS_OK) {
-                        psi_ws_emit_error(s,
-                            err_msg != NULL ? err_msg : "agent turn failed");
+                        psi_ws_emit_error(s, err_msg != NULL ? err_msg : "agent turn failed");
                     }
                     free(err_msg);
                 }
@@ -332,8 +331,8 @@ static void psi_ws_session_teardown(void) {
         xEventGroupSetBits(g_ws_session.flags, PSI_WS_BIT_CLOSE);
     /* Wait up to 2 s for the tasks to exit. They poll their inbox
      * with a 200/500 ms timeout, so this lands quickly. */
-    while ((g_ws_session.worker_task != NULL || g_ws_session.sender_task != NULL)
-           && waited < 2000) {
+    while (
+        (g_ws_session.worker_task != NULL || g_ws_session.sender_task != NULL) && waited < 2000) {
         vTaskDelay(pdMS_TO_TICKS(50));
         waited += 50;
     }
@@ -368,8 +367,7 @@ static esp_err_t psi_ws_handler(httpd_req_t *req) {
         memset(&g_ws_session, 0, sizeof(g_ws_session));
         g_ws_session.server = req->handle;
         g_ws_session.fd = httpd_req_to_sockfd(req);
-        g_ws_session.inbox =
-            xQueueCreate(PSI_WS_INBOX_DEPTH, sizeof(struct psi_ws_inbound));
+        g_ws_session.inbox = xQueueCreate(PSI_WS_INBOX_DEPTH, sizeof(struct psi_ws_inbound));
         g_ws_session.outbox = xQueueCreate(PSI_WS_OUTBOX_DEPTH, sizeof(char *));
         g_ws_session.flags = xEventGroupCreate();
         if (g_ws_session.inbox == NULL || g_ws_session.outbox == NULL ||
@@ -378,11 +376,11 @@ static esp_err_t psi_ws_handler(httpd_req_t *req) {
         }
         psi_esp_observer_init(&g_ws_session.observer, g_ws_session.outbox);
 
-        if (xTaskCreate(psi_ws_sender_task, "psi_ws_tx", 4096, &g_ws_session,
-                tskIDLE_PRIORITY + 5, &g_ws_session.sender_task) != pdPASS)
+        if (xTaskCreate(psi_ws_sender_task, "psi_ws_tx", 4096, &g_ws_session, tskIDLE_PRIORITY + 5,
+                &g_ws_session.sender_task) != pdPASS)
             return ESP_FAIL;
-        if (xTaskCreate(psi_ws_worker_task, "psi_ws_rx", PSI_WS_TURN_TASK_STACK,
-                &g_ws_session, tskIDLE_PRIORITY + 4, &g_ws_session.worker_task) != pdPASS) {
+        if (xTaskCreate(psi_ws_worker_task, "psi_ws_rx", PSI_WS_TURN_TASK_STACK, &g_ws_session,
+                tskIDLE_PRIORITY + 4, &g_ws_session.worker_task) != pdPASS) {
             xEventGroupSetBits(g_ws_session.flags, PSI_WS_BIT_CLOSE);
             return ESP_FAIL;
         }
@@ -426,9 +424,9 @@ void psi_ws_server_start(void) {
     httpd_handle_t server = NULL;
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     httpd_uri_t index_uri = {
-        .uri = "/", .method = HTTP_GET, .handler = psi_ws_index_handler, .user_ctx = NULL };
+        .uri = "/", .method = HTTP_GET, .handler = psi_ws_index_handler, .user_ctx = NULL};
     httpd_uri_t health_uri = {
-        .uri = "/healthz", .method = HTTP_GET, .handler = psi_ws_health_handler, .user_ctx = NULL };
+        .uri = "/healthz", .method = HTTP_GET, .handler = psi_ws_health_handler, .user_ctx = NULL};
     httpd_uri_t ws_uri = {
         .uri = "/ws",
         .method = HTTP_GET,

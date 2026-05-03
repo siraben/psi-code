@@ -18,8 +18,7 @@ struct psi_embedded_data {
  * consumer of the embed table) can decompress entries without
  * duplicating the zlib glue. */
 struct psi_embedded_data;
-int psi_embedded_inflate(
-    const struct psi_embedded_data *entry, unsigned char *out, size_t out_len);
+int psi_embedded_inflate(const struct psi_embedded_data *entry, unsigned char *out, size_t out_len);
 
 /* Lua modules, keyed by module name: lua/psi/prelude.lua -> psi.prelude. */
 extern const struct psi_embedded_data psi_embedded_lua_table[];

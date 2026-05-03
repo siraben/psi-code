@@ -124,8 +124,7 @@ static void on_tool_result(
     psi_obs_push(o, root);
 }
 
-static void on_tool_progress(
-    void *userdata, const char *id, const char *chunk, size_t len) {
+static void on_tool_progress(void *userdata, const char *id, const char *chunk, size_t len) {
     struct psi_esp_observer *o = (struct psi_esp_observer *)userdata;
     cJSON *root = psi_obs_obj("tool_progress");
     if (root == NULL)

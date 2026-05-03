@@ -2113,8 +2113,7 @@ static z_stream g_psi_inflate_stream;
 static int g_psi_inflate_inited = 0;
 #endif
 
-int psi_embedded_inflate(
-    const struct psi_embedded_data *e, unsigned char *out, size_t out_len) {
+int psi_embedded_inflate(const struct psi_embedded_data *e, unsigned char *out, size_t out_len) {
     if (e == NULL || e->src == NULL || out == NULL)
         return PSI_STATUS_ERROR;
     if (out_len < e->raw_len)
@@ -2135,38 +2134,37 @@ int psi_embedded_inflate(
      * on constrained targets that promised --no-compress everywhere.
      * Reaching it here means an entry slipped through with DEFLATE
      * data and we have no way to inflate it. */
-    fprintf(stderr, "psi: compressed embed entry %s but no zlib linked\n",
-        e->name ? e->name : "?");
+    fprintf(stderr, "psi: compressed embed entry %s but no zlib linked\n", e->name ? e->name : "?");
     return PSI_STATUS_ERROR;
 #else
     {
-    int rc;
-    if (!g_psi_inflate_inited) {
-        memset(&g_psi_inflate_stream, 0, sizeof(g_psi_inflate_stream));
-        g_psi_inflate_stream.zalloc = Z_NULL;
-        g_psi_inflate_stream.zfree = Z_NULL;
-        g_psi_inflate_stream.opaque = Z_NULL;
-        if (inflateInit(&g_psi_inflate_stream) != Z_OK) {
-            fprintf(stderr, "psi: inflateInit failed\n");
+        int rc;
+        if (!g_psi_inflate_inited) {
+            memset(&g_psi_inflate_stream, 0, sizeof(g_psi_inflate_stream));
+            g_psi_inflate_stream.zalloc = Z_NULL;
+            g_psi_inflate_stream.zfree = Z_NULL;
+            g_psi_inflate_stream.opaque = Z_NULL;
+            if (inflateInit(&g_psi_inflate_stream) != Z_OK) {
+                fprintf(stderr, "psi: inflateInit failed\n");
+                return PSI_STATUS_ERROR;
+            }
+            g_psi_inflate_inited = 1;
+        } else {
+            inflateReset(&g_psi_inflate_stream);
+        }
+
+        g_psi_inflate_stream.next_in = (Bytef *)e->src;
+        g_psi_inflate_stream.avail_in = (uInt)e->len;
+        g_psi_inflate_stream.next_out = (Bytef *)out;
+        g_psi_inflate_stream.avail_out = (uInt)out_len;
+
+        rc = inflate(&g_psi_inflate_stream, Z_FINISH);
+        if (rc != Z_STREAM_END || g_psi_inflate_stream.total_out != (uLong)e->raw_len) {
+            fprintf(stderr, "psi: inflate failed for %s (zlib %d, %lu/%lu)\n", e->name, rc,
+                (unsigned long)g_psi_inflate_stream.total_out, (unsigned long)e->raw_len);
             return PSI_STATUS_ERROR;
         }
-        g_psi_inflate_inited = 1;
-    } else {
-        inflateReset(&g_psi_inflate_stream);
-    }
-
-    g_psi_inflate_stream.next_in = (Bytef *)e->src;
-    g_psi_inflate_stream.avail_in = (uInt)e->len;
-    g_psi_inflate_stream.next_out = (Bytef *)out;
-    g_psi_inflate_stream.avail_out = (uInt)out_len;
-
-    rc = inflate(&g_psi_inflate_stream, Z_FINISH);
-    if (rc != Z_STREAM_END || g_psi_inflate_stream.total_out != (uLong)e->raw_len) {
-        fprintf(stderr, "psi: inflate failed for %s (zlib %d, %lu/%lu)\n", e->name, rc,
-            (unsigned long)g_psi_inflate_stream.total_out, (unsigned long)e->raw_len);
-        return PSI_STATUS_ERROR;
-    }
-    return PSI_STATUS_OK;
+        return PSI_STATUS_OK;
     }
 #endif /* PSI_NO_ZLIB */
 }
@@ -3034,34 +3032,34 @@ int psi_vm_init(
             boot = psi_vm_embedded_find("boot.lua");
         }
         {
-        unsigned char *buf;
-        int load_rc;
-        if (boot == NULL) {
-            fprintf(stderr, "psi: no embedded boot module compiled in\n");
-            lua_close(vm->L);
-            vm->L = NULL;
-            return PSI_STATUS_ERROR;
-        }
-        buf = (unsigned char *)malloc(boot->raw_len);
-        if (buf == NULL) {
-            lua_close(vm->L);
-            vm->L = NULL;
-            return PSI_STATUS_ERROR;
-        }
-        if (psi_vm_embedded_inflate(boot, buf, boot->raw_len) != PSI_STATUS_OK) {
+            unsigned char *buf;
+            int load_rc;
+            if (boot == NULL) {
+                fprintf(stderr, "psi: no embedded boot module compiled in\n");
+                lua_close(vm->L);
+                vm->L = NULL;
+                return PSI_STATUS_ERROR;
+            }
+            buf = (unsigned char *)malloc(boot->raw_len);
+            if (buf == NULL) {
+                lua_close(vm->L);
+                vm->L = NULL;
+                return PSI_STATUS_ERROR;
+            }
+            if (psi_vm_embedded_inflate(boot, buf, boot->raw_len) != PSI_STATUS_OK) {
+                free(buf);
+                lua_close(vm->L);
+                vm->L = NULL;
+                return PSI_STATUS_ERROR;
+            }
+            load_rc = luaL_loadbuffer(vm->L, (const char *)buf, boot->raw_len, boot->name);
             free(buf);
-            lua_close(vm->L);
-            vm->L = NULL;
-            return PSI_STATUS_ERROR;
-        }
-        load_rc = luaL_loadbuffer(vm->L, (const char *)buf, boot->raw_len, boot->name);
-        free(buf);
-        if (load_rc != LUA_OK || lua_pcall(vm->L, 0, 0, 0) != LUA_OK) {
-            fprintf(stderr, "psi: embedded boot failed: %s\n", lua_tostring(vm->L, -1));
-            lua_close(vm->L);
-            vm->L = NULL;
-            return PSI_STATUS_ERROR;
-        }
+            if (load_rc != LUA_OK || lua_pcall(vm->L, 0, 0, 0) != LUA_OK) {
+                fprintf(stderr, "psi: embedded boot failed: %s\n", lua_tostring(vm->L, -1));
+                lua_close(vm->L);
+                vm->L = NULL;
+                return PSI_STATUS_ERROR;
+            }
         }
     }
     return PSI_STATUS_OK;

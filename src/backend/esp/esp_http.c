@@ -97,8 +97,8 @@ static esp_err_t psi_buf_event_cb(esp_http_client_event_t *evt) {
     return ESP_OK;
 }
 
-static void psi_apply_headers(esp_http_client_handle_t client,
-    const char *const *header_lines, size_t header_count) {
+static void psi_apply_headers(
+    esp_http_client_handle_t client, const char *const *header_lines, size_t header_count) {
     size_t i;
     for (i = 0u; i < header_count; i++) {
         const char *line = header_lines[i];
@@ -427,9 +427,9 @@ int psi_http_stream_poll(
     if (chunk_len != NULL)
         *chunk_len = 0u;
 
-    wait = (timeout_ms < 0)
-               ? portMAX_DELAY
-               : (TickType_t)(timeout_ms / portTICK_PERIOD_MS) + (timeout_ms > 0 ? 1u : 0u);
+    wait = (timeout_ms < 0) ?
+        portMAX_DELAY :
+        (TickType_t)(timeout_ms / portTICK_PERIOD_MS) + (timeout_ms > 0 ? 1u : 0u);
 
     got = xQueueReceive(h->queue, &c, wait);
     if (got == pdTRUE) {
