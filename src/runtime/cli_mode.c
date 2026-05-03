@@ -10,7 +10,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <lua.h>
 #include "psi/abort.h"
 #include "psi/runtime.h"
 #include "psi/session.h"
@@ -74,7 +73,6 @@ static int psi_run_via_lua(const struct psi_cli_options *options) {
     struct psi_vm vm;
     struct psi_session session;
     const char *mode_name;
-    int ok;
     int status;
 
     mode_name = psi_mode_name(options->mode);
@@ -97,58 +95,12 @@ static int psi_run_via_lua(const struct psi_cli_options *options) {
         psi_install_sigint(&abort_signal);
     }
 
-    lua_getglobal(vm.L, "psi");
-    lua_getfield(vm.L, -1, "modes");
-    lua_getfield(vm.L, -1, "run");
-    lua_remove(vm.L, -2); /* drop modes */
-    lua_remove(vm.L, -2); /* drop psi */
-    if (lua_type(vm.L, -1) != LUA_TFUNCTION) {
-        fprintf(stderr, "psi.modes.run is not a function\n");
-        lua_pop(vm.L, 1);
-        psi_vm_destroy(&vm);
-        psi_session_free(&session);
-        return PSI_STATUS_ERROR;
-    }
-
-    lua_newtable(vm.L);
-    lua_pushstring(vm.L, mode_name);
-    lua_setfield(vm.L, -2, "mode");
-    if (options->payload != NULL) {
-        lua_pushstring(vm.L, options->payload);
-        lua_setfield(vm.L, -2, "payload");
-    }
-    if (options->session_file != NULL) {
-        lua_pushstring(vm.L, options->session_file);
-        lua_setfield(vm.L, -2, "session_file");
-    }
-    if (options->model != NULL) {
-        lua_pushstring(vm.L, options->model);
-        lua_setfield(vm.L, -2, "model");
-    }
-    if (options->thinking_level != NULL) {
-        lua_pushstring(vm.L, options->thinking_level);
-        lua_setfield(vm.L, -2, "thinking_level");
-    }
-    lua_pushinteger(vm.L, (lua_Integer)options->max_tokens);
-    lua_setfield(vm.L, -2, "max_tokens");
-    lua_pushinteger(vm.L, (lua_Integer)options->keep_recent);
-    lua_setfield(vm.L, -2, "keep_recent");
-
-    if (lua_pcall(vm.L, 1, 1, 0) != LUA_OK) {
-        fprintf(stderr, "psi.modes.run error: %s\n", lua_tostring(vm.L, -1));
-        lua_pop(vm.L, 1);
-        psi_restore_sigint();
-        psi_vm_destroy(&vm);
-        psi_session_free(&session);
-        return PSI_STATUS_ERROR;
-    }
-    ok = lua_toboolean(vm.L, -1);
-    lua_pop(vm.L, 1);
+    status = psi_vm_run_lua_mode(&vm, mode_name, options);
 
     psi_restore_sigint();
     psi_vm_destroy(&vm);
     psi_session_free(&session);
-    return ok ? PSI_STATUS_OK : PSI_STATUS_ERROR;
+    return status;
 }
 
 int psi_run_print_mode_dispatch(const struct psi_cli_options *options) {

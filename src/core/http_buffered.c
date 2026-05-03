@@ -54,20 +54,6 @@ static int psi_http_xferinfo(
     return psi_abort_signal_is_triggered(abort_signal) ? 1 : 0;
 }
 
-struct psi_http_chunk_ctx {
-    psi_http_chunk_cb cb;
-    void *userdata;
-};
-
-static size_t psi_http_chunk_forward(void *data, size_t size, size_t nmemb, void *userdata) {
-    struct psi_http_chunk_ctx *ctx = (struct psi_http_chunk_ctx *)userdata;
-    size_t total = size * nmemb;
-    if (ctx->cb != NULL) {
-        ctx->cb(ctx->userdata, (const char *)data, total);
-    }
-    return total;
-}
-
 static CURL *psi_http_build_handle(const char *url, const char *const *header_lines,
     size_t header_count, const char *body, size_t body_len, struct curl_slist **headers_out,
     const struct psi_abort_signal *abort_signal) {
@@ -102,38 +88,6 @@ static CURL *psi_http_build_handle(const char *url, const char *const *header_li
      * const psi_abort_signal *. */
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, (void *)abort_signal);
     return curl;
-}
-
-int psi_http_post_stream(const char *url, const char *const *header_lines, size_t header_count,
-    const char *body, size_t body_len, psi_http_chunk_cb on_chunk, void *userdata,
-    const struct psi_abort_signal *abort_signal, long *status_code) {
-    CURL *curl;
-    CURLcode code;
-    struct curl_slist *headers;
-    struct psi_http_chunk_ctx ctx;
-
-    if (status_code != NULL)
-        *status_code = 0l;
-    if (psi_http_global_init() != PSI_STATUS_OK)
-        return PSI_STATUS_ERROR;
-    curl = psi_http_build_handle(
-        url, header_lines, header_count, body, body_len, &headers, abort_signal);
-    if (curl == NULL)
-        return PSI_STATUS_ERROR;
-
-    ctx.cb = on_chunk;
-    ctx.userdata = userdata;
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, psi_http_chunk_forward);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&ctx);
-
-    code = curl_easy_perform(curl);
-    if (code == CURLE_OK && status_code != NULL) {
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, status_code);
-    }
-
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
-    return (code == CURLE_OK) ? PSI_STATUS_OK : PSI_STATUS_ERROR;
 }
 
 int psi_http_post(const char *url, const char *const *header_lines, size_t header_count,
@@ -189,49 +143,6 @@ int psi_http_post(const char *url, const char *const *header_lines, size_t heade
 
 int psi_http_get(const char *url, const char *const *header_lines, size_t header_count,
     const struct psi_abort_signal *abort_signal, long *status_code, char **response_body) {
-    CURL *curl;
-    CURLcode code;
-    struct curl_slist *headers;
-    struct psi_http_buffer buffer;
-
-    if (status_code != NULL)
-        *status_code = 0l;
-    if (response_body != NULL)
-        *response_body = NULL;
-    buffer.data = NULL;
-    buffer.length = 0u;
-
-    if (psi_http_global_init() != PSI_STATUS_OK)
-        return PSI_STATUS_ERROR;
-    curl = psi_http_build_handle(url, header_lines, header_count, NULL, 0u, &headers, abort_signal);
-    if (curl == NULL)
-        return PSI_STATUS_ERROR;
-
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, psi_http_buffer_callback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&buffer);
-
-    code = curl_easy_perform(curl);
-    if (code == CURLE_OK && status_code != NULL) {
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, status_code);
-    }
-
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
-
-    if (code != CURLE_OK) {
-        free(buffer.data);
-        return PSI_STATUS_ERROR;
-    }
-    if (response_body != NULL) {
-        if (buffer.data != NULL) {
-            *response_body = buffer.data;
-        } else {
-            *response_body = psi_strdup("");
-            if (*response_body == NULL)
-                return PSI_STATUS_ERROR;
-        }
-    } else {
-        free(buffer.data);
-    }
-    return PSI_STATUS_OK;
+    return psi_http_post(
+        url, header_lines, header_count, NULL, 0u, abort_signal, status_code, response_body);
 }

@@ -36,6 +36,7 @@
 #include "psi/host_ops.h"
 #include "psi/message.h"
 #include "psi/process.h"
+#include "psi/runtime.h"
 #include "psi/session.h"
 #include "psi/vm.h"
 
@@ -1340,63 +1341,6 @@ static int lfn_list_dir(lua_State *L) {
     return 1;
 }
 
-static const char *psi_vm_dirent_type_name(const struct dirent *entry) {
-#ifdef DT_DIR
-    if (entry->d_type == DT_DIR)
-        return "directory";
-    if (entry->d_type == DT_REG)
-        return "file";
-#else
-    PSI_UNUSED(entry);
-#endif
-    return NULL;
-}
-
-static int lfn_list_dir_typed(lua_State *L) {
-    const char *path = luaL_checkstring(L, 1);
-    DIR *dir;
-    struct dirent *entry;
-    int i;
-
-    dir = opendir(path);
-    if (dir == NULL) {
-        lua_pushnil(L);
-        return 1;
-    }
-
-    lua_newtable(L);
-    i = 1;
-    while ((entry = readdir(dir)) != NULL) {
-        const char *kind;
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-            continue;
-        }
-#ifdef DT_DIR
-        kind = psi_vm_dirent_type_name(entry);
-        if (kind == NULL)
-#else
-        kind = NULL;
-#endif
-        {
-            char *full = psi_vm_path_join(path, entry->d_name);
-            kind = full != NULL ? psi_vm_file_type_name(full) : NULL;
-            free(full);
-        }
-
-        lua_newtable(L);
-        lua_pushstring(L, entry->d_name);
-        lua_setfield(L, -2, "name");
-        if (kind != NULL) {
-            lua_pushstring(L, kind);
-            lua_setfield(L, -2, "type");
-        }
-        lua_rawseti(L, -2, i++);
-    }
-    closedir(dir);
-    psi_vm_mark_array(L);
-    return 1;
-}
-
 static int lfn_mkdir_p(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
     lua_pushboolean(L, psi_vm_mkdir_p(path) == PSI_STATUS_OK ? 1 : 0);
@@ -1492,9 +1436,6 @@ static int lfn_process_run(lua_State *L) {
     free(output);
     return 1;
 }
-
-static char **psi_vm_argv_from_table(lua_State *L, int idx, int *argc_out);
-static void psi_vm_argv_free(char **argv);
 
 static int lfn_process_run_argv(lua_State *L) {
     const struct psi_host_context *host = PSI_VM_HOST(L);
@@ -1913,24 +1854,6 @@ static int lfn_session_id(lua_State *L) {
     return 1;
 }
 
-struct psi_lua_http_stream_ctx {
-    lua_State *L;
-    int cb_ref;
-};
-
-static void psi_lua_http_stream_cb(void *userdata, const char *chunk, size_t len) {
-    struct psi_lua_http_stream_ctx *ctx = (struct psi_lua_http_stream_ctx *)userdata;
-    lua_State *L = ctx->L;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, ctx->cb_ref);
-    lua_pushlstring(L, chunk, len);
-    if (lua_pcall(L, 1, 0, 0) != LUA_OK) {
-        /* Swallow the error into stderr; we can't usefully propagate it
-         * out of libcurl's write callback without leaking resources. */
-        fprintf(stderr, "http_post_stream callback error: %s\n", lua_tostring(L, -1));
-        lua_pop(L, 1);
-    }
-}
-
 static int psi_lua_collect_headers(lua_State *L, int idx, char ***out, size_t *out_count) {
     lua_Integer len;
     lua_Integer i;
@@ -1965,46 +1888,6 @@ static void psi_lua_free_headers(char **headers, size_t count) {
     for (i = 0; i < count; i++)
         free(headers[i]);
     free((void *)headers);
-}
-
-static int lfn_http_post_stream(lua_State *L) {
-    const char *url = luaL_checkstring(L, 1);
-    size_t body_len;
-    const char *body;
-    char **headers;
-    size_t header_count;
-    const struct psi_host_context *host;
-    struct psi_lua_http_stream_ctx ctx;
-    long status_code;
-    int status;
-
-    luaL_checktype(L, 2, LUA_TTABLE);
-    body = luaL_checklstring(L, 3, &body_len);
-    luaL_checktype(L, 4, LUA_TFUNCTION);
-
-    if (psi_lua_collect_headers(L, 2, &headers, &header_count) != 0) {
-        return luaL_error(L, "failed to collect headers");
-    }
-
-    lua_pushvalue(L, 4);
-    ctx.L = L;
-    ctx.cb_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-
-    host = PSI_VM_HOST(L);
-    status_code = 0l;
-    status = psi_http_post_stream(url, (const char *const *)headers, header_count, body, body_len,
-        psi_lua_http_stream_cb, &ctx, host ? host->abort_signal : NULL, &status_code);
-
-    luaL_unref(L, LUA_REGISTRYINDEX, ctx.cb_ref);
-    psi_lua_free_headers(headers, header_count);
-
-    if (status != PSI_STATUS_OK) {
-        lua_pushnil(L);
-        lua_pushstring(L, "http request failed");
-        return 2;
-    }
-    lua_pushinteger(L, status_code);
-    return 1;
 }
 
 /* ------------------------------------------------------------------
@@ -2263,56 +2146,12 @@ static int psi_vm_embedded_inflate(
     return PSI_STATUS_OK;
 }
 
-/* psi.embedded_doc(name) -> string | nil
- * Look up a file name in the embedded docs table. Returns the file
- * contents as a Lua string, or nil if the name isn't embedded.
- * Entries are DEFLATE-compressed; we inflate on demand. */
-static int lfn_embedded_doc(lua_State *L) {
+/* Look up `name` in an embedded table, inflate, and push as a Lua
+ * string. Returns 1 (string on stack) on match, or pushes nil. */
+static int psi_vm_lookup_embedded(lua_State *L, const struct psi_embedded_lua *table) {
     const char *name = luaL_checkstring(L, 1);
     const struct psi_embedded_lua *e;
-    for (e = psi_embedded_docs_table; e->name != NULL; e++) {
-        if (strcmp(e->name, name) == 0) {
-            unsigned char *buf = (unsigned char *)malloc(e->raw_len + 1u);
-            if (buf == NULL)
-                return luaL_error(L, "out of memory");
-            if (psi_vm_embedded_inflate(e, buf, e->raw_len) != PSI_STATUS_OK) {
-                free(buf);
-                lua_pushnil(L);
-                return 1;
-            }
-            buf[e->raw_len] = 0; /* keep as NUL-terminated for safety */
-            lua_pushlstring(L, (const char *)buf, e->raw_len);
-            free(buf);
-            return 1;
-        }
-    }
-    lua_pushnil(L);
-    return 1;
-}
-
-/* psi.embedded_doc_names() -> array-of-strings
- * List every doc embedded in the binary. Handy for a `/docs` command
- * or an agent discovering what docs are available. */
-static int lfn_embedded_doc_names(lua_State *L) {
-    const struct psi_embedded_lua *e;
-    int i = 1;
-    lua_newtable(L);
-    for (e = psi_embedded_docs_table; e->name != NULL; e++, i++) {
-        lua_pushstring(L, e->name);
-        lua_rawseti(L, -2, i);
-    }
-    return 1;
-}
-
-/* psi.embedded_source(name) -> string | nil
- * Return the raw Lua source for an embedded module (same name as
- * `require(...)`, e.g. "psi.render"). Lets extensions and live-runtime
- * introspection inspect built-in modules without a real filesystem
- * path. Parallel to embedded_doc but over psi_embedded_lua_table. */
-static int lfn_embedded_source(lua_State *L) {
-    const char *name = luaL_checkstring(L, 1);
-    const struct psi_embedded_lua *e;
-    for (e = psi_embedded_lua_table; e->name != NULL; e++) {
+    for (e = table; e->name != NULL; e++) {
         if (strcmp(e->name, name) == 0) {
             unsigned char *buf = (unsigned char *)malloc(e->raw_len + 1u);
             if (buf == NULL)
@@ -2332,19 +2171,32 @@ static int lfn_embedded_source(lua_State *L) {
     return 1;
 }
 
-/* psi.embedded_source_names() -> array-of-strings
- * List every Lua module embedded in the binary. Complement of
- * embedded_doc_names; useful for extension authors wanting to know
- * what they can introspect. */
-static int lfn_embedded_source_names(lua_State *L) {
+/* List all names in an embedded table as a Lua array. */
+static int psi_vm_list_embedded_names(lua_State *L, const struct psi_embedded_lua *table) {
     const struct psi_embedded_lua *e;
     int i = 1;
     lua_newtable(L);
-    for (e = psi_embedded_lua_table; e->name != NULL; e++, i++) {
+    for (e = table; e->name != NULL; e++, i++) {
         lua_pushstring(L, e->name);
         lua_rawseti(L, -2, i);
     }
     return 1;
+}
+
+static int lfn_embedded_doc(lua_State *L) {
+    return psi_vm_lookup_embedded(L, psi_embedded_docs_table);
+}
+
+static int lfn_embedded_doc_names(lua_State *L) {
+    return psi_vm_list_embedded_names(L, psi_embedded_docs_table);
+}
+
+static int lfn_embedded_source(lua_State *L) {
+    return psi_vm_lookup_embedded(L, psi_embedded_lua_table);
+}
+
+static int lfn_embedded_source_names(lua_State *L) {
+    return psi_vm_list_embedded_names(L, psi_embedded_lua_table);
 }
 
 static int lfn_session_clear(lua_State *L) {
@@ -2630,18 +2482,6 @@ static int lfn_tui_clear(lua_State *L) {
     return 0;
 }
 
-static int lfn_tui_draw_line(lua_State *L) {
-    lua_Integer row = luaL_checkinteger(L, 1);
-    const char *text = lua_type(L, 2) == LUA_TSTRING ? lua_tostring(L, 2) : "";
-
-    psi_vm_require_tui(L);
-    if (row < 1) {
-        row = 1;
-    }
-    psi_vm_tui_draw_raw_line((long)row, text);
-    return 0;
-}
-
 static int lfn_tui_draw_raw_line(lua_State *L) {
     lua_Integer row = luaL_checkinteger(L, 1);
     const char *text = lua_type(L, 2) == LUA_TSTRING ? lua_tostring(L, 2) : "";
@@ -2653,6 +2493,10 @@ static int lfn_tui_draw_raw_line(lua_State *L) {
 
     psi_vm_tui_draw_raw_line((long)row, text);
     return 0;
+}
+
+static int lfn_tui_draw_line(lua_State *L) {
+    return lfn_tui_draw_raw_line(L);
 }
 
 static int lfn_tui_render_frame(lua_State *L) {
@@ -2904,7 +2748,6 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("file_exists", lfn_file_exists);
     PSI_REG("file_type", lfn_file_type);
     PSI_REG("list_dir", lfn_list_dir);
-    PSI_REG("list_dir_typed", lfn_list_dir_typed);
     PSI_REG("mkdir_p", lfn_mkdir_p);
     PSI_REG("mkdir_parent", lfn_mkdir_parent);
     PSI_REG("runtime_info", lfn_runtime_info);
@@ -2939,7 +2782,6 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("json_decode", lfn_json_decode);
     PSI_REG("http_post", lfn_http_post);
     PSI_REG("http_get", lfn_http_get);
-    PSI_REG("http_post_stream", lfn_http_post_stream);
     PSI_REG("http_stream_begin", lfn_http_stream_begin);
     PSI_REG("http_stream_poll", lfn_http_stream_poll);
     PSI_REG("http_stream_finish", lfn_http_stream_finish);
@@ -3200,20 +3042,6 @@ static int psi_vm_push_dotted(lua_State *L, const char *name) {
     return 0;
 }
 
-static int psi_vm_pop_string(lua_State *L, char **out) {
-    const char *s;
-    if (lua_type(L, -1) == LUA_TSTRING) {
-        s = lua_tostring(L, -1);
-    } else {
-        luaL_tolstring(L, -1, NULL);
-        s = lua_tostring(L, -1);
-        lua_remove(L, -2); /* remove original */
-    }
-    *out = psi_strdup(s ? s : "");
-    lua_pop(L, 1);
-    return *out ? PSI_STATUS_OK : PSI_STATUS_ERROR;
-}
-
 static void psi_vm_print_error(const char *where, const char *msg) {
     fprintf(stderr, "Lua error in %s: %s\n", where, msg ? msg : "<unknown>");
 }
@@ -3244,41 +3072,6 @@ static int psi_vm_finish_call(lua_State *L, int nargs, int nresults, const char 
 /* ------------------------------------------------------------------
  * Public helpers invoked by runtime modes / anthropic / agent / host_ops.
  * ------------------------------------------------------------------ */
-
-int psi_vm_eval_to_string(struct psi_vm *vm, const char *expression, char **output_text) {
-    size_t n;
-    char *prefixed;
-    int loaded;
-
-    if (!vm || !vm->L || !output_text)
-        return PSI_STATUS_ERROR;
-    *output_text = NULL;
-    if (!expression)
-        expression = "";
-
-    n = strlen(expression);
-    prefixed = (char *)malloc(n + 8u);
-    if (!prefixed)
-        return PSI_STATUS_ERROR;
-    memcpy(prefixed, "return ", 7);
-    memcpy(prefixed + 7, expression, n + 1u);
-    loaded = luaL_loadstring(vm->L, prefixed);
-    free(prefixed);
-    if (loaded != LUA_OK) {
-        lua_pop(vm->L, 1);
-        if (luaL_loadstring(vm->L, expression) != LUA_OK) {
-            psi_vm_print_error("eval (parse)", lua_tostring(vm->L, -1));
-            lua_pop(vm->L, 1);
-            return PSI_STATUS_ERROR;
-        }
-    }
-    if (lua_pcall(vm->L, 0, 1, 0) != LUA_OK) {
-        psi_vm_print_error("eval", lua_tostring(vm->L, -1));
-        lua_pop(vm->L, 1);
-        return PSI_STATUS_ERROR;
-    }
-    return psi_vm_pop_string(vm->L, output_text);
-}
 
 /* ------------------------------------------------------------------
  * Observer / abort trampolines for the Lua agent loop.
@@ -3467,4 +3260,43 @@ int psi_vm_run_agent_compact(struct psi_vm *vm, size_t keep_recent,
     char **summary_text) {
     return psi_vm_call_agent(vm, "psi.agent.run_compact", NULL, abort_signal, model, max_tokens,
         NULL, (long)keep_recent, summary_text);
+}
+
+int psi_vm_run_lua_mode(
+    struct psi_vm *vm, const char *mode, const struct psi_cli_options *options) {
+    int ok;
+    if (vm == NULL || vm->L == NULL || mode == NULL || options == NULL)
+        return PSI_STATUS_ERROR;
+    if (psi_vm_begin_call(vm->L, "psi.modes.run") != 0)
+        return PSI_STATUS_ERROR;
+
+    lua_newtable(vm->L);
+    lua_pushstring(vm->L, mode);
+    lua_setfield(vm->L, -2, "mode");
+    if (options->payload != NULL) {
+        lua_pushstring(vm->L, options->payload);
+        lua_setfield(vm->L, -2, "payload");
+    }
+    if (options->session_file != NULL) {
+        lua_pushstring(vm->L, options->session_file);
+        lua_setfield(vm->L, -2, "session_file");
+    }
+    if (options->model != NULL) {
+        lua_pushstring(vm->L, options->model);
+        lua_setfield(vm->L, -2, "model");
+    }
+    if (options->thinking_level != NULL) {
+        lua_pushstring(vm->L, options->thinking_level);
+        lua_setfield(vm->L, -2, "thinking_level");
+    }
+    lua_pushinteger(vm->L, (lua_Integer)options->max_tokens);
+    lua_setfield(vm->L, -2, "max_tokens");
+    lua_pushinteger(vm->L, (lua_Integer)options->keep_recent);
+    lua_setfield(vm->L, -2, "keep_recent");
+
+    if (psi_vm_finish_call(vm->L, 1, 1, "psi.modes.run") != PSI_STATUS_OK)
+        return PSI_STATUS_ERROR;
+    ok = lua_toboolean(vm->L, -1);
+    lua_pop(vm->L, 1);
+    return ok ? PSI_STATUS_OK : PSI_STATUS_ERROR;
 }
