@@ -1217,74 +1217,45 @@ static int lfn_tempfile_path(lua_State *L) {
     return 1;
 }
 
-static int lfn_current_date(lua_State *L) {
-    char *d = psi_vm_current_date();
-    if (!d) {
+/* Push a heap-allocated string as a Lua string (or nil if NULL), then free it. */
+static void psi_vm_push_heap_string(lua_State *L, char *s) {
+    if (s != NULL) {
+        lua_pushstring(L, s);
+        free(s);
+    } else {
         lua_pushnil(L);
-        return 1;
     }
-    lua_pushstring(L, d);
-    free(d);
+}
+
+static int lfn_current_date(lua_State *L) {
+    psi_vm_push_heap_string(L, psi_vm_current_date());
     return 1;
 }
 
 static int lfn_cwd(lua_State *L) {
-    char *p = psi_vm_current_cwd();
-    if (!p) {
-        lua_pushnil(L);
-        return 1;
-    }
-    lua_pushstring(L, p);
-    free(p);
+    psi_vm_push_heap_string(L, psi_vm_current_cwd());
     return 1;
 }
 
 static int lfn_parent_directory(lua_State *L) {
-    const char *path = luaL_checkstring(L, 1);
-    char *parent = psi_vm_parent_directory(path);
-    if (!parent) {
-        lua_pushnil(L);
-        return 1;
-    }
-    lua_pushstring(L, parent);
-    free(parent);
+    psi_vm_push_heap_string(L, psi_vm_parent_directory(luaL_checkstring(L, 1)));
     return 1;
 }
 
 static int lfn_path_join(lua_State *L) {
     const char *base = luaL_checkstring(L, 1);
     const char *name = luaL_checkstring(L, 2);
-    char *out = psi_vm_path_join(base, name);
-    if (!out) {
-        lua_pushnil(L);
-        return 1;
-    }
-    lua_pushstring(L, out);
-    free(out);
+    psi_vm_push_heap_string(L, psi_vm_path_join(base, name));
     return 1;
 }
 
 static int lfn_path_expand(lua_State *L) {
-    const char *path = luaL_checkstring(L, 1);
-    char *out = psi_vm_expand_path(path);
-    if (!out) {
-        lua_pushnil(L);
-        return 1;
-    }
-    lua_pushstring(L, out);
-    free(out);
+    psi_vm_push_heap_string(L, psi_vm_expand_path(luaL_checkstring(L, 1)));
     return 1;
 }
 
 static int lfn_path_resolve(lua_State *L) {
-    const char *path = luaL_checkstring(L, 1);
-    char *out = psi_vm_resolve_path(path);
-    if (!out) {
-        lua_pushnil(L);
-        return 1;
-    }
-    lua_pushstring(L, out);
-    free(out);
+    psi_vm_push_heap_string(L, psi_vm_resolve_path(luaL_checkstring(L, 1)));
     return 1;
 }
 

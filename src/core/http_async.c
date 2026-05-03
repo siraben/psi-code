@@ -100,24 +100,25 @@ static void psi_http_stream_free_request(struct psi_http_stream *h) {
  * either allocation fails. On failure, `write_failed` is latched
  * under `mu` so the write callback can abort curl rather than
  * silently lose streamed bytes. */
+static void psi_http_queue_push_fail(struct psi_http_stream *h) {
+    pthread_mutex_lock(&h->mu);
+    h->write_failed = 1;
+    pthread_cond_broadcast(&h->cond);
+    pthread_mutex_unlock(&h->mu);
+}
+
 static int psi_http_queue_push(struct psi_http_stream *h, const char *data, size_t len) {
     struct psi_http_chunk_node *node;
 
     node = (struct psi_http_chunk_node *)malloc(sizeof(*node));
     if (node == NULL) {
-        pthread_mutex_lock(&h->mu);
-        h->write_failed = 1;
-        pthread_cond_broadcast(&h->cond);
-        pthread_mutex_unlock(&h->mu);
+        psi_http_queue_push_fail(h);
         return 0;
     }
     node->data = (char *)malloc(len);
     if (node->data == NULL) {
         free(node);
-        pthread_mutex_lock(&h->mu);
-        h->write_failed = 1;
-        pthread_cond_broadcast(&h->cond);
-        pthread_mutex_unlock(&h->mu);
+        psi_http_queue_push_fail(h);
         return 0;
     }
     memcpy(node->data, data, len);
