@@ -442,6 +442,7 @@
               espPkgs.esp-idf-esp32
               pkgs.gcc
               pkgs.zlib
+              pkgs.html-minifier
             ];
 
             # ESP-IDF supplies its own cmake + ninja via the wrapper.
@@ -464,6 +465,30 @@
               # state; the Nix sandbox starts with HOME unset.
               export HOME=$PWD/.home
               mkdir -p $HOME
+
+              # Minify the embedded SPA before the embed tool packages
+              # it. Cuts ~15 KiB → ~10 KiB by stripping comments,
+              # collapsing whitespace, and folding the inline <script>
+              # / <style> blocks. The minifier walks HTML attribute
+              # quoting carefully so DOMPurify's CDN URL assembly
+              # (which avoids literal "name@version" patterns) keeps
+              # working post-minify.
+              SPA_SRC=assets/web/index.html
+              SPA_MIN=assets/web/index.min.html
+              html-minifier \
+                --collapse-whitespace \
+                --remove-comments \
+                --minify-css true \
+                --minify-js true \
+                "$SPA_SRC" -o "$SPA_MIN"
+              if [ -s "$SPA_MIN" ]; then
+                BEFORE=$(wc -c < "$SPA_SRC")
+                AFTER=$(wc -c < "$SPA_MIN")
+                echo "SPA minified: $BEFORE -> $AFTER bytes"
+                cp "$SPA_MIN" "$SPA_SRC"
+              else
+                echo "warning: html-minifier produced empty output; keeping unminified" >&2
+              fi
             '';
 
             buildPhase = ''

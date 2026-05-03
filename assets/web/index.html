@@ -349,14 +349,28 @@ form button:disabled { opacity: .4; cursor: not-allowed; }
   let ws, current = null, busy = false, currentRaw = '';
   const toolElems = new Map(); /* tool_use id -> <details> element */
 
+  // Auto-scroll discipline. We only force-scroll to the bottom when
+  // the user is *already* near the bottom; if they've scrolled up to
+  // read history, new deltas land below the viewport without yanking
+  // them back. The threshold is generous so a few pixels of "drift"
+  // from sub-pixel scroll math doesn't break the lock.
+  const STICK_THRESHOLD_PX = 96;
+  function isPinned() {
+    return main.scrollHeight - main.scrollTop - main.clientHeight <= STICK_THRESHOLD_PX;
+  }
+  function maybeScroll(wasPinned) {
+    if (wasPinned) main.scrollTop = main.scrollHeight;
+  }
+
   function clearWelcome() {
     if (welcome && welcome.parentNode) welcome.remove();
   }
 
   function append(el) {
+    const pinned = isPinned();
     clearWelcome();
     col.appendChild(el);
-    main.scrollTop = main.scrollHeight;
+    maybeScroll(pinned);
     return el;
   }
 
@@ -374,8 +388,10 @@ form button:disabled { opacity: .4; cursor: not-allowed; }
   }
 
   function renderMarkdown(el, raw) {
+    const pinned = isPinned();
     if (!window.marked || !window.DOMPurify) {
       el.textContent = raw;
+      maybeScroll(pinned);
       return;
     }
     const html = window.marked.parse(raw, { breaks: true, gfm: true });
@@ -383,7 +399,7 @@ form button:disabled { opacity: .4; cursor: not-allowed; }
     if (window.hljs) {
       el.querySelectorAll('pre code').forEach(b => window.hljs.highlightElement(b));
     }
-    main.scrollTop = main.scrollHeight;
+    maybeScroll(pinned);
   }
 
   function pretty(obj) {
@@ -422,6 +438,7 @@ form button:disabled { opacity: .4; cursor: not-allowed; }
 
   function attachToolResult(det, output, ok) {
     if (!det) return;
+    const pinned = isPinned();
     const sum = det.querySelector('summary .name');
     if (sum) {
       const txt = sum.textContent.replace(/[\s✓✕…]+$/, '');
@@ -432,7 +449,7 @@ form button:disabled { opacity: .4; cursor: not-allowed; }
     const pre = document.createElement('pre');
     pre.textContent = typeof output === 'string' ? output : pretty(output);
     det._body.appendChild(pre);
-    main.scrollTop = main.scrollHeight;
+    maybeScroll(pinned);
   }
 
   function setBusy(b) {
@@ -496,8 +513,9 @@ form button:disabled { opacity: .4; cursor: not-allowed; }
             current = bubble('thinking', '');
             current._kind = 'thinking';
           }
+          const pinned = isPinned();
           current.textContent += m.text || '';
-          main.scrollTop = main.scrollHeight;
+          maybeScroll(pinned);
           break;
         }
         case 'tool_call': {
