@@ -2808,12 +2808,31 @@ static int psi_vm_apply_package_path(lua_State *L, const char *boot_file) {
  * extensions on disk can still shadow the built-ins if the user sets
  * an explicit package.path via --boot. Entries are DEFLATE-compressed;
  * we inflate into a scratch buffer, hand it to luaL_loadbuffer (which
- * copies what it needs), then free. */
+ * copies what it needs), then free.
+ *
+ * The embedded keys mirror the source layout (e.g. "psi/tools/read.lua"),
+ * so we translate the Lua dotted module name to that form before the
+ * lookup. Stack traces then point at "psi/tools/read.lua" rather than
+ * a synthetic "psi.tools.read" string. */
 static int psi_vm_embedded_searcher(lua_State *L) {
     const char *name = luaL_checkstring(L, 1);
     const struct psi_embedded_data *e;
+    char path[512];
+    size_t i;
+    size_t name_len;
+
+    name_len = strlen(name);
+    if (name_len + 4u >= sizeof(path)) {
+        lua_pushfstring(L, "\n\tembedded module name too long: '%s'", name);
+        return 1;
+    }
+    for (i = 0; i < name_len; i++) {
+        path[i] = (name[i] == '.') ? '/' : name[i];
+    }
+    memcpy(path + name_len, ".lua", 5u);
+
     for (e = psi_embedded_lua_table; e->name != NULL; e++) {
-        if (strcmp(e->name, name) == 0) {
+        if (strcmp(e->name, path) == 0) {
             unsigned char *buf = (unsigned char *)malloc(e->raw_len);
             int load_rc;
             if (buf == NULL)
@@ -2912,7 +2931,7 @@ int psi_vm_init(
     } else
 #endif /* PSI_CAP_FILESYSTEM */
     {
-        const struct psi_embedded_data *boot = psi_vm_embedded_find("boot");
+        const struct psi_embedded_data *boot = psi_vm_embedded_find("boot.lua");
         unsigned char *buf;
         int load_rc;
         if (boot == NULL) {

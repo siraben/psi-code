@@ -2363,10 +2363,10 @@ def t_embedded_source(psi: Psi):
     """psi.embedded_source must surface a module's raw Lua source so
     extensions can introspect built-ins without an on-disk path."""
     out = psi.eval(
-        'local src = psi.embedded_source("psi.render")\n'
+        'local src = psi.embedded_source("psi/render.lua")\n'
         + 'local names = psi.embedded_source_names()\n'
         + 'return (src and #src or 0) .. "|" .. #names .. "|"\n'
-        + '       .. tostring(psi.embedded_source("no.such.module"))'
+        + '       .. tostring(psi.embedded_source("no/such/module.lua"))'
     )
     # Format: "<src_len>|<name_count>|nil"
     parts = out.strip().split("|")

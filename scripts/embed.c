@@ -3,11 +3,16 @@
  * Usage:
  *   embed [--table=NAME] [--key=NAME] [--raw-keys] <file1> [<file2> ...] > out.c
  *
- * Default behavior (Lua modules):
- *   --table=psi_embedded_lua_table
- *   module names derived from path:
- *     lua/boot.lua          -> "boot"
- *     lua/psi/prelude.lua   -> "psi.prelude"
+ * Default behavior (Lua modules): strip the leading "lua/" segment
+ * but otherwise preserve the source path verbatim. Embedded keys
+ * therefore look like real paths and match what scripts/embed.c sees
+ * on disk:
+ *   lua/boot.lua             -> "boot.lua"
+ *   lua/psi/prelude.lua      -> "psi/prelude.lua"
+ *   lua/psi/tools/read.lua   -> "psi/tools/read.lua"
+ *
+ * The Lua require() searcher in src/lua/vm.c translates dotted
+ * module names ("psi.tools.read") to this slash form on lookup.
  *
  * --raw-keys uses the input path verbatim. --key=NAME sets one key
  * explicitly and is only valid with one input file. */
@@ -21,21 +26,15 @@ static void derive_modname(const char *path, char *out, size_t out_size) {
     const char *start = path;
     size_t prefix_len = 4;
     size_t len;
-    size_t i;
 
     if (strncmp(start, "lua/", prefix_len) == 0) {
         start += prefix_len;
     }
     len = strlen(start);
-    if (len >= 4 && strcmp(start + len - 4, ".lua") == 0) {
-        len -= 4;
-    }
     if (len >= out_size)
         len = out_size - 1;
-    for (i = 0; i < len; i++) {
-        out[i] = (start[i] == '/') ? '.' : start[i];
-    }
-    out[i] = '\0';
+    memcpy(out, start, len);
+    out[len] = '\0';
 }
 
 static void sanitize_symbol(const char *in, char *out, size_t out_size) {

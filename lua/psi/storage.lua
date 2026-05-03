@@ -653,11 +653,12 @@ local function install_stdlib_shims()
       package.searchers = {
         package.searchers[1], -- preload
         function(name)
-          local content = psi.embedded_source and psi.embedded_source(name)
+          local key = name:gsub("%.", "/") .. ".lua"
+          local content = psi.embedded_source and psi.embedded_source(key)
           if content == nil then
             return "\n\tno embedded module '" .. tostring(name) .. "'"
           end
-          local chunk, err = load(content, "=" .. name, "t", _G)
+          local chunk, err = load(content, "@" .. key, "t", _G)
           if not chunk then
             return err
           end
