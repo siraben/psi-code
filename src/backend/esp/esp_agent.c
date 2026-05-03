@@ -252,9 +252,9 @@ static esp_err_t agent_http_event_cb(esp_http_client_event_t *evt) {
 /* Public entrypoint                                                   */
 /* ------------------------------------------------------------------ */
 
-int psi_esp_agent_turn(const char *user_text, const char *model, long max_tokens,
-    struct psi_agent_observer *observer, struct psi_abort_signal *abort_signal,
-    char **error_message) {
+int psi_esp_agent_turn(const char *user_text, const char *system_prompt, const char *model,
+    long max_tokens, struct psi_agent_observer *observer,
+    struct psi_abort_signal *abort_signal, char **error_message) {
     cJSON *root;
     cJSON *messages;
     cJSON *user_msg;
@@ -283,6 +283,9 @@ int psi_esp_agent_turn(const char *user_text, const char *model, long max_tokens
     cJSON_AddStringToObject(root, "model", model != NULL ? model : "claude-haiku-4-5");
     cJSON_AddNumberToObject(root, "max_tokens", (double)max_tokens);
     cJSON_AddTrueToObject(root, "stream");
+    if (system_prompt != NULL && *system_prompt != '\0') {
+        cJSON_AddStringToObject(root, "system", system_prompt);
+    }
     messages = cJSON_AddArrayToObject(root, "messages");
     user_msg = cJSON_CreateObject();
     cJSON_AddStringToObject(user_msg, "role", "user");

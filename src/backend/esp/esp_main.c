@@ -41,6 +41,7 @@
 #endif
 
 #include "psi/esp_runtime.h"
+#include "esp_obs_internal.h"
 
 static const char *TAG = "psi_main";
 
@@ -244,6 +245,19 @@ void psi_esp_main_run(void) {
         (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     if (psi_esp_vm_bootstrap() != 0) {
         ESP_LOGE(TAG, "psi_vm_init failed; agent will not be available");
+    } else {
+        /* Build the desktop-equivalent system prompt now while the
+         * Lua VM is still warm and we own its task; cache the result
+         * for the WS turn loop to inject as Anthropic's `system`
+         * field. Without this the embedded chat sees a default-empty
+         * system message and behaves unlike the CLI/TUI agents. */
+        char *prompt = psi_esp_build_system_prompt(psi_esp_vm());
+        if (prompt != NULL) {
+            ESP_LOGI(TAG, "system prompt cached (%u bytes)", (unsigned)strlen(prompt));
+            psi_esp_set_system_prompt(prompt);
+        } else {
+            ESP_LOGW(TAG, "system prompt build failed; turns will go unframed");
+        }
     }
     ESP_LOGI(TAG, "free heap after VM init:  %lu",
         (unsigned long)heap_caps_get_free_size(MALLOC_CAP_8BIT));

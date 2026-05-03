@@ -17,4 +17,10 @@ struct psi_esp_observer {
 void psi_esp_observer_init(struct psi_esp_observer *obs, QueueHandle_t outbox);
 void psi_esp_observer_emit_error(struct psi_esp_observer *obs, const char *message);
 
+/* Accessors for the singleton VM and cached system prompt; defined
+ * in esp_ws_server.c and called from esp_main.c at boot. */
+struct psi_vm;
+struct psi_vm *psi_esp_vm(void);
+void psi_esp_set_system_prompt(char *prompt); /* takes ownership */
+
 #endif

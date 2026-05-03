@@ -28,6 +28,8 @@
 #include "freertos/event_groups.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "lua.h"
+#include "lauxlib.h"
 
 #include "psi/abort.h"
 #include "psi/agent_runtime.h"
@@ -63,6 +65,24 @@ static struct psi_session g_psi_session;
 static struct psi_abort_signal g_psi_abort;
 static int g_psi_vm_inited = 0;
 
+/* Cached system prompt built from psi.prompt.system_prompt() in Lua
+ * at boot. The C agent injects it as the Anthropic `system` field
+ * for every turn so embedded chat sees the same context bundle the
+ * desktop CLI/TUI agents do (tool list, guidelines, date, embedded
+ * docs reference). NULL means we never built one — the turn still
+ * runs, the model just gets a default-empty system. */
+static char *g_psi_system_prompt = NULL;
+
+/* Accessor used by app_main after psi_esp_vm_bootstrap. */
+struct psi_vm *psi_esp_vm(void) {
+    return g_psi_vm_inited ? &g_psi_vm : NULL;
+}
+
+void psi_esp_set_system_prompt(char *prompt) {
+    free(g_psi_system_prompt);
+    g_psi_system_prompt = prompt;
+}
+
 struct psi_ws_session {
     httpd_handle_t server;
     int fd;
@@ -88,6 +108,56 @@ int psi_esp_vm_bootstrap(void) {
     psi_vm_bind_session(&g_psi_vm, &g_psi_session);
     g_psi_vm_inited = 1;
     return 0;
+}
+
+/* Call psi.prompt.system_prompt() in the given VM and return a
+ * heap-allocated copy. The Lua side knows about the active tool set,
+ * the embedded docs reference, the current date, and any context
+ * files that happened to land in @mem/ — same shape as the desktop
+ * --system-prompt mode. The C agent injects this as the Anthropic
+ * `system` field so embedded chat behaves consistently with the CLI.
+ *
+ * Touches the Lua state and is therefore not safe to call from a
+ * task other than the one that owns the VM. We invoke this once at
+ * boot from app_main; the cached result feeds every WS turn. */
+char *psi_esp_build_system_prompt(struct psi_vm *vm) {
+    lua_State *L;
+    int top;
+    const char *result;
+    size_t result_len;
+    char *copy = NULL;
+
+    if (vm == NULL || vm->L == NULL)
+        return NULL;
+    L = vm->L;
+    top = lua_gettop(L);
+
+    lua_getglobal(L, "psi");
+    if (lua_type(L, -1) != LUA_TTABLE)
+        goto out;
+    lua_getfield(L, -1, "prompt");
+    if (lua_type(L, -1) != LUA_TTABLE)
+        goto out;
+    lua_getfield(L, -1, "system_prompt");
+    if (lua_type(L, -1) != LUA_TFUNCTION)
+        goto out;
+    if (lua_pcall(L, 0, 1, 0) != LUA_OK) {
+        ESP_LOGW(TAG, "system_prompt error: %s",
+            lua_type(L, -1) == LUA_TSTRING ? lua_tostring(L, -1) : "?");
+        goto out;
+    }
+    result = lua_tolstring(L, -1, &result_len);
+    if (result == NULL)
+        goto out;
+    copy = (char *)malloc(result_len + 1u);
+    if (copy != NULL) {
+        memcpy(copy, result, result_len);
+        copy[result_len] = '\0';
+    }
+
+out:
+    lua_settop(L, top);
+    return copy;
 }
 
 #define PSI_WS_BIT_CLOSE 0x01u
@@ -206,8 +276,8 @@ static void psi_ws_worker_task(void *arg) {
                  * per event, no GC, no per-turn module loads. */
                 {
                     char *err_msg = NULL;
-                    int prc = psi_esp_agent_turn(u, m, mx, &s->observer.base, &g_psi_abort,
-                        &err_msg);
+                    int prc = psi_esp_agent_turn(u, g_psi_system_prompt, m, mx,
+                        &s->observer.base, &g_psi_abort, &err_msg);
                     if (prc != PSI_STATUS_OK) {
                         psi_ws_emit_error(s,
                             err_msg != NULL ? err_msg : "agent turn failed");
