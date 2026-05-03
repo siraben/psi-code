@@ -53,6 +53,35 @@
 #define PSI_ENABLE_REPL_EDITLINE 0
 #endif
 
+/* Capability gates. Desktop builds get all of these; ESP32 / 9front /
+ * other constrained targets can flip them off via -D at compile time
+ * to make psi.runtime_info().capabilities reflect reality. The Lua
+ * policy layer uses these to decide which primitives to use. */
+#ifndef PSI_CAP_EMBEDDED_RESOURCES
+#define PSI_CAP_EMBEDDED_RESOURCES 1
+#endif
+#ifndef PSI_CAP_RAMFS
+#define PSI_CAP_RAMFS 1
+#endif
+#ifndef PSI_CAP_FILESYSTEM
+#define PSI_CAP_FILESYSTEM 1
+#endif
+#ifndef PSI_CAP_PROCESS
+#define PSI_CAP_PROCESS 1
+#endif
+#ifndef PSI_CAP_HTTP
+#define PSI_CAP_HTTP 1
+#endif
+#ifndef PSI_CAP_TUI
+#define PSI_CAP_TUI PSI_ENABLE_TUI
+#endif
+#ifndef PSI_CAP_ENV
+#define PSI_CAP_ENV 1
+#endif
+#ifndef PSI_CAP_STDIO
+#define PSI_CAP_STDIO 1
+#endif
+
 /* ------------------------------------------------------------------
  * Tiny OS-level helpers used by the FFI date/cwd/file_exists primitives
  * and by runtime_info. Returns a fresh heap string the caller must free,
@@ -70,6 +99,7 @@ static char *psi_vm_current_date(void) {
     return psi_strdup(buffer);
 }
 
+#if PSI_CAP_FILESYSTEM
 static char *psi_vm_current_cwd(void) {
     size_t size = 256u;
     for (;;) {
@@ -84,6 +114,7 @@ static char *psi_vm_current_cwd(void) {
         size *= 2u;
     }
 }
+#endif
 
 static int psi_vm_is_abs_path(const char *path) {
     if (path == NULL || path[0] == '\0')
@@ -148,6 +179,7 @@ static char *psi_vm_expand_path(const char *path) {
     return out;
 }
 
+#if PSI_CAP_FILESYSTEM
 static char *psi_vm_resolve_path(const char *path) {
     char *expanded;
     char *cwd;
@@ -168,6 +200,7 @@ static char *psi_vm_resolve_path(const char *path) {
     free(expanded);
     return out;
 }
+#endif
 
 static char *psi_vm_parent_directory(const char *path) {
     size_t end;
@@ -198,6 +231,7 @@ static char *psi_vm_parent_directory(const char *path) {
     return out;
 }
 
+#if PSI_CAP_FILESYSTEM
 static int psi_vm_file_exists(const char *path) {
     struct stat st;
     if (path == NULL || path[0] == '\0')
@@ -287,9 +321,12 @@ static int psi_vm_mkdir_parent(const char *path) {
     free(parent);
     return status;
 }
+#endif /* PSI_CAP_FILESYSTEM */
 
+#if PSI_CAP_FILESYSTEM
 static const long PSI_VM_FILE_WRITE_MAX_BYTES = 16777216l;
 static const long PSI_VM_READ_FILE_MAX_BYTES = 262144l;
+#endif
 
 /* Host context is stored in the Lua state's extraspace so FFI primitives
  * can recover it from their lua_State* rather than a file-static. Keeps
@@ -853,6 +890,7 @@ static int lfn_session_message_count(lua_State *L) {
     return 1;
 }
 
+#if PSI_CAP_FILESYSTEM
 static int lfn_read_file(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
     FILE *f;
@@ -1230,6 +1268,7 @@ static int lfn_tempfile_path(lua_State *L) {
     lua_pushstring(L, buffer);
     return 1;
 }
+#endif /* PSI_CAP_FILESYSTEM */
 
 /* Push a heap-allocated string as a Lua string (or nil if NULL), then free it. */
 static void psi_vm_push_heap_string(lua_State *L, char *s) {
@@ -1246,10 +1285,12 @@ static int lfn_current_date(lua_State *L) {
     return 1;
 }
 
+#if PSI_CAP_FILESYSTEM
 static int lfn_cwd(lua_State *L) {
     psi_vm_push_heap_string(L, psi_vm_current_cwd());
     return 1;
 }
+#endif
 
 static int lfn_parent_directory(lua_State *L) {
     psi_vm_push_heap_string(L, psi_vm_parent_directory(luaL_checkstring(L, 1)));
@@ -1268,6 +1309,7 @@ static int lfn_path_expand(lua_State *L) {
     return 1;
 }
 
+#if PSI_CAP_FILESYSTEM
 static int lfn_path_resolve(lua_State *L) {
     psi_vm_push_heap_string(L, psi_vm_resolve_path(luaL_checkstring(L, 1)));
     return 1;
@@ -1327,6 +1369,7 @@ static int lfn_mkdir_parent(lua_State *L) {
     lua_pushboolean(L, psi_vm_mkdir_parent(path) == PSI_STATUS_OK ? 1 : 0);
     return 1;
 }
+#endif /* PSI_CAP_FILESYSTEM */
 
 static void psi_vm_process_progress(void *userdata, const char *chunk, size_t len) {
     struct psi_host_context *host = (struct psi_host_context *)userdata;
@@ -2220,7 +2263,11 @@ static int lfn_runtime_info(lua_State *L) {
 
     host = PSI_VM_HOST(L);
     date = psi_vm_current_date();
+#if PSI_CAP_FILESYSTEM
     cwd = psi_vm_current_cwd();
+#else
+    cwd = psi_strdup("");
+#endif
     if (!date || !cwd) {
         free(date);
         free(cwd);
@@ -2259,6 +2306,29 @@ static int lfn_runtime_info(lua_State *L) {
         lua_pushinteger(L, s ? (lua_Integer)s->count : 0);
         lua_setfield(L, -2, "session-message-count");
     }
+
+    /* Capabilities table. Desktop builds report everything true;
+     * constrained targets (ESP32, 9front headless) override the gates
+     * at compile time. The Lua policy layer reads these to decide
+     * which primitives to register and how session/temp paths route. */
+    lua_newtable(L);
+    lua_pushboolean(L, PSI_CAP_EMBEDDED_RESOURCES ? 1 : 0);
+    lua_setfield(L, -2, "embedded_resources");
+    lua_pushboolean(L, PSI_CAP_RAMFS ? 1 : 0);
+    lua_setfield(L, -2, "ramfs");
+    lua_pushboolean(L, PSI_CAP_FILESYSTEM ? 1 : 0);
+    lua_setfield(L, -2, "filesystem");
+    lua_pushboolean(L, PSI_CAP_PROCESS ? 1 : 0);
+    lua_setfield(L, -2, "process");
+    lua_pushboolean(L, PSI_CAP_HTTP ? 1 : 0);
+    lua_setfield(L, -2, "http");
+    lua_pushboolean(L, PSI_CAP_TUI ? 1 : 0);
+    lua_setfield(L, -2, "tui");
+    lua_pushboolean(L, PSI_CAP_ENV ? 1 : 0);
+    lua_setfield(L, -2, "env");
+    lua_pushboolean(L, PSI_CAP_STDIO ? 1 : 0);
+    lua_setfield(L, -2, "stdio");
+    lua_setfield(L, -2, "capabilities");
 
     /* Iterate the live `psi` table so the primitives list can't
      * drift from the actual registration. */
@@ -2623,6 +2693,17 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("version", lfn_version);
     PSI_REG("log", lfn_log);
     PSI_REG("session_message_count", lfn_session_message_count);
+    /* Pure helpers (no fopen) — always registered. */
+    PSI_REG("current_date", lfn_current_date);
+    PSI_REG("parent_directory", lfn_parent_directory);
+    PSI_REG("path_join", lfn_path_join);
+    PSI_REG("path_expand", lfn_path_expand);
+#if PSI_CAP_FILESYSTEM
+    /* Host-FS primitives are only registered when the filesystem
+     * capability is on. With FILESYSTEM=0 these names are absent
+     * from the global `psi` table; the Lua storage dispatcher then
+     * falls back to RAMFS / embedded resources, and stdlib shims
+     * (io.open, loadfile, dofile) refuse non-namespaced paths. */
     PSI_REG("read_file", lfn_read_file);
     PSI_REG("read_file_slice", lfn_read_file_slice);
     PSI_REG("file_write", lfn_file_write);
@@ -2630,17 +2711,14 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("file_write_atomic", lfn_file_write_atomic);
     PSI_REG("file_append", lfn_file_append);
     PSI_REG("tempfile_path", lfn_tempfile_path);
-    PSI_REG("current_date", lfn_current_date);
     PSI_REG("cwd", lfn_cwd);
-    PSI_REG("parent_directory", lfn_parent_directory);
-    PSI_REG("path_join", lfn_path_join);
-    PSI_REG("path_expand", lfn_path_expand);
     PSI_REG("path_resolve", lfn_path_resolve);
     PSI_REG("file_exists", lfn_file_exists);
     PSI_REG("file_type", lfn_file_type);
     PSI_REG("list_dir", lfn_list_dir);
     PSI_REG("mkdir_p", lfn_mkdir_p);
     PSI_REG("mkdir_parent", lfn_mkdir_parent);
+#endif
     PSI_REG("runtime_info", lfn_runtime_info);
     PSI_REG("time_ms", lfn_time_ms);
     PSI_REG("session_messages", lfn_session_messages);
@@ -2822,6 +2900,7 @@ int psi_vm_init(
      * binary. This is what makes static psi binaries self-contained —
      * a stripped-down install or a different host without the Nix
      * store still finds its Lua without touching the filesystem. */
+#if PSI_CAP_FILESYSTEM
     if (boot_file != NULL && boot_file[0] != '\0' && psi_vm_file_exists(boot_file)) {
         if (luaL_dofile(vm->L, boot_file) != LUA_OK) {
             fprintf(stderr, "failed to load Lua bootstrap: %s\n%s\n", boot_file,
@@ -2830,7 +2909,9 @@ int psi_vm_init(
             vm->L = NULL;
             return PSI_STATUS_ERROR;
         }
-    } else {
+    } else
+#endif /* PSI_CAP_FILESYSTEM */
+    {
         const struct psi_embedded_data *boot = psi_vm_embedded_find("boot");
         unsigned char *buf;
         int load_rc;

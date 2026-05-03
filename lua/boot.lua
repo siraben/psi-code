@@ -26,6 +26,11 @@ do
   end
 end
 
+-- Storage routing must come first so subsequent modules see the
+-- prefix-aware psi.file_* primitives instead of the raw POSIX ones.
+psi.ramfs = require("psi.ramfs")
+psi.storage = require("psi.storage")
+
 psi.prelude = require("psi.prelude")
 psi.path = require("psi.path_utils")
 psi.sched = require("psi.sched")

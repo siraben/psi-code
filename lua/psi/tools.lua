@@ -5,19 +5,30 @@ local registry = require("psi.tool_registry")
 
 local M = {}
 
+-- Tool registration is gated by capabilities so constrained builds
+-- (e.g. ESP32 without process execution) don't expose tools that
+-- would always fail. Desktop reports every capability true and
+-- registers everything; an ESP32 build with process=false drops
+-- bash/grep/find automatically.
+local caps = (psi.runtime_info().capabilities) or {}
+local has_storage = caps.filesystem or caps.ramfs
+local can_read = has_storage or caps.embedded_resources
+
 local BUILTINS = {
-  "psi.tools.read",
-  "psi.tools.bash",
-  "psi.tools.edit",
-  "psi.tools.write",
-  "psi.tools.grep",
-  "psi.tools.find",
-  "psi.tools.ls",
-  "psi.tools.lua",
+  { mod = "psi.tools.read", needs = can_read },
+  { mod = "psi.tools.bash", needs = caps.process == true },
+  { mod = "psi.tools.edit", needs = has_storage == true },
+  { mod = "psi.tools.write", needs = has_storage == true },
+  { mod = "psi.tools.grep", needs = caps.process == true },
+  { mod = "psi.tools.find", needs = caps.process == true },
+  { mod = "psi.tools.ls", needs = can_read == true },
+  { mod = "psi.tools.lua", needs = true },
 }
 
-for _, mod in ipairs(BUILTINS) do
-  require(mod)()
+for _, entry in ipairs(BUILTINS) do
+  if entry.needs then
+    require(entry.mod)()
+  end
 end
 
 M.dispatch = registry.dispatch
