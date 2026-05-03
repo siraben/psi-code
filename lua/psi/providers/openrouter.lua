@@ -34,10 +34,7 @@ local function api_url(path)
 end
 
 local function resolve_model(m)
-  if m and m ~= "" then
-    return m
-  end
-  return os.getenv(MODEL_ENV) or MODEL_DEFAULT
+  return prelude.resolve_env(m, MODEL_ENV, MODEL_DEFAULT)
 end
 
 local function headers()

@@ -244,6 +244,17 @@ function M.as_array(t)
   return setmetatable(t or {}, { __jsontype = "array" })
 end
 
+function M.resolve_env(explicit, env_var, default)
+  if explicit and explicit ~= "" then
+    return explicit
+  end
+  local env = os.getenv(env_var)
+  if env and env ~= "" then
+    return env
+  end
+  return default
+end
+
 function M.path_join(base, name)
   if psi and psi.path_join then
     return psi.path_join(base, name)

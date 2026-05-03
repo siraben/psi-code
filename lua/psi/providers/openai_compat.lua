@@ -277,32 +277,7 @@ end
 
 -- ---------- Non-streaming one-shot completion ----------
 
-local function http_post_text(url, headers, body, abort_check)
-  if not (sched.in_coroutine and sched.in_coroutine()) then
-    return psi.http_post(url, headers, body)
-  end
-
-  local handle, begin_err = psi.http_stream_begin(url, headers, body)
-  if handle == nil then
-    return nil, begin_err
-  end
-  local chunks = {}
-  while true do
-    if type(abort_check) == "function" and abort_check() then
-      psi.http_stream_finish(handle)
-      return nil, "aborted"
-    end
-    local chunk, done = sched.http_poll(handle, 50)
-    if chunk ~= nil then
-      chunks[#chunks + 1] = chunk
-    end
-    if done then
-      break
-    end
-  end
-  local status = psi.http_stream_finish(handle)
-  return status, table.concat(chunks)
-end
+local http_post_text = sched.http_post_text
 
 function M.complete_text(opts, cfg)
   local body = cfg.request_body({

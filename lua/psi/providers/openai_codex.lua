@@ -37,10 +37,7 @@ local function api_url()
 end
 
 local function resolve_model(m)
-  if m and m ~= "" then
-    return m
-  end
-  return os.getenv(MODEL_ENV) or MODEL_DEFAULT
+  return prelude.resolve_env(m, MODEL_ENV, MODEL_DEFAULT)
 end
 
 local function headers(creds)
@@ -480,32 +477,7 @@ local function persist(state, model, _content, tool_calls, stop_override, error_
   end
 end
 
-local function http_post_text(url, req_headers, body, abort_check)
-  if not (sched.in_coroutine and sched.in_coroutine()) then
-    return psi.http_post(url, req_headers, body)
-  end
-
-  local handle, begin_err = psi.http_stream_begin(url, req_headers, body)
-  if handle == nil then
-    return nil, begin_err
-  end
-  local chunks = {}
-  while true do
-    if type(abort_check) == "function" and abort_check() then
-      psi.http_stream_finish(handle)
-      return nil, "aborted"
-    end
-    local chunk, done = sched.http_poll(handle, 50)
-    if chunk ~= nil then
-      chunks[#chunks + 1] = chunk
-    end
-    if done then
-      break
-    end
-  end
-  local status = psi.http_stream_finish(handle)
-  return status, table.concat(chunks)
-end
+local http_post_text = sched.http_post_text
 
 function M.run_turn(opts)
   local creds, err = auth.credentials()
