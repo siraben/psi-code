@@ -126,9 +126,90 @@ static char *tool_system_info(const cJSON *input, char **err) {
 /* gpio_*                                                               */
 /* ------------------------------------------------------------------ */
 
+/* GPIO direction can't be read back through driver/gpio.h, so when
+ * PSI_GPIO_INTROSPECTION is on we shadow the last requested mode +
+ * commanded output level for every pin. The agent could bypass our
+ * tools via lua_eval — in that case the grid lags until the next
+ * gpio_mode call. */
+#define PSI_ESP_GPIO_COUNT 40
+
+enum psi_gpio_shadow_mode {
+    PSI_GPIO_OFF = 0,
+    PSI_GPIO_IN,
+    PSI_GPIO_OUT,
+    PSI_GPIO_PULLUP,
+    PSI_GPIO_PULLDOWN
+};
+
+/* Single source of truth for the agent-facing mode names: maps the
+ * JSON string the model sends (and the dashboard renders) to the
+ * gpio_config_t fields and the shadow enum. Adding a new mode here
+ * is a single row. */
+static const struct {
+    const char *name;
+    gpio_mode_t mode;
+    uint8_t pull_up;
+    uint8_t pull_down;
+    enum psi_gpio_shadow_mode shadow;
+} PSI_GPIO_MODES[] = {
+    {"out", GPIO_MODE_OUTPUT, 0, 0, PSI_GPIO_OUT},
+    {"in", GPIO_MODE_INPUT, 0, 0, PSI_GPIO_IN},
+    {"pullup", GPIO_MODE_INPUT, 1, 0, PSI_GPIO_PULLUP},
+    {"pulldown", GPIO_MODE_INPUT, 0, 1, PSI_GPIO_PULLDOWN},
+};
+#define PSI_GPIO_MODES_N (sizeof(PSI_GPIO_MODES) / sizeof(PSI_GPIO_MODES[0]))
+
+static int psi_gpio_find_mode(const char *name) {
+    size_t i;
+    for (i = 0; i < PSI_GPIO_MODES_N; i++) {
+        if (strcmp(PSI_GPIO_MODES[i].name, name) == 0)
+            return (int)i;
+    }
+    return -1;
+}
+
+#if PSI_GPIO_INTROSPECTION
+static uint8_t g_gpio_mode[PSI_ESP_GPIO_COUNT]; /* enum psi_gpio_shadow_mode */
+static int8_t g_gpio_level[PSI_ESP_GPIO_COUNT]; /* -1 = unknown, else 0/1 */
+
+static const char *gpio_shadow_name(enum psi_gpio_shadow_mode m) {
+    size_t i;
+    for (i = 0; i < PSI_GPIO_MODES_N; i++) {
+        if (PSI_GPIO_MODES[i].shadow == m)
+            return PSI_GPIO_MODES[i].name;
+    }
+    return "off";
+}
+
+char *psi_esp_gpio_snapshot_json(void) {
+    cJSON *root = cJSON_CreateObject();
+    cJSON *pins = cJSON_AddArrayToObject(root, "pins");
+    int i;
+    for (i = 0; i < PSI_ESP_GPIO_COUNT; i++) {
+        cJSON *p = cJSON_CreateObject();
+        enum psi_gpio_shadow_mode m = (enum psi_gpio_shadow_mode)g_gpio_mode[i];
+        cJSON_AddNumberToObject(p, "n", (double)i);
+        cJSON_AddStringToObject(p, "mode", gpio_shadow_name(m));
+        if (m == PSI_GPIO_OUT) {
+            cJSON_AddNumberToObject(
+                p, "level", g_gpio_level[i] >= 0 ? (double)g_gpio_level[i] : 0.0);
+            if (g_gpio_level[i] < 0)
+                cJSON_AddBoolToObject(p, "unknown", 1);
+        } else if (m == PSI_GPIO_OFF) {
+            cJSON_AddNullToObject(p, "level");
+        } else {
+            cJSON_AddNumberToObject(p, "level", (double)gpio_get_level((gpio_num_t)i));
+        }
+        cJSON_AddItemToArray(pins, p);
+    }
+    return json_to_string(root);
+}
+#endif /* PSI_GPIO_INTROSPECTION */
+
 static char *tool_gpio_mode(const cJSON *input, char **err) {
     int pin = json_int(input, "pin", -1);
     const char *mode = json_str(input, "mode", "");
+    int idx = psi_gpio_find_mode(mode);
     gpio_config_t cfg;
 
     if (pin < 0 || pin >= GPIO_NUM_MAX) {
@@ -136,29 +217,33 @@ static char *tool_gpio_mode(const cJSON *input, char **err) {
             *err = err_text("invalid pin %d", pin);
         return NULL;
     }
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.pin_bit_mask = 1ULL << pin;
-    cfg.intr_type = GPIO_INTR_DISABLE;
-    if (strcmp(mode, "out") == 0) {
-        cfg.mode = GPIO_MODE_OUTPUT;
-    } else if (strcmp(mode, "in") == 0) {
-        cfg.mode = GPIO_MODE_INPUT;
-    } else if (strcmp(mode, "pullup") == 0) {
-        cfg.mode = GPIO_MODE_INPUT;
-        cfg.pull_up_en = GPIO_PULLUP_ENABLE;
-    } else if (strcmp(mode, "pulldown") == 0) {
-        cfg.mode = GPIO_MODE_INPUT;
-        cfg.pull_down_en = GPIO_PULLDOWN_ENABLE;
-    } else {
+    if (idx < 0) {
         if (err)
             *err = err_text("mode must be one of: in, out, pullup, pulldown");
         return NULL;
     }
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.pin_bit_mask = 1ULL << pin;
+    cfg.intr_type = GPIO_INTR_DISABLE;
+    cfg.mode = PSI_GPIO_MODES[idx].mode;
+    if (PSI_GPIO_MODES[idx].pull_up)
+        cfg.pull_up_en = GPIO_PULLUP_ENABLE;
+    if (PSI_GPIO_MODES[idx].pull_down)
+        cfg.pull_down_en = GPIO_PULLDOWN_ENABLE;
     if (gpio_config(&cfg) != ESP_OK) {
         if (err)
             *err = err_text("gpio_config failed");
         return NULL;
     }
+#if PSI_GPIO_INTROSPECTION
+    if (pin < PSI_ESP_GPIO_COUNT) {
+        g_gpio_mode[pin] = (uint8_t)PSI_GPIO_MODES[idx].shadow;
+        /* Switching out of OUTPUT clears the cached level so the grid
+         * stops claiming we know what's on the line. */
+        if (g_gpio_mode[pin] != PSI_GPIO_OUT)
+            g_gpio_level[pin] = -1;
+    }
+#endif
     {
         cJSON *r = cJSON_CreateObject();
         cJSON_AddBoolToObject(r, "ok", 1);
@@ -203,6 +288,10 @@ static char *tool_gpio_write(const cJSON *input, char **err) {
             *err = err_text("gpio_set_level failed (configure as output first?)");
         return NULL;
     }
+#if PSI_GPIO_INTROSPECTION
+    if (pin < PSI_ESP_GPIO_COUNT)
+        g_gpio_level[pin] = (int8_t)level;
+#endif
     r = cJSON_CreateObject();
     cJSON_AddBoolToObject(r, "ok", 1);
     cJSON_AddNumberToObject(r, "pin", pin);
@@ -319,8 +408,8 @@ static char *tool_time_now(const cJSON *input, char **err) {
 /* ------------------------------------------------------------------ */
 
 static char *tool_restart(const cJSON *input, char **err) {
-    /* Schedule a restart 1s out so the WS frame containing the
-     * tool_result has time to flush before the CPU resets. */
+    /* 1s delay before esp_restart so the WS frame carrying this
+     * tool_result actually flushes to the client before reset. */
     cJSON *r;
     (void)input;
     (void)err;
@@ -329,7 +418,6 @@ static char *tool_restart(const cJSON *input, char **err) {
     cJSON_AddStringToObject(r, "note", "restart scheduled in 1s");
     {
         char *out = json_to_string(r);
-        /* Defer the restart slightly so the client gets a reply. */
         vTaskDelay(pdMS_TO_TICKS(1000));
         esp_restart();
         return out; /* unreachable, but the compiler doesn't know */
@@ -424,19 +512,12 @@ static char *tool_lua_eval(const cJSON *input, char **err) {
         result_len = 0u;
     }
 
+    /* luaL_tolstring leaves a NUL-terminated string on the Lua
+     * stack, so we can pass it straight to cJSON; no copy needed. */
+    (void)result_len;
     r = cJSON_CreateObject();
     cJSON_AddBoolToObject(r, "ok", 1);
-    {
-        char *copy = (char *)malloc(result_len + 1u);
-        if (copy != NULL) {
-            memcpy(copy, result_str, result_len);
-            copy[result_len] = '\0';
-            cJSON_AddStringToObject(r, "result", copy);
-            free(copy);
-        } else {
-            cJSON_AddStringToObject(r, "result", "");
-        }
-    }
+    cJSON_AddStringToObject(r, "result", result_str ? result_str : "");
     lua_settop(L, top);
     return json_to_string(r);
 }

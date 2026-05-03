@@ -443,6 +443,7 @@
               pkgs.gcc
               pkgs.zlib
               pkgs.html-minifier
+              pkgs.python3
             ];
 
             # ESP-IDF supplies its own cmake + ninja via the wrapper.
@@ -466,35 +467,44 @@
               export HOME=$PWD/.home
               mkdir -p $HOME
 
-              # Minify the embedded SPA before the embed tool packages
-              # it. Cuts ~15 KiB → ~10 KiB by stripping comments,
-              # collapsing whitespace, and folding the inline <script>
-              # / <style> blocks. The minifier walks HTML attribute
-              # quoting carefully so DOMPurify's CDN URL assembly
-              # (which avoids literal "name@version" patterns) keeps
-              # working post-minify.
+              # The firmware embeds one HTML blob; the host frontend
+              # serves chat.css + chat.js separately. Bundle-spa.py
+              # inlines them into index.html, then html-minifier
+              # collapses the result.
               SPA_SRC=assets/web/index.html
+              SPA_BUNDLED=assets/web/index.bundled.html
               SPA_MIN=assets/web/index.min.html
+              python3 scripts/bundle-spa.py "$SPA_SRC" -o "$SPA_BUNDLED"
               html-minifier \
                 --collapse-whitespace \
                 --remove-comments \
                 --minify-css true \
                 --minify-js true \
-                "$SPA_SRC" -o "$SPA_MIN"
+                "$SPA_BUNDLED" -o "$SPA_MIN"
               if [ -s "$SPA_MIN" ]; then
                 BEFORE=$(wc -c < "$SPA_SRC")
+                BUNDLED=$(wc -c < "$SPA_BUNDLED")
                 AFTER=$(wc -c < "$SPA_MIN")
-                echo "SPA minified: $BEFORE -> $AFTER bytes"
+                echo "SPA: $BEFORE -> $BUNDLED (bundled) -> $AFTER (minified) bytes"
                 cp "$SPA_MIN" "$SPA_SRC"
               else
-                echo "warning: html-minifier produced empty output; keeping unminified" >&2
+                echo "warning: html-minifier produced empty output; keeping unbundled" >&2
+                cp "$SPA_BUNDLED" "$SPA_SRC"
               fi
             '';
+
+            # PSI_CMAKE_OPTS is forwarded as -D flags to idf.py build.
+            # Variants like packages.firmware-prod set this via
+            # overrideAttrs to flip dev-only features off (the
+            # dashboard pin grid is the only one today). Default empty
+            # = full QEMU-friendly build.
+            PSI_CMAKE_OPTS = "";
 
             buildPhase = ''
               runHook preBuild
               cd firmware
-              idf.py --no-ccache build
+              # shellcheck disable=SC2086
+              idf.py --no-ccache build $PSI_CMAKE_OPTS
               runHook postBuild
             '';
 
@@ -519,6 +529,16 @@
             dontStrip = true;
             meta.description = "psi firmware image for ESP32";
         };
+
+        # Real-hardware variant: drops the /gpio dashboard endpoint
+        # since on real silicon you'd measure pins with a probe, not
+        # via WS polling. Same recipe otherwise; just one extra CMake
+        # flag flipped.
+        packages.firmware-prod = self.packages.${system}.firmware.overrideAttrs (_: {
+          pname = "psi-firmware-prod";
+          PSI_CMAKE_OPTS = "-DPSI_GPIO_INTROSPECTION=OFF";
+          meta.description = "psi firmware for real ESP32 hardware (no QEMU-only introspection endpoints)";
+        });
 
         # ---- Apps -------------------------------------------------------
 
@@ -595,24 +615,59 @@
           meta.description = "Run psi firmware in Espressif QEMU";
         };
 
-        # `nix run .#flash` — write the firmware to a connected ESP32.
-        # Defaults to /dev/ttyUSB0; override via PSI_FLASH_PORT.
+        # `nix run .#esp-frontend` — host dashboard: spawns QEMU, fans
+        # out parsed serial/heap/gpio telemetry, and serves the chat
+        # UI (the same shared module the firmware embeds).
+        apps.esp-frontend = {
+          type = "app";
+          program = let
+            pyEnv = pkgs.python3.withPackages (ps: [ ps.aiohttp ]);
+            frontendApp = pkgs.writeShellApplication {
+              name = "psi-esp-frontend";
+              runtimeInputs = [
+                pyEnv
+                espQemu
+                espPkgs.esp-idf-esp32
+                self.packages.${system}.firmware
+                pkgs.coreutils
+              ];
+              text = ''
+                FW="${self.packages.${system}.firmware}/psi-firmware.bin"
+                ASSETS="${./assets/web}"
+                # IDF_PATH points the script at nvs_partition_gen.py so
+                # ANTHROPIC_API_KEY (if set) can be seeded into NVS.
+                export IDF_PATH="${espPkgs.esp-idf-esp32}"
+                exec ${pyEnv}/bin/python3 ${./scripts/esp_frontend.py} \
+                  --firmware "$FW" \
+                  --assets "$ASSETS" \
+                  "$@"
+              '';
+            };
+          in "${frontendApp}/bin/psi-esp-frontend";
+          meta.description = "Host-side dashboard: QEMU + chat + serial telemetry";
+        };
+
+        # `nix run .#flash` — write the production firmware to a
+        # connected ESP32. Uses packages.firmware-prod, which builds
+        # with PSI_GPIO_INTROSPECTION=OFF since real silicon doesn't
+        # need (or want) the dashboard pin-state poll endpoint — you
+        # measure pins with a probe. Override via PSI_FLASH_PORT.
         apps.flash = {
           type = "app";
           program = let
             flashApp = pkgs.writeShellApplication {
               name = "psi-flash";
-              runtimeInputs = [ espPkgs.esp-idf-esp32 self.packages.${system}.firmware ];
+              runtimeInputs = [ espPkgs.esp-idf-esp32 self.packages.${system}.firmware-prod ];
               text = ''
                 PORT="''${PSI_FLASH_PORT:-/dev/ttyUSB0}"
-                FW="${self.packages.${system}.firmware}/psi-firmware.bin"
-                echo "Flashing $FW to $PORT"
+                FW="${self.packages.${system}.firmware-prod}/psi-firmware.bin"
+                echo "Flashing $FW (prod build) to $PORT"
                 exec esptool.py --chip esp32 --port "$PORT" --baud 460800 \
                   write_flash 0x0 "$FW"
               '';
             };
           in "${flashApp}/bin/psi-flash";
-          meta.description = "Flash psi firmware to a connected ESP32";
+          meta.description = "Flash production psi firmware to a connected ESP32";
         };
 
         # `nix run .#valgrind` — memcheck a non-agent exercise set.
@@ -793,6 +848,7 @@
             pkgs.gcc
             pkgs.zlib
             (pkgs.python3.withPackages (ps: [
+              ps.aiohttp
               ps.pexpect
               ps.pytest
               ps.websocket-client
@@ -802,6 +858,7 @@
             export HOST_CC=${pkgs.stdenv.cc}/bin/cc
             export LUA_SRC_DIR_TARBALL=${luaSrc}
             echo "psi ESP shell ready. Build firmware: cd firmware && idf.py build"
+            echo "Host dashboard: nix run .#esp-frontend"
           '';
         };
 

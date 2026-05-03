@@ -14,3 +14,10 @@ pi-mono/
 # Per-user bench target config (hostnames, ssh jump hops, binary paths).
 # Template lives at tests/bench.targets.example.json.
 tests/bench.targets.json
+
+__pycache__/
+*.pyc
+
+# Locally generated plotting artifacts.
+images/
+live_token_estimate_scatter*

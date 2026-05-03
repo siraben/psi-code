@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>psi · esp32 host dashboard</title>
+<link rel="stylesheet" href="/chat.css">
+<link rel="stylesheet" href="/host/host.css">
+<script src="/chat.js" defer></script>
+<script src="/host/host.js" defer></script>
+</head>
+<body>
+
+<div id="dashboard">
+
+  <section id="chat-pane">
+    <div id="chat-root" style="height:100%"></div>
+  </section>
+
+  <aside id="sidebar">
+    <header>
+      <h2>esp32 telemetry</h2>
+      <span id="qemu-status" class="qemu-status connecting">
+        <span class="dot"></span><span class="label">…</span>
+      </span>
+    </header>
+
+    <div class="stats-grid">
+      <div class="stat"><div class="k">uptime</div>      <div class="v" id="stat-uptime">—</div></div>
+      <div class="stat"><div class="k">heap free</div>   <div class="v" id="stat-heap-free">—</div></div>
+      <div class="stat"><div class="k">heap min</div>    <div class="v dim" id="stat-heap-min">—</div></div>
+      <div class="stat"><div class="k">psram free</div>  <div class="v" id="stat-psram-free">—</div></div>
+      <div class="stat"><div class="k">ip address</div>  <div class="v dim" id="stat-ip">—</div></div>
+      <div class="stat"><div class="k">tasks</div>       <div class="v dim" id="stat-tasks">—</div></div>
+    </div>
+
+    <div id="gpio-section">
+      <div class="title">gpio</div>
+      <div id="gpio-grid"></div>
+    </div>
+
+    <div id="serial-section">
+      <div class="title">
+        serial
+        <button id="serial-clear" type="button">clear</button>
+      </div>
+      <div id="serial-log"></div>
+    </div>
+  </aside>
+
+</div>
+
+</body>
+</html>

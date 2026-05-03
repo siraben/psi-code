@@ -1,0 +1,224 @@
+/* Host dashboard layout: chat pane + telemetry sidebar. Chat tokens
+ * come from chat.css; this file only sets host-specific overrides. */
+:root {
+  --sidebar-w: 380px;
+  --serial-bg: #07090c;
+  --tag-info: #6aa9ff;
+  --tag-warn: #f5b942;
+  --tag-error: #ef6868;
+  --tag-debug: #8b94a8;
+}
+
+body { overflow: hidden; }
+
+#dashboard {
+  display: grid;
+  grid-template-columns: 1fr var(--sidebar-w);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+#chat-pane {
+  border-right: 1px solid var(--border);
+  /* min-* zeros let the inner chat module own its scroll instead of
+   * the grid cell sizing to content and overflowing the viewport. */
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* Override chat.css's column-width custom property so the chat
+   * fills the pane instead of self-narrowing to 66vw. */
+  --content-w: auto;
+  --content-w-narrow: auto;
+}
+#chat-pane .psi-chat .column { max-width: none; padding: 24px 24px 12px; }
+
+#sidebar {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  min-width: 0;
+  overflow-y: auto; /* fallback if header + stats + serial overflow on a short viewport */
+}
+#sidebar header {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+#sidebar header h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .3px;
+}
+#sidebar header .qemu-status {
+  margin-left: auto;
+  font: 11px ui-monospace, SFMono-Regular, monospace;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+#sidebar header .qemu-status .dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--text-muted);
+  display: inline-block;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+#sidebar header .qemu-status.up .dot { background: #4ade80; box-shadow: 0 0 4px #4ade80; }
+#sidebar header .qemu-status.down .dot { background: var(--error); }
+
+.stats-grid {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+  flex-shrink: 0;
+}
+.stat .k {
+  color: var(--text-muted);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.stat .v {
+  color: var(--text);
+  font: 14px ui-monospace, SFMono-Regular, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.stat .v.dim { color: var(--text-muted); }
+
+/* GPIO pin grid: 8×5 cells. QEMU doesn't model voltages — colors
+ * reflect *intent* from the agent's gpio_mode/gpio_write calls. */
+#gpio-section {
+  border-top: 1px solid var(--border);
+  padding: 8px 14px 12px;
+  flex-shrink: 0;
+}
+#gpio-section .title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+#gpio-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 3px;
+}
+.pin {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 5px 2px 4px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  font: 10.5px ui-monospace, SFMono-Regular, monospace;
+  color: var(--text-muted);
+}
+.pin.mode-out  { border-color: #b07900; background: #1a1306; color: #f5b942; }
+.pin.mode-out.lvl-1 { border-color: #4ade80; background: #0e1f12; color: #86efac; }
+.pin.mode-out.lvl-0 { border-color: #5a6373; background: #0d1218; color: var(--text-dim); }
+.pin.mode-in       { border-color: #2a3140; color: var(--text-dim); }
+.pin.mode-pullup   { border-color: #6aa9ff; color: #93c5fd; }
+.pin.mode-pulldown { border-color: #6aa9ff; color: #93c5fd; }
+.pin.mode-off      { opacity: .35; }
+.pin .num {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.pin .lvl {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor;
+  opacity: .9;
+}
+.pin.mode-off .lvl, .pin .lvl.unknown { background: transparent; border: 1px dashed var(--text-muted); }
+
+/* Fixed serial-pane height so the page never grows; the inner log
+ * scrolls. Override --serial-h on :root if you want a different size. */
+#serial-section {
+  height: var(--serial-h, 50vh);
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+}
+#serial-section .title {
+  padding: 8px 14px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#serial-section .title button {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 10.5px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+#serial-section .title button:hover { color: var(--text); border-color: var(--text-muted); }
+
+#serial-log {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--serial-bg);
+  font: 11.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 6px 12px;
+  scrollbar-width: thin;
+}
+#serial-log .line {
+  display: flex;
+  gap: 8px;
+  padding: 1px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+#serial-log .line .lvl {
+  flex-shrink: 0;
+  width: 1.2em;
+  text-align: center;
+  font-weight: 600;
+}
+#serial-log .line .tag {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  min-width: 6em;
+  max-width: 12em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#serial-log .line .msg { flex: 1; min-width: 0; color: var(--text); }
+#serial-log .line.I .lvl { color: var(--tag-info); }
+#serial-log .line.W .lvl { color: var(--tag-warn); }
+#serial-log .line.E .lvl { color: var(--tag-error); }
+#serial-log .line.D .lvl, #serial-log .line.V .lvl { color: var(--tag-debug); }
+#serial-log .line.raw { color: var(--text-dim); font-style: italic; }
+#serial-log .line.raw .msg { color: var(--text-dim); }
+
+@media (max-width: 1100px) {
+  :root { --sidebar-w: 320px; }
+}
+@media (max-width: 800px) {
+  #dashboard { grid-template-columns: 1fr; grid-template-rows: 1fr 240px; }
+  #chat-pane { border-right: none; border-bottom: 1px solid var(--border); }
+}

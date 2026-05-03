@@ -10,6 +10,17 @@
 
 #include "cJSON.h"
 
+/* Firmware feature flags. CMake (components/psi/CMakeLists.txt) sets
+ * these unconditionally for the firmware build; the fallbacks below
+ * keep the headers self-contained so editor tooling doesn't trip on
+ * #if of an undefined macro. */
+#ifndef PSI_INCLUDE_SPA
+#define PSI_INCLUDE_SPA 1
+#endif
+#ifndef PSI_GPIO_INTROSPECTION
+#define PSI_GPIO_INTROSPECTION 1
+#endif
+
 struct psi_esp_tool {
     const char *name;
     const char *description;
@@ -27,5 +38,13 @@ extern const struct psi_esp_tool psi_esp_tool_table[];
 
 /* Convenience: find by name; returns NULL if absent. */
 const struct psi_esp_tool *psi_esp_tool_find(const char *name);
+
+#if PSI_GPIO_INTROSPECTION
+/* Snapshot of every GPIO's configured mode + last commanded level.
+ * Caller frees the returned heap string. Compiled out when
+ * PSI_GPIO_INTROSPECTION=0 — real-hardware deploys measure pins
+ * directly. */
+char *psi_esp_gpio_snapshot_json(void);
+#endif
 
 #endif

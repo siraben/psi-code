@@ -17,6 +17,24 @@ set(PSI_ROOT "${CMAKE_CURRENT_LIST_DIR}/../..")
 # create them are only registered in the main build pass — ESP-IDF
 # also evaluates this CMakeLists in script mode (CMAKE_BUILD_EARLY_EXPANSION),
 # where add_custom_command is forbidden.
+# PSI_INCLUDE_SPA controls whether the firmware embeds the chat SPA
+# at /. Default ON so `nix build .#firmware` keeps producing a
+# self-contained image that can be opened directly in a browser.
+# Turn OFF (idf.py build -DPSI_INCLUDE_SPA=OFF) when the firmware is
+# only ever talked to through the host frontend dashboard
+# (`apps.esp-frontend`), which serves its own UI and proxies the WS.
+# Saves ~14 KiB of flash + the inflate codepath at boot.
+option(PSI_INCLUDE_SPA "Embed the chat SPA into the firmware" ON)
+
+# PSI_GPIO_INTROSPECTION exposes the /gpio HTTP endpoint and the
+# shadow state behind it (configured mode + last commanded level for
+# every pin). The host dashboard polls this at 2 Hz to render a live
+# pin grid. Useful in QEMU where there's no physical scope. On real
+# hardware you'd measure pins directly, so default OFF saves the
+# 40-byte shadow + a small handler. The flake sets ON for the QEMU
+# firmware image; pass -DPSI_GPIO_INTROSPECTION=OFF for production.
+option(PSI_GPIO_INTROSPECTION "Expose /gpio endpoint for the host dashboard pin grid" ON)
+
 set(PSI_EMBED_TOOL "${CMAKE_CURRENT_BINARY_DIR}/psi_embed")
 set(PSI_EMBED_LUA  "${CMAKE_CURRENT_BINARY_DIR}/embedded_lua.c")
 set(PSI_EMBED_DOCS "${CMAKE_CURRENT_BINARY_DIR}/embedded_docs.c")
@@ -86,6 +104,18 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     PSI_LUA_BOOT_FILE=""
     PSI_NO_ZLIB=1
 )
+
+if(PSI_INCLUDE_SPA)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_INCLUDE_SPA=1)
+else()
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_INCLUDE_SPA=0)
+endif()
+
+if(PSI_GPIO_INTROSPECTION)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_GPIO_INTROSPECTION=1)
+else()
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_GPIO_INTROSPECTION=0)
+endif()
 
 # ESP-IDF v5.5+ uses C23-ish dialect for its headers; we let the
 # component-default flags through and only ensure psi's *own* sources
@@ -202,16 +232,34 @@ add_custom_command(
     VERBATIM
 )
 
-add_custom_command(
-    OUTPUT "${PSI_EMBED_HTML}"
-    COMMAND "${PSI_EMBED_TOOL}" --no-compress --table=psi_embedded_html_table
-            --key=index.html assets/web/index.html
+if(PSI_INCLUDE_SPA)
+    add_custom_command(
+        OUTPUT "${PSI_EMBED_HTML}"
+        COMMAND "${PSI_EMBED_TOOL}" --no-compress --table=psi_embedded_html_table
+                --key=index.html assets/web/index.html
+                > "${PSI_EMBED_HTML}"
+        WORKING_DIRECTORY "${PSI_ROOT}"
+        DEPENDS "${PSI_EMBED_TOOL}" "${PSI_ROOT}/assets/web/index.html"
+        COMMENT "Embedding psi web SPA (uncompressed)"
+        VERBATIM
+    )
+else()
+    # Empty stub: linker still resolves psi_embedded_html_table, but
+    # the / handler is compiled out so the table is never consulted.
+    add_custom_command(
+        OUTPUT "${PSI_EMBED_HTML}"
+        COMMAND ${CMAKE_COMMAND} -E echo "/* PSI_INCLUDE_SPA=0 stub */"
             > "${PSI_EMBED_HTML}"
-    WORKING_DIRECTORY "${PSI_ROOT}"
-    DEPENDS "${PSI_EMBED_TOOL}" "${PSI_ROOT}/assets/web/index.html"
-    COMMENT "Embedding psi web SPA (uncompressed)"
-    VERBATIM
-)
+        COMMAND ${CMAKE_COMMAND} -E echo "#include <stddef.h>"
+            >> "${PSI_EMBED_HTML}"
+        COMMAND ${CMAKE_COMMAND} -E echo "#include \"psi/embedded_data.h\""
+            >> "${PSI_EMBED_HTML}"
+        COMMAND ${CMAKE_COMMAND} -E echo "const struct psi_embedded_data psi_embedded_html_table[] = { { NULL, NULL, 0u, 0u } };"
+            >> "${PSI_EMBED_HTML}"
+        COMMENT "Stubbing psi SPA table (PSI_INCLUDE_SPA=OFF)"
+        VERBATIM
+    )
+endif()
 
 # Tie the generated blobs to the component build target so ninja
 # orders the embed step correctly.

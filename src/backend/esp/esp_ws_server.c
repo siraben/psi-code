@@ -40,8 +40,14 @@
 #include "psi/vm.h"
 
 #include "esp_obs_internal.h"
+#include "esp_tools.h"
 
+/* PSI_INCLUDE_SPA / PSI_GPIO_INTROSPECTION fallbacks come from
+ * esp_tools.h. Both gate features the host frontend can replace
+ * (chat SPA, GPIO snapshot endpoint) — see CMakeLists.txt. */
+#if PSI_INCLUDE_SPA
 extern const struct psi_embedded_data psi_embedded_html_table[];
+#endif
 
 static const char *TAG = "psi_ws";
 
@@ -162,6 +168,7 @@ out:
 
 #define PSI_WS_BIT_CLOSE 0x01u
 
+#if PSI_INCLUDE_SPA
 static char *psi_ws_inflate_html(size_t *len_out) {
     const struct psi_embedded_data *e = &psi_embedded_html_table[0];
     unsigned char *buf;
@@ -195,12 +202,33 @@ static esp_err_t psi_ws_index_handler(httpd_req_t *req) {
     free(html);
     return err;
 }
+#endif /* PSI_INCLUDE_SPA */
 
 static esp_err_t psi_ws_health_handler(httpd_req_t *req) {
     static const char body[] = "{\"ok\":true}";
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, body, (ssize_t)(sizeof(body) - 1u));
 }
+
+#if PSI_GPIO_INTROSPECTION
+/* Snapshot of every GPIO's configured mode + level for the host
+ * dashboard's pin grid. Polled at 2 Hz from esp_frontend.py. */
+static esp_err_t psi_ws_gpio_handler(httpd_req_t *req) {
+    char *json = psi_esp_gpio_snapshot_json();
+    esp_err_t err;
+    if (json == NULL)
+        return httpd_resp_send_500(req);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    /* Allow polls from the host dashboard regardless of origin —
+     * everything's on localhost, but the dashboard binds 0.0.0.0 so
+     * a different LAN host could be the client. */
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    err = httpd_resp_send(req, json, (ssize_t)strlen(json));
+    free(json);
+    return err;
+}
+#endif
 
 /* ------------------------------------------------------------------ */
 /* Per-connection worker + sender                                      */
@@ -423,10 +451,16 @@ static esp_err_t psi_ws_handler(httpd_req_t *req) {
 void psi_ws_server_start(void) {
     httpd_handle_t server = NULL;
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
+#if PSI_INCLUDE_SPA
     httpd_uri_t index_uri = {
         .uri = "/", .method = HTTP_GET, .handler = psi_ws_index_handler, .user_ctx = NULL};
+#endif
     httpd_uri_t health_uri = {
         .uri = "/healthz", .method = HTTP_GET, .handler = psi_ws_health_handler, .user_ctx = NULL};
+#if PSI_GPIO_INTROSPECTION
+    httpd_uri_t gpio_uri = {
+        .uri = "/gpio", .method = HTTP_GET, .handler = psi_ws_gpio_handler, .user_ctx = NULL};
+#endif
     httpd_uri_t ws_uri = {
         .uri = "/ws",
         .method = HTTP_GET,
@@ -447,8 +481,13 @@ void psi_ws_server_start(void) {
         ESP_LOGE(TAG, "httpd_start failed");
         return;
     }
+#if PSI_INCLUDE_SPA
     httpd_register_uri_handler(server, &index_uri);
+#endif
     httpd_register_uri_handler(server, &health_uri);
+#if PSI_GPIO_INTROSPECTION
+    httpd_register_uri_handler(server, &gpio_uri);
+#endif
     httpd_register_uri_handler(server, &ws_uri);
     ESP_LOGI(TAG, "psi web chat ready on port 80");
 }
