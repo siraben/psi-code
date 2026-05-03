@@ -23,6 +23,7 @@ local context = require("psi.context")
 local prelude = require("psi.prelude")
 local provider_loop = require("psi.provider_loop")
 local sched = require("psi.sched")
+local stream_parser = require("psi.stream_parser")
 local transform = require("psi.transform_messages")
 local tools = require("psi.tools")
 local session_mod = require("psi.session_manager")
@@ -133,7 +134,7 @@ local function tool_result_block(msg)
   -- accepts either a string or an array. Concatenate text blocks with
   -- "\n" (matches pi) and strip surrogates so the on-wire body is
   -- always valid UTF-8.
-  local parts = {}
+  local parts = prelude.array(#(msg.content or {}))
   if type(msg.content) == "table" then
     for _, b in ipairs(msg.content) do
       if type(b) == "table" and b.type == "text" and type(b.text) == "string" then
@@ -161,189 +162,54 @@ end
 --     inserted right before the next user message.
 --   * Consecutive tool-result entries are coalesced into one user message.
 local function build_api_messages(session)
-  local out = {}
-  local pending_tool_calls = {} -- tool_use blocks awaiting results
-  local seen_result_ids = {} -- tool_use_ids already paired
-  -- Every tool_use id we have ever emitted on an assistant message
-  -- (across the whole build, not just the current pending set). Used
-  -- to drop orphan tool_result blocks whose tool_use was compacted
-  -- away: Anthropic rejects those with 400 "unexpected tool_use_id
-  -- found in tool_result blocks". Defence-in-depth alongside
-  -- session.do_compact's cut-point snap — a stale session loaded
-  -- from an older psi that lacked the snap still serialises cleanly.
-  local known_tool_use_ids = {}
-
-  local function flush_synthetic_results()
-    if #pending_tool_calls == 0 then
-      return
-    end
-    local blocks = prelude.as_array({})
-    for _, tc in ipairs(pending_tool_calls) do
-      if not seen_result_ids[tc.id] then
+  local out = prelude.array(#session)
+  transform.replay_session(session, {
+    user = function(message)
+      out[#out + 1] = { role = "user", content = pi_content_to_anthropic(message.content) }
+    end,
+    assistant = function(message)
+      local pending = prelude.array(#(message.content or {}))
+      out[#out + 1] = {
+        role = "assistant",
+        content = pi_content_to_anthropic(message.content),
+      }
+      for _, block in ipairs(message.content or {}) do
+        if type(block) == "table" and block.type == "toolCall" then
+          pending[#pending + 1] = { id = block.id, name = block.name }
+        end
+      end
+      return pending
+    end,
+    tool_result = function(message)
+      local block = tool_result_block(message)
+      return block.tool_use_id, block
+    end,
+    tool_results = function(blocks)
+      out[#out + 1] = { role = "user", content = prelude.as_array(blocks) }
+    end,
+    synthetic_tool_results = function(calls)
+      local blocks = prelude.array(#calls)
+      for _, call in ipairs(calls) do
         blocks[#blocks + 1] = {
           type = "tool_result",
-          tool_use_id = tc.id,
+          tool_use_id = call.id,
           content = "No result provided",
           is_error = true,
         }
       end
-    end
-    if #blocks > 0 then
-      out[#out + 1] = { role = "user", content = blocks }
-    end
-    pending_tool_calls = {}
-    seen_result_ids = {}
-  end
-
-  local i, n = 1, #session
-  while i <= n do
-    local m = session[i]
-    local message, body = transform.message_body(m)
-    local role = m.role
-
-    if role == "assistant" and message then
-      if transform.skip_assistant(message) then
-        -- Skip entirely; any tool_use blocks here were never dispatched
-        -- and are paired with synthetic results below when a user turn
-        -- arrives. (No need to track them in pending_tool_calls since
-        -- the aborted assistant itself is invisible to the API.)
-        i = i + 1
-      else
-        flush_synthetic_results()
-        local content = pi_content_to_anthropic(message.content)
-        out[#out + 1] = { role = "assistant", content = content }
-        -- Track tool_use blocks for orphan detection on next iteration.
-        pending_tool_calls = {}
-        seen_result_ids = {}
-        if type(message.content) == "table" then
-          for _, b in ipairs(message.content) do
-            if type(b) == "table" and b.type == "toolCall" then
-              pending_tool_calls[#pending_tool_calls + 1] = { id = b.id, name = b.name }
-              if b.id ~= nil and b.id ~= "" then
-                known_tool_use_ids[b.id] = true
-              end
-            end
-          end
-        end
-        i = i + 1
-      end
-    elseif role == "user" and message then
-      flush_synthetic_results()
-      out[#out + 1] = { role = "user", content = pi_content_to_anthropic(message.content) }
-      i = i + 1
-    elseif role == "tool-result" then
-      local blocks = prelude.as_array({})
-      while i <= n and session[i].role == "tool-result" do
-        local b = safe_decode(session[i].data)
-        if type(b) == "table" and type(b.message) == "table" then
-          local tr = tool_result_block(b.message)
-          -- Drop orphan tool_results: those whose tool_use_id was
-          -- never emitted on a preceding assistant message (usually
-          -- because compaction trimmed the tool_use away). Serialising
-          -- the block anyway would 400 the wire request. Matches pi's
-          -- compaction-layer guarantee; belt + braces here.
-          if tr.tool_use_id ~= "" and known_tool_use_ids[tr.tool_use_id] then
-            blocks[#blocks + 1] = tr
-            seen_result_ids[tr.tool_use_id] = true
-          end
-        end
-        i = i + 1
-      end
-      if #blocks > 0 then
-        out[#out + 1] = { role = "user", content = blocks }
-      end
-    elseif role == "compaction-summary" then
-      flush_synthetic_results()
-      local summary = (type(body) == "table" and body.summary) or m.text or ""
+      out[#out + 1] = { role = "user", content = prelude.as_array(blocks) }
+    end,
+    compaction_summary = function(summary)
       out[#out + 1] = { role = "user", content = summary }
-      i = i + 1
-    elseif
-      role == "custom"
-      and type(body) == "table"
-      and body.__entry_type == "custom_message"
-      and type(body.message) == "table"
-      and not body.message.hidden
-    then
-      flush_synthetic_results()
+    end,
+    custom_message = function(message)
       out[#out + 1] = {
-        role = body.message.role == "assistant" and "assistant" or "user",
-        content = pi_content_to_anthropic(body.message.content),
+        role = message.role == "assistant" and "assistant" or "user",
+        content = pi_content_to_anthropic(message.content),
       }
-      i = i + 1
-    else
-      i = i + 1
-    end
-  end
-  flush_synthetic_results()
+    end,
+  })
   return prelude.as_array(out)
-end
-
--- ---------- SSE parser ----------
-
--- Feed stream buffer, call on_event(event_type, data_table) for each
--- complete event, return leftover bytes that didn't form a full event.
---
--- `carry` holds parser state that MUST persist across chunk
--- boundaries: `event` (the most recent `event: X` line) and `data`
--- (the most recent `data: Y` line). A blank line finalises them.
---
--- Previously these lived as sse_feed's own locals and were reset on
--- every chunk. If a libcurl chunk ended after `data: {...}\n` but
--- before the `\n\n` terminator, the event was silently dropped —
--- corrupting streamed tool_use JSON and causing the agent to call
--- the tool with empty input ("missing string field: path"). TCP
--- fragmentation + large input_json_delta events made this triggerable.
--- Stateful SSE parser. Replaces the old `leftover = leftover .. chunk`
--- + sse_feed pair, which paid O(N²) in chunk count when an event
--- body was split across many small chunks (Lua strings are
--- immutable; every concat reallocates). Here we accumulate the
--- current in-flight LINE as a table, concat once per `\n`, and
--- never hold a multi-chunk `leftover` string at all.
---
--- State shape:
---   { line = {},              -- table of pending-line chunks
---     pending_event = string|nil,
---     pending_data  = string|nil }
-local function new_sse_parser()
-  return { line = {}, pending_event = nil, pending_data = nil }
-end
-
-local function sse_dispatch_line(parser, line, on_event)
-  -- Strip trailing \r for CRLF servers.
-  if line:sub(-1) == "\r" then
-    line = line:sub(1, -2)
-  end
-  if line:sub(1, 7) == "event: " then
-    parser.pending_event = line:sub(8)
-  elseif line:sub(1, 6) == "data: " then
-    parser.pending_data = line:sub(7)
-  elseif line == "" then
-    if parser.pending_event and parser.pending_data then
-      local data = safe_decode(parser.pending_data)
-      if data then
-        on_event(parser.pending_event, data)
-      end
-    end
-    parser.pending_event, parser.pending_data = nil, nil
-  end
-end
-
-local function sse_push(parser, chunk, on_event)
-  local start = 1
-  local len = #chunk
-  while start <= len do
-    local nl = chunk:find("\n", start, true)
-    if not nl then
-      -- No terminator in this chunk; stash the tail and wait for more.
-      parser.line[#parser.line + 1] = chunk:sub(start)
-      break
-    end
-    parser.line[#parser.line + 1] = chunk:sub(start, nl - 1)
-    local line = table.concat(parser.line)
-    parser.line = {}
-    sse_dispatch_line(parser, line, on_event)
-    start = nl + 1
-  end
 end
 
 -- ---------- Stream-state accumulator ----------
@@ -609,7 +475,7 @@ local function tools_with_cache(tool_specs)
   if not caching_enabled() then
     return tool_specs
   end
-  local out = prelude.as_array({})
+  local out = prelude.array(#tool_specs)
   local n = #tool_specs
   for i, t in ipairs(tool_specs) do
     local copy = {}
@@ -817,11 +683,17 @@ function M.run_turn(opts)
       }
     end,
     new_state = new_state,
-    parser_new = new_sse_parser,
+    parser_new = stream_parser.sse_parser,
     parser_push = function(parser, chunk, state, observer)
-      sse_push(parser, chunk, function(event_type, data)
-        dispatch_sse(state, event_type, data, observer)
-      end)
+      stream_parser.push_sse(parser, chunk, {
+        multi_data = true,
+        on_event = function(event_type, data)
+          local parsed = safe_decode(data)
+          if parsed then
+            dispatch_sse(state, event_type, parsed, observer)
+          end
+        end,
+      })
     end,
     finalize = finalize_blocks,
     stream_error = function(state)
@@ -855,8 +727,18 @@ end
 
 -- Exported for tests/bench.py only. Safe to drop if internal.
 M._test = {
-  new_sse_parser = new_sse_parser,
-  sse_push = sse_push,
+  new_sse_parser = stream_parser.sse_parser,
+  sse_push = function(parser, chunk, on_event)
+    stream_parser.push_sse(parser, chunk, {
+      multi_data = true,
+      on_event = function(event_type, data)
+        local parsed = safe_decode(data)
+        if parsed then
+          on_event(event_type, parsed)
+        end
+      end,
+    })
+  end,
   new_state = new_state,
   dispatch_sse = dispatch_sse,
   finalize_blocks = finalize_blocks,

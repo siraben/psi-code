@@ -5,8 +5,10 @@ local auth = require("psi.providers.oauth_openai_codex")
 local openai_compat = require("psi.providers.openai_compat")
 local prelude = require("psi.prelude")
 local provider_loop = require("psi.provider_loop")
+local sched = require("psi.sched")
 local settings = require("psi.settings_manager")
 local session_mod = require("psi.session_manager")
+local stream_parser = require("psi.stream_parser")
 local thinking = require("psi.thinking")
 local tools = require("psi.tools")
 local transform = require("psi.transform_messages")
@@ -86,10 +88,7 @@ local function split_tool_id(id)
 end
 
 local function response_input_from_session(session, _system_prompt)
-  local out = prelude.as_array({})
-  local known_tool_calls = {}
-  local pending_tool_calls = {}
-  local seen_result_ids = {}
+  local out = prelude.array(#session)
   local msg_index = 0
 
   local function user_input(text)
@@ -127,97 +126,62 @@ local function response_input_from_session(session, _system_prompt)
     }
   end
 
-  local function flush_synthetic_results()
-    for _, tc in ipairs(pending_tool_calls) do
-      if not seen_result_ids[tc.id] then
-        out[#out + 1] = tool_output(tc.id, "No result provided")
-      end
-    end
-    pending_tool_calls = {}
-    seen_result_ids = {}
-  end
-
-  local i, n = 1, #session
-  while i <= n do
-    local m = session[i]
-    local message, body = transform.message_body(m)
-    local role = m.role
-
-    if role == "user" and message then
-      flush_synthetic_results()
+  transform.replay_session(session, {
+    user = function(message)
       out[#out + 1] = user_input(transform.text_from_content(message.content))
-      i = i + 1
-    elseif role == "assistant" and message then
-      if not transform.skip_assistant(message) then
-        flush_synthetic_results()
-        for _, block in ipairs(message.content or {}) do
-          if type(block) == "table" then
-            if block.type == "thinking" and type(block.thinkingSignature) == "string" then
-              local item = safe_decode(block.thinkingSignature)
-              if type(item) == "table" then
-                out[#out + 1] = item
-              end
-            elseif block.type == "text" then
-              out[#out + 1] = assistant_text(block.text or "")
-            elseif block.type == "toolCall" then
-              local call_id, item_id = split_tool_id(block.id)
-              if call_id ~= "" then
-                known_tool_calls[call_id] = true
-                pending_tool_calls[#pending_tool_calls + 1] = {
-                  id = call_id,
-                  name = block.name,
-                }
-                out[#out + 1] = {
-                  type = "function_call",
-                  id = item_id,
-                  call_id = call_id,
-                  name = block.name,
-                  arguments = psi.json_encode(block.arguments or {}),
-                }
-              end
-            end
+    end,
+    assistant = function(message)
+      local pending = prelude.array(#(message.content or {}))
+      for _, block in ipairs(message.content or {}) do
+        if type(block) == "table" and block.type == "thinking" then
+          local item = safe_decode(block.thinkingSignature)
+          if type(item) == "table" then
+            out[#out + 1] = item
+          end
+        elseif type(block) == "table" and block.type == "text" then
+          out[#out + 1] = assistant_text(block.text or "")
+        elseif type(block) == "table" and block.type == "toolCall" then
+          local call_id, item_id = split_tool_id(block.id)
+          if call_id ~= "" then
+            pending[#pending + 1] = { id = call_id, name = block.name }
+            out[#out + 1] = {
+              type = "function_call",
+              id = item_id,
+              call_id = call_id,
+              name = block.name,
+              arguments = psi.json_encode(block.arguments or {}),
+            }
           end
         end
       end
-      i = i + 1
-    elseif role == "tool-result" then
-      while i <= n and session[i].role == "tool-result" do
-        local b = safe_decode(session[i].data)
-        local tm = type(b) == "table" and b.message or nil
-        if type(tm) == "table" then
-          local call_id = split_tool_id(tm.toolCallId)
-          if call_id ~= "" and known_tool_calls[call_id] then
-            out[#out + 1] = tool_output(call_id, transform.tool_result_text(tm))
-            seen_result_ids[call_id] = true
-          end
-        end
-        i = i + 1
+      return pending
+    end,
+    tool_result = function(message)
+      local call_id = split_tool_id(message.toolCallId)
+      return call_id, tool_output(call_id, transform.tool_result_text(message))
+    end,
+    tool_results = function(messages)
+      for _, message in ipairs(messages) do
+        out[#out + 1] = message
       end
-    elseif role == "compaction-summary" then
-      flush_synthetic_results()
-      local summary = (type(body) == "table" and body.summary) or m.text or ""
+    end,
+    synthetic_tool_results = function(calls)
+      for _, call in ipairs(calls) do
+        out[#out + 1] = tool_output(call.id, "No result provided")
+      end
+    end,
+    compaction_summary = function(summary)
       out[#out + 1] = user_input(summary)
-      i = i + 1
-    elseif
-      role == "custom"
-      and type(body) == "table"
-      and body.__entry_type == "custom_message"
-      and type(body.message) == "table"
-      and not body.message.hidden
-    then
-      flush_synthetic_results()
-      local text = transform.text_from_content(body.message.content)
-      if body.message.role == "assistant" then
+    end,
+    custom_message = function(message)
+      local text = transform.text_from_content(message.content)
+      if message.role == "assistant" then
         out[#out + 1] = assistant_text(text)
       else
         out[#out + 1] = user_input(text)
       end
-      i = i + 1
-    else
-      i = i + 1
-    end
-  end
-  flush_synthetic_results()
+    end,
+  })
   return out
 end
 
@@ -257,10 +221,6 @@ local function request_body(args)
     body.tools = args.tool_specs
   end
   return body
-end
-
-local function parser_new()
-  return { line = {}, pending = {} }
 end
 
 local function new_state()
@@ -428,49 +388,17 @@ local function handle_event(data, state, observer)
   end
 end
 
-local function dispatch_pending(parser, state, observer)
-  if #parser.pending == 0 then
-    return
-  end
-  local data = table.concat(parser.pending, "\n")
-  parser.pending = {}
-  if data ~= "" then
-    handle_event(data, state, observer)
-  end
-end
-
-local function push_line(parser, line, state, observer)
-  if line:sub(-1) == "\r" then
-    line = line:sub(1, -2)
-  end
-  if line == "" then
-    dispatch_pending(parser, state, observer)
-  elseif line:sub(1, 5) == "data:" then
-    local data = line:sub(6)
-    if data:sub(1, 1) == " " then
-      data = data:sub(2)
-    end
-    parser.pending[#parser.pending + 1] = data
-  end
-end
-
 local function parser_push(parser, chunk, state, observer)
-  local start = 1
-  while start <= #chunk do
-    local nl = chunk:find("\n", start, true)
-    if not nl then
-      parser.line[#parser.line + 1] = chunk:sub(start)
-      return
-    end
-    parser.line[#parser.line + 1] = chunk:sub(start, nl - 1)
-    push_line(parser, table.concat(parser.line), state, observer)
-    parser.line = {}
-    start = nl + 1
-  end
+  stream_parser.push_sse(parser, chunk, {
+    multi_data = true,
+    on_event = function(_, data)
+      handle_event(data, state, observer)
+    end,
+  })
 end
 
 local function finalize(state)
-  local tool_calls = {}
+  local tool_calls = prelude.array(#state.blocks)
   for _, b in ipairs(state.blocks) do
     if b.kind == "tool" and b.name and b.name ~= "" then
       -- Malformed arg_text → stream_error; don't dispatch with {}.
@@ -505,7 +433,7 @@ local function finalize(state)
 end
 
 local function state_text(state)
-  local out = {}
+  local out = prelude.array(#(state.blocks or {}))
   for _, b in ipairs(state.blocks or {}) do
     if b.kind == "text" then
       out[#out + 1] = block_text(b)
@@ -515,7 +443,7 @@ local function state_text(state)
 end
 
 local function persist(state, model, _content, tool_calls, stop_override, error_message)
-  local blocks = {}
+  local blocks = prelude.array(#(state.blocks or {}))
   for _, b in ipairs(state.blocks or {}) do
     if b.kind == "thinking" then
       blocks[#blocks + 1] = {
@@ -552,6 +480,33 @@ local function persist(state, model, _content, tool_calls, stop_override, error_
   end
 end
 
+local function http_post_text(url, req_headers, body, abort_check)
+  if not (sched.in_coroutine and sched.in_coroutine()) then
+    return psi.http_post(url, req_headers, body)
+  end
+
+  local handle, begin_err = psi.http_stream_begin(url, req_headers, body)
+  if handle == nil then
+    return nil, begin_err
+  end
+  local chunks = {}
+  while true do
+    if type(abort_check) == "function" and abort_check() then
+      psi.http_stream_finish(handle)
+      return nil, "aborted"
+    end
+    local chunk, done = sched.http_poll(handle, 50)
+    if chunk ~= nil then
+      chunks[#chunks + 1] = chunk
+    end
+    if done then
+      break
+    end
+  end
+  local status = psi.http_stream_finish(handle)
+  return status, table.concat(chunks)
+end
+
 function M.run_turn(opts)
   local creds, err = auth.credentials()
   if not creds then
@@ -581,7 +536,7 @@ function M.run_turn(opts)
       return response_input_from_session(session, system_prompt)
     end,
     request_body = request_body,
-    parser_new = parser_new,
+    parser_new = stream_parser.sse_parser,
     parser_push = parser_push,
     new_state = new_state,
     finalize = finalize,
@@ -632,7 +587,8 @@ function M.complete_text(opts)
   })
   body.stream = false
   body.tools = nil
-  local status, response = psi.http_post(api_url(), headers(creds), psi.json_encode(body))
+  local status, response =
+    http_post_text(api_url(), headers(creds), psi.json_encode(body), opts.abort_check)
   if not status or status < 200 or status >= 300 then
     io.stderr:write(
       "openai-codex request failed: " .. tostring(status) .. " " .. tostring(response) .. "\n"
@@ -661,7 +617,7 @@ M._debug = {
   request_body = request_body,
   handle_event = handle_event,
   new_state = new_state,
-  parser_new = parser_new,
+  parser_new = stream_parser.sse_parser,
   parser_push = parser_push,
   finalize = finalize,
   classify_http_error = openai_compat.classify_http_error,

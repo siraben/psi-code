@@ -551,7 +551,9 @@ local function write_session_file(path, header, messages, count)
   -- truncated session log. The host primitive caps content at 16 MiB;
   -- larger sessions fall through to the streamed writer below.
   if psi.file_write_atomic then
-    local parts = { psi.json_encode(header), "\n" }
+    local parts = prelude.array(n * 2 + 2)
+    parts[#parts + 1] = psi.json_encode(header)
+    parts[#parts + 1] = "\n"
     for i = 1, n do
       parts[#parts + 1] = psi.json_encode(to_disk_entry(messages[i]))
       parts[#parts + 1] = "\n"
@@ -589,7 +591,7 @@ end
 -- The full delta goes out as one fwrite; psi.file_append fsyncs
 -- before close, so a successful return means it's on disk.
 local function append_session_file(path, messages)
-  local parts = {}
+  local parts = prelude.array(#messages * 2)
   for i = 1, #messages do
     parts[#parts + 1] = psi.json_encode(to_disk_entry(messages[i]))
     parts[#parts + 1] = "\n"

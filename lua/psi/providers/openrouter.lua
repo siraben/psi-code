@@ -11,6 +11,7 @@
 
 local compat = require("psi.providers.openai_compat")
 local prelude = require("psi.prelude")
+local stream_parser = require("psi.stream_parser")
 
 local M = {}
 
@@ -159,44 +160,13 @@ local function handle_event(data, state, observer)
   end
 end
 
-local function parser_new()
-  return { line = {}, pending_data = nil }
-end
-
-local function dispatch_sse_line(parser, line, state, observer)
-  if line:sub(-1) == "\r" then
-    line = line:sub(1, -2)
-  end
-  if line:sub(1, 5) == "data:" then
-    local data = line:sub(6)
-    if data:sub(1, 1) == " " then
-      data = data:sub(2)
-    end
-    parser.pending_data = data
-  elseif line == "" then
-    if parser.pending_data ~= nil then
-      handle_event(parser.pending_data, state, observer)
-      parser.pending_data = nil
-    end
-  end
-  -- `event:` / `:comment` / `id:` / `retry:` lines are ignored.
-end
-
 local function parser_push(parser, chunk, state, observer)
-  local start = 1
-  local len = #chunk
-  while start <= len do
-    local nl = chunk:find("\n", start, true)
-    if not nl then
-      parser.line[#parser.line + 1] = chunk:sub(start)
-      break
-    end
-    parser.line[#parser.line + 1] = chunk:sub(start, nl - 1)
-    local line = table.concat(parser.line)
-    parser.line = {}
-    dispatch_sse_line(parser, line, state, observer)
-    start = nl + 1
-  end
+  stream_parser.push_sse(parser, chunk, {
+    multi_data = true,
+    on_event = function(_, data)
+      handle_event(data, state, observer)
+    end,
+  })
 end
 
 local function finalize_tool_calls(state)
@@ -258,7 +228,7 @@ local function make_config(model)
       return body
     end,
 
-    parser_new = parser_new,
+    parser_new = stream_parser.sse_parser,
     parser_push = parser_push,
     new_state = new_state,
     finalize_tool_calls = finalize_tool_calls,

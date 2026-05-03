@@ -267,14 +267,17 @@ function M.run_compact(opts)
   local provider, resolved = pick_provider(M.current_model(opts.model))
   local thinking_level = M.thinking_level_for(resolved, opts.thinking_level, opts.reasoning_effort)
   local request = prompt.compaction_request(keep_recent)
-  local ok, summary = provider.complete_text({
-    system_prompt = request[1],
-    user_text = request[2],
-    model = resolved.id,
-    max_tokens = context.compaction_budget(),
-    thinking_level = thinking_level,
-    reasoning_effort = M.current_reasoning_effort(opts.reasoning_effort),
-  })
+  local ok, summary = sched.run(function()
+    return provider.complete_text({
+      system_prompt = request[1],
+      user_text = request[2],
+      model = resolved.id,
+      max_tokens = context.compaction_budget(),
+      thinking_level = thinking_level,
+      reasoning_effort = M.current_reasoning_effort(opts.reasoning_effort),
+      abort_check = opts.abort_check,
+    })
+  end)
   if not ok then
     return false
   end

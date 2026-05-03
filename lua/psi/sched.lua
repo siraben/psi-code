@@ -17,6 +17,7 @@
 -- and resumes. Same Lua code, two drivers.
 
 local M = {}
+local prelude = require("psi.prelude")
 
 -- The TUI (or any other host) can install a per-resume hook that
 -- advances its own state one step. The default is a no-op (print/
@@ -164,7 +165,7 @@ end
 
 function M.run_all(fns, opts)
   opts = opts or {}
-  local tasks = {}
+  local tasks = prelude.array(#fns)
   for i, fn in ipairs(fns) do
     tasks[i] = {
       co = coroutine.create(fn),
@@ -191,7 +192,8 @@ function M.run_all(fns, opts)
             opts.on_done(i, { ok = false, error = t.error_msg })
           end
         elseif coroutine.status(t.co) == "dead" then
-          local vals = { n = res.n - 1 }
+          local vals = prelude.array(res.n - 1, 1)
+          vals.n = res.n - 1
           for j = 2, res.n do
             vals[j - 1] = res[j]
           end
@@ -240,7 +242,7 @@ function M.run_all(fns, opts)
     end
   end
 
-  local out = {}
+  local out = prelude.array(#tasks)
   for i, t in ipairs(tasks) do
     if t.ok then
       out[i] = { ok = true, values = t.values }

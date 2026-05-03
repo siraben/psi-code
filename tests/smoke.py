@@ -1584,6 +1584,24 @@ def t_providers_openai_codex_parser(psi: Psi):
                   "OpenAI Codex parser handles text, usage, and errors without unsupported caps")
 
 
+@test("providers/shared_sse_parser")
+def t_providers_shared_sse_parser(psi: Psi):
+    out = psi.eval(
+        'local a = require("psi.providers.anthropic")._test\n'
+        + 'local p = a.new_sse_parser()\n'
+        + 'local seen = {}\n'
+        + 'a.sse_push(p, "event: message_delta\\ndata: {\\"type\\":\\n", function(ev, data)\n'
+        + '  seen[#seen + 1] = ev .. ":" .. tostring(data.type)\n'
+        + 'end)\n'
+        + 'a.sse_push(p, "data: \\"message_delta\\"}\\n\\n", function(ev, data)\n'
+        + '  seen[#seen + 1] = ev .. ":" .. tostring(data.type)\n'
+        + 'end)\n'
+        + 'return table.concat(seen, "|")'
+    )
+    assert_equals(out, "message_delta:message_delta",
+                  "shared SSE parser preserves state and joins data lines")
+
+
 @test("providers/openai_codex_unresolved_tool_call")
 def t_providers_openai_codex_unresolved_tool_call(psi: Psi):
     out = psi.eval(

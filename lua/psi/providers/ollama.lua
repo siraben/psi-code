@@ -8,6 +8,7 @@
 
 local compat = require("psi.providers.openai_compat")
 local prelude = require("psi.prelude")
+local stream_parser = require("psi.stream_parser")
 
 local M = {}
 
@@ -116,30 +117,12 @@ local function handle_line(line, state, observer)
   end
 end
 
-local function parser_new()
-  return { line = {} }
-end
-
 local function parser_push(parser, chunk, state, observer)
-  local start = 1
-  local len = #chunk
-  while start <= len do
-    local nl = chunk:find("\n", start, true)
-    if not nl then
-      parser.line[#parser.line + 1] = chunk:sub(start)
-      break
-    end
-    parser.line[#parser.line + 1] = chunk:sub(start, nl - 1)
-    local line = table.concat(parser.line)
-    parser.line = {}
-    if line:sub(-1) == "\r" then
-      line = line:sub(1, -2)
-    end
+  stream_parser.push_lines(parser, chunk, function(line)
     if #line > 0 then
       handle_line(line, state, observer)
     end
-    start = nl + 1
-  end
+  end)
 end
 
 local function finalize_tool_calls(state)
@@ -170,7 +153,7 @@ local function make_config(model)
       return body
     end,
 
-    parser_new = parser_new,
+    parser_new = stream_parser.line_parser,
     parser_push = parser_push,
     new_state = new_state,
     finalize_tool_calls = finalize_tool_calls,

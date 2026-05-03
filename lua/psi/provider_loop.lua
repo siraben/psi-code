@@ -7,6 +7,7 @@
 
 local context = require("psi.context")
 local control = require("psi.agent_control")
+local prelude = require("psi.prelude")
 local transform = require("psi.transform_messages")
 local session_mod = require("psi.session_manager")
 
@@ -147,7 +148,7 @@ local function dispatch_tools(tool_calls, observer, abort_check)
       cursor = cursor + 1
     else
       local start = cursor
-      local tasks = {}
+      local tasks = prelude.array(#tool_calls - cursor + 1)
       while
         cursor <= #tool_calls and tool_execution_mode(tool_calls[cursor].name) ~= "sequential"
       do

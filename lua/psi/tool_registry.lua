@@ -206,7 +206,7 @@ function M.optional_boolean(input, key, default)
     return true
   end
   if v == false then
-    return default
+    return false
   end
   return default
 end

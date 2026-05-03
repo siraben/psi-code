@@ -16,6 +16,7 @@ local prelude = require("psi.prelude")
 local keybindings = require("psi.keybindings")
 local session = require("psi.session_manager")
 local thinking = require("psi.thinking")
+local clipboard = require("psi.clipboard")
 
 local M = {}
 
@@ -117,11 +118,7 @@ local function cmd_thinking(rest)
 end
 
 local function copy_auth_url(url)
-  local ok, osc52 = pcall(require, "psi.extensions.osc52_clipboard")
-  if not ok or type(osc52) ~= "table" or type(osc52.write_clipboard) ~= "function" then
-    return false
-  end
-  local copied = osc52.write_clipboard(url, { source = "openai-codex-login" })
+  local copied = clipboard.write_osc52(url, { source = "openai-codex-login" })
   return copied and true or false
 end
 
@@ -187,13 +184,6 @@ end
 
 -- ---------- clipboard (/copy) ----------
 
-local CLIPBOARD_CMDS = {
-  "xclip -selection clipboard",
-  "pbcopy",
-  "wl-copy",
-  "xsel --clipboard --input",
-}
-
 local function last_assistant_text()
   local last = last_assistant_summary()
   if not last then
@@ -210,29 +200,12 @@ local function last_assistant_text()
   return text
 end
 
-local function copy_to_clipboard(text)
-  for _, cmd in ipairs(CLIPBOARD_CMDS) do
-    local handle = io.popen(cmd .. " 2>/dev/null", "w")
-    if handle then
-      local ok_write = pcall(function()
-        handle:write(text)
-        handle:flush()
-      end)
-      local ok_close, _, rc = handle:close()
-      if ok_write and ok_close and (rc == nil or rc == 0) then
-        return true, cmd:match("^(%S+)")
-      end
-    end
-  end
-  return false
-end
-
 local function cmd_copy()
   local text = last_assistant_text()
   if not text or text == "" then
     return records.new_command_action("print", "no assistant message to copy")
   end
-  local ok, tool = copy_to_clipboard(text)
+  local ok, tool = clipboard.write(text, { source = "slash-copy" })
   if ok then
     return records.new_command_action("print", string.format("copied %d chars via %s", #text, tool))
   end

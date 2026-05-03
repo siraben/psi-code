@@ -914,7 +914,7 @@ local function style_line(line)
 end
 
 local function build_render_window(state, first_line, count)
-  local lines = {}
+  local lines = prelude.array(count)
   local pos = 0
   local last_line = first_line + count - 1
 
@@ -1056,7 +1056,7 @@ local function redraw(state)
   local status_arg
   local status_text = ""
   local cwd
-  local frame = {}
+  local frame = prelude.array(state.height)
   local frame_width
 
   state.scroll_offset = clamp(state.scroll_offset, 0, max_scroll)
@@ -2071,6 +2071,7 @@ local function run_compact(state, keep_recent)
       max_tokens = state.opts.max_tokens,
       thinking_level = state.opts.thinking_level,
       reasoning_effort = state.opts.reasoning_effort,
+      abort_check = psi.is_aborted,
     })
   end, debug.traceback)
 

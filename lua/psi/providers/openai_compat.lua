@@ -150,125 +150,68 @@ end
 function M.build_api_messages(session, system_prompt, cfg)
   local tool_result_message = cfg.tool_result_message
   local assistant_tool_call = cfg.assistant_tool_call
-  local out = {}
+  local out = prelude.array(#session + 1)
   if system_prompt and system_prompt ~= "" then
     out[#out + 1] = { role = "system", content = system_prompt }
   end
-
-  local pending_tool_calls = {}
-  local seen_result_ids = {}
-  -- Every tool_call id that has ever been emitted on an assistant
-  -- message so far. Used to drop orphan tool-result entries whose
-  -- matching tool_call was compacted away. See anthropic.lua for the
-  -- same defence and session.do_compact for the cut-point snap that
-  -- prevents the orphan from happening in the first place.
-  local known_tool_use_ids = {}
-
-  local function flush_synthetic_results()
-    for _, tc in ipairs(pending_tool_calls) do
-      if not seen_result_ids[tc.id] then
-        out[#out + 1] = tool_result_message(tc.id, tc.name, "No result provided")
-      end
-    end
-    pending_tool_calls = {}
-    seen_result_ids = {}
-  end
-
-  local i, n = 1, #session
-  while i <= n do
-    local m = session[i]
-    local message, body = transform.message_body(m)
-    local role = m.role
-
-    if role == "user" and message then
-      flush_synthetic_results()
+  transform.replay_session(session, {
+    user = function(message)
       out[#out + 1] = { role = "user", content = transform.text_from_content(message.content) }
-      i = i + 1
-    elseif role == "assistant" and message then
-      if transform.skip_assistant(message) then
-        i = i + 1
-      else
-        flush_synthetic_results()
-        local text = transform.text_from_content(message.content)
-        local tool_calls = nil
-        for _, b in ipairs(message.content or {}) do
-          if type(b) == "table" then
-            if b.type == "toolCall" then
-              tool_calls = tool_calls or {}
-              tool_calls[#tool_calls + 1] = assistant_tool_call(b)
-            end
-          end
+    end,
+    assistant = function(message)
+      local tool_calls = nil
+      local pending = prelude.array(#(message.content or {}))
+      for _, block in ipairs(message.content or {}) do
+        if type(block) == "table" and block.type == "toolCall" then
+          tool_calls = tool_calls or prelude.array(1)
+          local wire_call = assistant_tool_call(block)
+          tool_calls[#tool_calls + 1] = wire_call
+          pending[#pending + 1] = { id = wire_call.id, name = wire_call["function"].name }
         end
-        local entry = { role = "assistant" }
-        if text ~= "" then
-          entry.content = text
-        end
-        if tool_calls then
-          entry.tool_calls = tool_calls
-        end
-        out[#out + 1] = entry
-
-        pending_tool_calls = {}
-        seen_result_ids = {}
-        if tool_calls then
-          for _, tc in ipairs(tool_calls) do
-            pending_tool_calls[#pending_tool_calls + 1] = { id = tc.id, name = tc["function"].name }
-            if tc.id ~= nil and tc.id ~= "" then
-              known_tool_use_ids[tc.id] = true
-            end
-          end
-        end
-        i = i + 1
       end
-    elseif role == "tool-result" then
-      while i <= n and session[i].role == "tool-result" do
-        local b = safe_decode(session[i].data)
-        if type(b) == "table" and type(b.message) == "table" then
-          local tm = b.message
-          local text = transform.tool_result_text(tm)
-          local tid = tm.toolCallId or ""
-          -- Skip orphans: a tool-result whose tool_call was compacted
-          -- away (never emitted on a preceding assistant message).
-          -- Serialising it would trip the OpenAI-compat server with
-          -- "tool_call_id not found" or similar.
-          if tid ~= "" and known_tool_use_ids[tid] then
-            out[#out + 1] = tool_result_message(tid, tm.toolName or "", text)
-            seen_result_ids[tid] = true
-          end
-        end
-        i = i + 1
+      local entry = { role = "assistant" }
+      local text = transform.text_from_content(message.content)
+      if text ~= "" then
+        entry.content = text
       end
-    elseif role == "compaction-summary" then
-      flush_synthetic_results()
-      local summary = (type(body) == "table" and body.summary) or m.text or ""
+      if tool_calls then
+        entry.tool_calls = tool_calls
+      end
+      out[#out + 1] = entry
+      return pending
+    end,
+    tool_result = function(message)
+      local id = message.toolCallId or ""
+      return id,
+        tool_result_message(id, message.toolName or "", transform.tool_result_text(message))
+    end,
+    tool_results = function(messages)
+      for _, message in ipairs(messages) do
+        out[#out + 1] = message
+      end
+    end,
+    synthetic_tool_results = function(calls)
+      for _, call in ipairs(calls) do
+        out[#out + 1] = tool_result_message(call.id, call.name, "No result provided")
+      end
+    end,
+    compaction_summary = function(summary)
       out[#out + 1] = { role = "user", content = summary }
-      i = i + 1
-    elseif
-      role == "custom"
-      and type(body) == "table"
-      and body.__entry_type == "custom_message"
-      and type(body.message) == "table"
-      and not body.message.hidden
-    then
-      flush_synthetic_results()
-      local text = transform.text_from_content(body.message.content)
+    end,
+    custom_message = function(message)
       out[#out + 1] = {
-        role = body.message.role == "assistant" and "assistant" or "user",
-        content = text,
+        role = message.role == "assistant" and "assistant" or "user",
+        content = transform.text_from_content(message.content),
       }
-      i = i + 1
-    else
-      i = i + 1
-    end
-  end
-  flush_synthetic_results()
+    end,
+  })
   return prelude.as_array(out)
 end
 
 -- ---------- Persist assistant + tool_calls in v2 session shape ----------
 
 function M.persist_assistant(state, model, _content, tool_calls, cfg, stop_override, error_message)
-  local blocks = {}
+  local blocks = prelude.array(#tool_calls + 2)
   -- Reasoning-model thinking (Qwen3, DeepSeek-R1, …) arrives via a
   -- separate field on the wire and is accumulated by the provider's
   -- parser into state.thinking. Persist it as a thinking block so
