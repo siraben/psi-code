@@ -52,12 +52,15 @@
 
         # Target-arch libraries for building psi.  Parameterized by
         # package set so cross/static/i686 variants get the right libs.
-        buildDeps = p: [
+        # curlPkg/luaPkg allow cross-toolchain variants (e.g. Fil-C)
+        # to substitute deps that can't be built with the default
+        # overrides for that package set.
+        buildDeps = { p, curlPkg ? curlWithMbedtls p, luaPkg ? luaFor p }: [
           p.argtable
           p.cjson
-          (curlWithMbedtls p)
+          curlPkg
           p.libedit
-          (luaFor p)
+          luaPkg
           p.zlib
         ];
 
@@ -82,7 +85,7 @@
         mkApp = { name, description, extraInputs ? [], text }: let
           script = pkgs.writeShellApplication {
             inherit name text;
-            runtimeInputs = buildTools ++ buildDeps pkgs ++ extraInputs;
+            runtimeInputs = buildTools ++ buildDeps { p = pkgs; } ++ extraInputs;
           };
         in {
           type = "app";
@@ -106,7 +109,8 @@
         # glibc cannot be fully statically linked in general (NSS
         # modules, dlopen).
 
-        mkPsi = { p, static ? false, extraMakeFlags ? [], extraNativeBuildInputs ? [], curlOverride ? null }:
+        mkPsi = { p, static ? false, extraMakeFlags ? [], extraNativeBuildInputs ? [],
+                   deps ? buildDeps { inherit p; } }:
           let
             # When cross-compiling, embed (the host helper that bakes
             # Lua/doc files into a .c) must run on the build machine, so
@@ -131,26 +135,7 @@
             ]
             ++ extraNativeBuildInputs;
 
-          buildInputs = if curlOverride != null then [
-            p.argtable p.cjson curlOverride p.libedit
-            # filnix's nixpkgs fork predates lua5_5; override lua5_4.
-            (p.lua5_4.overrideAttrs (old: {
-              version = "5.5.0";
-              src = p.fetchurl {
-                url = "https://www.lua.org/ftp/lua-5.5.0.tar.gz";
-                hash = "sha256-V8zDK7vQBcq3W8xSREBSU1r2kXiduiuQFtXFBkDWiz0=";
-              };
-              makeFlags = [
-                "INSTALL_TOP=$(out)"
-                "INSTALL_MAN=$(out)/share/man/man1"
-                "R=5.5.0" "V=5.5" "PLAT=linux"
-                "CC=${p.stdenv.cc.targetPrefix}cc"
-                "RANLIB=${p.stdenv.cc.targetPrefix}ranlib"
-                "MYLIBS=" "LDFLAGS=-fPIC"
-              ];
-            }))
-            p.zlib
-          ] else buildDeps p;
+          buildInputs = deps;
 
           makeFlags = [
             "CC=${p.stdenv.cc.targetPrefix}cc"
@@ -358,9 +343,30 @@
         # the nixpkgs cacert bundle.
         packages.psi-filc = let
           pkgsFilc = filnix.legacyPackages.${system}.pkgsFilc;
+          # filnix's nixpkgs fork predates lua5_5; override lua5_4.
+          filcLua55 = pkgsFilc.lua5_4.overrideAttrs (old: {
+            version = "5.5.0";
+            src = pkgsFilc.fetchurl {
+              url = "https://www.lua.org/ftp/lua-5.5.0.tar.gz";
+              hash = "sha256-V8zDK7vQBcq3W8xSREBSU1r2kXiduiuQFtXFBkDWiz0=";
+            };
+            makeFlags = [
+              "INSTALL_TOP=$(out)" "INSTALL_MAN=$(out)/share/man/man1"
+              "R=5.5.0" "V=5.5" "PLAT=linux"
+              "CC=${pkgsFilc.stdenv.cc.targetPrefix}cc"
+              "RANLIB=${pkgsFilc.stdenv.cc.targetPrefix}ranlib"
+              "MYLIBS=" "LDFLAGS=-fPIC"
+            ];
+          });
         in (mkPsi {
           p = pkgsFilc;
-          curlOverride = pkgsFilc.curl;
+          # Stock filnix curl (openssl); mbedtls tests SIGTRAP under fil-c.
+          # Lua 5.5 isn't in filnix's nixpkgs yet, so override lua5_4.
+          deps = buildDeps {
+            p = pkgsFilc;
+            curlPkg = pkgsFilc.curl;
+            luaPkg = filcLua55;
+          };
           extraNativeBuildInputs = [ pkgs.makeWrapper ];
         }).overrideAttrs (old: {
           postFixup = (old.postFixup or "") + ''
@@ -442,7 +448,7 @@
         # ---- Dev shells -------------------------------------------------
 
         devShells.compcert = pkgs.mkShell {
-          packages = buildTools ++ buildDeps pkgs ++ [
+          packages = buildTools ++ buildDeps { p = pkgs; } ++ [
             pkgs.compcert
             pkgs.gcc
           ];
@@ -450,7 +456,7 @@
         };
 
         devShells.default = pkgs.mkShell {
-          packages = buildTools ++ buildDeps pkgs ++ [
+          packages = buildTools ++ buildDeps { p = pkgs; } ++ [
             pkgs.clang
             pkgs.clang-tools
             pkgs.cppcheck
