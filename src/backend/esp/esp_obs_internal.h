@@ -41,4 +41,14 @@ char *psi_esp_forth_build_system_prompt(void);
  * the function returns NULL. Used by the forth_eval tool. */
 int psi_esp_forth_eval(const char *code, char **out);
 
+/* NimBLE bring-up. Idempotent — safe to call from multiple tools.
+ * Returns 0 on success, -1 on init/sync failure (logged). */
+int psi_esp_ble_init(void);
+
+/* GAP discovery scan. Blocks for `duration_ms` (clamped 500–10000)
+ * collecting up to `max_results` unique devices. Returns a malloc'd
+ * JSON string {count, devices[{addr, rssi, addr_type, name?}], ...}.
+ * NULL on failure. Used by the ble_scan tool. */
+char *psi_esp_ble_scan_json(int duration_ms, int max_results);
+
 #endif

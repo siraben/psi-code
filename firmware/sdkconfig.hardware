@@ -35,3 +35,14 @@ CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=n
 # Reverts the QEMU build's mbedTLS-via-PSRAM allocation; on internal
 # heap mbedtls allocates from the regular pool.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=n
+
+# Bluetooth: enable the BT controller in BLE-only mode and bring up
+# NimBLE as the host. Bluedroid stays off — NimBLE is half the size
+# and what psi's ble_scan tool talks to. Coexists with WiFi via the
+# BT/WiFi coexistence layer that ESP-IDF includes by default.
+CONFIG_BT_ENABLED=y
+CONFIG_BTDM_CTRL_MODE_BLE_ONLY=y
+CONFIG_BTDM_CTRL_MODE_BR_EDR_ONLY=n
+CONFIG_BTDM_CTRL_MODE_BTDM=n
+CONFIG_BT_BLUEDROID_ENABLED=n
+CONFIG_BT_NIMBLE_ENABLED=y

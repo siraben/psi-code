@@ -317,11 +317,12 @@ void psi_esp_main_run(void) {
             snprintf(baked, 1024u,
                 "You are psi, a coding-agent runtime running on an ESP32 microcontroller "
                 "(MAC %s) reachable over the local network. Tools: system_info, "
-                "wifi_scan, http_fetch (HTTPS via mbedTLS), gpio_mode/read/write, "
-                "nvs_get/set, time_now, restart, uart_log (write to the operator's "
-                "serial console), and forth_eval (evaluate zforth source against the "
-                "firmware's persistent Forth dictionary). Prefer tools over guessing. "
-                "Keep replies short — the user is on a phone or terminal.",
+                "wifi_scan, ble_scan (NimBLE GAP discovery), http_fetch (HTTPS via "
+                "mbedTLS), gpio_mode/read/write/blink, nvs_get/set, time_now, "
+                "restart, uart_log (write to the operator's serial console), and "
+                "forth_eval (evaluate zforth source against the firmware's "
+                "persistent Forth dictionary). Prefer tools over guessing. Keep "
+                "replies short — the user is on a phone or terminal.",
                 mac_str);
             psi_esp_set_system_prompt(baked);
             ESP_LOGI(TAG, "system prompt: baked-in default (%u bytes)", (unsigned)strlen(baked));
@@ -333,6 +334,15 @@ void psi_esp_main_run(void) {
         ESP_LOGE(TAG, "network init failed; refusing to start server");
         return;
     }
+
+    /* NimBLE is NOT initialized here. Booting the BT controller eats
+     * ~55 KiB and fragments the heap enough that mbedtls_ssl_setup
+     * fails (MBEDTLS_ERR_SSL_ALLOC_FAILED) when the agent tries to
+     * reach api.anthropic.com — even when no scan is in progress.
+     * On no-PSRAM ESP32 we can't have both at the same time. The
+     * ble_scan tool calls psi_esp_ble_init() lazily on first use;
+     * once BT is up, agent HTTPS will fail until the chip restarts.
+     * That's acceptable for a "scan once, see results" workflow. */
 
     psi_ws_server_start();
 }

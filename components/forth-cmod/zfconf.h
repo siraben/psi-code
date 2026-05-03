@@ -24,7 +24,11 @@ typedef int zf_int;
 typedef uint16_t zf_addr;
 #define ZF_ADDR_FMT "%04x"
 
-#define ZF_DICT_SIZE 2048
+/* 8 KiB dictionary fits zforth's bootstrap primitives + the
+ * core.zf-equivalent standard library psi loads on init + room for
+ * agent-supplied definitions. The dictionary is the only growable
+ * region; everything else is a fixed allocation. */
+#define ZF_DICT_SIZE 8192
 #define ZF_DSTACK_SIZE 32
 #define ZF_RSTACK_SIZE 32
 

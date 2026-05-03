@@ -843,6 +843,22 @@ static char *tool_wifi_scan(const cJSON *input, char **err) {
 }
 
 /* ------------------------------------------------------------------ */
+/* ble_scan — list nearby BLE advertisers via NimBLE                    */
+/* ------------------------------------------------------------------ */
+
+static char *tool_ble_scan(const cJSON *input, char **err) {
+    int duration_ms = json_int(input, "duration_ms", 3000);
+    int max_results = json_int(input, "max_results", 16);
+    char *json = psi_esp_ble_scan_json(duration_ms, max_results);
+    if (json == NULL) {
+        if (err)
+            *err = err_text("ble_scan failed (init or scan error — check serial log)");
+        return NULL;
+    }
+    return json;
+}
+
+/* ------------------------------------------------------------------ */
 /* uart_log — print to the firmware's stdout (visible on serial)        */
 /* ------------------------------------------------------------------ */
 
@@ -974,13 +990,16 @@ const struct psi_esp_tool psi_esp_tool_table[] = {
         .name = "forth_eval",
         .description = "Evaluate Forth source against the firmware's persistent "
                        "zforth dictionary. Definitions stick across calls (`: foo "
-                       "1 2 + ;` is callable next time). Output is whatever the "
-                       "Forth program writes via `tell` (a stack of (addr len) "
-                       "string emit). Useful for sequencing low-level peripheral "
-                       "pokes or building tiny custom primitives the agent can "
-                       "compose with later. Tip: `tell` and `emit` are wired up; "
-                       "`.` prints a number; named primitives in core.zf aren't "
-                       "loaded — define them inline if you need them.",
+                       "1 2 + ;` is callable next time). The standard library "
+                       "from core.zf is loaded at boot, so you have: `if / else "
+                       "/ then / fi`, `begin / again / until`, `do / loop` (must "
+                       "be inside a `:` definition — top-level do/loop doesn't "
+                       "work in zforth), `s\\\" ... \\\"` and `.\\\" ... \\\"` "
+                       "for string literals, `1+ 1- < > <= >= = != not =0 over "
+                       "+! abs negate cr space here allot variable constant`. "
+                       "Output of the program (anything written via `.`, `emit`, "
+                       "`tell`, `.\\\" ... \\\"`) is captured and returned as "
+                       "the `output` field. ZF_ABORT_NOT_A_WORD = 7.",
         .input_schema_json = "{\"type\":\"object\","
                              "\"properties\":{\"code\":{\"type\":\"string\"}},"
                              "\"required\":[\"code\"]}",
@@ -1009,6 +1028,25 @@ const struct psi_esp_tool psi_esp_tool_table[] = {
             "{\"type\":\"object\","
             "\"properties\":{\"max_results\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":32}}}",
         .handler = tool_wifi_scan,
+    },
+    {
+        .name = "ble_scan",
+        .description = "Scan for nearby BLE advertisers via NimBLE. Returns "
+                       "{count, devices[]} where each device has addr (string), "
+                       "rssi (dBm), addr_type, and name (if the advertisement "
+                       "carried one). duration_ms in [500, 10000] (default "
+                       "3000); max_results in [1, 64] (default 16). Blocking. "
+                       "Note: on this hardware (no PSRAM) the BT controller "
+                       "fragments the heap enough that subsequent agent turns "
+                       "over HTTPS will fail with ESP_ERR_HTTP_CONNECT. So this "
+                       "tool is one-shot per boot — call restart afterward to "
+                       "get HTTPS back, or finish the conversation here.",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{"
+            "\"duration_ms\":{\"type\":\"integer\",\"minimum\":500,\"maximum\":10000},"
+            "\"max_results\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":64}}}",
+        .handler = tool_ble_scan,
     },
     {
         .name = "uart_log",

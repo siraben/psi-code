@@ -78,8 +78,9 @@ static const char BODY1[] =
     "You are psi, a coding-agent runtime running on an ESP32 microcontroller "
     "(MAC ";
 static const char BODY2[] =
-    ") reachable on the local LAN. Tools: system_info, wifi_scan, http_fetch "
-    "(HTTPS via mbedTLS), gpio_mode/read/write, nvs_get/set, time_now, "
+    ") reachable on the local LAN. Tools: system_info, wifi_scan, ble_scan "
+    "(NimBLE GAP discovery, returns nearby BLE devices), http_fetch (HTTPS "
+    "via mbedTLS), gpio_mode/read/write/blink, nvs_get/set, time_now, "
     "restart, uart_log, and forth_eval (run Forth source against the "
     "firmware's persistent zforth dictionary; definitions stick). Prefer "
     "tools over guessing. Keep replies short. [prompt built by zforth]";
@@ -171,25 +172,98 @@ static const char PROMPT_FORTH[] =
 /* One-time bootstrap of the persistent zforth context. Called by
  * both the prompt builder (at boot) and forth_eval (when the agent
  * sends Forth code) — whichever wins the race installs the
- * dictionary that survives for the life of the firmware. */
+ * dictionary that survives for the life of the firmware.
+ *
+ * The standard-library subset we load below is core.zf from the
+ * upstream zforth source (zevv/zforth, MIT) with the host-syscall
+ * words trimmed (quit/sin/include/save aren't wired here) and
+ * `then` aliased to `fi` since standard ANS Forth spells it `then`.
+ * Total ~1.4 KiB compiled into the dictionary; ZF_DICT_SIZE in
+ * components/forth-cmod/zfconf.h is sized to fit this plus
+ * agent-supplied definitions. */
+static const char STDLIB_FORTH[] =
+    /* host syscalls */
+    ": emit    0 sys ;\n"
+    ": .       1 sys ;\n"
+    ": tell    2 sys ;\n"
+    /* typed memory access wrappers — variable-length cells */
+    ": !  0 !! ;\n"
+    ": @  0 @@ ;\n"
+    ": ,  0 ,, ;\n"
+    ": #  0 ## ;\n"
+    /* fixed-size jump-cell access (used by if/else/begin etc.) */
+    ": !j  64 !! ;\n"
+    ": ,j  64 ,, ;\n"
+    /* compiler state */
+    ": [ 0 compiling ! ; immediate\n"
+    ": ] 1 compiling ! ;\n"
+    ": postpone 1 _postpone ! ; immediate\n"
+    /* arithmetic + stack ergonomics */
+    ": 1+ 1 + ;\n"
+    ": 1- 1 - ;\n"
+    ": negate 0 swap - ;\n"
+    ": over 1 pick ;\n"
+    ": +!   dup @ rot + swap ! ;\n"
+    ": inc  1 swap +! ;\n"
+    ": dec  -1 swap +! ;\n"
+    /* comparison */
+    ": <    - <0 ;\n"
+    ": >    swap < ;\n"
+    ": <=   over over >r >r < r> r> = + ;\n"
+    ": >=   swap <= ;\n"
+    ": =0   0 = ;\n"
+    ": 0=   0 = ;\n"
+    ": 0<   <0 ;\n"
+    ": not  =0 ;\n"
+    ": !=   = not ;\n"
+    /* I/O conveniences */
+    ": cr    10 emit ;\n"
+    ": space 32 emit ;\n"
+    ": br    32 emit ;\n"
+    ": ..    dup . ;\n"
+    /* memory layout */
+    ": here h @ ;\n"
+    ": allot h +! ;\n"
+    ": var : ' lit , here 5 allot here swap ! 5 allot postpone ; ;\n"
+    ": const : ' lit , , postpone ; ;\n"
+    ": constant >r : r> postpone literal postpone ; ;\n"
+    ": variable >r here r> postpone , constant ;\n"
+    /* simple loops */
+    ": begin   here ; immediate\n"
+    ": again   ' jmp , , ; immediate\n"
+    ": until   ' jmp0 , , ; immediate\n"
+    /* if/else/then. zforth's core.zf calls the close `fi`; we
+     * also alias the standard ANS Forth name `then`. */
+    ": if      ' jmp0 , here 0 ,j ; immediate\n"
+    ": unless  ' not , postpone if ; immediate\n"
+    ": else    ' jmp , here 0 ,j swap here swap !j ; immediate\n"
+    ": fi      here swap !j ; immediate\n"
+    ": then    postpone fi ; immediate\n"
+    /* counted loops with i, j accessors */
+    ": i ' lit , 0 , ' pickr , ; immediate\n"
+    ": j ' lit , 2 , ' pickr , ; immediate\n"
+    ": do ' swap , ' >r , ' >r , here ; immediate\n"
+    ": loop+ ' r> , ' + , ' dup , ' >r , ' lit , 1 , ' pickr , ' >= , "
+    "' jmp0 , , ' r> , ' drop , ' r> , ' drop , ; immediate\n"
+    ": loop ' lit , 1 , postpone loop+ ; immediate\n"
+    /* abs uses if/then which we just defined */
+    ": abs dup 0< if negate then ;\n"
+    /* string literals: s\" pushes (addr len), .\" tells immediately */
+    ": s\" compiling @ if ' lits , here 0 , fi here begin key dup 34 = if drop"
+    "  compiling @ if here swap - swap ! else dup here swap - fi exit else , fi"
+    "  again ; immediate\n"
+    ": .\" compiling @ if postpone s\" ' tell , else begin key dup 34 = if drop exit"
+    "  else emit fi again fi ; immediate\n";
+
 static void forth_lazy_init(void) {
     if (g_zf_ready)
         return;
     zf_init(&g_zf_ctx, 0);
     zf_bootstrap(&g_zf_ctx);
-    /* zforth's bootstrap dictionary is just primitives (sys, +, *,
-     * dup, drop, swap, ...). The library wrappers live in core.zf
-     * which we don't bundle, so install the handful of words an
-     * agent is likely to reach for. Idempotent; redefining a word
-     * is fine. */
-    zf_eval(&g_zf_ctx,
-        ": emit  0 sys ;\n"
-        ": .     1 sys ;\n"
-        ": tell  2 sys ;\n"
-        ": cr    10 emit ;\n"
-        ": space 32 emit ;\n"
-        ": negate  0 swap - ;\n"
-        ": abs    dup 0 < if negate then ;\n");
+    zf_result rv = zf_eval(&g_zf_ctx, STDLIB_FORTH);
+    if (rv != ZF_OK) {
+        ESP_LOGW(TAG, "stdlib eval returned %d", (int)rv);
+    }
     g_zf_ready = 1;
 }
 

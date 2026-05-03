@@ -77,6 +77,7 @@ set(PSI_C_SOURCES
     "${PSI_ROOT}/src/backend/esp/esp_observer.c"
     "${PSI_ROOT}/src/backend/esp/esp_ws_server.c"
     "${PSI_ROOT}/src/backend/esp/esp_forth.c"
+    "${PSI_ROOT}/src/backend/esp/esp_ble.c"
     ${PSI_EMBED_LUA}
     ${PSI_EMBED_DOCS}
     ${PSI_EMBED_HTML}
@@ -102,6 +103,7 @@ idf_component_register(
         esp_event
         esp_eth
         esp_wifi
+        bt
         esp_http_client
         esp_http_server
         esp-tls
