@@ -1308,12 +1308,14 @@ def t_session_cwd_scoped_dirs_do_not_collide(psi: Psi):
 def t_tui_prompt_history_navigation(psi: Psi):
     out = psi.eval(
         'local rt = require("psi.tui_runtime")\n'
+        + 'local no_history = rt._debug_history_sequence({}, {"line-up"}, "")\n'
         + 'local empty = rt._debug_history_sequence({"first", "second"}, {"line-up"}, "")\n'
         + 'local draft = rt._debug_history_sequence({"first", "second"}, {"line-up", "line-down"}, "sec")\n'
-        + 'return tostring(empty.scrolled) .. "|" .. empty.input .. "|"\n'
+        + 'return tostring(no_history.scrolled) .. "|" .. empty.input .. "|"\n'
         + "  .. draft.input .. '|' .. tostring(draft.cursor)"
     )
-    assert_equals(out, "true||sec|3", "history only intercepts editable prompt navigation")
+    assert_equals(out, "true|second|sec|3",
+                  "empty prompt recalls history when available and scrolls otherwise")
 
 
 @test("tui/prompt_history_reverse_search")

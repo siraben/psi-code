@@ -511,9 +511,7 @@ local function history_input_target(state)
 end
 
 local function history_up_applicable(state)
-  return history_input_target(state)
-    and #state.prompt_history > 0
-    and ((state.input or "") ~= "" or state.history_index ~= nil)
+  return history_input_target(state) and #state.prompt_history > 0
 end
 
 local function history_down_applicable(state)
