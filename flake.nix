@@ -436,6 +436,7 @@
 
         # `nix run .#infer` — Infer static analysis from siraben/overlay.
         apps.infer = let
+          curl = curlWithMbedtls pkgs;
           lua = luaFor pkgs;
         in mkApp {
           name = "psi-infer";
@@ -449,28 +450,33 @@
             build_dir="''${INFER_BUILD_DIR:-/tmp/psi-infer-build}"
             results_dir="''${INFER_RESULTS_DIR:-/tmp/psi-infer-out}"
             infer_cppflags=()
-            export PSI_CFLAGS_LUA="-I${lua}/include"
-            export PSI_LIBS_LUA="-L${lua}/lib -llua"
             ${lib.optionalString pkgs.stdenv.isLinux ''
               infer_cppflags+=(
                 "-isystem" "$(${pkgs.gcc}/bin/gcc -print-file-name=include)"
                 "-isystem" "${pkgs.glibc.dev}/include"
               )
             ''}
-            host_cflags_zlib="-I${pkgs.zlib.dev}/include"
-            host_libs_zlib="-L${pkgs.zlib.out}/lib -lz"
+            make_args=(
+              "BUILD_DIR=$build_dir"
+              "analyze-infer"
+              "CPPFLAGS=''${infer_cppflags[*]}"
+              "PSI_CFLAGS_LUA=-I${lib.getDev lua}/include"
+              "PSI_LIBS_LUA=-L${lib.getLib lua}/lib -llua"
+              "PSI_CFLAGS_CJSON=-I${lib.getDev pkgs.cjson}/include -I${lib.getDev pkgs.cjson}/include/cjson"
+              "PSI_CFLAGS_CURL=-I${lib.getDev curl}/include"
+              "PSI_CFLAGS_ZLIB=-I${lib.getDev pkgs.zlib}/include"
+              "PSI_CFLAGS_EDIT=-I${lib.getDev pkgs.libedit}/include -I${lib.getDev pkgs.libedit}/include/editline"
+              "PSI_CFLAGS_ARGTABLE=-I${lib.getDev pkgs.argtable}/include"
+              "HOST_CFLAGS_ZLIB=''${infer_cppflags[*]} -I${lib.getDev pkgs.zlib}/include"
+              "HOST_LIBS_ZLIB=-L${lib.getLib pkgs.zlib}/lib -lz"
+            )
             rm -rf "$build_dir" "$results_dir"
             mkdir -p "$build_dir"
             infer run \
               --fail-on-issue \
               --force-integration make \
               --results-dir "$results_dir" \
-              -- make \
-                BUILD_DIR="$build_dir" \
-                analyze-infer \
-                CPPFLAGS="''${infer_cppflags[*]}" \
-                HOST_CFLAGS_ZLIB="''${infer_cppflags[*]} $host_cflags_zlib" \
-                HOST_LIBS_ZLIB="$host_libs_zlib"
+              -- make "''${make_args[@]}"
           '';
         };
 
