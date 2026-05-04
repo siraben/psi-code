@@ -660,7 +660,8 @@ def t_tool_mcp_timeout_does_not_hang(psi: Psi):
     )
     out = psi.run(
         "--eval",
-        'require("psi.tools"); return require("psi.mcp").status_text({tools=false})',
+        'local tools = require("psi.tools"); tools.ensure_mcp_started();'
+        ' return require("psi.mcp").status_text({tools=false})',
         cwd=project,
         timeout=3,
     ).stdout
@@ -764,7 +765,8 @@ def t_tool_mcp_forgejo_auto(psi: Psi):
 
     status = psi.run(
         "--eval",
-        'require("psi.tools"); return require("psi.mcp").status_text({tools=true})',
+        'local tools = require("psi.tools"); tools.ensure_mcp_started();'
+        ' return require("psi.mcp").status_text({tools=true})',
         cwd=project,
         env_extra={
             "PATH": str(bindir) + os.pathsep + os.environ.get("PATH", ""),

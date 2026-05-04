@@ -10,6 +10,11 @@ local M = {}
 
 local PROTOCOL_VERSION = "2025-11-25"
 local DEFAULT_TIMEOUT_MS = 5000
+-- Hard cap on a single inbound MCP line (JSON-RPC framing is
+-- newline-delimited). A misbehaving or hostile server that streams
+-- newline-free bytes would otherwise grow `Client:next_line`'s buffer
+-- without bound and pay quadratic concat cost per chunk.
+local MAX_LINE_BYTES = 4 * 1024 * 1024
 
 local clients = {}
 local registered = {}
@@ -100,6 +105,43 @@ local function build_env_pairs(cfg)
   return #out > 0 and out or nil
 end
 
+-- Stems matched against `--<stem>`, `-<stem>`, `--<stem>=...`, or
+-- `-<stem>=...`. Anything in the value position after a bare flag form is
+-- replaced with <redacted>; the inline `=value` form keeps the flag prefix.
+local SECRET_FLAG_STEMS = {
+  "token",
+  "access-token",
+  "api-key",
+  "apikey",
+  "key",
+  "password",
+  "pass",
+  "secret",
+  "auth",
+  "bearer",
+  "authorization",
+  "header",
+}
+
+local function is_secret_flag(part)
+  for _, stem in ipairs(SECRET_FLAG_STEMS) do
+    if part == "--" .. stem or part == "-" .. stem then
+      return true
+    end
+  end
+  return false
+end
+
+local function secret_flag_inline(part)
+  for _, stem in ipairs(SECRET_FLAG_STEMS) do
+    local prefix = part:match("^(%-%-?" .. stem .. "=).+$")
+    if prefix then
+      return prefix
+    end
+  end
+  return nil
+end
+
 local function command_label(cfg)
   if type(cfg) ~= "table" then
     return "<invalid>"
@@ -113,14 +155,14 @@ local function command_label(cfg)
       redact_next = false
       return
     end
-    if part == "--token" or part == "-token" then
+    if is_secret_flag(part) then
       parts[#parts + 1] = part
       redact_next = true
       return
     end
-    local flag = part:match("^(%-%-?token=).+$")
-    if flag then
-      parts[#parts + 1] = flag .. "<redacted>"
+    local prefix = secret_flag_inline(part)
+    if prefix then
+      parts[#parts + 1] = prefix .. "<redacted>"
       return
     end
     parts[#parts + 1] = part
@@ -250,6 +292,10 @@ function Client:next_line(timeout_ms)
   end
   if type(chunk) == "string" and chunk ~= "" then
     self.buffer = self.buffer .. chunk
+    if #self.buffer > MAX_LINE_BYTES then
+      self.buffer = ""
+      return nil, "MCP line exceeded " .. tostring(MAX_LINE_BYTES) .. " bytes"
+    end
     return self:next_line(0)
   end
   if done then
@@ -292,6 +338,15 @@ function Client:read_message(timeout_ms)
   end
   local decoded = prelude.safe_json_decode(line, nil)
   if type(decoded) ~= "table" then
+    -- Surface the bad line so a server that emits a startup banner
+    -- or malformed JSON does not just look like a silent timeout.
+    local preview = line:sub(1, 200)
+    if #line > 200 then
+      preview = preview .. "..."
+    end
+    io.stderr:write(
+      "psi: MCP " .. tostring(self.name) .. ": dropping non-JSON line: " .. preview .. "\n"
+    )
     return nil
   end
   return decoded
@@ -358,7 +413,13 @@ end
 function Client:list_tools()
   local out = {}
   local cursor = nil
+  local seen = {}
+  local pages = 0
   repeat
+    pages = pages + 1
+    if pages > 256 then
+      return nil, "tools/list exceeded 256 pages"
+    end
     local params = cursor and { cursor = cursor } or nil
     local result, err = self:request("tools/list", params, self.timeout_ms)
     if not result then
@@ -370,6 +431,12 @@ function Client:list_tools()
       end
     end
     cursor = result.nextCursor
+    if cursor ~= nil and cursor ~= "" then
+      if seen[cursor] then
+        return nil, "tools/list cursor cycled: " .. tostring(cursor)
+      end
+      seen[cursor] = true
+    end
   until cursor == nil or cursor == ""
   return out
 end
@@ -418,17 +485,14 @@ local function configured_servers()
   if cfg.auto_forgejo ~= false and out.forgejo == nil then
     local token = os.getenv("FORGEJO_ACCESS_TOKEN") or os.getenv("GITEA_ACCESS_TOKEN")
     local url = os.getenv("FORGEJO_URL") or os.getenv("GITEA_HOST")
-    if (token and token ~= "") or (url and url ~= "") then
-      local args = { "--transport", "stdio", "--url", url or "https://codeberg.org" }
-      local env = {}
-      if token and token ~= "" then
-        env.FORGEJO_TOKEN = token
-        env.FORGEJO_ACCESS_TOKEN = token
-      end
+    -- Require BOTH a token and a URL: defaulting URL when only the
+    -- token is set would forward a self-hosted credential to
+    -- codeberg.org.
+    if token and token ~= "" and url and url ~= "" then
       out.forgejo = {
         command = "forgejo-mcp",
-        args = args,
-        env = next(env) and env or nil,
+        args = { "--transport", "stdio", "--url", url },
+        env = { FORGEJO_TOKEN = token, FORGEJO_ACCESS_TOKEN = token },
         source = "auto",
       }
     end
@@ -450,6 +514,15 @@ function M.register_configured_servers(registry, records)
   local used = {}
   for _, client in pairs(clients) do
     client:shutdown()
+  end
+  -- Drop the previously-registered MCP tool records so the registry
+  -- does not retain entries whose closures point at a shut-down
+  -- client. Built-in tools are unaffected (they were not in
+  -- `registered`).
+  if type(registry.unregister) == "function" then
+    for local_name in pairs(registered) do
+      registry.unregister(local_name)
+    end
   end
   clients = {}
   registered = {}

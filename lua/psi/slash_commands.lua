@@ -187,6 +187,12 @@ local function mcp_status(include_tools)
   if not ok or type(mcp) ~= "table" or type(mcp.status_text) ~= "function" then
     return "MCP servers: unavailable"
   end
+  -- Trigger lazy MCP initialization so the user sees current server
+  -- state on first /mcp or /status invocation, not "MCP servers: none".
+  local tools_mod = require("psi.tools")
+  if type(tools_mod.ensure_mcp_started) == "function" then
+    tools_mod.ensure_mcp_started()
+  end
   return mcp.status_text({ tools = include_tools and true or false })
 end
 

@@ -34,6 +34,16 @@ function M.register(tool)
   registry[#registry + 1] = tool
 end
 
+function M.unregister(name)
+  for i, existing in ipairs(registry) do
+    if existing.name == name then
+      table.remove(registry, i)
+      return true
+    end
+  end
+  return false
+end
+
 function M.all()
   return registry
 end
