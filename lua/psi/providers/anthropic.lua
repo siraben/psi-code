@@ -568,8 +568,9 @@ function M.complete_text(opts)
     api_key = psi.amiga_bridge_api_key()
   end
   if not api_key or api_key == "" then
-    io.stderr:write("ANTHROPIC_API_KEY is not set\n")
-    return false
+    local msg = "ANTHROPIC_API_KEY is not set"
+    io.stderr:write(msg .. "\n")
+    return false, msg
   end
   local request = {
     model = resolve_model(opts.model),
@@ -617,8 +618,9 @@ function M.run_turn(opts)
     api_key = psi.amiga_bridge_api_key()
   end
   if not api_key or api_key == "" then
-    io.stderr:write("ANTHROPIC_API_KEY is not set\n")
-    return false
+    local msg = "ANTHROPIC_API_KEY is not set"
+    io.stderr:write(msg .. "\n")
+    return false, msg
   end
 
   local model = resolve_model(opts.model)

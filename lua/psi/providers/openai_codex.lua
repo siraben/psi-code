@@ -539,8 +539,9 @@ end
 function M.complete_text(opts)
   local creds, err = auth.credentials()
   if not creds then
-    io.stderr:write("openai-codex auth failed: " .. tostring(err) .. "\n")
-    return false
+    local msg = "openai-codex auth failed: " .. tostring(err) .. " (run /login openai-codex)"
+    io.stderr:write(msg .. "\n")
+    return false, msg
   end
   local model = resolve_model(opts.model)
   local body = request_body({
@@ -562,10 +563,13 @@ function M.complete_text(opts)
   local status, response =
     http_post_text(api_url(), headers(creds), psi.json_encode(body), opts.abort_check)
   if not status or status < 200 or status >= 300 then
-    io.stderr:write(
-      "openai-codex request failed: " .. tostring(status) .. " " .. tostring(response) .. "\n"
+    local msg = openai_compat.classify_http_error(
+      tonumber(status) or 0,
+      tostring(response or ""),
+      "openai-codex"
     )
-    return false
+    io.stderr:write(msg .. "\n")
+    return false, msg
   end
   local parsed = safe_decode(response)
   local parts = {}

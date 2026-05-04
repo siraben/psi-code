@@ -279,7 +279,7 @@ function M.run_compact(opts)
     })
   end)
   if not ok then
-    return false
+    return false, summary
   end
 
   session.do_compact(keep_recent, summary)

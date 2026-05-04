@@ -184,8 +184,11 @@ function M.run_agent(opts)
     io.stderr:write("failed to load session file: " .. tostring(load_err) .. "\n")
     return false
   end
-  local ok = run_agent_turn(opts, opts.payload or "")
+  local ok, reply = run_agent_turn(opts, opts.payload or "")
   if not ok then
+    if reply ~= nil and reply ~= "" and reply ~= "aborted" then
+      io.stderr:write("agent turn failed: " .. tostring(reply) .. "\n")
+    end
     session.announce_shutdown()
     return false
   end
@@ -372,12 +375,14 @@ function M.run_repl(opts)
       if line ~= "" then
         psi.add_history(line)
       end
-      local ok = run_agent_turn(opts, line)
+      local ok, reply = run_agent_turn(opts, line)
       if ok then
         if not save_current_session(opts) then
           session.announce_shutdown()
           return false
         end
+      elseif reply ~= nil and reply ~= "" and reply ~= "aborted" then
+        io.stderr:write("agent turn failed: " .. tostring(reply) .. "\n")
       end
     end
   end

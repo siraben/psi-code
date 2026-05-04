@@ -296,19 +296,21 @@ function M.complete_text(opts, cfg)
   local status, response =
     http_post_text(cfg.url, cfg.headers, psi.json_encode(body), opts.abort_check)
   if status == nil then
-    io.stderr:write(cfg.provider_name .. ": http post failed: " .. tostring(response) .. "\n")
-    return false
+    local msg = cfg.provider_name .. ": http post failed: " .. tostring(response)
+    io.stderr:write(msg .. "\n")
+    return false, msg
   end
   if status < 200 or status >= 300 then
-    io.stderr:write(
-      ("%s: request failed (%d): %s\n"):format(cfg.provider_name, status, response or "")
-    )
-    return false
+    local msg = M.classify_http_error(status, tostring(response or ""), cfg.provider_name)
+    io.stderr:write(msg .. "\n")
+    return false, msg
   end
 
   local parsed = safe_decode(response)
   if type(parsed) ~= "table" then
-    return false
+    local msg = cfg.provider_name .. ": malformed JSON response"
+    io.stderr:write(msg .. "\n")
+    return false, msg
   end
   return true, cfg.extract_completion(parsed)
 end

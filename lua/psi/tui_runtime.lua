@@ -1085,6 +1085,19 @@ local function add_session_entry(state, msg)
     if not added_text and type(msg.text) == "string" and msg.text ~= "" then
       add_entry(state, "assistant", msg.text)
     end
+    -- Surface persisted error/aborted assistants so reloaded sessions show
+    -- the same context the live turn rendered (parity with pi-mono's
+    -- assistant-message.ts errorMessage rendering).
+    local persisted = body and body.message
+    if type(persisted) == "table" then
+      local stop = persisted.stopReason
+      local err = persisted.errorMessage
+      if (stop == "error" or stop == "aborted") and type(err) == "string" and err ~= "" then
+        if err ~= "Request was aborted" then
+          add_entry(state, "error", err)
+        end
+      end
+    end
     return
   end
 
@@ -2329,8 +2342,9 @@ local function run_turn(state, line)
   state.streaming_thinking_index = nil
 
   if not ran then
-    add_entry(state, "error", reply or "agent turn failed")
-    set_status(state, "agent turn failed", true)
+    local detail = reply ~= nil and reply ~= "" and tostring(reply) or "agent turn failed"
+    add_entry(state, "error", detail)
+    set_status(state, detail, true)
     fire_turn_event(state, "after-turn", after_turn_payload("", false))
     session.save()
     return false
@@ -2342,8 +2356,9 @@ local function run_turn(state, line)
     if reply == "aborted" then
       set_status(state, "aborted", false)
     else
-      add_entry(state, "error", reply ~= "" and reply or "provider request failed")
-      set_status(state, "agent turn failed", true)
+      local detail = (reply ~= nil and reply ~= "") and tostring(reply) or "provider request failed"
+      add_entry(state, "error", detail)
+      set_status(state, detail, true)
     end
     session.save()
     return false
@@ -2390,10 +2405,10 @@ local function run_compact(state, keep_recent)
       set_status(state, "session compacted", false)
     end
   else
-    set_status(state, "failed to compact session", true)
-    if not ran then
-      add_entry(state, "error", summary or "compaction failed")
-    end
+    local detail = (summary ~= nil and summary ~= "") and tostring(summary)
+      or "failed to compact session"
+    set_status(state, detail, true)
+    add_entry(state, "error", detail)
   end
 
   state.busy = false

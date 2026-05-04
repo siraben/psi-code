@@ -267,7 +267,21 @@ end
 
 -- ---------- Public entry points ----------
 
+local function check_api_key()
+  local key = os.getenv(API_KEY_ENV)
+  if not key or key == "" then
+    local msg = API_KEY_ENV .. " is not set"
+    io.stderr:write(msg .. "\n")
+    return false, msg
+  end
+  return true
+end
+
 function M.run_turn(opts)
+  local ok, err = check_api_key()
+  if not ok then
+    return false, err
+  end
   local model = resolve_model(opts.model)
   return compat.run_turn({
     model = model,
@@ -280,6 +294,10 @@ function M.run_turn(opts)
 end
 
 function M.complete_text(opts)
+  local ok, err = check_api_key()
+  if not ok then
+    return false, err
+  end
   local model = resolve_model(opts.model)
   return compat.complete_text({
     model = model,
