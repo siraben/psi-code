@@ -558,6 +558,31 @@ def t_process_stdio_terminate(psi: Psi):
     assert_equals(out, "130", "stdio terminate returns interrupted status")
 
 
+@test("handles/process_try_write_eagain")
+def t_process_try_write_eagain(psi: Psi):
+    """psi.process_try_write must surface partial-write / EAGAIN to Lua
+    instead of looping internally, so a slow MCP child can't wedge the
+    coroutine driver. We fill a pipe past PIPE_BUF and confirm a single
+    try_write returns less than the requested length."""
+    out = psi.run(
+        "--eval",
+        'local h, err = psi.process_begin_stdio_argv({"sh", "-c", "sleep 5"})\n'
+        'if not h then return err end\n'
+        '-- Push 1 MiB at a single try_write; pipe buffer is typically\n'
+        '-- 64 KiB on Linux, so the syscall should return a partial\n'
+        '-- count rather than block.\n'
+        'local payload = string.rep("x", 1024 * 1024)\n'
+        'local n = psi.process_try_write(h, payload)\n'
+        'psi.process_terminate(h)\n'
+        'psi.process_finish(h)\n'
+        'if n == nil then return "nil" end\n'
+        'if n == #payload then return "no-backpressure" end\n'
+        'return "partial"\n',
+        timeout=4,
+    ).stdout.strip()
+    assert_equals(out, "partial", "process_try_write surfaces backpressure")
+
+
 @test("handles/process_write_sigpipe_scoped")
 def t_process_write_sigpipe_scoped(psi: Psi):
     marker = psi.tmp / "sigpipe-survived"

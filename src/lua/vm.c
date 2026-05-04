@@ -1646,6 +1646,31 @@ static int lfn_process_write(lua_State *L) {
     return 1;
 }
 
+static int lfn_process_try_write(lua_State *L) {
+    struct psi_process_handle **ud;
+    struct psi_process_handle *h;
+    const char *data;
+    size_t data_len;
+    size_t written;
+
+    ud = psi_vm_process_ud_check(L, 1);
+    h = *ud;
+    if (h == NULL) {
+        lua_pushnil(L);
+        lua_pushstring(L, "process_try_write: handle already finished");
+        return 2;
+    }
+    data = luaL_checklstring(L, 2, &data_len);
+    written = 0u;
+    if (psi_process_try_write(h, data, data_len, &written) != PSI_STATUS_OK) {
+        lua_pushnil(L);
+        lua_pushstring(L, "process_try_write failed");
+        return 2;
+    }
+    lua_pushinteger(L, (lua_Integer)written);
+    return 1;
+}
+
 static int lfn_process_close_stdin(lua_State *L) {
     struct psi_process_handle **ud;
     struct psi_process_handle *h;
@@ -2756,6 +2781,7 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("process_begin_argv", lfn_process_begin_argv);
     PSI_REG("process_begin_stdio_argv", lfn_process_begin_stdio_argv);
     PSI_REG("process_write", lfn_process_write);
+    PSI_REG("process_try_write", lfn_process_try_write);
     PSI_REG("process_close_stdin", lfn_process_close_stdin);
     PSI_REG("process_terminate", lfn_process_terminate);
     PSI_REG("process_poll", lfn_process_poll);

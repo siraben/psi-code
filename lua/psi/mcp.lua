@@ -238,15 +238,47 @@ function Client.new(name, cfg, global_timeout_ms)
   }, Client)
 end
 
-function Client:send(msg)
+-- Cooperative stdin write: a single non-blocking try_write per
+-- iteration, yielding to psi.sched between attempts so the TUI
+-- redraw / abort poll keeps running while a slow MCP child drains
+-- its pipe. Falls back to the blocking psi.process_write when the
+-- non-blocking primitive is unavailable (older builds / Windows
+-- stub).
+function Client:send_bytes(bytes)
   if not self.handle then
     return nil, "MCP server is not running"
   end
-  local ok, err = psi.process_write(self.handle, encode_line(msg))
-  if not ok then
-    return nil, tostring(err or "failed to write MCP message")
+  if not psi.process_try_write then
+    local ok, err = psi.process_write(self.handle, bytes)
+    if not ok then
+      return nil, tostring(err or "failed to write MCP message")
+    end
+    return true
+  end
+
+  local sched = require("psi.sched")
+  local in_co = sched.in_coroutine()
+  local sent = 0
+  local total = #bytes
+  while sent < total do
+    local n, err = psi.process_try_write(self.handle, bytes:sub(sent + 1))
+    if n == nil then
+      return nil, tostring(err or "failed to write MCP message")
+    end
+    sent = sent + n
+    if sent < total then
+      if in_co then
+        sched.sleep_ms(20)
+      elseif psi.sleep_ms then
+        psi.sleep_ms(20)
+      end
+    end
   end
   return true
+end
+
+function Client:send(msg)
+  return self:send_bytes(encode_line(msg))
 end
 
 function Client:notify(method, params)

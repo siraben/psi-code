@@ -62,6 +62,18 @@ int psi_process_begin_stdio_argv(char *const argv[], const char *const *env_pair
 
 int psi_process_write(struct psi_process_handle *h, const char *data, size_t len);
 
+/* Single non-blocking write attempt. Honors abort_signal: if abort fires,
+ * SIGTERMs the child group and returns PSI_STATUS_ERROR. Otherwise:
+ *   - returns PSI_STATUS_OK with *written set to the byte count actually
+ *     accepted by the kernel (0 on EAGAIN, len on full acceptance, or
+ *     a partial count). Never sleeps, never loops.
+ *   - returns PSI_STATUS_ERROR on a hard error (EPIPE, EINVAL, etc).
+ * Callers must drive the retry loop themselves and yield cooperatively
+ * (psi.sched.sleep_ms / psi.sched.yield_tick) so the host event loop
+ * stays responsive while a slow MCP child drains stdin. */
+int psi_process_try_write(
+    struct psi_process_handle *h, const char *data, size_t len, size_t *written);
+
 int psi_process_close_stdin(struct psi_process_handle *h);
 
 /* Best-effort termination for leaked or failed protocol children.

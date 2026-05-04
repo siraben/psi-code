@@ -327,6 +327,52 @@ int psi_process_close_stdin(struct psi_process_handle *h) {
     return PSI_STATUS_OK;
 }
 
+int psi_process_try_write(
+    struct psi_process_handle *h, const char *data, size_t len, size_t *written) {
+    struct sigaction ignore_pipe;
+    struct sigaction old_pipe;
+    int have_old_pipe;
+    int status;
+    ssize_t n;
+
+    if (written != NULL)
+        *written = 0u;
+    if (h == NULL || data == NULL)
+        return PSI_STATUS_ERROR;
+    if (h->stdin_fd < 0)
+        return PSI_STATUS_ERROR;
+    if (len == 0u)
+        return PSI_STATUS_OK;
+
+    if (psi_abort_signal_is_triggered(h->abort_signal) && !h->aborted) {
+        h->aborted = 1;
+        kill(-h->child_pid, SIGTERM);
+        return PSI_STATUS_ERROR;
+    }
+
+    memset(&ignore_pipe, 0, sizeof(ignore_pipe));
+    memset(&old_pipe, 0, sizeof(old_pipe));
+    ignore_pipe.sa_handler = SIG_IGN;
+    sigemptyset(&ignore_pipe.sa_mask);
+    have_old_pipe = sigaction(SIGPIPE, &ignore_pipe, &old_pipe) == 0;
+
+    status = PSI_STATUS_OK;
+    n = write(h->stdin_fd, data, len);
+    if (n > 0) {
+        if (written != NULL)
+            *written = (size_t)n;
+    } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+        /* Caller retries after a cooperative yield. */
+    } else {
+        status = PSI_STATUS_ERROR;
+    }
+
+    if (have_old_pipe) {
+        sigaction(SIGPIPE, &old_pipe, NULL);
+    }
+    return status;
+}
+
 int psi_process_terminate(struct psi_process_handle *h) {
     if (h == NULL)
         return PSI_STATUS_ERROR;
@@ -571,6 +617,15 @@ int psi_process_write(struct psi_process_handle *h, const char *data, size_t len
 }
 int psi_process_close_stdin(struct psi_process_handle *h) {
     PSI_UNUSED(h);
+    return PSI_STATUS_ERROR;
+}
+int psi_process_try_write(
+    struct psi_process_handle *h, const char *data, size_t len, size_t *written) {
+    PSI_UNUSED(h);
+    PSI_UNUSED(data);
+    PSI_UNUSED(len);
+    if (written)
+        *written = 0u;
     return PSI_STATUS_ERROR;
 }
 int psi_process_terminate(struct psi_process_handle *h) {
