@@ -95,7 +95,8 @@ struct psi_process_handle {
 };
 
 static int psi_process_begin_exec(char *const argv[], const struct psi_abort_signal *abort_signal,
-    int use_stdin_pipe, int protocol_stdout, struct psi_process_handle **out) {
+    int use_stdin_pipe, int protocol_stdout, const char *const *env_pairs, int env_count,
+    struct psi_process_handle **out) {
     struct psi_process_handle *h;
     int pipe_fds[2];
     int stdin_fds[2];
@@ -183,6 +184,22 @@ static int psi_process_begin_exec(char *const argv[], const struct psi_abort_sig
         }
         if (close(pipe_fds[1]) != 0)
             _exit(127);
+        {
+            int ei;
+            for (ei = 0; ei < env_count && env_pairs != NULL && env_pairs[ei] != NULL; ei++) {
+                const char *pair = env_pairs[ei];
+                const char *eq = strchr(pair, '=');
+                if (eq != NULL && eq != pair) {
+                    char key[256];
+                    size_t klen = (size_t)(eq - pair);
+                    if (klen < sizeof(key)) {
+                        memcpy(key, pair, klen);
+                        key[klen] = '\0';
+                        setenv(key, eq + 1, 1);
+                    }
+                }
+            }
+        }
         execvp(argv[0], argv);
         _exit(127);
 #if defined(__GNUC__) && !defined(__clang__) && !defined(__TINYC__) && __GNUC__ >= 13
@@ -196,6 +213,11 @@ static int psi_process_begin_exec(char *const argv[], const struct psi_abort_sig
     flags = fcntl(pipe_fds[0], F_GETFL, 0);
     if (flags != -1) {
         fcntl(pipe_fds[0], F_SETFL, flags | O_NONBLOCK);
+    }
+    if (stdin_fds[1] >= 0) {
+        flags = fcntl(stdin_fds[1], F_GETFL, 0);
+        if (flags != -1)
+            fcntl(stdin_fds[1], F_SETFL, flags | O_NONBLOCK);
     }
 
     /* Mirror the child's setpgid so the group exists race-free; an
@@ -222,12 +244,12 @@ static int psi_process_begin_exec(char *const argv[], const struct psi_abort_sig
 
 int psi_process_begin_argv(char *const argv[], const struct psi_abort_signal *abort_signal,
     struct psi_process_handle **out) {
-    return psi_process_begin_exec(argv, abort_signal, 0, 0, out);
+    return psi_process_begin_exec(argv, abort_signal, 0, 0, NULL, 0, out);
 }
 
-int psi_process_begin_stdio_argv(char *const argv[], const struct psi_abort_signal *abort_signal,
-    struct psi_process_handle **out) {
-    return psi_process_begin_exec(argv, abort_signal, 1, 1, out);
+int psi_process_begin_stdio_argv(char *const argv[], const char *const *env_pairs, int env_count,
+    const struct psi_abort_signal *abort_signal, struct psi_process_handle **out) {
+    return psi_process_begin_exec(argv, abort_signal, 1, 1, env_pairs, env_count, out);
 }
 
 int psi_process_begin(const char *command, const struct psi_abort_signal *abort_signal,
@@ -239,7 +261,7 @@ int psi_process_begin(const char *command, const struct psi_abort_signal *abort_
     argv[3] = NULL;
     if (command == NULL)
         return PSI_STATUS_ERROR;
-    return psi_process_begin_exec(argv, abort_signal, 0, 0, out);
+    return psi_process_begin_exec(argv, abort_signal, 0, 0, NULL, 0, out);
 }
 
 int psi_process_write(struct psi_process_handle *h, const char *data, size_t len) {
@@ -276,6 +298,13 @@ int psi_process_write(struct psi_process_handle *h, const char *data, size_t len
             continue;
         }
         if (n < 0 && errno == EINTR) {
+            continue;
+        }
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            struct timespec delay;
+            delay.tv_sec = 0;
+            delay.tv_nsec = PSI_PROCESS_POLL_DELAY_NS;
+            nanosleep(&delay, NULL);
             continue;
         }
         status = PSI_STATUS_ERROR;
@@ -524,9 +553,11 @@ int psi_process_begin_argv(char *const argv[], const struct psi_abort_signal *ab
         *out = NULL;
     return PSI_STATUS_ERROR;
 }
-int psi_process_begin_stdio_argv(char *const argv[], const struct psi_abort_signal *abort_signal,
-    struct psi_process_handle **out) {
+int psi_process_begin_stdio_argv(char *const argv[], const char *const *env_pairs, int env_count,
+    const struct psi_abort_signal *abort_signal, struct psi_process_handle **out) {
     PSI_UNUSED(argv);
+    PSI_UNUSED(env_pairs);
+    PSI_UNUSED(env_count);
     PSI_UNUSED(abort_signal);
     if (out != NULL)
         *out = NULL;

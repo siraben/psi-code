@@ -1587,7 +1587,9 @@ static int lfn_process_begin_stdio_argv(lua_State *L) {
     struct psi_process_handle *h;
     struct psi_process_handle **ud;
     char **argv;
+    char **env_pairs;
     int argc;
+    int env_count;
     int status;
 
     argc = 0;
@@ -1599,9 +1601,17 @@ static int lfn_process_begin_stdio_argv(lua_State *L) {
         return 2;
     }
 
+    env_pairs = NULL;
+    env_count = 0;
+    if (lua_istable(L, 2)) {
+        env_pairs = psi_vm_argv_from_table(L, 2, &env_count);
+    }
+
     h = NULL;
-    status = psi_process_begin_stdio_argv(argv, host ? host->abort_signal : NULL, &h);
+    status = psi_process_begin_stdio_argv(
+        argv, (const char *const *)env_pairs, env_count, host ? host->abort_signal : NULL, &h);
     psi_vm_argv_free(argv);
+    psi_vm_argv_free(env_pairs);
     if (status != PSI_STATUS_OK || h == NULL) {
         lua_pushnil(L);
         lua_pushstring(L, "failed to spawn stdio process");

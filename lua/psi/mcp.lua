@@ -77,27 +77,27 @@ local function build_argv(cfg)
     return nil
   end
 
-  local argv = {}
-  if type(cfg.env) == "table" then
-    argv[#argv + 1] = "env"
-    local keys = {}
-    for k, v in pairs(cfg.env) do
-      if type(k) == "string" and type(v) == "string" then
-        keys[#keys + 1] = k
-      end
-    end
-    table.sort(keys)
-    for _, k in ipairs(keys) do
-      argv[#argv + 1] = k .. "=" .. cfg.env[k]
-    end
-  end
-  argv[#argv + 1] = cfg.command
+  local argv = { cfg.command }
   if type(cfg.args) == "table" then
     for _, arg in ipairs(cfg.args) do
       argv[#argv + 1] = tostring(arg)
     end
   end
   return argv
+end
+
+local function build_env_pairs(cfg)
+  if type(cfg.env) ~= "table" then
+    return nil
+  end
+  local out = {}
+  for k, v in pairs(cfg.env) do
+    if type(k) == "string" and type(v) == "string" then
+      out[#out + 1] = k .. "=" .. v
+    end
+  end
+  table.sort(out)
+  return #out > 0 and out or nil
 end
 
 local function command_label(cfg)
@@ -212,11 +212,16 @@ function Client:notify(method, params)
 end
 
 function Client:shutdown()
-  if self.handle and psi.process_terminate then
+  if not self.handle then
+    return
+  end
+  if psi.process_terminate then
     psi.process_terminate(self.handle)
-  elseif self.handle and psi.process_close_stdin then
+  elseif psi.process_close_stdin then
     psi.process_close_stdin(self.handle)
   end
+  pcall(psi.process_finish, self.handle)
+  self.handle = nil
 end
 
 function Client:next_line(timeout_ms)
@@ -329,7 +334,8 @@ function Client:start()
   if not argv then
     return nil, "missing MCP command"
   end
-  local handle, err = psi.process_begin_stdio_argv(argv)
+  local env_pairs = build_env_pairs(self.cfg)
+  local handle, err = psi.process_begin_stdio_argv(argv, env_pairs)
   if not handle then
     return nil, tostring(err or "failed to start MCP server")
   end
@@ -414,13 +420,15 @@ local function configured_servers()
     local url = os.getenv("FORGEJO_URL") or os.getenv("GITEA_HOST")
     if (token and token ~= "") or (url and url ~= "") then
       local args = { "--transport", "stdio", "--url", url or "https://codeberg.org" }
+      local env = {}
       if token and token ~= "" then
-        args[#args + 1] = "--token"
-        args[#args + 1] = token
+        env.FORGEJO_TOKEN = token
+        env.FORGEJO_ACCESS_TOKEN = token
       end
       out.forgejo = {
         command = "forgejo-mcp",
         args = args,
+        env = next(env) and env or nil,
         source = "auto",
       }
     end

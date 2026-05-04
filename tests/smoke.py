@@ -725,8 +725,8 @@ def t_tool_mcp_forgejo_auto(psi: Psi):
     server = bindir / "forgejo-mcp"
     server.write_text(
         "#!/usr/bin/env python3\n"
-        "import json, sys\n"
-        "if '--token' not in sys.argv or sys.argv[sys.argv.index('--token') + 1] != 'test-token':\n"
+        "import json, os, sys\n"
+        "if os.environ.get('FORGEJO_TOKEN') != 'test-token':\n"
         "    sys.exit(2)\n"
         "for line in sys.stdin:\n"
         "    msg = json.loads(line)\n"
@@ -772,8 +772,7 @@ def t_tool_mcp_forgejo_auto(psi: Psi):
             "FORGEJO_ACCESS_TOKEN": "test-token",
         },
     ).stdout.strip()
-    assert_contains(status, "--token <redacted>", "Forgejo status redacts token")
-    assert_true("test-token" not in status, "Forgejo token leaked in status")
+    assert_true("test-token" not in status, "Forgejo token not visible in status")
 
 
 @test("tool/mcp_linear_auto")

@@ -53,9 +53,12 @@ int psi_process_begin_argv(char *const argv[], const struct psi_abort_signal *ab
 
 /* Start a process intended for stdio protocols: child stdin is a
  * writable pipe owned by the parent, child stdout is the pollable
- * output stream, and child stderr is kept out of the protocol stream. */
-int psi_process_begin_stdio_argv(char *const argv[], const struct psi_abort_signal *abort_signal,
-    struct psi_process_handle **out);
+ * output stream, and child stderr is kept out of the protocol stream.
+ * env_pairs is an optional array of "KEY=VALUE" strings (env_count
+ * entries) that are set in the child via setenv() before exec.  Pass
+ * NULL / 0 to inherit the parent environment unmodified. */
+int psi_process_begin_stdio_argv(char *const argv[], const char *const *env_pairs, int env_count,
+    const struct psi_abort_signal *abort_signal, struct psi_process_handle **out);
 
 int psi_process_write(struct psi_process_handle *h, const char *data, size_t len);
 
