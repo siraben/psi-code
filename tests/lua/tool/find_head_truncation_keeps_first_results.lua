@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "true|false|true"
-]]
+]==]
 -- Create 700 sibling files with long names; find should head-truncate.
 local root = TMP .. "/many-long-find-names"
 psi.mkdir_p(root)

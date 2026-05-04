@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "60000|60000"
-]]
+]==]
 local r = require("psi.tools").dispatch("bash", {
   command = "yes A | head -c 60000"
 })

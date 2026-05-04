@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "true|true|a.md,b.lua|true"
-]]
+]==]
 local dir = TMP .. "/portable-fs/a/b"
 local ok = psi.mkdir_p(dir)
 psi.file_write(dir .. "/b.lua", "")

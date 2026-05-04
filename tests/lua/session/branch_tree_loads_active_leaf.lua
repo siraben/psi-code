@@ -1,8 +1,8 @@
---[[psi-test
+--[==[psi-test
 # Folded: original also asserted on-disk file message count == 3 after branch.
 # The Lua reads the file back and includes the count in the return string.
 expect = "loaded=2 first=false second=true branched=2 leaf=true|3"
-]]
+]==]
 local s = require("psi.session_manager")
 local path = TMP .. "/branch.jsonl"
 psi.session_set_path(path)

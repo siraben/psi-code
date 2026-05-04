@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "2|user|input_text|visible user|message|assistant|output_text|visible assistant"
-]]
+]==]
 local s = require("psi.session_manager")
 local d = require("psi.providers.openai_codex")._debug
 s.append_custom_message("visible user", { role = "user" })

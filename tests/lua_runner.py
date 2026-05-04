@@ -68,8 +68,13 @@ def smoke_env(tmp: Path) -> dict[str, str]:
     return env
 
 LUA_DIR_NAME = "lua"
-META_OPEN = "--[[psi-test"
-META_CLOSE = "]]"
+# Use a level-2 long-bracket comment ``--[==[psi-test ... ]==]`` so the
+# embedded TOML can contain literal ``[[arr]]`` tables without prematurely
+# closing the comment under real-Lua semantics (which level-0 ``--[[ ]]``
+# would). chroma's Lua lexer follows the same rule, so the level-2 form
+# also keeps Forgejo / GitHub syntax highlighting correct.
+META_OPEN = "--[==[psi-test"
+META_CLOSE = "]==]"
 
 
 @dataclass
@@ -245,22 +250,14 @@ def assert_output(case: LuaCase, output: str) -> None:
 
 
 def _split_meta(text: str) -> tuple[str, str]:
-    """Find the meta block, treating ``]]`` only as a close marker when it sits
-    at the start of a line. That avoids colliding with TOML's ``[[arr]]``
-    array-of-tables syntax.
-    """
     if not text.startswith(META_OPEN):
         return "", text
-    pos = len(META_OPEN)
-    while True:
-        idx = text.find(META_CLOSE, pos)
-        if idx < 0:
-            raise ValueError(f"unterminated {META_OPEN} block")
-        if idx == 0 or text[idx - 1] == "\n":
-            meta = text[len(META_OPEN):idx]
-            body = text[idx + len(META_CLOSE):]
-            return meta.strip("\n"), body.lstrip("\n")
-        pos = idx + len(META_CLOSE)
+    end = text.find(META_CLOSE, len(META_OPEN))
+    if end < 0:
+        raise ValueError(f"unterminated {META_OPEN} block")
+    meta = text[len(META_OPEN):end]
+    body = text[end + len(META_CLOSE):]
+    return meta.strip("\n"), body.lstrip("\n")
 
 
 def _as_list(value: Any) -> list[str]:

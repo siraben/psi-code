@@ -1,8 +1,8 @@
---[[psi-test
+--[==[psi-test
 # Original split-and-check on stdout '|'-separated parts. Refactored to do all
 # checks in Lua and return a single boolean tuple.
 expect = "true|true|true|true"
-]]
+]==]
 local r = require("psi.render")
 local a = r.handle_event("thinking-delta", { text = "first " })
 local b = r.handle_event("thinking-delta", { text = "second" })

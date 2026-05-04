@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "high|none|medium"
-]]
+]==]
 local a = require("psi.agent_session")
 a.set_reasoning_effort("high")
 local got = a.current_reasoning_effort("low")

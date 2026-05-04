@@ -1,7 +1,7 @@
---[[psi-test
+--[==[psi-test
 # Original: full == 9, tail == 4, keep == 1. Folded into single equals string.
 expect = "9|4|1"
-]]
+]==]
 local s = require("psi.session_manager")
 local c = require("psi.context")
 s.append_user("12345678")

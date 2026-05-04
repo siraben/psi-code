@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "8"
-]]
+]==]
 local prelude = require("psi.prelude")
 local layout_mod = require("psi.tui_layout")
 layout_mod.set_prompt_max_rows(8)

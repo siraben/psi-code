@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 contains = "openrouter/x/y|anthropic/fallback|ollama/local|true|ollama"
-]]
+]==]
 local a = require("psi.agent_session")
 a.set_model("openrouter/x/y")
 local got = a.current_model("anthropic/fallback")

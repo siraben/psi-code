@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "submit:-|submit:-|insert:\\n|scroll:page-up|quit:-|nil|queue-restore:-|scroll:line-up|scroll:line-up|scroll:line-down|nil|abort:-|insert:x"
-]]
+]==]
 local tui = require("psi.tui_status")
 local function fmt(res)
   if not res then return "nil" end

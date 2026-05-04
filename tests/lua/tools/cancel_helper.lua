@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 contains = "false|nope"
-]]
+]==]
 local t = require("psi.tools")
 local real_ran = false
 t.add_before_hook(function(name, input)

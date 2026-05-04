@@ -1,7 +1,7 @@
---[[psi-test
+--[==[psi-test
 contains = ["REPLACED", "tail"]
 not_contains = "first"
-]]
+]==]
 local r = require("psi.render")
 r.register_hook("before-turn", function() return "first\n" end)
 r.register_hook("before-turn", function()

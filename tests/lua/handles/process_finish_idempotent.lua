@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "idempotent-test|0|"
-]]
+]==]
 local h = psi.process_begin("echo idempotent-test")
 while true do
   local _, done = psi.process_poll(h, 50)

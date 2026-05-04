@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "hi|0|7|3|nil|true|error|Codex error: bad|true"
-]]
+]==]
 local d = require("psi.providers.openai_codex")._debug
 local s, p = d.new_state(), d.parser_new()
 local seen = ""

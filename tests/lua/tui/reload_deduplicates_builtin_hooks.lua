@@ -1,10 +1,10 @@
---[[psi-test
+--[==[psi-test
 expect = "1|vim-mode|true|1"
 cwd = "reload-vim-config"
 files = [
   { path = ".psi/settings.json", json = { extensions = { vim_keybindings = { enabled = true } } } },
 ]
-]]
+]==]
 local commands = require("psi.slash_commands")
 local tui = require("psi.tui_status")
 commands.handle("/reload")

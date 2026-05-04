@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "true|updated queued message 2|removed queued message 1|changed"
-]]
+]==]
 local agent = require("psi.agent_session")
 local c = require("psi.slash_commands")
 agent.clear_queues()

@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "1337|1328"
-]]
+]==]
 local s = require("psi.session_manager")
 s.append_assistant("", {
   { type = "text", text = "abcd" },

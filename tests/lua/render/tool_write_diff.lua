@@ -1,9 +1,9 @@
---[[psi-test
+--[==[psi-test
 contains = ["updated", "delta"]
 files = [
   { path = "tool.txt", text = "alpha beta" },
 ]
-]]
+]==]
 local path = TMP .. "/tool.txt"
 local tools = require('psi.tools')
 local render = require('psi.render')

@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "false|19|true|18|20|true|18"
-]]
+]==]
 local rt = require("psi.tui_runtime")
 local idle = rt._debug_layout_rows(80, 24, false, nil)
 local busy = rt._debug_layout_rows(80, 24, true, nil)

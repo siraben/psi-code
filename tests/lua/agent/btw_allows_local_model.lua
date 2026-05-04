@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "true|qwen2.5"
-]]
+]==]
 local agent = require("psi.agent_session")
 local ollama = require("psi.providers.ollama")
 ollama.complete_text = function(opts) return true, opts.model end

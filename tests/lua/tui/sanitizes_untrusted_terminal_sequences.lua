@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "abc\nnext"
-]]
+]==]
 local rt = require("psi.tui_runtime")
 local esc = string.char(27)
 local bel = string.char(7)

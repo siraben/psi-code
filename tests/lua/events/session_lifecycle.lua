@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 contains = "start:new,shutdown"
-]]
+]==]
 local seen = {}
 psi.events.on("session-start", function(p)
   seen[#seen + 1] = "start:" .. tostring(p.source)

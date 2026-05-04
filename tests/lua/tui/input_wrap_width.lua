@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "2|79|3|2|1"
-]]
+]==]
 local d = require("psi.tui_runtime")._debug_input_lines(
   string.rep("a", 78), 78, 80, "> ", "| ")
 return table.concat({

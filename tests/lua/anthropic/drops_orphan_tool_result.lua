@@ -1,7 +1,7 @@
---[[psi-test
+--[==[psi-test
 # Original: parts[0] == "false" AND parts[1] >= 1. Folded.
 expect = "true|true"
-]]
+]==]
 local a = require("psi.providers.anthropic")
 local prelude = require("psi.prelude")
 local function msg(role, body)

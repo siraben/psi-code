@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 contains = "stamped"
-]]
+]==]
 local session = require("psi.session_manager")
 print("before:", tostring(psi.session_id()))
 session.save()

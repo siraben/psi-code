@@ -1,10 +1,10 @@
---[[psi-test
+--[==[psi-test
 name = "events/tui_bootstrap_load_fires_single_session_start"
 expect = "true|nil|1"
 files = [
   { path = "empty-session.jsonl", text = "" },
 ]
-]]
+]==]
 local count = 0
 psi.events.on("session-start", function()
   count = count + 1

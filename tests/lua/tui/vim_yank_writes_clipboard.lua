@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "abc"
-]]
+]==]
 local tui = require("psi.tui_status")
 local rt = require("psi.tui_runtime")
 require("psi.extensions.vim_keybindings").enable(psi)

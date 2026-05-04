@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 contains = "true|true|true|true"
-]]
+]==]
 local r = require("psi.tools").dispatch("bash", {
   command = "yes hello | head -c 200000"
 })

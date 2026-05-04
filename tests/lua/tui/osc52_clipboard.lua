@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "aGVsbG8=|true|true|true|true|false|1"
-]]
+]==]
 local tui = require("psi.tui_status")
 local osc52 = require("psi.extensions.osc52_clipboard")
 local writes = {}

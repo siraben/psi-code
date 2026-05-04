@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "true|true"
-]]
+]==]
 local agent = require("psi.agent_session")
 local compat = require("psi.providers.openai_compat")
 local seen = "-"

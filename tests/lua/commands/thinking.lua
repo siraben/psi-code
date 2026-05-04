@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "set-thinking|xhigh|print|true"
-]]
+]==]
 local c = require("psi.slash_commands")
 local a = c.handle("/thinking xhigh")
 local b = c.handle("/thinking nope")

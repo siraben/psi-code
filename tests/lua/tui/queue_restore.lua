@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "first queued\n\nsecond queued\n\ndraft|0|editing queued messages"
-]]
+]==]
 local agent = require("psi.agent_session")
 local rt = require("psi.tui_runtime")
 agent.clear_queues()

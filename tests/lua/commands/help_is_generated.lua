@@ -1,4 +1,4 @@
---[[psi-test
+--[==[psi-test
 contains = [
   "built-ins:",
   "/hotkeys",
@@ -8,7 +8,7 @@ contains = [
   "Say hello",
   "/btw <question>",
 ]
-]]
+]==]
 local c = require("psi.slash_commands")
 c.register("greet", {
   description = "Say hello",

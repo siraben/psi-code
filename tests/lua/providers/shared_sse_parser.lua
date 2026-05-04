@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "message_delta:message_delta"
-]]
+]==]
 local a = require("psi.providers.anthropic")._test
 local p = a.new_sse_parser()
 local seen = {}

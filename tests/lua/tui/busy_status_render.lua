@@ -1,7 +1,7 @@
---[[psi-test
+--[==[psi-test
 # Original: stripped equals plain string AND raw output contains "\x1b[96m". Folded.
 expect = "working (0:04  • Ctrl-G to interrupt) ...|true"
-]]
+]==]
 local ansi = require("psi.ansi")
 ansi.color_enabled = true
 local rendered = require("psi.tui_status").render_busy_status("working", 2, 4)

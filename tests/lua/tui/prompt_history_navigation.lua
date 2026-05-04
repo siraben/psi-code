@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "true|second|sec|3"
-]]
+]==]
 local rt = require("psi.tui_runtime")
 local no_history = rt._debug_history_sequence({}, {"line-up"}, "")
 local empty = rt._debug_history_sequence({"first", "second"}, {"line-up"}, "")

@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "midnight-ember|234|81"
-]]
+]==]
 local t = require("psi.theme")
 local cur = t.current()
 return t.current_name() .. "|"

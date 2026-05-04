@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 contains = ["ext:normal", "ext:visual"]
-]]
+]==]
 local tui = require("psi.tui_status")
 tui.register_status_hook(function(arg) return "ext:" .. tostring(arg.editor_mode) end)
 local line = tui.status_line(

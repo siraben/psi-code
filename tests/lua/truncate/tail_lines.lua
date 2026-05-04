@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "line 8\nline 9\nline 10|lines|3"
-]]
+]==]
 local t = require("psi.truncate")
 local lines = {}
 for i = 1, 10 do lines[#lines + 1] = "line " .. i end

@@ -1,7 +1,7 @@
---[[psi-test
+--[==[psi-test
 expect = "ansi-print|true|true"
 env = { NO_COLOR = "1", PSI_COLOR = "0" }
-]]
+]==]
 local action = require("psi.slash_commands").handle("/rainbow")
 local payload = action.payload or ""
 return table.concat({

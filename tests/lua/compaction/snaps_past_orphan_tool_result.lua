@@ -1,8 +1,8 @@
---[[psi-test
+--[==[psi-test
 # Regression for orphan tool-result after compaction. Pass iff first kept
 # role is NOT 'tool-result'. Folded into a boolean return.
 expect = "true"
-]]
+]==]
 local s = require("psi.session_manager")
 local records = require("psi.records")
 s.append_user("hi")

@@ -1,4 +1,4 @@
---[[psi-test
+--[==[psi-test
 contains = [
   "anthropic request failed (401)",
   "check your API key",
@@ -9,7 +9,7 @@ contains = [
   "provider is overloaded",
   "upstream exploded",
 ]
-]]
+]==]
 local c = require("psi.providers.openai_compat").classify_http_error
 local results = {}
 results[1] = c(401,

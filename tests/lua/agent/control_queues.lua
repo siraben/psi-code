@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "true|true|2|follow-up|true|steer|nil|follow edited|0"
-]]
+]==]
 local agent = require("psi.agent_session")
 agent.clear_queues()
 local ok1 = agent.queue_steering("steer")

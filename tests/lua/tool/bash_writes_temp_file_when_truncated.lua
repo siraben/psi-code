@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 contains = "1|true"
-]]
+]==]
 local r = require("psi.tools").dispatch("bash", {
   command = "yes spillover | head -c 200000"
 })

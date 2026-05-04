@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = '18|" › "|"   "'
-]]
+]==]
 local prelude = require("psi.prelude")
 local raw = require("psi.tui_layout").input_layout(
   psi.json_encode({width = 80, height = 24}))

@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 contains = "2|false|unsupported role: bogus"
-]]
+]==]
 local s = require("psi.session_manager")
 local before = psi.session_message_count()
 s.send_message("user", "from extension")

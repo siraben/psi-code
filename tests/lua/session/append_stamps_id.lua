@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "stamped"
-]]
+]==]
 local session = require("psi.session_manager")
 session.append_user("hi")
 local id = psi.session_id()

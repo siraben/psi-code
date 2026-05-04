@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "true|"
-]]
+]==]
 local t = require("psi.truncate")
 local body = string.rep("x", 200) .. "\nshort"
 local r = t.truncate_head(body, { max_bytes = 50 })

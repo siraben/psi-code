@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 contains = "\u001b[38;5;118m"
-]]
+]==]
 local ansi = require("psi.ansi")
 local theme = require("psi.theme")
 ansi.enabled = true

@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "1|1|/new|command unavailable while busy"
-]]
+]==]
 local rt = require("psi.tui_runtime")
 psi.session_append("user", "keep", nil)
 local before = psi.session_message_count()

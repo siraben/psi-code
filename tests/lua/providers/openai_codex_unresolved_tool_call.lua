@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "function_call|call_1|function_call_output|call_1|No result provided|continue"
-]]
+]==]
 local s = require("psi.session_manager")
 local d = require("psi.providers.openai_codex")._debug
 s.append_user("hi")

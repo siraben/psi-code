@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 contains = "true|false|false"
-]]
+]==]
 local tools = require("psi.tools")
 local prompt = require("psi.prompt")
 tools.set_active({"read"})

@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "msgs=2 raw=true"
-]]
+]==]
 local s = require("psi.session_manager")
 local path = TMP .. "/direct.jsonl"
 psi.session_set_path(path)

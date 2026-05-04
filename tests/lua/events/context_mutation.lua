@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 contains = "1|ollama|3"
-]]
+]==]
 local fired = 0
 local seen_provider = ""
 psi.events.on("context", function(p)

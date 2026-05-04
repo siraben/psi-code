@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "2:fast,1:slow|slow|fast"
-]]
+]==]
 local sched = require("psi.sched")
 local seen = {}
 local results = sched.run_all({

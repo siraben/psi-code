@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "print|true|true|true|true"
-]]
+]==]
 local copied = ""
 psi.stdout_write = function(s) copied = copied .. s end
 local action = require("psi.slash_commands").handle("/login openai-codex")

@@ -1,6 +1,6 @@
---[[psi-test
+--[==[psi-test
 expect = "medium|xhigh|off|true|xhigh|xhigh"
-]]
+]==]
 local a = require("psi.agent_session")
 local openai = { provider="openai-codex", id="gpt-5.5", reasoning=true }
 local fallback = a.thinking_level_for(openai, nil, nil)
