@@ -13,6 +13,7 @@ concurrency:
 env:
   NIX_CONFIG: |
     experimental-features = nix-command flakes
+    build-users-group =
   LANG: C.UTF-8
   LC_ALL: C.UTF-8
   TERM: xterm-256color

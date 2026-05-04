@@ -133,11 +133,6 @@ CURL_CA_BUNDLE      = $(shell curl-config --ca 2>/dev/null)
 HOST_CFLAGS_ZLIB ?= $(shell $(HOST_PKG_CONFIG) --cflags zlib)
 HOST_LIBS_ZLIB   ?= $(shell $(HOST_PKG_CONFIG) --libs zlib)
 
-JOBS := $(shell nproc 2>/dev/null || echo 4)
-ifeq (,$(filter -j%,$(MAKEFLAGS)))
-MAKEFLAGS += -j$(JOBS)
-endif
-
 # ---- Default target ----
 .DEFAULT_GOAL := all
 all: $(TARGET)

@@ -21,13 +21,14 @@
 
 # Static psi build for pkgsCosmo / pkgsCosmoFat.
 
-stdenv.mkDerivation {
+stdenv.mkDerivation (finalAttrs: {
   pname = "psi-cosmocc";
   version = "0.1.0";
 
   src = lib.cleanSource ./..;
 
   nativeBuildInputs = [ gnumake ];
+  depsBuildBuild = [ buildCC buildZlib ];
 
   # Use cosmocc's bundled zlib headers and libcosmo symbols.
   buildInputs = [
@@ -36,6 +37,9 @@ stdenv.mkDerivation {
     curl
     lua
   ];
+
+  enableParallelBuilding = true;
+  strictDeps = true;
 
   # makeFlagsArray preserves multi-token values like "-L/path -lz".
   preBuild =
@@ -88,7 +92,11 @@ stdenv.mkDerivation {
   dontPatchShebangs = true;
 
   meta = {
-    description = "psi coding agent built as a static, no-glibc binary via cosmocc";
+    description = "psi coding agent";
+    homepage = "https://github.com/siraben/psi-coding-agent";
+    license = lib.licenses.mit;
+    maintainers = with lib.maintainers; [ siraben ];
     platforms = [ "x86_64-linux" "aarch64-linux" ];
+    mainProgram = "psi";
   };
-}
+})
