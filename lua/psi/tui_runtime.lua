@@ -77,10 +77,6 @@ function chat.set_alt_screen(enter)
   end
 end
 
-local ANSI_PATTERN_CSI = "\27%[[%d;?]*[A-Za-z]"
-local ANSI_PATTERN_KEYPAD = "\27[=>]"
-local ANSI_PATTERN_PRIVATE_MODE = "\27%[%?[%d]+[a-z]"
-
 local EMPTY = ""
 local NEWLINE = "\n"
 local FALLBACK_PROMPT_PREFIX_FIRST = "> "

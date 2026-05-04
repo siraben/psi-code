@@ -64,6 +64,7 @@ they're useful before the binary is on the system. Regenerated from
 |---|---|---|
 | `--agent` | `TEXT` | run a single Anthropic-backed coding-agent turn |
 | `--boot` | `FILE` | override the Lua bootstrap file |
+| `--chat` | — | use the chat-style TUI (transcript flows into terminal scrollback) |
 | `--compact` | `N` | compact the current session, keeping the most recent N messages |
 | `--eval` | `EXPR` | evaluate a Lua expression and print the result |
 | `-h`, `--help` | — | show help |

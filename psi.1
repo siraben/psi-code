@@ -18,6 +18,9 @@ run a single Anthropic\-backed coding\-agent turn
 \fB\-\-boot\fR \fIFILE\fR
 override the Lua bootstrap file
 .TP
+\fB\-\-chat\fR
+use the chat\-style TUI (transcript flows into terminal scrollback)
+.TP
 \fB\-\-compact\fR \fIN\fR
 compact the current session, keeping the most recent N messages
 .TP
@@ -52,7 +55,7 @@ print the default coding\-agent system prompt
 thinking level: off, minimal, low, medium, high, xhigh
 .TP
 \fB\-\-tui\fR
-run the full\-screen interactive TUI
+run the inline interactive TUI
 .TP
 \fB\-\-version\fR
 show version
