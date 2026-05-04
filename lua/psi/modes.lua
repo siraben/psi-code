@@ -40,8 +40,44 @@ local function choose_session_cli(infos)
   return nil
 end
 
+-- Treat --session values that lack a path separator and a .jsonl
+-- extension as session ids (or unique prefixes). The TUI prints
+-- `Resume with: psi --session <id>` on exit, so the same value the
+-- user reads has to round-trip back through this entrypoint.
+local function looks_like_session_id(value)
+  if type(value) ~= "string" or value == "" then
+    return false
+  end
+  if value:find("/", 1, true) or value:find("\\", 1, true) then
+    return false
+  end
+  if value:sub(-6) == ".jsonl" then
+    return false
+  end
+  return true
+end
+
+local function resolve_session_file_arg(opts)
+  if not opts.session_file or opts.session_file == "" then
+    return true
+  end
+  if not looks_like_session_id(opts.session_file) then
+    return true
+  end
+  local resolved, err = session.find_session_by_id(opts.session_file, psi.cwd())
+  if not resolved then
+    return false, err
+  end
+  opts.session_file = resolved
+  return true
+end
+
 local function bootstrap_session(opts)
   if opts.session_file and opts.session_file ~= "" then
+    local ok, err = resolve_session_file_arg(opts)
+    if not ok then
+      return false, err
+    end
     return session.load(opts.session_file)
   end
   if opts.resume then
@@ -212,6 +248,11 @@ function M.run_compact(opts)
   end
   if not opts.session_file or opts.session_file == "" then
     io.stderr:write("--compact requires --session FILE or --resume\n")
+    return false
+  end
+  local resolved_ok, resolved_err = resolve_session_file_arg(opts)
+  if not resolved_ok then
+    io.stderr:write("--compact failed to resolve session: " .. tostring(resolved_err) .. "\n")
     return false
   end
   session.load(opts.session_file)

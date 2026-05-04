@@ -3131,8 +3131,33 @@ local function choose_session_tui(infos)
   end
 end
 
+-- Mirror modes.lua: a --session value with no path separator and no
+-- .jsonl suffix is treated as a session id (or unique prefix) and
+-- resolved against the on-disk session store. Required so the
+-- `Resume with: psi --session <id>` line printed at TUI exit
+-- round-trips back through this entrypoint.
+local function looks_like_session_id(value)
+  if type(value) ~= "string" or value == "" then
+    return false
+  end
+  if value:find("/", 1, true) or value:find("\\", 1, true) then
+    return false
+  end
+  if value:sub(-6) == ".jsonl" then
+    return false
+  end
+  return true
+end
+
 local function bootstrap_session(opts)
   if opts.session_file and opts.session_file ~= "" then
+    if looks_like_session_id(opts.session_file) then
+      local resolved, find_err = session.find_session_by_id(opts.session_file, psi.cwd())
+      if not resolved then
+        return false, find_err
+      end
+      opts.session_file = resolved
+    end
     local ok, err = session.load(opts.session_file)
     if not ok then
       return false, err

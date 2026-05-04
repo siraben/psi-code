@@ -747,6 +747,84 @@ function M.list_sessions(cwd)
   return sort_infos(infos)
 end
 
+-- Resolve a session id (or unique prefix) to a JSONL path. Looks first
+-- in the cwd-scoped session dir, then widens to all session dirs under
+-- $STATE/psi/sessions. Filenames follow "<timestamp>_<id>.jsonl" (new)
+-- or "<id>.jsonl" (legacy flat layout).
+function M.find_session_by_id(id, cwd)
+  if type(id) ~= "string" or id == "" then
+    return nil, "session id required"
+  end
+  local seen = {}
+  local matches = {}
+
+  local function scan_dir(d)
+    if not d then
+      return
+    end
+    local entries = psi.list_dir and psi.list_dir(d) or nil
+    if type(entries) ~= "table" then
+      return
+    end
+    for _, entry in ipairs(entries) do
+      local name = type(entry) == "table" and entry.name or entry
+      if type(name) == "string" and name:match("%.jsonl$") then
+        local file_id = name:match("_([^_/]+)%.jsonl$") or name:match("^(.+)%.jsonl$")
+        if file_id and (file_id == id or file_id:sub(1, #id) == id) then
+          local full = prelude.path_join(d, name)
+          if not seen[full] then
+            seen[full] = true
+            matches[#matches + 1] = { path = full, id = file_id, exact = file_id == id }
+          end
+        end
+      end
+    end
+  end
+
+  scan_dir(M.session_dir_for_cwd(cwd or current_cwd()))
+
+  local root = M.sessions_root()
+  if root then
+    local legacy = prelude.path_join(root, legacy_encode_session_dir(cwd or current_cwd()))
+    scan_dir(legacy)
+    if #matches == 0 then
+      scan_dir(root)
+      local entries = psi.list_dir(root)
+      if type(entries) == "table" then
+        for _, entry in ipairs(entries) do
+          local name = type(entry) == "table" and entry.name or entry
+          if type(name) == "string" then
+            local sub = prelude.path_join(root, name)
+            if psi.file_type and psi.file_type(sub) == "directory" then
+              scan_dir(sub)
+            end
+          end
+        end
+      end
+    end
+  end
+
+  if #matches == 0 then
+    return nil, "no session found with id: " .. id
+  end
+  local exact
+  for _, m in ipairs(matches) do
+    if m.exact then
+      if exact then
+        return nil, "ambiguous session id: " .. id
+      end
+      exact = m
+    end
+  end
+  if exact then
+    return exact.path
+  end
+  if #matches > 1 then
+    return nil, "ambiguous session id: " .. id
+  end
+  return matches[1].path
+end
+
 function M.most_recent_session(cwd)
   local infos = M.list_sessions(cwd)
   return infos[1] and infos[1].path or nil

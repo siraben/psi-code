@@ -1220,6 +1220,35 @@ def t_session_list_sessions_for_cwd(psi: Psi):
     assert_contains(first, "one", "first message")
 
 
+@test("session/find_by_id")
+def t_session_find_by_id(psi: Psi):
+    # `--session <uuid>` (no path, no .jsonl) should resolve to the
+    # JSONL file inside this cwd's session dir, matching what the TUI
+    # prints as "Resume with: psi --session <uuid>". Both full ids and
+    # unique prefixes work.
+    project = psi.tmp / "project-find-by-id"
+    project.mkdir()
+    state = psi.tmp / "state-find-by-id"
+    env = {"XDG_STATE_HOME": str(state)}
+    psi.run("--print", "first", cwd=project, env_extra=env)
+    sid = psi.run(
+        "--eval",
+        'local s = require("psi.session_manager")\n'
+        + "local xs = s.list_sessions(psi.cwd())\n"
+        + "return xs[1] and xs[1].id or ''",
+        cwd=project,
+        env_extra=env,
+    ).stdout.strip()
+    assert_true(len(sid) > 0, "session has an id")
+    out = psi.run("--session", sid[:8], "--print", "second",
+                  cwd=project, env_extra=env).stdout
+    # `--session <prefix>` resolves to the same session the TUI just
+    # printed: --print loads it (3 messages: user "first", synthetic
+    # assistant reply, new user "second" + assistant) — if the prefix
+    # had failed to resolve, --print would have created a fresh session.
+    assert_contains(out, "session-messages: 3", "prefix-resume reloaded prior turns")
+
+
 @test("session/list_sessions_includes_preview")
 def t_session_list_sessions_includes_preview(psi: Psi):
     project = psi.tmp / "project-preview"
@@ -2700,7 +2729,7 @@ def t_tui_quits(psi: Psi):
         ("repo" in text and "worktree" in text) or "cwd" in text,
         "TUI header should show workspace context",
     )
-    assert_contains(text, "Resume with: psi --tui --session", "TUI quit resume command")
+    assert_contains(text, "Resume with: psi --session", "TUI quit resume command")
 
 
 @test("mode/tui_resume_picker_previews_session")

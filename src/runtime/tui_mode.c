@@ -55,13 +55,22 @@ static void psi_tui_fprint_shell_quoted(FILE *out, const char *text) {
 }
 
 static void psi_tui_print_resume_command(const struct psi_session *session) {
-    if (session == NULL || session->path == NULL || session->path[0] == '\0') {
+    if (session == NULL) {
         return;
     }
-    fputs("\nResume with: psi --tui --session ", stdout);
-    psi_tui_fprint_shell_quoted(stdout, session->path);
-    fputc('\n', stdout);
-    fflush(stdout);
+    if (session->id != NULL && session->id[0] != '\0') {
+        fputs("\nResume with: psi --session ", stdout);
+        psi_tui_fprint_shell_quoted(stdout, session->id);
+        fputc('\n', stdout);
+        fflush(stdout);
+        return;
+    }
+    if (session->path != NULL && session->path[0] != '\0') {
+        fputs("\nResume with: psi --session ", stdout);
+        psi_tui_fprint_shell_quoted(stdout, session->path);
+        fputc('\n', stdout);
+        fflush(stdout);
+    }
 }
 
 static int psi_tui_enter_terminal(void) {
