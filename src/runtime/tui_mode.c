@@ -161,7 +161,11 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
     psi_abort_signal_init(&abort_signal);
     vm.host.abort_signal = &abort_signal;
 
-    setlocale(LC_ALL, "");
+    /* Adopt user's LC_CTYPE so wcwidth/iconv-style terminal text handling
+     * works, but keep LC_NUMERIC at "C" so cJSON / printf("%f") emit
+     * locale-neutral decimals (a German LC_NUMERIC=de_DE produces "1,5"
+     * which would corrupt JSON bodies sent to providers). */
+    setlocale(LC_CTYPE, "");
     status = psi_tui_install_atexit();
     if (status != PSI_STATUS_OK) {
         psi_vm_destroy(&vm);

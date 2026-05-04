@@ -240,7 +240,8 @@ int main(int argc, char **argv) {
 
     printf("const struct psi_embedded_data %s[] = {\n", table_name);
     for (i = 0; i < (int)count; i++) {
-        printf("    { \"%s\", emb_%s_src, %zuu, %zuu },\n", keys[i], syms[i], zlen[i], raw_lens[i]);
+        printf("    { \"%s\", emb_%s_src, %luu, %luu },\n", keys[i], syms[i],
+            (unsigned long)zlen[i], (unsigned long)raw_lens[i]);
     }
     printf("    { NULL, NULL, 0u, 0u }\n");
     printf("};\n");

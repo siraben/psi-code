@@ -5,6 +5,7 @@
 
 #include <stdlib.h>
 #include <unistd.h>
+#include <curl/curl.h>
 #include <zlib.h>
 #include "psi/common.h"
 #include "psi/http_tls.h"
@@ -40,15 +41,16 @@ static const char *psi_http_ca_bundle_path(void) {
     return NULL;
 }
 
-void psi_http_configure_tls(CURL *curl) {
+void psi_http_configure_tls(void *curl) {
+    CURL *handle = (CURL *)curl;
     const char *ca_bundle;
 
-    if (curl == NULL)
+    if (handle == NULL)
         return;
 
     ca_bundle = psi_http_ca_bundle_path();
     if (ca_bundle != NULL) {
-        curl_easy_setopt(curl, CURLOPT_CAINFO, ca_bundle);
+        curl_easy_setopt(handle, CURLOPT_CAINFO, ca_bundle);
         return;
     }
 
@@ -68,7 +70,7 @@ void psi_http_configure_tls(CURL *curl) {
             blob.data = (void *)bytes;
             blob.len = entry->raw_len;
             blob.flags = CURL_BLOB_COPY;
-            curl_easy_setopt(curl, CURLOPT_CAINFO_BLOB, &blob);
+            curl_easy_setopt(handle, CURLOPT_CAINFO_BLOB, &blob);
         }
         free(bytes);
     }

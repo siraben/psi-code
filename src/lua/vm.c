@@ -2680,8 +2680,9 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("mkdir_parent", lfn_mkdir_parent);
     PSI_REG_DOC("runtime_info", lfn_runtime_info,
         "Return a table describing compiled-in capabilities (TUI, ANSI, COLOR, REPL_EDITLINE).");
-    PSI_REG_DOC(
-        "time_ms", lfn_time_ms, "Return a monotonic millisecond timestamp; useful for timings.");
+    PSI_REG_DOC("time_ms", lfn_time_ms,
+        "Return a wall-clock millisecond timestamp (gettimeofday); useful for timings, "
+        "but not guaranteed monotonic across system clock adjustments.");
     PSI_REG("session_messages", lfn_session_messages);
     PSI_REG("session_messages_from", lfn_session_messages_from);
     PSI_REG("session_token_estimate_from", lfn_session_token_estimate_from);

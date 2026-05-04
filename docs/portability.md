@@ -52,7 +52,7 @@ can replace any one bit and keep the rest.
 | C89 strict                            | ✅      |
 | `bool`/`stdint.h`/VLA                 | ✅ none|
 | `//` comments                         | ✅ none|
-| Endianness assumptions                | ✅ none|
+| Endianness assumptions                | ✅ none — verified by treewide audit: no byte-order primitives (`htonl`/`bswap`/`__builtin_bswap`), no shift-assemble of multi-byte ints from byte streams, no integer-over-byte unions, no `*(uint32_t*)buf` type punning, no raw-int `fwrite`/`fread`. Embedded blobs (Lua bytecode + docs + CA bundle) are zlib-compressed byte streams, byte-order independent. |
 | `sizeof(long)` assumptions            | ✅ none|
 | Hardcoded paths                       | only `/bin/sh` and `/dev/null` (TUI only) |
 | Lua shelling out for filesystem work  | avoided for built-in read/write/listing, sessions, prompt templates, and extensions; path joins, parent dirs, recursive mkdir, file type, and directory listing are C-backed primitives |
@@ -61,6 +61,9 @@ can replace any one bit and keep the rest.
 | `nanosleep`                           | POSIX-1b; universal on modern Unices |
 | `sigaction` / `sigemptyset`           | POSIX; universal |
 | `fork` / `execl` / `pipe` / `waitpid` | POSIX; gated by `#ifndef _WIN32` |
+| Signal-handler-written flag type      | ✅ `volatile sig_atomic_t` (the only type C89 guarantees safe under signal handlers) |
+| `LC_NUMERIC` poisoning                | ✅ TUI mode adopts `LC_CTYPE` only, not `LC_ALL` — keeps `printf("%f")` and cJSON locale-neutral so JSON request bodies stay valid |
+| Public-header dependency footprint    | ✅ `include/psi/*.h` only pulls `<stddef.h>`, `<signal.h>`, `<stdio.h>`, `<lua.h>`; no `<curl/curl.h>`, `<pthread.h>`, `<unistd.h>`, or other platform/library headers leak through |
 | Vendored vs system deps               | Lua 5.5, cJSON, argtable3, libedit, libcurl, zlib are system-supplied via pkg-config on Linux/Haiku. Hosts without pkg-config can vendor or override per-dep — see "untested-OS predictions" below. |
 
 ## Untested-OS predictions
