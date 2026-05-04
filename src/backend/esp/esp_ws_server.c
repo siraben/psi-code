@@ -28,10 +28,6 @@
 #include "freertos/event_groups.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
-#if PSI_USE_LUA_VM
-#include "lua.h"
-#include "lauxlib.h"
-#endif
 
 #include "psi/abort.h"
 #include "psi/agent_runtime.h"
@@ -39,9 +35,6 @@
 #include "psi/embedded_data.h"
 #include "psi/esp_runtime.h"
 #include "psi/session.h"
-#if PSI_USE_LUA_VM
-#include "psi/vm.h"
-#endif
 
 #include "esp_obs_internal.h"
 #include "esp_tools.h"
@@ -57,46 +50,25 @@ static const char *TAG = "psi_ws";
 
 #define PSI_WS_INBOX_DEPTH 4
 #define PSI_WS_OUTBOX_DEPTH 32
-/* The worker task drives the agent turn through psi_vm_run_agent_turn,
- * which recurses C ↔ Lua several times during streaming. mbedTLS's
- * handshake nests deep too; 32 KiB has been reliable so far. */
+/* The worker task drives the agent turn through psi_esp_agent_turn,
+ * which streams Anthropic SSE and dispatches tool calls inline.
+ * mbedTLS's handshake nests deep, so 32 KiB has been reliable. */
 #define PSI_WS_TURN_TASK_STACK 32768
 
 struct psi_ws_inbound {
     char *json; /* owned; receiver frees */
 };
 
-/* The agent VM and session are process-wide singletons: when Lua
- * is in the build, ESP32's heap is too small to host a Lua state
- * per WS connection, and the agent is single-threaded by design
- * (one turn at a time). When PSI_USE_LUA_VM=0 (default for the
- * ESP build) only the abort signal lives here; the VM/session
- * stubs go away. The connection still owns the queues and
- * observer either way. */
-#if PSI_USE_LUA_VM
-static struct psi_vm g_psi_vm;
-static struct psi_session g_psi_session;
-static int g_psi_vm_inited = 0;
-#endif
+/* The agent is single-threaded by design (one WS turn at a time),
+ * so a single abort signal serves every connection. */
 static struct psi_abort_signal g_psi_abort;
 
-/* Cached system prompt built from psi.prompt.system_prompt() in Lua
- * at boot. The C agent injects it as the Anthropic `system` field
- * for every turn so embedded chat sees the same context bundle the
- * desktop CLI/TUI agents do (tool list, guidelines, date, embedded
- * docs reference). NULL means we never built one — the turn still
- * runs, the model just gets a default-empty system. */
+/* Cached system prompt built once at boot — by zforth's prompt
+ * builder when PSI_USE_FORTH_PROMPT=ON, otherwise the baked-in C
+ * string fallback in psi_esp_main_run. The C agent injects it as
+ * Anthropic's `system` field on every turn. NULL means turns go
+ * unframed. */
 static char *g_psi_system_prompt = NULL;
-
-/* Accessor used by app_main after psi_esp_vm_bootstrap. NULL when
- * the Lua VM is compiled out (the ESP build's default). */
-struct psi_vm *psi_esp_vm(void) {
-#if PSI_USE_LUA_VM
-    return g_psi_vm_inited ? &g_psi_vm : NULL;
-#else
-    return NULL;
-#endif
-}
 
 void psi_esp_set_system_prompt(char *prompt) {
     free(g_psi_system_prompt);
@@ -122,77 +94,11 @@ struct psi_ws_session {
     int closed;
 };
 
-/* Initialize state the C agent always needs (the abort signal is
- * polled by every WS turn). Independent of the Lua VM, which gets
- * its own bootstrap below. */
+/* Initialize state the C agent always needs. Called from
+ * psi_esp_main_run before the network comes up. */
 void psi_esp_runtime_init(void) {
     psi_abort_signal_init(&g_psi_abort);
 }
-
-#if PSI_USE_LUA_VM
-int psi_esp_vm_bootstrap(void) {
-    if (g_psi_vm_inited)
-        return 0;
-    psi_session_init(&g_psi_session);
-    if (psi_vm_init(&g_psi_vm, NULL, NULL, NULL, NULL) != PSI_STATUS_OK)
-        return -1;
-    psi_vm_bind_session(&g_psi_vm, &g_psi_session);
-    g_psi_vm_inited = 1;
-    return 0;
-}
-
-/* Call psi.prompt.system_prompt() in the given VM and return a
- * heap-allocated copy. Touches the Lua state and so isn't safe to
- * call from a task other than the one that owns the VM. We invoke
- * this once at boot from app_main; the cached result feeds every
- * WS turn. Only available when PSI_USE_LUA_VM=ON. */
-char *psi_esp_build_system_prompt(struct psi_vm *vm) {
-    lua_State *L;
-    int top;
-    const char *result;
-    size_t result_len;
-    char *copy = NULL;
-
-    if (vm == NULL || vm->L == NULL)
-        return NULL;
-    L = vm->L;
-    top = lua_gettop(L);
-
-    lua_getglobal(L, "psi");
-    if (lua_type(L, -1) != LUA_TTABLE)
-        goto out;
-    lua_getfield(L, -1, "prompt");
-    if (lua_type(L, -1) != LUA_TTABLE)
-        goto out;
-    lua_getfield(L, -1, "system_prompt");
-    if (lua_type(L, -1) != LUA_TFUNCTION)
-        goto out;
-    if (lua_pcall(L, 0, 1, 0) != LUA_OK) {
-        ESP_LOGW(TAG, "system_prompt error: %s",
-            lua_type(L, -1) == LUA_TSTRING ? lua_tostring(L, -1) : "?");
-        goto out;
-    }
-    result = lua_tolstring(L, -1, &result_len);
-    if (result == NULL)
-        goto out;
-    copy = (char *)malloc(result_len + 1u);
-    if (copy != NULL) {
-        memcpy(copy, result, result_len);
-        copy[result_len] = '\0';
-    }
-
-out:
-    lua_settop(L, top);
-    return copy;
-}
-#else
-/* Stubs for the default ESP build (Lua VM compiled out). */
-int psi_esp_vm_bootstrap(void) { return -1; }
-char *psi_esp_build_system_prompt(struct psi_vm *vm) {
-    (void)vm;
-    return NULL;
-}
-#endif
 
 #define PSI_WS_BIT_CLOSE 0x01u
 
@@ -321,15 +227,10 @@ static void psi_ws_worker_task(void *arg) {
                 const char *u = (cJSON_IsString(text) ? text->valuestring : "");
                 const char *m = (cJSON_IsString(model) ? model->valuestring : "claude-haiku-4-5");
                 long mx = (cJSON_IsNumber(max) ? (long)max->valuedouble : 1024L);
-                char *response = NULL;
                 psi_abort_signal_reset(&g_psi_abort);
-                /* C-native agent path: bypasses the Lua VM entirely.
-                 * The Lua machinery (anthropic.lua + provider_loop +
-                 * stream_parser + transform_messages...) allocates
-                 * far more than ESP32's heap can give us reliably,
-                 * even with PSRAM. The C path streams Anthropic SSE
-                 * straight to the WS observer with one cJSON parse
-                 * per event, no GC, no per-turn module loads. */
+                /* C-native agent path: streams Anthropic SSE straight
+                 * to the WS observer with one cJSON parse per event,
+                 * no GC, no scripting language on the hot path. */
                 {
                     char *err_msg = NULL;
                     int prc = psi_esp_agent_turn(
@@ -339,11 +240,6 @@ static void psi_ws_worker_task(void *arg) {
                     }
                     free(err_msg);
                 }
-                (void)response;
-#if PSI_USE_LUA_VM
-                (void)psi_vm_run_agent_turn;
-                (void)g_psi_vm_inited;
-#endif
             } else if (cJSON_IsString(type) && strcmp(type->valuestring, "abort") == 0) {
                 psi_esp_request_abort(&g_psi_abort);
             } else {

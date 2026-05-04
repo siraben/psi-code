@@ -27,22 +27,14 @@ void psi_esp_main_run(void);
 void psi_esp_request_abort(struct psi_abort_signal *abort_signal);
 
 struct psi_agent_observer;
-struct psi_vm;
-
-/* Build the desktop-equivalent system prompt by calling
- * psi.prompt.system_prompt() in the given Lua VM. Returns a
- * heap-allocated copy the caller must free, or NULL if the VM or
- * prompt module isn't reachable. The Lua state is touched only on
- * the calling task; pre-build once at boot and cache the result. */
-char *psi_esp_build_system_prompt(struct psi_vm *vm);
 
 /* Run a single Anthropic turn entirely in C. Builds the JSON request,
- * streams the SSE response, and forwards text deltas to the observer.
- * Bypasses Lua entirely — necessary on ESP32 where the full Lua agent
- * loop allocates beyond the available heap.
+ * streams the SSE response, dispatches tool calls inline against
+ * psi_esp_tool_table, and forwards text deltas to the observer.
  *
- * `system_prompt` is the system message to send (typically the result
- * of psi_esp_build_system_prompt); pass NULL to send no system field.
+ * `system_prompt` is the system message to send (the cached prompt
+ * from psi_esp_get_system_prompt is the typical source); pass NULL
+ * to omit the system field entirely.
  *
  * Returns PSI_STATUS_OK on success, PSI_STATUS_ERROR on transport or
  * API failure (in which case *error_message is a heap string the

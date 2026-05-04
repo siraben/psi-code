@@ -1,22 +1,18 @@
 /* zForth glue.
  *
- * Builds the agent's system prompt at boot by running a tiny Forth
- * program that calls back into C via custom syscalls. zForth's
- * footprint is ~10 KiB code + 2 KiB dictionary + 256 B stacks ≈
- * 12 KiB total — nearly an order of magnitude smaller than chibi
- * and small enough that mbedTLS still gets its handshake buffers
- * afterward (the failure mode chibi hit).
+ * Builds the agent's system prompt at boot and serves the
+ * forth_eval tool at runtime. zforth's whole runtime is one
+ * fixed allocation (~10 KiB code + 2 KiB dictionary + 256 B
+ * stacks ≈ 12 KiB total) — small enough that the mbedTLS
+ * handshake buffers still fit alongside it.
  *
  * Forth has no built-in string concatenation, so the prompt-build
  * pattern is "TELL into a captured buffer, append more, TELL
  * again." Three custom syscalls let the Forth program emit the
  * MAC and pull literal prompt fragments from C without paying for
- * Forth-side string manipulation.
- *
- * The Forth context lives process-wide. Unlike chibi's 96 KiB
- * carve, 12 KiB doesn't fragment the heap meaningfully — flipping
- * PSI_USE_FORTH_PROMPT=ON leaves the agent's HTTPS path
- * untouched, which is the whole point of trying Forth.
+ * Forth-side string manipulation. The persistent context means
+ * agent-supplied definitions stick across forth_eval calls — the
+ * dictionary is a real long-lived workspace.
  */
 
 #include <stdio.h>

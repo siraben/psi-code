@@ -60,7 +60,6 @@ static const char *TAG = "psi_main";
 #define PSI_NET_BIT_FAIL BIT1
 
 void psi_ws_server_start(void);
-int psi_esp_vm_bootstrap(void);
 
 static EventGroupHandle_t g_net_events = NULL;
 
@@ -259,35 +258,10 @@ void psi_esp_main_run(void) {
     /* Initialize the abort signal the C agent uses on every WS turn. */
     psi_esp_runtime_init();
 
-    /* Bring up the optional Lua VM BEFORE the network stack so the
-     * boot module set sees the maximum free heap. Network bring-up
-     * (lwIP buffers, eth/wifi drivers, HTTP server) carves out ~80
-     * KiB of contiguous space that Lua otherwise can't allocate
-     * inside. With PSI_USE_LUA_VM=0 (the ESP default) this whole
-     * block compiles out and we go straight to the zforth-built
-     * prompt below. */
-    ESP_LOGI(TAG, "free heap before VM init: %lu",
+    ESP_LOGI(TAG, "free heap before prompt build: %lu",
         (unsigned long)heap_caps_get_free_size(MALLOC_CAP_8BIT));
-    ESP_LOGI(TAG, "largest free block:        %lu",
+    ESP_LOGI(TAG, "largest free block:            %lu",
         (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-#if PSI_USE_LUA_VM
-    /* Lua VM path. Only built when PSI_USE_LUA_VM=ON (typically only
-     * on WROVER ESP32s where the embedded module graph fits). Builds
-     * the desktop-equivalent system prompt by calling
-     * psi.prompt.system_prompt() in Lua, then caches the result for
-     * the WS turn loop. */
-    if (psi_esp_vm_bootstrap() != 0) {
-        ESP_LOGE(TAG, "psi_vm_init failed; agent will run without Lua-built prompt");
-    } else {
-        char *prompt = psi_esp_build_system_prompt(psi_esp_vm());
-        if (prompt != NULL) {
-            ESP_LOGI(TAG, "system prompt cached from Lua (%u bytes)", (unsigned)strlen(prompt));
-            psi_esp_set_system_prompt(prompt);
-        } else {
-            ESP_LOGW(TAG, "system prompt build (Lua) failed; falling back");
-        }
-    }
-#endif
 #if PSI_USE_FORTH_PROMPT
     /* zForth path: tiny stack-based Forth, ~12 KiB total state.
      * Small enough that mbedTLS still gets its handshake buffers
@@ -302,9 +276,8 @@ void psi_esp_main_run(void) {
         }
     }
 #endif
-    /* Baked-in C fallback. Last resort if zforth (and the optional
-     * Lua VM) fail to build a prompt — ensures the agent never runs
-     * unframed. */
+    /* Baked-in C fallback. Last resort if zforth fails to build a
+     * prompt — ensures the agent never runs unframed. */
     if (psi_esp_get_system_prompt() == NULL) {
         char *baked = (char *)malloc(1024u);
         if (baked != NULL) {
@@ -328,7 +301,7 @@ void psi_esp_main_run(void) {
             ESP_LOGI(TAG, "system prompt: baked-in default (%u bytes)", (unsigned)strlen(baked));
         }
     }
-    ESP_LOGI(TAG, "free heap after VM init:  %lu",
+    ESP_LOGI(TAG, "free heap after prompt build:  %lu",
         (unsigned long)heap_caps_get_free_size(MALLOC_CAP_8BIT));
     if (psi_net_init() != 0) {
         ESP_LOGE(TAG, "network init failed; refusing to start server");

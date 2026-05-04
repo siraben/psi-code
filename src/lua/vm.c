@@ -3018,19 +3018,11 @@ int psi_vm_init(
     } else
 #endif /* PSI_CAP_FILESYSTEM */
     {
-        /* Prefer the slim "boot-esp.lua" when the filesystem capability
-         * is compiled out — embedded targets don't need the desktop
-         * boot's TUI / slash-command / multi-provider stack, and the
-         * slim boot's smaller require graph trims peak heap usage.
-         * Falls through to the full boot.lua when boot-esp isn't
-         * embedded (host-style builds with PSI_CAP_FILESYSTEM=0). */
-        const struct psi_embedded_data *boot = NULL;
-#if !PSI_CAP_FILESYSTEM
-        boot = psi_vm_embedded_find("boot-esp.lua");
-#endif
-        if (boot == NULL) {
-            boot = psi_vm_embedded_find("boot.lua");
-        }
+        /* No filesystem; load the embedded boot.lua. (Earlier builds
+         * had a separate slim "boot-esp.lua" for embedded targets,
+         * but the ESP firmware moved to a non-Lua extension language
+         * and the slim boot was deleted.) */
+        const struct psi_embedded_data *boot = psi_vm_embedded_find("boot.lua");
         {
             unsigned char *buf;
             int load_rc;

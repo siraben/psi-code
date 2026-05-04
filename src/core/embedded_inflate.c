@@ -1,13 +1,13 @@
-/* Minimal inflater for the embedded-blob table — used only when the
- * full Lua VM (src/lua/vm.c, which has its own zlib-backed
- * implementation) is compiled out. The ESP build with
- * PSI_USE_LUA_VM=OFF wires this file in via PSI_C_SOURCES; every
- * other build leaves it out and uses vm.c's definition.
+/* Minimal inflater for the embedded-blob table.
+ *
+ * Used by the ESP firmware build (where src/lua/vm.c, which carries
+ * the zlib-backed inflate path, isn't compiled). Every other build
+ * uses vm.c's definition.
  *
  * The firmware always embeds with --no-compress (raw_len == len) so
- * inflate is just a memcpy; if the linker ever sees a compressed
- * entry through this path we log loudly and fail rather than try to
- * pull zlib in. */
+ * inflate is just a memcpy. If the linker ever sees a compressed
+ * entry come through this path we log loudly and fail rather than
+ * try to pull zlib in. */
 
 #include <stdio.h>
 #include <stdlib.h>

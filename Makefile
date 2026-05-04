@@ -72,7 +72,7 @@ SOURCES := $(sort $(shell find src -name '*.c' -not -path 'src/backend/*' 2>/dev
 OBJECTS := $(SOURCES:%.c=$(BUILD_DIR)/%.o)
 C_FORMAT_FILES := $(sort $(shell find include scripts src -type f \( -name '*.c' -o -name '*.h' \) 2>/dev/null))
 
-LUA_SOURCES = lua/boot.lua lua/boot-esp.lua $(sort $(shell find lua/psi -name '*.lua' 2>/dev/null))
+LUA_SOURCES = lua/boot.lua $(sort $(shell find lua/psi -name '*.lua' 2>/dev/null))
 DOC_SOURCES = README.md $(sort $(wildcard docs/*.md))
 EMBED_TOOL  = $(BUILD_DIR)/embed
 EMBED_LUA   = $(BUILD_DIR)/embedded_lua.c

@@ -2,68 +2,48 @@
 #
 # The C/Lua core lives at the root of the psi-coding-agent repo,
 # alongside this firmware/components tree. We point the component
-# build at $PROJECT_DIR/.. so the existing src/, include/, lua/, and
+# build at $PROJECT_DIR/.. so the existing src/, include/, and
 # scripts/ directories don't need to move.
 #
-# Capability gates: ESP firmware sets PSI_CAP_FILESYSTEM=0,
-# PSI_CAP_PROCESS=0, PSI_CAP_TUI=0, PSI_CAP_HTTP=1, and selects the
-# esp_http_client backend via PSI_HTTP_BACKEND_CURL=0. See
-# include/psi/* for the full list.
+# The desktop psi build uses Lua heavily; this ESP build does not.
+# zforth is the on-chip extension language (see components/forth-cmod
+# and src/backend/esp/esp_forth.c) and the C agent loop in
+# esp_agent.c is what drives Anthropic. There is no Lua VM, no
+# embedded module graph, no lua-cmod dependency.
 
 set(PSI_ROOT "${CMAKE_CURRENT_LIST_DIR}/../..")
 
-# Generated blob paths. These live under the component's build dir so
-# ESP-IDF treats them like ordinary sources. The custom commands that
-# create them are only registered in the main build pass — ESP-IDF
-# also evaluates this CMakeLists in script mode (CMAKE_BUILD_EARLY_EXPANSION),
-# where add_custom_command is forbidden.
 # PSI_INCLUDE_SPA controls whether the firmware embeds the chat SPA
-# at /. Default ON so `nix build .#firmware` keeps producing a
-# self-contained image that can be opened directly in a browser.
-# Turn OFF (idf.py build -DPSI_INCLUDE_SPA=OFF) when the firmware is
-# only ever talked to through the host frontend dashboard
-# (`apps.esp-frontend`), which serves its own UI and proxies the WS.
-# Saves ~14 KiB of flash + the inflate codepath at boot.
+# at /. Default ON so the firmware is self-contained — open the
+# device's IP in a browser and chat. Turn OFF when only the host
+# frontend dashboard talks to the chip.
 option(PSI_INCLUDE_SPA "Embed the chat SPA into the firmware" ON)
 
-# PSI_GPIO_INTROSPECTION exposes the /gpio HTTP endpoint and the
-# shadow state behind it (configured mode + last commanded level for
-# every pin). The host dashboard polls this at 2 Hz to render a live
-# pin grid. Useful in QEMU where there's no physical scope. On real
-# hardware you'd measure pins directly, so default OFF saves the
-# 40-byte shadow + a small handler. The flake sets ON for the QEMU
-# firmware image; pass -DPSI_GPIO_INTROSPECTION=OFF for production.
+# PSI_GPIO_INTROSPECTION exposes /gpio for the host dashboard's pin
+# grid. ON by default; turn OFF on real hardware where you'd measure
+# pins with a probe instead.
 option(PSI_GPIO_INTROSPECTION "Expose /gpio endpoint for the host dashboard pin grid" ON)
 
-# PSI_USE_FORTH_PROMPT uses zforth (~10 KiB code + 2 KiB dict + 256 B
-# stacks) to build the system prompt at boot. Default ON: zforth is
-# the chosen extension language for the ESP build (see PSI_USE_LUA_VM
-# below), so the prompt-builder using zforth keeps everything in one
-# story.
+# PSI_USE_FORTH_PROMPT builds the agent's system prompt at boot via
+# zforth + a few C foreign procs. ON by default — zforth is the
+# extension language and the prompt-builder using it keeps the path
+# uniform. Turn OFF to use the baked-in C string fallback.
 option(PSI_USE_FORTH_PROMPT "Build the system prompt with zforth at boot" ON)
 
-# PSI_USE_LUA_VM compiles in psi's full Lua VM + embedded module
-# graph. On no-PSRAM ESP32 (D0WD-V3 etc.) the module graph OOMs
-# during boot, so the VM bootstrap fails and ~150 KiB of code +
-# ~1.3 MiB of generated source carry no value at runtime. Default
-# OFF for the ESP build: drop src/lua/vm.c, lua-cmod, and the
-# embedded blobs — the Lua-eval tool gets replaced with forth_eval.
-# Turn ON when running on a WROVER (ESP32 with PSRAM) where the
-# module graph actually fits.
-option(PSI_USE_LUA_VM "Compile psi's Lua VM + embedded module graph" OFF)
-
 set(PSI_EMBED_TOOL "${CMAKE_CURRENT_BINARY_DIR}/psi_embed")
-set(PSI_EMBED_LUA  "${CMAKE_CURRENT_BINARY_DIR}/embedded_lua.c")
-set(PSI_EMBED_DOCS "${CMAKE_CURRENT_BINARY_DIR}/embedded_docs.c")
 set(PSI_EMBED_HTML "${CMAKE_CURRENT_BINARY_DIR}/embedded_html.c")
 
 # ---- C sources ----
 # We deliberately exclude src/runtime/ (CLI/TUI dispatcher, libedit,
-# argtable3) and src/main.c (POSIX entrypoint). The ESP backend in
-# src/backend/esp/ provides app_main + WS server.
+# argtable3), src/main.c (POSIX entrypoint), and src/lua/vm.c (the
+# desktop Lua VM, which doesn't fit on a no-PSRAM ESP32). The ESP
+# backend in src/backend/esp/ provides app_main + WS server, and
+# src/core/embedded_inflate.c supplies the no-zlib inflater the SPA
+# loader needs (vm.c carries the zlib-backed version on desktop).
 set(PSI_C_SOURCES
     "${PSI_ROOT}/src/core/abort.c"
     "${PSI_ROOT}/src/core/common.c"
+    "${PSI_ROOT}/src/core/embedded_inflate.c"
     "${PSI_ROOT}/src/core/http_async.c"
     "${PSI_ROOT}/src/core/http_buffered.c"
     "${PSI_ROOT}/src/core/http_tls.c"
@@ -78,22 +58,8 @@ set(PSI_C_SOURCES
     "${PSI_ROOT}/src/backend/esp/esp_ws_server.c"
     "${PSI_ROOT}/src/backend/esp/esp_forth.c"
     "${PSI_ROOT}/src/backend/esp/esp_ble.c"
-    ${PSI_EMBED_LUA}
-    ${PSI_EMBED_DOCS}
     ${PSI_EMBED_HTML}
 )
-if(PSI_USE_LUA_VM)
-    list(APPEND PSI_C_SOURCES "${PSI_ROOT}/src/lua/vm.c")
-else()
-    # vm.c also defines psi_embedded_inflate (used by the SPA loader);
-    # supply a tiny memcpy-only version when it's compiled out.
-    list(APPEND PSI_C_SOURCES "${PSI_ROOT}/src/core/embedded_inflate.c")
-endif()
-
-set(PSI_PRIV_REQUIRES forth-cmod)
-if(PSI_USE_LUA_VM)
-    list(APPEND PSI_PRIV_REQUIRES lua-cmod)
-endif()
 
 idf_component_register(
     SRCS ${PSI_C_SOURCES}
@@ -113,12 +79,14 @@ idf_component_register(
         mbedtls
         nvs_flash
     PRIV_REQUIRES
-        ${PSI_PRIV_REQUIRES}
+        forth-cmod
 )
 
-# Capability gates and HTTP backend selection. -DPSI_CAP_FILESYSTEM=0
-# strips the libcurl-style file primitives entirely; PSI_HTTP_BACKEND_CURL=0
-# routes the HTTP layer through esp_http_client + mbedTLS.
+# Capability gates. PSI_HTTP_BACKEND_CURL=0 routes the HTTP layer
+# through esp_http_client + mbedTLS (vs libcurl on desktop).
+# PSI_NO_ZLIB strips zlib and switches embedded_inflate.c to its
+# memcpy-only path (the firmware's embed pipeline always uses
+# --no-compress, so raw_len == len and we never actually inflate).
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
     PSI_CAP_FILESYSTEM=0
     PSI_CAP_PROCESS=0
@@ -132,8 +100,6 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     PSI_ENABLE_TUI=0
     PSI_ENABLE_ANSI=0
     PSI_ENABLE_COLOR=0
-    PSI_ENABLE_REPL_EDITLINE=0
-    PSI_LUA_BOOT_FILE=""
     PSI_NO_ZLIB=1
 )
 
@@ -155,25 +121,10 @@ else()
     target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_USE_FORTH_PROMPT=0)
 endif()
 
-if(PSI_USE_LUA_VM)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_USE_LUA_VM=1)
-else()
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE PSI_USE_LUA_VM=0)
-endif()
-
-# ESP-IDF v5.5+ uses C23-ish dialect for its headers; we let the
-# component-default flags through and only ensure psi's *own* sources
-# (the C89-clean ones) compile under whatever ESP-IDF picks. The
-# backend src/backend/esp/*.c bodies are C89-syntax-compatible so
-# they build under any -std=gnu1x.
-
-# Mark the generated sources so ESP-IDF doesn't complain about
-# missing files at idf_component_register time. The custom commands
-# below populate them during the main build.
-set_source_files_properties(
-    ${PSI_EMBED_LUA} ${PSI_EMBED_DOCS} ${PSI_EMBED_HTML}
-    PROPERTIES GENERATED TRUE
-)
+# Mark the generated source so ESP-IDF doesn't complain about a
+# missing file at idf_component_register time. The custom command
+# below populates it during the main build.
+set_source_files_properties(${PSI_EMBED_HTML} PROPERTIES GENERATED TRUE)
 
 # Skip the rest in script-mode (component_get_requirements) — only
 # the main build can run add_custom_command and add_dependencies.
@@ -190,113 +141,10 @@ add_custom_command(
     VERBATIM
 )
 
-# ---- Embedded blobs ----
-# scripts/embed.c keys Lua modules by stripping the leading "lua/"
-# segment of each input path; we run from PSI_ROOT with relative
-# paths so the keys come out as "psi/foo.lua" instead of absolute
-# build-tree paths.
-#
-# --no-compress emits the source verbatim (len == raw_len). The
-# runtime inflater memcpy's the bytes instead of allocating an
-# inflate state + intermediate buffer; on ESP32 the heap pressure
-# from compressed loads bricked module loading mid-boot. Trades ~700
-# KiB of flash for a much simpler load path; the 2 MiB factory
-# partition has plenty of headroom.
-#
-# We also drop unused modules: TUI, slash commands, alternative
-# providers, markdown rendering, theming, prompt templates,
-# extensions. A real-hardware build that wants those can extend
-# PSI_LUA_RELATIVE here.
-set(PSI_LUA_RELATIVE
-    lua/boot.lua
-    lua/boot-esp.lua
-    lua/psi/agent_control.lua
-    lua/psi/agent_session.lua
-    lua/psi/api_registry.lua
-    lua/psi/context.lua
-    lua/psi/diff.lua
-    lua/psi/event_bus.lua
-    lua/psi/file_mutation_queue.lua
-    lua/psi/json_pure.lua
-    lua/psi/path_utils.lua
-    lua/psi/prelude.lua
-    lua/psi/prompt.lua
-    lua/psi/provider_loop.lua
-    lua/psi/providers/anthropic.lua
-    lua/psi/providers/openai_compat.lua
-    lua/psi/ramfs.lua
-    lua/psi/records.lua
-    lua/psi/resource_loader.lua
-    lua/psi/sched.lua
-    lua/psi/session_manager.lua
-    lua/psi/settings_manager.lua
-    lua/psi/storage.lua
-    lua/psi/stream_parser.lua
-    lua/psi/thinking.lua
-    lua/psi/tool_helpers.lua
-    lua/psi/tool_registry.lua
-    lua/psi/tool_shell.lua
-    lua/psi/tools.lua
-    lua/psi/tools/edit.lua
-    lua/psi/tools/ls.lua
-    lua/psi/tools/lua.lua
-    lua/psi/tools/read.lua
-    lua/psi/tools/write.lua
-    lua/psi/transform_messages.lua
-    lua/psi/truncate.lua
-    lua/psi/auth_storage.lua
-)
-set(_psi_lua_abs)
-foreach(_r IN LISTS PSI_LUA_RELATIVE)
-    list(APPEND _psi_lua_abs "${PSI_ROOT}/${_r}")
-endforeach()
-if(PSI_USE_LUA_VM)
-    add_custom_command(
-        OUTPUT "${PSI_EMBED_LUA}"
-        COMMAND "${PSI_EMBED_TOOL}" --no-compress ${PSI_LUA_RELATIVE} > "${PSI_EMBED_LUA}"
-        WORKING_DIRECTORY "${PSI_ROOT}"
-        DEPENDS "${PSI_EMBED_TOOL}" ${_psi_lua_abs}
-        COMMENT "Embedding psi Lua sources (uncompressed)"
-        VERBATIM
-    )
-else()
-    # Lua VM compiled out — generate an empty embedded-source table so
-    # the linker still sees psi_embedded_lua_table. Saves ~1.3 MiB of
-    # generated source compilation and ~150 KiB of flash. Note: also
-    # depends on PSI_EMBED_TOOL only as a no-op so add_dependencies()
-    # below still has a valid target to chain.
-    add_custom_command(
-        OUTPUT "${PSI_EMBED_LUA}"
-        COMMAND ${CMAKE_COMMAND} -E echo "/* auto-generated stub — Lua VM disabled */"
-            > "${PSI_EMBED_LUA}"
-        COMMAND ${CMAKE_COMMAND} -E echo "#include <stddef.h>"
-            >> "${PSI_EMBED_LUA}"
-        COMMAND ${CMAKE_COMMAND} -E echo "#include \"psi/embedded_data.h\""
-            >> "${PSI_EMBED_LUA}"
-        COMMAND ${CMAKE_COMMAND} -E echo "const struct psi_embedded_data psi_embedded_lua_table[] = { { NULL, NULL, 0u, 0u } };"
-            >> "${PSI_EMBED_LUA}"
-        COMMENT "Stubbing psi Lua sources table (PSI_USE_LUA_VM=OFF)"
-        VERBATIM
-    )
-endif()
-
-# Docs are not used by the firmware agent; emit a stub table so
-# psi_embedded_docs_table is defined for the linker. (The C side
-# references it from lfn_embedded_doc.)
-add_custom_command(
-    OUTPUT "${PSI_EMBED_DOCS}"
-    COMMAND ${CMAKE_COMMAND} -E echo "/* auto-generated stub */"
-        > "${PSI_EMBED_DOCS}"
-    COMMAND ${CMAKE_COMMAND} -E echo "#include <stddef.h>"
-        >> "${PSI_EMBED_DOCS}"
-    COMMAND ${CMAKE_COMMAND} -E echo "#include \"psi/embedded_data.h\""
-        >> "${PSI_EMBED_DOCS}"
-    COMMAND ${CMAKE_COMMAND} -E echo "const struct psi_embedded_data psi_embedded_docs_table[] = { { NULL, NULL, 0u, 0u } };"
-        >> "${PSI_EMBED_DOCS}"
-    COMMENT "Stubbing psi docs table (firmware doesn't embed docs)"
-    VERBATIM
-)
-
+# ---- Embedded SPA blob ----
+# scripts/embed.c emits a static C array; --no-compress makes it raw
+# bytes (no DEFLATE), which the runtime memcpy's into a heap buffer
+# at boot. ~14 KiB of flash for the chat UI.
 if(PSI_INCLUDE_SPA)
     add_custom_command(
         OUTPUT "${PSI_EMBED_HTML}"
@@ -309,11 +157,9 @@ if(PSI_INCLUDE_SPA)
         VERBATIM
     )
 else()
-    # Empty stub: linker still resolves psi_embedded_html_table, but
-    # the / handler is compiled out so the table is never consulted.
     add_custom_command(
         OUTPUT "${PSI_EMBED_HTML}"
-        COMMAND ${CMAKE_COMMAND} -E echo "/* PSI_INCLUDE_SPA=0 stub */"
+        COMMAND ${CMAKE_COMMAND} -E echo "/* auto-generated stub — SPA disabled */"
             > "${PSI_EMBED_HTML}"
         COMMAND ${CMAKE_COMMAND} -E echo "#include <stddef.h>"
             >> "${PSI_EMBED_HTML}"
@@ -321,13 +167,7 @@ else()
             >> "${PSI_EMBED_HTML}"
         COMMAND ${CMAKE_COMMAND} -E echo "const struct psi_embedded_data psi_embedded_html_table[] = { { NULL, NULL, 0u, 0u } };"
             >> "${PSI_EMBED_HTML}"
-        COMMENT "Stubbing psi SPA table (PSI_INCLUDE_SPA=OFF)"
+        COMMENT "Stubbing psi web SPA table (PSI_INCLUDE_SPA=OFF)"
         VERBATIM
     )
 endif()
-
-# Tie the generated blobs to the component build target so ninja
-# orders the embed step correctly.
-add_custom_target(psi_generate_embeds DEPENDS
-    ${PSI_EMBED_LUA} ${PSI_EMBED_DOCS} ${PSI_EMBED_HTML})
-add_dependencies(${COMPONENT_LIB} psi_generate_embeds)

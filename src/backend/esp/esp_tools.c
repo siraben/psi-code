@@ -22,11 +22,6 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#if PSI_USE_LUA_VM
-#include "lua.h"
-#include "lauxlib.h"
-#include "lualib.h"
-#endif
 #include "nvs.h"
 
 /* GPIO is available on every ESP32 SoC variant. ESP-IDF v5.x has
@@ -34,11 +29,8 @@
 #include "driver/gpio.h"
 
 #include "psi/common.h"
-#if PSI_USE_LUA_VM
-#include "psi/vm.h"
-#endif
 #include "esp_tools.h"
-#include "esp_obs_internal.h" /* psi_esp_vm(), psi_esp_forth_eval() */
+#include "esp_obs_internal.h" /* psi_esp_forth_eval(), psi_esp_ble_scan_json() */
 
 static const char *TAG_NS = "psi";
 
@@ -507,105 +499,6 @@ static char *tool_forth_eval(const cJSON *input, char **err) {
     return json_to_string(r);
 }
 
-#if PSI_USE_LUA_VM
-/* ------------------------------------------------------------------ */
-/* lua_eval                                                             */
-/* ------------------------------------------------------------------ */
-
-/* Run a Lua snippet against the firmware's shared psi_vm. Tries the
- * input as an expression first ("return <code>") so simple lookups
- * like "psi.runtime_info().version" return their value; on parse
- * failure, falls back to running it as a statement so longer scripts
- * still work. The Lua state is single-threaded — only the worker task
- * dispatches tools, and it does so serially — so concurrent access
- * isn't a concern.
- *
- * The result is stringified via luaL_tolstring (which calls __tostring
- * if defined, otherwise gives a sensible default for nil/bool/number/
- * string/table). Tool output is wrapped in a JSON object {ok, result,
- * stdout?} so the model can act on it. */
-static char *tool_lua_eval(const cJSON *input, char **err) {
-    const char *code = json_str(input, "code", NULL);
-    struct psi_vm *vm = psi_esp_vm();
-    lua_State *L;
-    int top;
-    int rc;
-    cJSON *r;
-    char *wrapped;
-    size_t code_len;
-    const char *result_str;
-    size_t result_len;
-
-    if (vm == NULL || vm->L == NULL) {
-        if (err)
-            *err = err_text("psi VM not initialized");
-        return NULL;
-    }
-    if (code == NULL || *code == '\0') {
-        if (err)
-            *err = err_text("missing string field: code");
-        return NULL;
-    }
-    L = vm->L;
-    top = lua_gettop(L);
-
-    /* Try expression form first: "return (<code>)". */
-    code_len = strlen(code);
-    wrapped = (char *)malloc(code_len + 16u);
-    if (wrapped == NULL) {
-        if (err)
-            *err = err_text("out of memory");
-        return NULL;
-    }
-    snprintf(wrapped, code_len + 16u, "return (%s)", code);
-    rc = luaL_loadbuffer(L, wrapped, strlen(wrapped), "=lua_eval");
-    free(wrapped);
-    if (rc != LUA_OK) {
-        /* Drop the expression-form error, retry as a statement. */
-        lua_pop(L, 1);
-        rc = luaL_loadbuffer(L, code, code_len, "=lua_eval");
-    }
-    if (rc != LUA_OK) {
-        const char *e = lua_tostring(L, -1);
-        char *msg = err_text("compile: %s", e ? e : "?");
-        lua_settop(L, top);
-        if (err)
-            *err = msg;
-        else
-            free(msg);
-        return NULL;
-    }
-
-    rc = lua_pcall(L, 0, LUA_MULTRET, 0);
-    if (rc != LUA_OK) {
-        const char *e = lua_tostring(L, -1);
-        char *msg = err_text("runtime: %s", e ? e : "?");
-        lua_settop(L, top);
-        if (err)
-            *err = msg;
-        else
-            free(msg);
-        return NULL;
-    }
-
-    /* Stringify whatever's on top (may be nil for statement form). */
-    if (lua_gettop(L) > top) {
-        result_str = luaL_tolstring(L, -1, &result_len);
-    } else {
-        result_str = "";
-        result_len = 0u;
-    }
-
-    /* luaL_tolstring leaves a NUL-terminated string on the Lua
-     * stack, so we can pass it straight to cJSON; no copy needed. */
-    (void)result_len;
-    r = cJSON_CreateObject();
-    cJSON_AddBoolToObject(r, "ok", 1);
-    cJSON_AddStringToObject(r, "result", result_str ? result_str : "");
-    lua_settop(L, top);
-    return json_to_string(r);
-}
-#endif /* PSI_USE_LUA_VM */
 
 /* ------------------------------------------------------------------ */
 /* http_fetch                                                           */
@@ -1005,20 +898,6 @@ const struct psi_esp_tool psi_esp_tool_table[] = {
                              "\"required\":[\"code\"]}",
         .handler = tool_forth_eval,
     },
-#if PSI_USE_LUA_VM
-    {
-        .name = "lua_eval",
-        .description = "Evaluate a Lua expression or short script in the firmware's "
-                       "psi VM. Only built when the firmware was compiled with "
-                       "PSI_USE_LUA_VM=ON (typically WROVER chips with PSRAM). "
-                       "Returns {ok, result} where result is the stringified "
-                       "return value.",
-        .input_schema_json = "{\"type\":\"object\","
-                             "\"properties\":{\"code\":{\"type\":\"string\"}},"
-                             "\"required\":[\"code\"]}",
-        .handler = tool_lua_eval,
-    },
-#endif
     {
         .name = "wifi_scan",
         .description = "Scan for nearby WiFi access points. Returns {count, aps[]} where "
