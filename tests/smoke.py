@@ -1309,6 +1309,1348 @@ def t_session_cwd_scoped_dirs_do_not_collide(psi: Psi):
     assert_equals(count_b, "1", "nested cwd session count")
     assert_contains(first_b, "from nested", "nested cwd first message")
 
+@test("tui/prompt_history_navigation")
+def t_tui_prompt_history_navigation(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local no_history = rt._debug_history_sequence({}, {"line-up"}, "")\n'
+        + 'local empty = rt._debug_history_sequence({"first", "second"}, {"line-up"}, "")\n'
+        + 'local draft = rt._debug_history_sequence({"first", "second"}, {"line-up", "line-down"}, "sec")\n'
+        + 'return tostring(no_history.scrolled) .. "|" .. empty.input .. "|"\n'
+        + "  .. draft.input .. '|' .. tostring(draft.cursor)"
+    )
+    assert_equals(out, "true|second|sec|3",
+                  "empty prompt recalls history when available and scrolls otherwise")
+
+
+@test("tui/prompt_history_reverse_search")
+def t_tui_prompt_history_reverse_search(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local r = rt._debug_history_sequence({"alpha", "beta", "alphabet"}, {"ctrl-r", "text:a", "text:l", "ctrl-r"})\n'
+        + "return r.input .. '|' .. r.history_search_query .. '|' .. tostring(r.history_search_active)"
+    )
+    assert_equals(out, "alpha|al|true", "ctrl-r reverse searches prompt history")
+
+
+@test("prompt/transformer")
+def t_prompt_transformer(psi: Psi):
+    """psi.prompt.register_transformer runs after built-in assembly
+    and can rewrite the returned prompt string."""
+    out = psi.eval(
+        'local p = require("psi.prompt")\n'
+        + 'p.register_transformer(function(s) return s .. " [TAIL]" end)\n'
+        + 'local sp = p.system_prompt()\n'
+        + 'p.clear_transformers()\n'
+        + 'return sp:sub(-6)'
+    )
+    assert_contains(out, "[TAIL]", "transformer appended tail marker")
+
+
+@test("tools/cancel_helper")
+def t_tools_cancel(psi: Psi):
+    """psi.tools.cancel returns a failure ToolResult that a before-hook
+    can use to short-circuit dispatch. Real tool impl must not run."""
+    out = psi.eval(
+        'local t = require("psi.tools")\n'
+        + 'local real_ran = false\n'
+        + 't.add_before_hook(function(name, input)\n'
+        + '  if name == "bash" then return t.cancel("nope") end\n'
+        + 'end)\n'
+        + '-- Register a fake tool whose impl flips a flag; if\n'
+        + '-- cancel short-circuits, impl must not run.\n'
+        + 'local r = t.dispatch("bash", { command = "echo x" })\n'
+        + 't.clear_hooks()\n'
+        + 'return tostring(r.ok) .. "|" .. tostring(r.error)'
+    )
+    assert_contains(out, "false|nope", "cancel result shape")
+
+
+@test("agent/set_model")
+def t_agent_set_model(psi: Psi):
+    out = psi.eval(
+        'local a = require("psi.agent_session")\n'
+        + 'a.set_model("openrouter/x/y")\n'
+        + 'local got = a.current_model("anthropic/fallback")\n'
+        + 'a.set_model(nil)\n'
+        + 'local cleared = a.current_model("anthropic/fallback")\n'
+        + 'a.configure({model = "ollama/local"})\n'
+        + 'local configured = a.current_model(nil)\n'
+        + 'local effective = a.effective_model(nil)\n'
+        + 'local desc = a.model_descriptor(nil)\n'
+        + 'local has_effective = effective ~= nil and effective ~= ""\n'
+        + 'return got .. "|" .. cleared .. "|" .. configured .. "|"\n'
+        + '  .. tostring(has_effective) .. "|" .. desc.provider'
+    )
+    assert_contains(out, "openrouter/x/y|anthropic/fallback|ollama/local|true|ollama",
+                    "override then clear")
+
+
+@test("agent/set_reasoning_effort")
+def t_agent_set_reasoning_effort(psi: Psi):
+    out = psi.eval(
+        'local a = require("psi.agent_session")\n'
+        + 'a.set_reasoning_effort("high")\n'
+        + 'local got = a.current_reasoning_effort("low")\n'
+        + 'a.set_reasoning_effort("none")\n'
+        + 'local none = a.current_reasoning_effort("low")\n'
+        + 'a.set_reasoning_effort(nil)\n'
+        + 'local cleared = a.current_reasoning_effort("medium")\n'
+        + 'return got .. "|" .. none .. "|" .. cleared'
+    )
+    assert_equals(out, "high|none|medium", "reasoning effort override then clear")
+
+
+@test("agent/thinking_level")
+def t_agent_thinking_level(psi: Psi):
+    out = psi.eval(
+        'local a = require("psi.agent_session")\n'
+        + 'local openai = { provider="openai-codex", id="gpt-5.5", reasoning=true }\n'
+        + 'local fallback = a.thinking_level_for(openai, nil, nil)\n'
+        + 'local explicit = a.thinking_level_for(openai, "xhigh", nil)\n'
+        + 'local off = a.thinking_level_for(openai, nil, "none")\n'
+        + 'local ok, set = a.set_thinking_level("xhigh", "openai-codex/gpt-5.5")\n'
+        + 'local current = a.current_reasoning_effort("low")\n'
+        + 'return fallback .. "|" .. explicit .. "|" .. off .. "|" .. tostring(ok) .. "|"\n'
+        + '  .. tostring(set) .. "|" .. tostring(current)'
+    )
+    assert_equals(out, "medium|xhigh|off|true|xhigh|xhigh",
+                  "thinking defaults, clamps, and updates reasoning override")
+
+
+@test("commands/set_reasoning_effort")
+def t_commands_set_reasoning_effort(psi: Psi):
+    out = psi.eval(
+        'local c = require("psi.slash_commands")\n'
+        + 'local a = c.handle("/set effort xhigh")\n'
+        + 'local b = c.handle("/set reasoning_effort nope")\n'
+        + 'return a.kind .. "|" .. tostring(a.payload) .. "|" .. b.kind .. "|" .. b.payload'
+    )
+    assert_contains(out, "set-reasoning-effort|xhigh|print|usage: /set effort",
+                    "/set validates reasoning effort")
+
+
+@test("commands/thinking")
+def t_commands_thinking(psi: Psi):
+    out = psi.eval(
+        'local c = require("psi.slash_commands")\n'
+        + 'local a = c.handle("/thinking xhigh")\n'
+        + 'local b = c.handle("/thinking nope")\n'
+        + 'return a.kind .. "|" .. tostring(a.payload) .. "|" .. b.kind .. "|"\n'
+        + '  .. tostring(b.payload:find("usage: /thinking", 1, true) ~= nil)'
+    )
+    assert_equals(out, "set-thinking|xhigh|print|true",
+                  "/thinking validates pi-style levels")
+
+
+@test("theme/default_dark")
+def t_theme_default(psi: Psi):
+    out = psi.eval(
+        'local t = require("psi.theme")\n'
+        + 'local cur = t.current()\n'
+        + 'return t.current_name() .. "|"\n'
+        + '  .. tostring(cur.tui.chrome.bg) .. "|"\n'
+        + '  .. tostring(cur.tui.accent.fg)'
+    )
+    assert_equals(out, "midnight-ember|234|81", "default theme")
+
+
+@test("theme/compound_ansi_mapping")
+def t_theme_compound_ansi_mapping(psi: Psi):
+    out = psi.eval(
+        'local ansi = require("psi.ansi")\n'
+        + 'ansi.enabled = true\n'
+        + 'ansi.color_enabled = true\n'
+        + 'ansi.set_code_map({["38;5;242"] = "38;5;123"})\n'
+        + 'return ansi.gray("x")'
+    )
+    assert_contains(out, "\x1b[38;5;123mx\x1b[0m", "compound ANSI map applies")
+
+
+@test("theme/settings_selects_extension_theme")
+def t_theme_settings_select(psi: Psi):
+    project = psi.tmp / "theme-project"
+    extdir = psi.tmp / "theme-ext"
+    (project / ".psi").mkdir(parents=True, exist_ok=True)
+    extdir.mkdir(exist_ok=True)
+    (project / ".psi" / "settings.json").write_text(
+        json.dumps({"theme": {"name": "toxic"}})
+    )
+    (extdir / "toxic.lua").write_text(
+        "return function(psi)\n"
+        "  psi.theme.register('toxic', {\n"
+        "    tui = {\n"
+        "      accent = { fg = 118, bg = 233 },\n"
+        "      chrome = { fg = 244, bg = 233 },\n"
+        "    },\n"
+        "  })\n"
+        "end\n"
+    )
+    expr = (
+        'local t = require("psi.theme")\n'
+        + 'local cur = t.current()\n'
+        + 'return t.current_name() .. "|"\n'
+        + '  .. tostring(cur.tui.accent.fg) .. "|"\n'
+        + '  .. tostring(cur.tui.chrome.bg) .. "|"\n'
+        + '  .. tostring(cur.tui.text.fg)'
+    )
+    out = psi.run(
+        "--eval",
+        expr,
+        cwd=project,
+        env_extra={"PSI_EXTENSIONS_DIR": str(extdir)},
+    ).stdout.strip()
+    assert_equals(out, "toxic|118|233|253", "configured theme override")
+
+
+@test("theme/extension_selected_theme_survives_boot")
+def t_theme_extension_selected_theme(psi: Psi):
+    project = psi.tmp / "theme-extension-selected-project"
+    extdir = psi.tmp / "theme-extension-selected-ext"
+    (project / ".psi").mkdir(parents=True, exist_ok=True)
+    extdir.mkdir(exist_ok=True)
+    (extdir / "select.lua").write_text(
+        "return function(psi)\n"
+        "  psi.theme.register('extension-picked', {\n"
+        "    tui = { accent = { fg = 118, bg = 233 } },\n"
+        "  })\n"
+        "  assert(psi.theme.use('extension-picked'))\n"
+        "end\n"
+    )
+    out = psi.run(
+        "--eval",
+        'local t = require("psi.theme")\n'
+        + 'local cur = t.current()\n'
+        + 'return t.current_name() .. "|" .. tostring(cur.tui.accent.fg)',
+        cwd=project,
+        env_extra={"PSI_EXTENSIONS_DIR": str(extdir)},
+    ).stdout.strip()
+    assert_equals(out, "extension-picked|118", "extension-selected theme survives boot")
+
+
+@test("theme/composite_ansi_remap")
+def t_theme_composite_ansi_remap(psi: Psi):
+    out = psi.eval(
+        'local ansi = require("psi.ansi")\n'
+        + 'local theme = require("psi.theme")\n'
+        + 'ansi.enabled = true\n'
+        + 'ansi.color_enabled = true\n'
+        + 'theme.use({ tui = { chrome = { fg = 118, bg = 233 } } })\n'
+        + 'return ansi.gray("x")'
+    )
+    assert_contains(out, "\x1b[38;5;118m", "composite ANSI chrome remap applies")
+
+
+@test("theme/reload_reverts_to_default")
+def t_theme_reload_reverts_default(psi: Psi):
+    project = psi.tmp / "theme-reload-project"
+    extdir = psi.tmp / "theme-reload-ext"
+    (project / ".psi").mkdir(parents=True, exist_ok=True)
+    extdir.mkdir(parents=True, exist_ok=True)
+    (project / ".psi" / "settings.json").write_text(
+        json.dumps({"theme": {"name": "toxic"}})
+    )
+    (extdir / "toxic.lua").write_text(
+        "return function(psi)\n"
+        "  psi.theme.register('toxic', {\n"
+        "    tui = { chrome = { fg = 244, bg = 233 } },\n"
+        "  })\n"
+        "end\n"
+    )
+    out = psi.run(
+        "--eval",
+        'local theme = require("psi.theme")\n'
+        'local settings = require("psi.settings_manager")\n'
+        'local before = theme.current()\n'
+        'psi.file_write(".psi/settings.json", "{}")\n'
+        'settings.reload()\n'
+        'theme.apply_configured()\n'
+        'local after = theme.current()\n'
+        'return table.concat({\n'
+        '  theme.current_name(),\n'
+        '  tostring(before.tui.chrome.bg),\n'
+        '  tostring(after.tui.chrome.bg)\n'
+        '}, "|")',
+        cwd=project,
+        env_extra={"PSI_EXTENSIONS_DIR": str(extdir)},
+    ).stdout.strip()
+    assert_equals(out, "midnight-ember|233|234", "reload falls back to default theme")
+
+
+@test("theme/reload_preserves_extension_selected_theme")
+def t_theme_reload_preserves_extension_selected_theme(psi: Psi):
+    project = psi.tmp / "theme-command-reload-project"
+    extdir = psi.tmp / "theme-command-reload-ext"
+    (project / ".psi").mkdir(parents=True, exist_ok=True)
+    extdir.mkdir(parents=True, exist_ok=True)
+    (extdir / "select.lua").write_text(
+        "return function(psi)\n"
+        "  psi.theme.register('reload-picked', {\n"
+        "    tui = { accent = { fg = 118, bg = 233 } },\n"
+        "  })\n"
+        "  assert(psi.theme.use('reload-picked'))\n"
+        "end\n"
+    )
+    out = psi.run(
+        "--eval",
+        'local commands = require("psi.slash_commands")\n'
+        'local theme = require("psi.theme")\n'
+        'commands.handle("/reload")\n'
+        'local cur = theme.current()\n'
+        'return theme.current_name() .. "|" .. tostring(cur.tui.accent.fg)',
+        cwd=project,
+        env_extra={"PSI_EXTENSIONS_DIR": str(extdir)},
+    ).stdout.strip()
+    assert_equals(out, "reload-picked|118", "/reload preserves extension-selected theme")
+
+
+@test("tui/status_hook")
+def t_tui_status_hook(psi: Psi):
+    out = psi.eval(
+        'local tui = require("psi.tui_status")\n'
+        + 'tui.register_status_hook(function(arg) return "ext:" .. tostring(arg.editor_mode) end)\n'
+        + 'local line = tui.status_line(\n'
+        + '  psi.json_encode({model="m", busy=false, scroll=0, editor_mode="normal"}))\n'
+        + 'local bar = tui.status_bar(\n'
+        + '  psi.json_encode({model="m", busy=false, scroll=0, editor_mode="visual"}))\n'
+        + 'tui.clear_status_hooks()\n'
+        + 'return line .. "|" .. bar'
+    )
+    assert_contains(out, "ext:normal", "status hook contribution shows in status line")
+    assert_contains(out, "ext:visual", "status hook receives context in status bar")
+
+
+@test("tui/reload_deduplicates_builtin_hooks")
+def t_tui_reload_deduplicates_builtin_hooks(psi: Psi):
+    cwd = psi.tmp / "reload-vim-config"
+    (cwd / ".psi").mkdir(parents=True, exist_ok=True)
+    (cwd / ".psi" / "settings.json").write_text(
+        json.dumps({"extensions": {"vim_keybindings": {"enabled": True}}})
+    )
+    out = psi.run(
+        "--eval",
+        'local commands = require("psi.slash_commands")\n'
+        + 'local tui = require("psi.tui_status")\n'
+        + 'commands.handle("/reload")\n'
+        + 'commands.handle("/reload")\n'
+        + 'local writes = 0\n'
+        + 'psi.stdout_write = function() writes = writes + 1 end\n'
+        + 'local copied = tostring(tui.write_clipboard("hi", {force=true}))\n'
+        + 'local bar = tui.status_bar({model="m", busy=false, scroll=0, editor_mode="normal"})\n'
+        + 'local _, count = bar:gsub("mode:NORMAL", "")\n'
+        + 'local action = tui.handle_key({key="escape", busy=false, input_length=1, editor_mode="insert"})\n'
+        + 'return tostring(count) .. "|" .. tostring(action and action.action or "nil") .. "|" .. copied .. "|" .. tostring(writes)',
+        cwd=cwd,
+    ).stdout.strip()
+    assert_equals(out, "1|vim-mode|true|1", "/reload should reinstall built-in TUI hooks once")
+
+
+@test("tui/status_default_model")
+def t_tui_status_default_model(psi: Psi):
+    out = psi.eval(
+        'local tui = require("psi.tui_status")\n'
+        + 'return tui.status_line(psi.json_encode({busy=false, scroll=0}))'
+    )
+    assert_not_contains(out, "model:?", "status line should show effective default model")
+    assert_contains(out, "model:", "status line includes model")
+
+
+@test("providers/openrouter_metadata")
+def t_providers_openrouter_metadata(psi: Psi):
+    cache = psi.tmp / "openrouter_models.json"
+    cache.write_text(json.dumps({
+        "google/gemini-3-flash-preview": {
+            "context_window": 1048576,
+            "max_output_tokens": 65536,
+            "reasoning": True,
+            "supports_tool_use": True,
+            "input": ["text", "image"],
+        },
+        "openai/gpt-5.1-codex": {
+            "context_window": 400000,
+            "max_output_tokens": 128000,
+            "reasoning": True,
+            "supports_tool_use": True,
+            "input": ["text"],
+        },
+        "fake/provider-model": {
+            "context_window": 12345,
+            "max_output_tokens": 678,
+            "reasoning": False,
+            "supports_tool_use": True,
+            "input": ["text"],
+        },
+    }))
+    out = psi.run(
+        "--eval",
+        'local providers = require("psi.api_registry")\n'
+        + 'local full = providers.model("openrouter/google/gemini-3-flash-preview")\n'
+        + 'local slug = providers.model("google/gemini-3-flash-preview")\n'
+        + 'local codex = providers.model("openrouter/openai/gpt-5.1-codex")\n'
+        + 'local fake = providers.model("openrouter/fake/provider-model")\n'
+        + 'local resolved = providers.resolve_descriptor("openrouter/openai/gpt-5.1-codex")\n'
+        + 'return table.concat({\n'
+        + '  tostring(full.context_window),\n'
+        + '  tostring(slug.max_output_tokens),\n'
+        + '  tostring(codex.context_window),\n'
+        + '  tostring(fake.max_output_tokens),\n'
+        + '  tostring(resolved.id),\n'
+        + '  tostring(resolved.provider),\n'
+        + '}, "|")',
+        env_extra={"PSI_OPENROUTER_MODELS_CACHE": str(cache)},
+    ).stdout.strip()
+    assert_equals(out, "1048576|65536|400000|678|openai/gpt-5.1-codex|openrouter",
+                  "OpenRouter metadata resolves full and stripped model ids")
+
+
+@test("providers/api_registry")
+def t_providers_api_registry(psi: Psi):
+    out = psi.eval(
+        'local p = require("psi.api_registry")\n'
+        + 'local api = p.api("anthropic-messages")\n'
+        + 'local desc = p.resolve_descriptor("anthropic/claude-opus-4-7")\n'
+        + 'local mod = p.load_api("anthropic-messages")\n'
+        + 'return table.concat({\n'
+        + '  tostring(api.module),\n'
+        + '  tostring(desc.api),\n'
+        + '  tostring(desc.compat.supports_tool_use),\n'
+        + '  tostring(type(mod.run_turn)),\n'
+        + '  tostring(#p.all_apis()),\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "psi.providers.anthropic|anthropic-messages|true|function|4",
+                  "provider API registry should route API adapters")
+
+
+@test("providers/openai_codex_registry")
+def t_providers_openai_codex_registry(psi: Psi):
+    out = psi.eval(
+        'local p = require("psi.api_registry")\n'
+        + 'local desc = p.resolve_descriptor("openai-codex/gpt-5.5")\n'
+        + 'local model = p.model("openai-codex/gpt-5.5")\n'
+        + 'return table.concat({desc.provider, desc.api, desc.id,\n'
+        + '  tostring(model.context_window), tostring(model.supports_tool_use)}, "|")'
+    )
+    assert_equals(out, "openai-codex|openai-codex-responses|gpt-5.5|272000|true",
+                  "OpenAI Codex provider resolves model metadata")
+
+
+@test("oauth/openai_codex_pkce")
+def t_oauth_openai_codex_pkce(psi: Psi):
+    out = psi.eval(
+        'local d = require("psi.providers.oauth_openai_codex")._debug\n'
+        + 'local digest = d.base64url_encode(d.sha256_bytes("abc"))\n'
+        + 'local q = d.parse_query("http://localhost:1455/auth/callback?code=abc&state=xyz")\n'
+        + 'return digest .. "|" .. q.code .. "|" .. q.state'
+    )
+    assert_equals(out, "ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0|abc|xyz",
+                  "OpenAI Codex PKCE helpers match SHA-256/base64url")
+
+
+@test("commands/openai_codex_login_starts")
+def t_commands_openai_codex_login_starts(psi: Psi):
+    out = psi.eval(
+        'local copied = ""\n'
+        + 'psi.stdout_write = function(s) copied = copied .. s end\n'
+        + 'local action = require("psi.slash_commands").handle("/login openai-codex")\n'
+        + 'return table.concat({\n'
+        + '  action.kind,\n'
+        + '  tostring(action.payload:find("https://auth.openai.com/oauth/authorize", 1, true) ~= nil),\n'
+        + '  tostring(action.payload:find("/login openai-codex <redirect-url-or-code>", 1, true) ~= nil),\n'
+        + '  tostring(action.payload:find("Copied auth URL to clipboard via OSC 52.", 1, true) ~= nil),\n'
+        + '  tostring(copied:find("\\27]52;", 1, true) ~= nil),\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "print|true|true|true|true",
+                  "OpenAI Codex login should start without blocking and copy auth URL")
+
+
+@test("auth/storage_roundtrip")
+def t_auth_storage_roundtrip(psi: Psi):
+    auth_file = psi.tmp / "auth.json"
+    out = psi.run(
+        "--eval",
+        'local a = require("psi.auth_storage")\n'
+        + 'local ok = a.set("openai-codex", {type="oauth", access="a", refresh="r", expires=123, accountId="acct"})\n'
+        + 'local c = a.get("openai-codex")\n'
+        + 'return tostring(ok) .. "|" .. c.type .. "|" .. c.access .. "|" .. c.accountId',
+        env_extra={"PSI_AUTH_FILE": str(auth_file)},
+    ).stdout.strip()
+    assert_equals(out, "true|oauth|a|acct", "auth storage persists provider credentials")
+
+
+@test("providers/openai_codex_parser")
+def t_providers_openai_codex_parser(psi: Psi):
+    out = psi.eval(
+        'local d = require("psi.providers.openai_codex")._debug\n'
+        + 'local s, p = d.new_state(), d.parser_new()\n'
+        + 'local seen = ""\n'
+        + 'local obs = { on_assistant_text_delta = function(t) seen = seen .. t end }\n'
+        + 'd.parser_push(p, "data: {\\"type\\":\\"response.output_item.added\\",\\"item\\":{\\"type\\":\\"message\\",\\"id\\":\\"msg_1\\"}}\\n\\n", s, obs)\n'
+        + 'd.parser_push(p, "data: {\\"type\\":\\"response.output_text.delta\\",\\"delta\\":\\"hi\\"}\\n\\n", s, obs)\n'
+        + 'd.parser_push(p, "data: {\\"type\\":\\"response.output_item.done\\",\\"item\\":{\\"type\\":\\"message\\",\\"id\\":\\"msg_1\\",\\"content\\":[{\\"type\\":\\"output_text\\",\\"text\\":\\"hi\\"}]}}\\n\\n", s, obs)\n'
+        + 'd.parser_push(p, "data: {\\"type\\":\\"response.completed\\",\\"response\\":{\\"status\\":\\"completed\\",\\"usage\\":{\\"input_tokens\\":10,\\"output_tokens\\":2,\\"total_tokens\\":12,\\"input_tokens_details\\":{\\"cached_tokens\\":3}}}}\\n\\n", s, obs)\n'
+        + 'local _, calls = d.finalize(s)\n'
+        + 'local body = d.request_body({model="gpt-5.5", messages={}, max_tokens=123})\n'
+        + 'local e, ep = d.new_state(), d.parser_new()\n'
+        + 'local ok = pcall(d.parser_push, ep, "data: {\\"type\\":\\"error\\",\\"message\\":\\"bad\\"}\\n\\n", e, {})\n'
+        + 'local classified = d.classify_http_error(429, "{\\"error\\":{\\"message\\":\\"slow\\"}}", "openai-codex")\n'
+        + 'return seen .. "|" .. tostring(#calls) .. "|" .. tostring(s.usage.input_tokens) .. "|"\n'
+        + '  .. tostring(s.usage.cache_read_input_tokens) .. "|" .. tostring(body.max_output_tokens) .. "|"\n'
+        + '  .. tostring(ok) .. "|" .. tostring(e.stop_reason) .. "|" .. tostring(e.error_message) .. "|"\n'
+        + '  .. tostring(classified:find("slow", 1, true) ~= nil)'
+    )
+    assert_equals(out, "hi|0|7|3|nil|true|error|Codex error: bad|true",
+                  "OpenAI Codex parser handles text, usage, and errors without unsupported caps")
+
+
+@test("providers/shared_sse_parser")
+def t_providers_shared_sse_parser(psi: Psi):
+    out = psi.eval(
+        'local a = require("psi.providers.anthropic")._test\n'
+        + 'local p = a.new_sse_parser()\n'
+        + 'local seen = {}\n'
+        + 'a.sse_push(p, "event: message_delta\\ndata: {\\"type\\":\\n", function(ev, data)\n'
+        + '  seen[#seen + 1] = ev .. ":" .. tostring(data.type)\n'
+        + 'end)\n'
+        + 'a.sse_push(p, "data: \\"message_delta\\"}\\n\\n", function(ev, data)\n'
+        + '  seen[#seen + 1] = ev .. ":" .. tostring(data.type)\n'
+        + 'end)\n'
+        + 'return table.concat(seen, "|")'
+    )
+    assert_equals(out, "message_delta:message_delta",
+                  "shared SSE parser preserves state and joins data lines")
+
+
+@test("providers/openai_codex_unresolved_tool_call")
+def t_providers_openai_codex_unresolved_tool_call(psi: Psi):
+    out = psi.eval(
+        'local s = require("psi.session_manager")\n'
+        + 'local d = require("psi.providers.openai_codex")._debug\n'
+        + 's.append_user("hi")\n'
+        + 's.append_assistant("", {\n'
+        + '  { type = "tool_use", id = "call_1|item_1", name = "bash",\n'
+        + '    input = { command = "pwd" } }\n'
+        + '}, {})\n'
+        + 's.append_user("continue")\n'
+        + 'local wire = d.response_input_from_session(s.messages(), "")\n'
+        + 'return table.concat({\n'
+        + '  wire[2].type,\n'
+        + '  wire[2].call_id,\n'
+        + '  wire[3].type,\n'
+        + '  wire[3].call_id,\n'
+        + '  wire[3].output,\n'
+        + '  wire[4].content[1].text,\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "function_call|call_1|function_call_output|call_1|No result provided|continue",
+                  "OpenAI Codex closes unresolved tool calls before user input")
+
+
+@test("providers/openai_codex_custom_messages")
+def t_providers_openai_codex_custom_messages(psi: Psi):
+    out = psi.eval(
+        'local s = require("psi.session_manager")\n'
+        + 'local d = require("psi.providers.openai_codex")._debug\n'
+        + 's.append_custom_message("visible user", { role = "user" })\n'
+        + 's.append_custom_message("hidden user", { role = "user", hidden = true })\n'
+        + 's.append_custom_message("visible assistant", { role = "assistant" })\n'
+        + 'local wire = d.response_input_from_session(s.messages(), "")\n'
+        + 'return table.concat({\n'
+        + '  tostring(#wire),\n'
+        + '  wire[1].role,\n'
+        + '  wire[1].content[1].type,\n'
+        + '  wire[1].content[1].text,\n'
+        + '  wire[2].type,\n'
+        + '  wire[2].role,\n'
+        + '  wire[2].content[1].type,\n'
+        + '  wire[2].content[1].text,\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "2|user|input_text|visible user|message|assistant|output_text|visible assistant",
+                  "OpenAI Codex preserves non-hidden custom messages")
+
+
+@test("providers/openai_codex_reasoning_config")
+def t_providers_openai_codex_reasoning_config(psi: Psi):
+    project = psi.tmp / "codex-reasoning-config"
+    (project / ".psi").mkdir(parents=True, exist_ok=True)
+    (project / ".psi" / "settings.json").write_text(
+        json.dumps({"defaults": {"reasoning_effort": "medium"}})
+    )
+    out = psi.run(
+        "--eval",
+        'local d = require("psi.providers.openai_codex")._debug\n'
+        + 'local a = d.request_body({model="gpt-5.5", messages={}, reasoning_effort="xhigh"})\n'
+        + 'local b = d.request_body({model="gpt-5.5", messages={}, reasoning_effort="none"})\n'
+        + 'local c = d.request_body({model="gpt-5.5", messages={}})\n'
+        + 'return a.reasoning.effort .. "|" .. tostring(b.reasoning) .. "|" .. c.reasoning.effort',
+        cwd=project,
+        env_extra={"PSI_OPENAI_CODEX_REASONING": ""},
+    ).stdout.strip()
+    assert_equals(out, "xhigh|nil|medium",
+                  "OpenAI Codex reasoning effort uses runtime override then config")
+
+
+@test("providers/openai_codex_reasoning")
+def t_providers_openai_codex_reasoning(psi: Psi):
+    out = psi.eval(
+        'local d = require("psi.providers.openai_codex")._debug\n'
+        + 'local a = d.request_body({model="gpt-5.5", messages={}})\n'
+        + 'local b = d.request_body({model="gpt-5.5", messages={}, thinking_level="minimal"})\n'
+        + 'local c = d.request_body({model="gpt-5.5", messages={}, thinking_level="xhigh"})\n'
+        + 'local e = d.request_body({model="gpt-5.5", messages={}, thinking_level="off"})\n'
+        + 'return a.reasoning.effort .. "|" .. b.reasoning.effort .. "|"\n'
+        + '  .. c.reasoning.effort .. "|" .. tostring(e.reasoning == nil)'
+    )
+    assert_equals(out, "medium|low|xhigh|true",
+                  "OpenAI Codex maps pi-style thinking levels to request reasoning")
+
+
+@test("providers/openai_codex_http_error")
+def t_providers_openai_codex_http_error(psi: Psi):
+    auth_file = psi.tmp / "codex-auth.json"
+    out = psi.run(
+        "--eval",
+        'local a = require("psi.auth_storage")\n'
+        + 'a.set("openai-codex", {type="oauth", access="a", refresh="r", expires=9999999999999, accountId="acct"})\n'
+        + 'psi.http_stream_begin = function() return {} end\n'
+        + 'psi.http_stream_poll = function() return "{\\"error\\":{\\"message\\":\\"nope\\"}}", true end\n'
+        + 'psi.http_stream_finish = function() return 401 end\n'
+        + 'local ok, err = require("psi.sched").run(function()\n'
+        + '  return require("psi.providers.openai_codex").run_turn({model="gpt-5.5"})\n'
+        + 'end)\n'
+        + 'return tostring(ok) .. "|" .. tostring(err)',
+        env_extra={"PSI_AUTH_FILE": str(auth_file)},
+    ).stdout.strip()
+    assert_contains(out, "false|openai-codex request failed (401)",
+                    "OpenAI Codex HTTP errors should be classified")
+    assert_contains(out, "nope", "OpenAI Codex HTTP error details should be preserved")
+
+
+@test("tui/status_context_window")
+def t_tui_status_context_window(psi: Psi):
+    cache = psi.tmp / "openrouter_models_status.json"
+    cache.write_text(json.dumps({
+        "google/gemini-3-flash-preview": {
+            "context_window": 1048576,
+            "max_output_tokens": 65536,
+            "reasoning": True,
+            "supports_tool_use": True,
+            "input": ["text", "image"],
+        },
+    }))
+    out = psi.run(
+        "--eval",
+        'local context = require("psi.context")\n'
+        + 'local tui = require("psi.tui_status")\n'
+        + 'context.record_usage(0, { input_tokens = 3000, output_tokens = 566 }, "google/gemini-3-flash-preview")\n'
+        + 'return tui.status_line(psi.json_encode({model="openrouter/google/gemini-3-flash-preview", busy=false, scroll=0}))',
+        env_extra={"PSI_OPENROUTER_MODELS_CACHE": str(cache)},
+    ).stdout.strip()
+    assert_contains(out, "ctx:0.3% (3566/1048576)",
+                    "status line uses OpenRouter metadata and one-decimal percentage")
+
+
+@test("tui/footer_hint_hidden")
+def t_tui_footer_hint_hidden(psi: Psi):
+    out = psi.eval(
+        'local tui = require("psi.tui_status")\n'
+        + 'local idle = tui.footer_hint(psi.json_encode({busy=false, scroll=0}))\n'
+        + 'local busy = tui.footer_hint(psi.json_encode({\n'
+        + '  busy=true, busy_label="working", elapsed_seconds=4, busy_phase=2, scroll=0\n'
+        + '}))\n'
+        + 'return tostring(idle) .. "|" .. tostring(busy)'
+    )
+    assert_equals(out, "|working (0:04  • Ctrl-G to interrupt) ..", "footer hint hidden when idle")
+
+
+@test("tui/layout_geometry")
+def t_tui_layout_geometry(psi: Psi):
+    out = psi.eval(
+        'local layout = require("psi.tui_layout").geometry(80, 24)\n'
+        + 'return table.concat({layout.title, layout.transcript.h, layout.input.y}, "|")'
+    )
+    assert_equals(out, "psi coding agent|18|21", "shared TUI layout")
+
+
+@test("tui/layout_reclaims_empty_status_row")
+def t_tui_layout_reclaims_empty_status_row(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local idle = rt._debug_layout_rows(80, 24, false, nil)\n'
+        + 'local busy = rt._debug_layout_rows(80, 24, true, nil)\n'
+        + 'local status = rt._debug_layout_rows(80, 24, false, "saved")\n'
+        + 'return table.concat({\n'
+        + '  tostring(idle.status_visible), tostring(idle.transcript_height),\n'
+        + '  tostring(busy.status_visible), tostring(busy.transcript_height), tostring(busy.status_row),\n'
+        + '  tostring(status.status_visible), tostring(status.transcript_height)\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "false|19|true|18|20|true|18", "idle TUI reclaims the empty status row")
+
+
+@test("tui/input_layout")
+def t_tui_input_layout(psi: Psi):
+    out = psi.eval(
+        'local prelude = require("psi.prelude")\n'
+        + 'local raw = require("psi.tui_layout").input_layout(\n'
+        + '  psi.json_encode({width = 80, height = 24}))\n'
+        + 'local layout = prelude.safe_json_decode(raw, {})\n'
+        + 'return string.format("%d|%q|%q",\n'
+        + '  layout.max_rows or -1,\n'
+        + '  layout.prefix_first or "",\n'
+        + '  layout.prefix_rest or "")'
+    )
+    assert_equals(out, '18|" › "|"   "', "Lua-owned TUI input layout")
+
+
+@test("tui/input_layout_override")
+def t_tui_input_layout_override(psi: Psi):
+    out = psi.eval(
+        'local prelude = require("psi.prelude")\n'
+        + 'local layout_mod = require("psi.tui_layout")\n'
+        + 'layout_mod.set_prompt_max_rows(8)\n'
+        + 'local raw = layout_mod.input_layout(\n'
+        + '  psi.json_encode({width = 80, height = 24}))\n'
+        + 'layout_mod.set_prompt_max_rows(nil)\n'
+        + 'local layout = prelude.safe_json_decode(raw, {})\n'
+        + 'return tostring(layout.max_rows or -1)'
+    )
+    assert_equals(out, "8", "Lua override for TUI prompt rows")
+
+
+@test("tui/input_layout_settings")
+def t_tui_input_layout_settings(psi: Psi):
+    ctx = psi.tmp / "tui-layout-settings"
+    (ctx / ".psi").mkdir(parents=True, exist_ok=True)
+    (ctx / ".psi" / "settings.json").write_text(
+        json.dumps({"tui": {"prompt": {"max_rows": 7}}})
+    )
+    out = psi.run(
+        "--eval",
+        'local layout = require("psi.tui_runtime")._debug_resolve_input_layout(80, 24)\n'
+        + 'return tostring(layout.max_rows or -1)',
+        cwd=ctx,
+    ).stdout.strip()
+    assert_equals(out, "7", "settings-driven TUI prompt rows")
+
+
+@test("tui/busy_status_config")
+def t_tui_busy_status_config(psi: Psi):
+    project = psi.tmp / "busy-config-project"
+    (project / ".psi").mkdir(parents=True, exist_ok=True)
+    (project / ".psi" / "settings.json").write_text(
+        json.dumps({"tui": {"busy_labels": ["custom busy"]}})
+    )
+    out = psi.run(
+        "--eval",
+        'return require("psi.tui_status").pick_busy_status()',
+        cwd=project,
+    ).stdout.strip()
+    assert_equals(out, "custom busy", "busy label pulled from settings")
+
+
+@test("tui/busy_status_render")
+def t_tui_busy_status_render(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local ansi = require("psi.ansi")\n'
+        + 'ansi.color_enabled = true\n'
+        + 'return require("psi.tui_status").render_busy_status("working", 2, 4)',
+    ).stdout.rstrip("\n")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_equals(
+        plain,
+        "working (0:04  • Ctrl-G to interrupt) ...",
+        "busy status renders selected label, hint, and animated dots",
+    )
+    assert_contains(out, "\x1b[96m", "busy label has a subtle shimmer")
+
+
+@test("tui/full_redraw_uses_single_ansi_pass")
+def t_tui_full_redraw_uses_single_ansi_pass(psi: Psi):
+    out = psi.eval(
+        'local d = require("psi.tui_runtime")._debug_redraw_counts("hello\\nhi")\n'
+        + 'return table.concat({\n'
+        + '  tostring(d.first_frames),\n'
+        + '  tostring(d.second_frames),\n'
+        + '  tostring(d.second_input_draws > 0),\n'
+        + '  tostring(d.second_clears),\n'
+        + '  tostring(d.stale_clears > 0),\n'
+        + '  tostring(d.line_clears),\n'
+        + '  tostring(d.draw_rows),\n'
+        + '  tostring(d.raw_draws),\n'
+        + '  tostring(d.cursor_sets),\n'
+        + '  tostring(d.refreshes)\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "1|1|true|0|true|0|0|0|0|0", "full redraw uses one no-clear ANSI frame")
+
+
+@test("tui/chat_mode_streams_to_scrollback")
+def t_tui_chat_mode_streams_to_scrollback(psi: Psi):
+    # Drive a chat-mode session through three steps:
+    #   1. user message added (live region only)
+    #   2. assistant message added (user becomes committed scrollback)
+    #   3. input edit (no entry change; just live region repaint)
+    # Verify entries get committed exactly once and that input edits don't
+    # re-emit committed lines.
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local snapshots = rt._debug_chat_redraw_sequence({\n'
+        + '  {kind="user", text="hello"},\n'
+        + '  {kind="assistant", text="hi there"},\n'
+        + '  {kind="set_input", text="next message"},\n'
+        + '})\n'
+        + 'local s1, s2, s3 = snapshots[1], snapshots[2], snapshots[3]\n'
+        + 'return table.concat({\n'
+        + '  tostring(s1.committed_entries),\n'
+        + '  tostring(s2.committed_entries),\n'
+        + '  tostring(s3.committed_entries),\n'
+        + '  tostring(s2.output:find("hello", 1, true) ~= nil),\n'
+        + '  tostring(s3.output:find("hello", 1, true) == nil),\n'
+        + '  tostring(s3.output:find("next message", 1, true) ~= nil),\n'
+        + '  tostring(s2.live_rows >= 3),\n'
+        + '}, "|")'
+    )
+    assert_equals(
+        out,
+        "0|1|1|true|true|true|true",
+        "chat mode commits each entry to scrollback once, repaints only the live region",
+    )
+
+
+@test("tui/chat_mode_uses_tui_write_not_render_frame")
+def t_tui_chat_mode_uses_tui_write_not_render_frame(psi: Psi):
+    # Chat mode should bypass psi.tui_render_frame entirely so the output
+    # flows into the terminal's primary screen scrollback.
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local snapshots = rt._debug_chat_redraw_sequence({\n'
+        + '  {kind="user", text="ping"},\n'
+        + '})\n'
+        + 'local s = snapshots[1]\n'
+        + 'return table.concat({\n'
+        + '  tostring(s.write_count >= 1),\n'
+        + '  tostring(s.output:find("\\27[?2026h", 1, true) ~= nil),\n'
+        + '  tostring(s.output:find("\\27[?25h", 1, true) ~= nil),\n'
+        + '}, "|")'
+    )
+    assert_equals(
+        out,
+        "true|true|true",
+        "chat mode emits lines via tui_write inside synchronized output",
+    )
+
+
+@test("tui/show_thinking_config")
+def t_tui_show_thinking_config(psi: Psi):
+    default_out = psi.eval('return require("psi.tui_status").show_thinking()')
+    assert_equals(default_out, "0", "thinking hidden by default in TUI")
+
+    project = psi.tmp / "thinking-config-project"
+    (project / ".psi").mkdir(parents=True, exist_ok=True)
+    (project / ".psi" / "settings.json").write_text(
+        json.dumps({"tui": {"show_thinking": True}})
+    )
+    out = psi.run(
+        "--eval",
+        'return require("psi.tui_status").show_thinking()',
+        cwd=project,
+    ).stdout.strip()
+    assert_equals(out, "1", "thinking visibility pulled from settings")
+
+
+@test("tui/capabilities_disable_raw_for_dumb_terminal")
+def t_tui_capabilities_disable_raw_for_dumb_terminal(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local caps = require("psi.tui_runtime")._debug_tui_capabilities()\n'
+        + 'return table.concat({tostring(caps.ansi), tostring(caps.color), tostring(caps.raw_ansi)}, "|")',
+        env_extra={"TERM": "dumb"},
+    ).stdout.strip()
+    assert_equals(out, "false|false|false", "dumb terminal disables ANSI/color/raw rendering")
+
+
+@test("tui/raw_ansi_available_with_ansi")
+def t_tui_raw_ansi_available_with_ansi(psi: Psi):
+    expr = (
+        'local caps = require("psi.tui_runtime")._debug_tui_capabilities()\n'
+        + 'return table.concat({tostring(caps.ansi), tostring(caps.color), tostring(caps.raw_ansi)}, "|")'
+    )
+    default_out = psi.run(
+        "--eval",
+        expr,
+        env_extra={"TERM": "xterm-256color", "PSI_COLOR": "1"},
+    ).stdout.strip()
+    assert_equals(default_out, "true|true|true", "raw ANSI is available with ANSI terminals")
+
+
+@test("tui/sanitizes_untrusted_terminal_sequences")
+def t_tui_sanitizes_untrusted_terminal_sequences(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local esc = string.char(27)\n'
+        + 'local bel = string.char(7)\n'
+        + 'local input = "a" .. esc .. "]52;c;evil" .. bel .. "b" .. esc .. "[2Jc\\nnext"\n'
+        + 'return rt._debug_sanitize_terminal_text(input, true)'
+    )
+    assert_equals(out, "abc\nnext", "untrusted terminal control sequences are stripped")
+
+
+@test("tui/live_tool_progress_is_bounded")
+def t_tui_live_tool_progress_is_bounded(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local text = rt._debug_limit_live_tool_progress_text(string.rep("a", 9000) .. "TAIL")\n'
+        + 'return table.concat({\n'
+        + '  tostring(#text <= 8192),\n'
+        + '  tostring(text:find("earlier output truncated", 1, true) ~= nil),\n'
+        + '  text:sub(-4)\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "true|true|TAIL", "live tool output is kept to a bounded rolling tail")
+
+
+@test("tui/no_color_disables_input_chrome_colors")
+def t_tui_no_color_disables_input_chrome_colors(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local d = require("psi.tui_runtime")._debug_redraw_counts("hello")\n'
+        + 'local frame = d.second_frame or ""\n'
+        + 'return table.concat({\n'
+        + '  tostring(frame:find("48;5;", 1, true) == nil),\n'
+        + '  tostring(frame:find("38;5;", 1, true) == nil)\n'
+        + '}, "|")',
+        env_extra={"NO_COLOR": "1", "TERM": "xterm-256color"},
+    ).stdout.strip()
+    assert_equals(out, "true|true", "NO_COLOR disables Lua-owned input chrome colors")
+
+
+@test("tui/input_wrap_width")
+def t_tui_input_wrap_width(psi: Psi):
+    out = psi.eval(
+        'local d = require("psi.tui_runtime")._debug_input_lines(\n'
+        + '  string.rep("a", 78), 78, 80, "> ", "| ")\n'
+        + 'return table.concat({\n'
+        + '  tostring(#d.lines),\n'
+        + '  tostring(#d.lines[1]),\n'
+        + '  tostring(#d.lines[2]),\n'
+        + '  tostring(d.cursor_line),\n'
+        + '  tostring(d.cursor_col)\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "2|79|3|2|1", "input wraps to drawable width")
+
+
+@test("tui/input_cursor_prefix_width")
+def t_tui_input_cursor_prefix_width(psi: Psi):
+    out = psi.eval(
+        'local d = require("psi.tui_runtime")._debug_input_lines(\n'
+        + '  "abc", 0, 80, " › ", "   ")\n'
+        + 'return tostring(d.cursor_screen_col)'
+    )
+    assert_equals(out, "4", "cursor column uses display width for unicode prompt prefix")
+
+
+@test("tui/busy_input_clears_transient_error")
+def t_tui_busy_input_clears_transient_error(psi: Psi):
+    out = psi.eval(
+        'local d = require("psi.tui_runtime")._debug_edit_keys("/btw later", 10, '\
+        + '{{key="enter"}, {key="text", text="x"}}, false, {busy=true, busy_kind="agent"})\n'
+        + 'return tostring(d.status_text) .. "|" .. d.input'
+    )
+    assert_equals(out, "nil|/btw laterx",
+                  "typing while busy should restore the busy status line after transient /btw error")
+
+
+@test("tui/tool_call_text_has_no_leading_blank")
+def t_tui_tool_call_text_has_no_leading_blank(psi: Psi):
+    out = psi.eval(
+        'return require("psi.tui_runtime")._debug_tool_call_text_after_assistant()'
+    )
+    assert_true(not out.startswith("\n"),
+                "TUI tool calls should not add an extra blank after assistant text")
+    assert_contains(out, "read README.md", "tool call text still renders")
+
+
+@test("tui/busy_animation_uses_wall_clock")
+def t_tui_busy_animation_uses_wall_clock(psi: Psi):
+    out = psi.eval(
+        'return require("psi.tui_runtime")._debug_busy_animation_frames({0, 599, 600, 1199, 1200})'
+    )
+    assert_equals(out, "0:0|0:0|1:1|1:1|2:2",
+                  "busy animation should advance on wall-clock time")
+
+
+@test("tui/key_policy")
+def t_tui_key_policy(psi: Psi):
+    out = psi.eval(
+        'local tui = require("psi.tui_status")\n'
+        + 'local function fmt(res)\n'
+        + '  if not res then return "nil" end\n'
+        + '  local arg = res.arg\n'
+        + '  if type(arg) == "table" then arg = arg.mode end\n'
+        + '  if arg == "\\n" then arg = "\\\\n" end\n'
+        + '  return (res.action or "?") .. ":" .. (arg or "-")\n'
+        + 'end\n'
+        + 'return table.concat({\n'
+        + '  fmt(tui.handle_key({key="enter", busy=false, input_length=1})),\n'
+        + '  fmt(tui.handle_key({key="enter", busy=true, input_length=1})),\n'
+        + '  fmt(tui.handle_key({key="shift-enter", busy=false, input_length=0})),\n'
+        + '  fmt(tui.handle_key({key="ctrl-u", busy=false, input_length=0})),\n'
+        + '  fmt(tui.handle_key({key="ctrl-d", busy=false, input_length=0})),\n'
+        + '  fmt(tui.handle_key({key="ctrl-d", busy=true, input_length=0})),\n'
+        + '  fmt(tui.handle_key({key="up", busy=true, input_length=0, queue_count=2})),\n'
+        + '  fmt(tui.handle_key({key="up", busy=true, input_length=0, queue_count=0})),\n'
+        + '  fmt(tui.handle_key({key="wheel-up", busy=false, input_length=0})),\n'
+        + '  fmt(tui.handle_key({key="wheel-down", busy=false, input_length=0})),\n'
+        + '  fmt(tui.handle_key({key="escape", busy=true, input_length=0})),\n'
+        + '  fmt(tui.handle_key({key="ctrl-g", busy=true, input_length=0})),\n'
+        + '  fmt(tui.handle_key({key="text", text="x"}))\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "submit:-|submit:-|insert:\\n|scroll:page-up|quit:-|nil|queue-restore:-|scroll:line-up|scroll:line-up|scroll:line-down|nil|abort:-|insert:x",
+                  "Lua TUI key policy")
+
+
+@test("tui/ctrl_d_empty_prompt_exits")
+def t_tui_ctrl_d_empty_prompt_exits(psi: Psi):
+    out = psi.eval(
+        'local d = require("psi.tui_runtime")._debug_edit_keys("", 0, {{key="ctrl-d"}}, false)\n'
+        + 'return tostring(d.running) .. "|" .. d.input'
+    )
+    assert_equals(out, "false|", "Ctrl-D exits from an empty TUI prompt")
+
+
+@test("tui/queue_restore")
+def t_tui_queue_restore(psi: Psi):
+    out = psi.eval(
+        'local agent = require("psi.agent_session")\n'
+        + 'local rt = require("psi.tui_runtime")\n'
+        + 'agent.clear_queues()\n'
+        + 'agent.queue_follow_up("first queued")\n'
+        + 'agent.queue_follow_up("second queued")\n'
+        + 'local state = rt._debug_edit_keys("draft", 5, {{key="up"}}, false, {busy=true})\n'
+        + 'return state.input .. "|" .. tostring(agent.pending_message_count()) .. "|"\n'
+        + '  .. tostring(state.status_text)'
+    )
+    assert_equals(out, "first queued\n\nsecond queued\n\ndraft|0|editing queued messages",
+                  "Up should restore queued messages without dropping current input")
+
+
+@test("tui/queue_status_lists_all")
+def t_tui_queue_status_lists_all(psi: Psi):
+    out = psi.eval(
+        'local agent = require("psi.agent_session")\n'
+        + 'local tui = require("psi.tui_status")\n'
+        + 'agent.clear_queues()\n'
+        + 'agent.queue_follow_up("first queued")\n'
+        + 'agent.queue_follow_up("second queued")\n'
+        + 'return tui.status_line({busy=true, scroll=0})'
+    )
+    assert_contains(out, "queue:first queued | second queued",
+                    "queue status should concatenate every queued message")
+
+
+@test("tui/queue_edit_then_append")
+def t_tui_queue_edit_then_append(psi: Psi):
+    out = psi.eval(
+        'local agent = require("psi.agent_session")\n'
+        + 'local rt = require("psi.tui_runtime")\n'
+        + 'agent.clear_queues()\n'
+        + 'agent.queue_follow_up("first queued")\n'
+        + 'agent.queue_follow_up("second queued")\n'
+        + 'local function text(s) return {key="text", text=s} end\n'
+        + 'local state = rt._debug_edit_keys("", 0, {\n'
+        + '  {key="ctrl-p"}, {key="ctrl-a"}, {key="ctrl-k"}, text("edited queued"),\n'
+        + '  {key="enter"}, text("third queued"), {key="enter"}\n'
+        + '}, false, {busy=true})\n'
+        + 'local pending = agent.pending_messages()\n'
+        + 'return table.concat({\n'
+        + '  pending[1].text,\n'
+        + '  pending[2].text,\n'
+        + '  pending[3].text,\n'
+        + '  tostring(state.queue_nav_index)\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "first queued|edited queued|third queued|nil",
+                  "editing a queued message should not make the next busy submit overwrite it")
+
+
+@test("tui/consumed_queue_preview_clears_editor")
+def t_tui_consumed_queue_preview_clears_editor(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local same = rt._debug_consume_queued_preview("queued text", "queued text")\n'
+        + 'local edited = rt._debug_consume_queued_preview("queued text edited", "queued text")\n'
+        + 'return table.concat({\n'
+        + '  same.input,\n'
+        + '  tostring(same.cursor),\n'
+        + '  tostring(same.queue_nav_index),\n'
+        + '  edited.input\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "|0|nil|queued text edited",
+                  "consuming a displayed queued preview should clear only the unmodified preview")
+
+
+@test("tui/busy_btw_not_consumed")
+def t_tui_busy_btw_not_consumed(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local state = rt._debug_edit_keys("/btw keep me", 12, {{key="enter"}}, false, {busy=true})\n'
+        + 'return state.input .. "|" .. tostring(state.status_text)'
+    )
+    assert_equals(out, "/btw keep me|/btw is unavailable while a turn is running",
+                  "busy /btw should remain editable instead of being dropped")
+
+
+@test("tui/busy_unavailable_command_not_consumed")
+def t_tui_busy_unavailable_command_not_consumed(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local state = rt._debug_edit_keys("/model x", 8, {{key="enter"}}, false, {busy=true})\n'
+        + 'return state.input .. "|" .. tostring(state.status_text)'
+    )
+    assert_equals(out, "/model x|command unavailable while busy",
+                  "busy unavailable slash commands should remain editable")
+
+
+@test("tui/busy_slash_command_does_not_dispatch")
+def t_tui_busy_slash_command_does_not_dispatch(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'psi.session_append("user", "keep", nil)\n'
+        + 'local before = psi.session_message_count()\n'
+        + 'local state = rt._debug_edit_keys("/new", 4, {{key="enter"}}, false, {busy=true})\n'
+        + 'return table.concat({\n'
+        + '  tostring(before),\n'
+        + '  tostring(psi.session_message_count()),\n'
+        + '  state.input,\n'
+        + '  tostring(state.status_text)\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "1|1|/new|command unavailable while busy",
+                  "busy slash commands should not dispatch side effects like /new")
+
+
+@test("tui/non_agent_busy_submit_not_queued")
+def t_tui_non_agent_busy_submit_not_queued(psi: Psi):
+    out = psi.eval(
+        'local agent = require("psi.agent_session")\n'
+        + 'local rt = require("psi.tui_runtime")\n'
+        + 'agent.clear_queues()\n'
+        + 'local state = rt._debug_edit_keys("draft", 5, {{key="enter"}}, false, {busy=true, busy_kind="compact"})\n'
+        + 'return state.input .. "|" .. tostring(agent.pending_message_count()) .. "|" .. tostring(state.status_text)'
+    )
+    assert_equals(out, "draft|0|busy",
+                  "non-agent busy states should preserve input instead of queueing follow-ups")
+
+
+@test("tui/vim_modal_keys")
+def t_tui_vim_modal_keys(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local tui = require("psi.tui_status")\n'
+        + 'require("psi.extensions.vim_keybindings").enable(psi)\n'
+        + 'local function text(c) return {key="text", text=c} end\n'
+        + 'local s = rt._debug_edit_keys("alpha beta gamma", 0, {\n'
+        + '  {key="escape"}, text("w"), text("v"), text("l"), text("l"), text("l"), text("l"), text("y"), text("p")\n'
+        + '})\n'
+        + 'local b = rt._debug_edit_keys("aa\\nbb\\ncc", 0, {\n'
+        + '  {key="escape"}, {key="ctrl-v"}, text("j"), text("y")\n'
+        + '})\n'
+        + 'local g = rt._debug_edit_keys("", 0, {\n'
+        + '  {key="escape"}, {key="ctrl-u"}, text("g"), text("g"), text("G")\n'
+        + '})\n'
+        + 'local a = rt._debug_edit_keys("  aa\\nbb", 0, {\n'
+        + '  {key="escape"}, text("A"), text("!"), {key="escape"}\n'
+        + '})\n'
+        + 'local i = rt._debug_edit_keys("  aa", 4, {\n'
+        + '  {key="escape"}, text("I"), text("x"), {key="escape"}\n'
+        + '})\n'
+        + 'local o = rt._debug_edit_keys("aa\\nbb", 0, {\n'
+        + '  {key="escape"}, text("o"), text("x"), {key="escape"}\n'
+        + '})\n'
+        + 'local O = rt._debug_edit_keys("aa\\nbb", 3, {\n'
+        + '  {key="escape"}, text("O"), text("x"), {key="escape"}\n'
+        + '})\n'
+        + 'local line = rt._debug_edit_keys("  aa\\nbb", 0, {\n'
+        + '  {key="escape"}, text("$"), text("^"), {key="ctrl-e"}, {key="ctrl-a"}\n'
+        + '})\n'
+        + 'local clear = rt._debug_edit_keys("abc", 2, {\n'
+        + '  {key="escape"}, {key="ctrl-c"}\n'
+        + '})\n'
+        + 'local visual = rt._debug_edit_keys("abc", 0, {\n'
+        + '  {key="escape"}, text("v"), text("l")\n'
+        + '})\n'
+        + 'local line_visual = rt._debug_edit_keys("alpha\\n\\nbeta", 6, {\n'
+        + '  {key="escape"}, text("V")\n'
+        + '})\n'
+        + 'local block_insert = rt._debug_edit_keys("aa\\nbb\\ncc", 0, {\n'
+        + '  {key="escape"}, {key="ctrl-v"}, text("j"), text("I"), text("x"), {key="escape"}\n'
+        + '})\n'
+        + 'local block_append = rt._debug_edit_keys("aa\\nbb\\ncc", 0, {\n'
+        + '  {key="escape"}, {key="ctrl-v"}, text("l"), text("j"), text("A"), text("x"), {key="escape"}\n'
+        + '})\n'
+        + 'local interrupt = tui.handle_key({key="ctrl-g", busy=true, editor_mode="normal", input_length=1})\n'
+        + 'return table.concat({\n'
+        + '  s.editor_mode, tostring(s.cursor), s.clipboard, s.input,\n'
+        + '  b.selection_kind or "-", b.clipboard,\n'
+        + '  tostring(g.scroll_offset), g.editor_mode,\n'
+        + '  a.input, i.input, o.input, O.input,\n'
+        + '  tostring(line.cursor), clear.input, clear.editor_mode,\n'
+        + '  tostring((visual.rendered[1] or ""):find("\\27%[7m") ~= nil),\n'
+        + '  line_visual.selection_kind or "-",\n'
+        + '  tostring((line_visual.rendered[2] or ""):find("\\27%[7m") ~= nil),\n'
+        + '  block_insert.input,\n'
+        + '  block_append.input,\n'
+        + '  interrupt and interrupt.action or "-"\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "normal|14|beta|alpha betabeta gamma|-|a\nb|0|normal|  aa!\nbb|  xaa|aa\nx\nbb|aa\nx\nbb|0||insert|true|line|true|xaa\nxbb\ncc|aax\nbbx\ncc|abort",
+                  "Vim modal TUI keys")
+
+
+@test("tui/osc52_clipboard")
+def t_tui_osc52_clipboard(psi: Psi):
+    out = psi.eval(
+        'local tui = require("psi.tui_status")\n'
+        + 'local osc52 = require("psi.extensions.osc52_clipboard")\n'
+        + 'local writes = {}\n'
+        + 'psi.stdout_write = function(text) writes[#writes + 1] = text end\n'
+        + 'osc52.disable(psi)\n'
+        + 'tui.clear_clipboard_writers()\n'
+        + 'osc52.enable(psi)\n'
+        + 'local wrote = tui.write_clipboard("hi", {source="test", force=true})\n'
+        + 'local direct = osc52._debug_osc52_sequence("hi", {TMUX=""})\n'
+        + 'local tmux = osc52._debug_osc52_sequence("hi", {TMUX="/tmp/tmux"})\n'
+        + 'local capped = osc52.write_clipboard(string.rep("a", 75001), {source="test"})\n'
+        + 'return table.concat({\n'
+        + '  osc52._debug_base64_encode("hello"),\n'
+        + '  tostring(wrote),\n'
+        + '  tostring((writes[1] or ""):find("52;", 1, true) ~= nil and (writes[1] or ""):find(";aGk=", 1, true) ~= nil),\n'
+        + '  tostring(direct:sub(1, 2) == "\\27]"),\n'
+        + '  tostring(tmux:sub(1, 7) == "\\27Ptmux;"),\n'
+        + '  tostring(capped),\n'
+        + '  tostring(#writes)\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "aGVsbG8=|true|true|true|true|false|1", "OSC 52 clipboard writer")
+
+
+@test("tui/vim_yank_writes_clipboard")
+def t_tui_vim_yank_writes_clipboard(psi: Psi):
+    out = psi.eval(
+        'local tui = require("psi.tui_status")\n'
+        + 'local rt = require("psi.tui_runtime")\n'
+        + 'require("psi.extensions.vim_keybindings").enable(psi)\n'
+        + 'local copied = "-"\n'
+        + 'tui.clear_clipboard_writers()\n'
+        + 'tui.register_clipboard_writer(function(text) copied = text return true end)\n'
+        + 'rt._debug_edit_keys("abc", 0, {{key="escape"}, {key="text", text="y"}}, false, {clipboard_writers=true})\n'
+        + 'return copied'
+    )
+    assert_equals(out, "abc", "Vim yank writes through TUI clipboard hook")
+
+
+@test("tui/vim_toggle")
+def t_tui_vim_toggle(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local function run(input, events)\n'
+        + '  local s = rt._debug_edit_keys(input, #input, events)\n'
+        + '  return table.concat({s.status_text or "-", s.editor_mode, s.input}, "|")\n'
+        + 'end\n'
+        + 'return table.concat({\n'
+        + '  run("", {{key="escape"}}),\n'
+        + '  run("/vim", {{key="enter"}, {key="escape"}}),\n'
+        + '  run("/vim off", {{key="enter"}, {key="escape"}})\n'
+        + '}, "||")'
+    )
+    assert_equals(
+        out,
+        "-|insert|||Vim keybindings enabled|normal|||Vim keybindings disabled|insert|",
+        "Vim extension is off by default and /vim toggles it",
+    )
+
+
+@test("tui/vim_config_enable")
+def t_tui_vim_config_enable(psi: Psi):
+    cwd = psi.tmp / "vim-config"
+    (cwd / ".psi").mkdir(parents=True, exist_ok=True)
+    (cwd / ".psi" / "settings.json").write_text(
+        json.dumps({"extensions": {"vim_keybindings": {"enabled": True}}})
+    )
+    out = psi.run(
+        "--eval",
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local s = rt._debug_edit_keys("abc", 0, {{key="escape"}}, true)\n'
+        + 'return s.editor_mode',
+        cwd=cwd,
+    ).stdout.strip()
+    assert_equals(out, "normal", "config enables bundled Vim extension")
+
+
+@test("render/replace_mode")
+def t_render_replace(psi: Psi):
+    """A render hook returning {replace=true, text=...} must drop
+    earlier hooks' output from the chain and start the accumulator
+    over. Later hooks still append. Verifies the replace-mode
+    rough-edge fix from session be5ebe99."""
+    out = psi.eval(
+        'local r = require("psi.render")\n'
+        + 'r.register_hook("before-turn", function() return "first\\n" end)\n'
+        + 'r.register_hook("before-turn", function()\n'
+        + '  return { replace = true, text = "REPLACED\\n" }\n'
+        + 'end)\n'
+        + 'r.register_hook("before-turn", function() return "tail\\n" end)\n'
+        + 'return r.handle_event("before-turn", {})'
+    )
+    assert_not_contains(out, "first", "first hook's string should have been dropped")
+    assert_contains(out, "REPLACED", "replacement text present")
+    assert_contains(out, "tail", "later hook still appends after replace")
+
+
+@test("render/event_catalog")
+def t_render_events(psi: Psi):
+    out = psi.eval(
+        'return table.concat(require("psi.render").events(), ",")')
+    for ev in ("before-turn", "tool-call", "tool-result", "after-turn"):
+        assert_contains(out, ev, f"catalog lists {ev}")
+
+
+@test("render/tui_after_turn_payload")
+def t_tui_after_turn_payload(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local a = rt._debug_after_turn_payload("", false)\n'
+        + 'local b = rt._debug_after_turn_payload("reply", true)\n'
+        + 'return tostring(a["assistant-streamed"]) .. "|" .. a.text .. "|"\n'
+        + '  .. tostring(b["assistant-streamed"]) .. "|" .. b.text'
+    )
+    assert_equals(out.strip(), "false||true|reply", "TUI after-turn payload")
+
+
+@test("introspect/embedded_source")
+def t_embedded_source(psi: Psi):
+    """psi.embedded_source must surface a module's raw Lua source so
+    extensions can introspect built-ins without an on-disk path."""
+    out = psi.eval(
+        'local src = psi.embedded_source("psi.render")\n'
+        + 'local names = psi.embedded_source_names()\n'
+        + 'return (src and #src or 0) .. "|" .. #names .. "|"\n'
+        + '       .. tostring(psi.embedded_source("no.such.module"))'
+    )
+    # Format: "<src_len>|<name_count>|nil"
+    parts = out.strip().split("|")
+    assert_equals(len(parts), 3, f"unexpected shape: {out!r}")
+    assert_true(int(parts[0]) > 100, "render source should be non-trivial")
+    assert_true(int(parts[1]) > 10, "should enumerate many modules")
+    assert_equals(parts[2], "nil", "unknown module must return nil")
+
 @test("prompt/system_lists_tools")
 def t_system_prompt_tools(psi: Psi):
     out = psi.system_prompt()

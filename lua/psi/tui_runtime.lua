@@ -20,7 +20,6 @@ local M = {}
 
 local MAX_RENDER_TEXT = 8192
 local MAX_RENDER_TRUNCATION_SUFFIX = "\n\n[output truncated]"
-local MAX_COMMAND_COMPLETION_ROWS = 6
 
 local DEFAULT_WIDTH = 80
 local DEFAULT_HEIGHT = 24
@@ -49,6 +48,38 @@ local CHAR_APC = "_"
 local CHAR_ST = "\\"
 local SETTING_PROMPT_MAX_ROWS = "tui.prompt.max_rows"
 local BUSY_ANIMATION_INTERVAL_MS = 600
+
+-- Bundled chat-layout helpers. Single local keeps tui_runtime under Lua's
+-- 200-locals-per-function chunk limit.
+local chat = { FRAME = "frame", CHAT = "chat" }
+
+function chat.resolve_mode(opts)
+  local explicit = opts and opts.layout_mode
+  if explicit == chat.CHAT or explicit == chat.FRAME then
+    return explicit
+  end
+  if settings.get("tui.layout.mode", chat.FRAME) == chat.CHAT then
+    return chat.CHAT
+  end
+  return chat.FRAME
+end
+
+function chat.set_alt_screen(enter)
+  if type(psi.tui_write) == "function" then
+    if enter then
+      psi.tui_write("\27[?1049h\27[?1000h\27[?1006h\27[?25h\27[2J\27[H")
+    else
+      psi.tui_write("\27[?1006l\27[?1000l\27[?2026l\27[0m\27[?25h\27[?1049l")
+    end
+  end
+  if type(psi.tui_set_alt_screen_active) == "function" then
+    psi.tui_set_alt_screen_active(enter)
+  end
+end
+
+local ANSI_PATTERN_CSI = "\27%[[%d;?]*[A-Za-z]"
+local ANSI_PATTERN_KEYPAD = "\27[=>]"
+local ANSI_PATTERN_PRIVATE_MODE = "\27%[%?[%d]+[a-z]"
 
 local EMPTY = ""
 local NEWLINE = "\n"
@@ -545,6 +576,10 @@ local function new_state(opts)
     command_completion_input = nil,
     command_completion_items = nil,
     dirty = true,
+    layout_mode = chat.resolve_mode(opts),
+    chat_committed_entry_count = 0,
+    chat_live_rows = 0,
+    chat_first_paint = false,
   }
   refresh_input_layout(state)
   if tui.run_startup_hooks then
@@ -1205,6 +1240,9 @@ local function rebuild_from_session(state)
   end
   history_seed_from_session(state)
   state.scroll_offset = 0
+  state.chat_committed_entry_count = 0
+  state.chat_first_paint = false
+  state.chat_live_rows = 0
   state.dirty = true
 end
 
@@ -1283,8 +1321,7 @@ local function layout_rows(state)
   local command_completions = active_command_completions(state)
   local completion_anchor_row = status_visible and (status_row - 1) or (input_start_row - 1)
   local max_completion_rows = math.max(0, completion_anchor_row - transcript_start)
-  local command_completion_rows =
-    math.min(#command_completions, MAX_COMMAND_COMPLETION_ROWS, max_completion_rows)
+  local command_completion_rows = math.min(#command_completions, 6, max_completion_rows)
   local command_completion_first = 1
   if command_completion_rows > 0 then
     command_completion_first = (state.command_completion_index or 1) - command_completion_rows + 1
@@ -1364,6 +1401,9 @@ local render_input_text_with_cursor
 local input_line_selected
 
 local function redraw(state)
+  if state.layout_mode == chat.CHAT then
+    return chat.redraw(state)
+  end
   local terminal_width, terminal_height = current_size()
   state.width = terminal_width
   state.terminal_height = terminal_height
@@ -1504,6 +1544,186 @@ local function redraw(state)
     force_full = state.force_physical_clear,
   })
   state.force_physical_clear = false
+  state.dirty = false
+end
+
+-- Chat mode renderer.
+--
+-- Lays the conversation out in the terminal's primary screen so it ends up
+-- in native scrollback (mouse wheel, shell scrollback). Each redraw:
+--
+--   1. Erases the previous "live region" (last entry being mutated, status,
+--      input box) by moving the cursor up state.chat_live_rows lines and
+--      clearing to end of screen.
+--   2. Appends any newly-completed entries to scrollback with plain
+--      newlines so the terminal scrolls them naturally.
+--   3. Repaints the live region in place. The bottom-most live row stays
+--      visible; previous content scrolls up out of view.
+--
+-- The "committed" boundary is always all-but-the-last entry: the last
+-- entry may still be streaming, so we keep it in the mutable region.
+function chat.redraw(state)
+  state.width, state.height = current_size()
+  state.scroll_offset = 0
+  refresh_input_layout(state)
+
+  local frame_width = math.max(1, state.width - 1)
+  local out = {}
+  local function panel_join(prev, entry)
+    return (prev and prev.kind == "tool_call" and entry.kind == "tool_result")
+      or (prev and prev.kind == "tool_result" and entry.kind == "tool_result")
+  end
+
+  -- 1. Erase previous live region or prepare clean line for first paint.
+  if state.chat_first_paint then
+    if state.chat_live_rows > 0 then
+      out[#out + 1] = "\27[" .. state.chat_live_rows .. "F\27[J"
+    else
+      out[#out + 1] = "\r\27[J"
+    end
+  else
+    out[#out + 1] = "\r\27[J"
+    state.chat_first_paint = true
+  end
+
+  -- 2. Commit entries that are no longer the last entry.
+  if state.chat_committed_entry_count > #state.entries then
+    state.chat_committed_entry_count = #state.entries
+  end
+  local committed_target = math.max(0, #state.entries - 1)
+  while state.chat_committed_entry_count < committed_target do
+    local idx = state.chat_committed_entry_count + 1
+    local entry = state.entries[idx]
+    local prev = state.entries[idx - 1]
+    local next_entry = state.entries[idx + 1]
+    if idx > 1 and not panel_join(prev, entry) then
+      out[#out + 1] = "\n"
+    end
+    for _, line in ipairs(entry_render_lines(state, entry)) do
+      out[#out + 1] = style_line(line)
+      out[#out + 1] = "\27[0m\n"
+    end
+    if entry.kind == "tool_result" and (not next_entry or next_entry.kind ~= "tool_result") then
+      out[#out + 1] = ansi.yellow("╰─")
+      out[#out + 1] = "\27[0m\n"
+    end
+    state.chat_committed_entry_count = idx
+  end
+
+  -- 3. Build live region: last entry (if any) + status + input box + footer.
+  local live_lines = {}
+  if #state.entries > 0 then
+    local idx = #state.entries
+    local entry = state.entries[idx]
+    local prev = state.entries[idx - 1]
+    if state.chat_committed_entry_count >= 1 and not panel_join(prev, entry) then
+      live_lines[#live_lines + 1] = ""
+    end
+    for _, line in ipairs(entry_render_lines(state, entry)) do
+      live_lines[#live_lines + 1] = style_line(line)
+    end
+    if entry.kind == "tool_result" then
+      live_lines[#live_lines + 1] = ansi.yellow("╰─")
+    end
+  end
+
+  local status_arg = {
+    model = state.model and state.model.id or state.opts.model,
+    provider = state.model and state.model.provider or nil,
+    context_window = state.model and state.model.context_window or nil,
+    busy = state.busy,
+    busy_label = state.busy_label,
+    elapsed_seconds = state.busy_started_at and (os.time() - state.busy_started_at) or 0,
+    busy_phase = state.busy_phase,
+    scroll = 0,
+    editor_mode = state.editor_mode,
+    selection_kind = state.selection_kind,
+  }
+  local status_text = nil
+  if state.status_text ~= nil then
+    status_text = state.status_is_error and ansi.bold(ansi.red(state.status_text))
+      or ansi.dim(state.status_text)
+  elseif state.busy then
+    status_text = tui.render_busy_status(
+      state.busy_label or "working",
+      state.busy_phase,
+      status_arg.elapsed_seconds,
+      state.busy_tick
+    )
+  end
+  if status_text ~= nil then
+    live_lines[#live_lines + 1] = status_text
+  end
+
+  local input_lines, cursor_line, cursor_col = build_input_lines(state)
+  local input_max = input_max_rows(state)
+  local input_rows_n = math.max(1, math.min(#input_lines, input_max))
+  local input_first_line = 1
+  if cursor_line > input_rows_n then
+    input_first_line = cursor_line - input_rows_n + 1
+  end
+  if input_first_line + input_rows_n - 1 > #input_lines then
+    input_first_line = #input_lines - input_rows_n + 1
+  end
+  local input_width = frame_width
+  local input_box_top_idx = #live_lines + 1
+  live_lines[#live_lines + 1] = style_input_border(input_width)
+  for i = 0, input_rows_n - 1 do
+    local line_index = input_first_line + i
+    local line = input_lines[line_index]
+    local prefix = line_index == 1 and state.input_layout.prefix_first
+      or state.input_layout.prefix_rest
+    local text = ""
+    if line ~= nil then
+      text = render_input_text(state, line)
+    end
+    local rendered
+    if input_line_selected and input_line_selected(state, line) then
+      rendered = ansi.color("7", input_box_line(prefix .. text, input_width))
+    else
+      rendered = input_box_line(
+        style_input_prefix(prefix, line_index == 1)
+          .. (
+            line and render_input_text_with_cursor(state, line, line_index == cursor_line)
+            or style_input_text(text)
+          ),
+        input_width
+      )
+    end
+    live_lines[#live_lines + 1] = rendered
+  end
+  live_lines[#live_lines + 1] = style_input_border(input_width)
+  live_lines[#live_lines + 1] = tui.compose_bar(tui.status_bar(status_arg) or "", frame_width)
+
+  -- 4. Emit live region inside synchronized output, then position cursor.
+  out[#out + 1] = "\27[?2026h\27[?25l"
+  for i, line in ipairs(live_lines) do
+    out[#out + 1] = line
+    out[#out + 1] = "\27[0m"
+    if i < #live_lines then
+      out[#out + 1] = "\n"
+    end
+  end
+
+  local visible_cursor_line = cursor_line - input_first_line + 1
+  local cursor_target_idx = input_box_top_idx + visible_cursor_line
+  local rows_up = #live_lines - cursor_target_idx
+  local cursor_prefix = cursor_line == 1 and state.input_layout.prefix_first
+    or state.input_layout.prefix_rest
+  local cursor_col_n = display_width(cursor_prefix) + cursor_col + 1
+  cursor_col_n = clamp(cursor_col_n, 1, math.max(1, state.width - 1))
+  if rows_up > 0 then
+    out[#out + 1] = "\27[" .. rows_up .. "F"
+  else
+    out[#out + 1] = "\r"
+  end
+  out[#out + 1] = "\27[" .. cursor_col_n .. "G"
+  out[#out + 1] = "\27[?25h\27[?2026l"
+
+  state.chat_live_rows = #live_lines
+  if type(psi.tui_write) == "function" then
+    psi.tui_write(table.concat(out))
+  end
   state.dirty = false
 end
 
@@ -2873,6 +3093,15 @@ local function apply_action(state, action, arg)
     return
   end
   if action == "scroll" then
+    if state.layout_mode == chat.CHAT then
+      -- Terminal handles scrollback natively. Keep history navigation though.
+      if arg == "line-up" and history_up_applicable(state) then
+        history_up(state)
+      elseif arg == "line-down" and history_down_applicable(state) then
+        history_down(state)
+      end
+      return
+    end
     if arg == "page-up" then
       scroll_by(state, math.max(4, math.floor(state.height / 2)))
     elseif arg == "page-down" then
@@ -3232,13 +3461,28 @@ end
 
 function M.run(opts)
   agent.configure(opts)
+
+  local layout_mode = chat.resolve_mode(opts)
+
+  -- Always enter alt-screen for bootstrap so the resume picker (which uses
+  -- absolute positioning) doesn't clobber the user's terminal. We leave it
+  -- before the chat-mode main loop so transcript output flows into native
+  -- scrollback.
+  chat.set_alt_screen(true)
+
   local ok, err = bootstrap_session(opts)
   if not ok then
+    chat.set_alt_screen(false)
     io.stderr:write("failed to load session file: " .. tostring(err) .. "\n")
     return false
   end
 
+  if layout_mode == chat.CHAT then
+    chat.set_alt_screen(false)
+  end
+
   local state = new_state(opts)
+  state.layout_mode = layout_mode
   rebuild_from_session(state)
 
   local success, runtime_err = xpcall(function()
@@ -3264,6 +3508,16 @@ function M.run(opts)
   psi.tui_set_tick_handler(nil)
   psi.tui_set_tool_progress_handler(nil)
   session.announce_shutdown()
+
+  if state.layout_mode == chat.CHAT then
+    -- Drop cursor onto a fresh line below the input box so the shell
+    -- prompt comes back without overwriting our last paint.
+    if type(psi.tui_write) == "function" then
+      psi.tui_write("\27[0m\27[?25h\n")
+    end
+  else
+    chat.set_alt_screen(false)
+  end
 
   if not success then
     io.stderr:write("TUI runtime error: " .. tostring(runtime_err) .. "\n")
@@ -3927,6 +4181,60 @@ function M._debug_redraw_counts(input, debug_options)
   for _, name in ipairs(names) do
     psi[name] = saved[name]
   end
+  if not ok then
+    error(result)
+  end
+  return result
+end
+
+-- Drive chat-mode redraw through a sequence of entry mutations and capture
+-- the bytes psi.tui_write would emit on each step, so smoke tests can verify
+-- that committed transcript lines are written to scrollback exactly once
+-- while the live region is repainted in place.
+function M._debug_chat_redraw_sequence(steps)
+  steps = steps or {}
+  local saved_size = psi.tui_size
+  local saved_write = psi.tui_write
+  local saved_set_alt = psi.tui_set_alt_screen_active
+  local writes = {}
+  psi.tui_size = function()
+    return { width = 80, height = 24 }
+  end
+  psi.tui_write = function(text)
+    writes[#writes + 1] = text or ""
+  end
+  psi.tui_set_alt_screen_active = function() end
+
+  local ok, result = xpcall(function()
+    local state = new_state({ model = "debug", layout_mode = chat.CHAT })
+    state.layout_mode = chat.CHAT
+    local snapshots = {}
+    for _, step in ipairs(steps) do
+      if step.kind == "user" then
+        add_entry(state, "user", step.text or "")
+      elseif step.kind == "assistant" then
+        add_entry(state, "assistant", step.text or "")
+      elseif step.kind == "set_input" then
+        state.input = step.text or ""
+        state.cursor = #state.input
+        state.dirty = true
+      end
+      writes = {}
+      chat.redraw(state)
+      snapshots[#snapshots + 1] = {
+        write_count = #writes,
+        output = table.concat(writes),
+        committed_entries = state.chat_committed_entry_count,
+        live_rows = state.chat_live_rows,
+        entries = #state.entries,
+      }
+    end
+    return snapshots
+  end, debug.traceback)
+
+  psi.tui_size = saved_size
+  psi.tui_write = saved_write
+  psi.tui_set_alt_screen_active = saved_set_alt
   if not ok then
     error(result)
   end

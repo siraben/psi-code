@@ -3537,6 +3537,32 @@ static int lfn_tui_suspend(lua_State *L) {
     return 0;
 }
 
+/* psi.tui_write(text) -- emit raw bytes to stdout while the TUI is active.
+ *
+ * Used by chat-mode rendering to append transcript lines to the terminal's
+ * native scrollback and to position the sticky input box with relative
+ * cursor moves. Frame mode keeps using tui_render_frame for atomic repaints. */
+static int lfn_tui_write(lua_State *L) {
+    const char *text = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : "";
+    psi_vm_require_tui(L);
+    psi_vm_tui_write(text);
+    fflush(stdout);
+    return 0;
+}
+
+extern void psi_tui_set_alt_screen_active(int active);
+
+/* psi.tui_set_alt_screen_active(flag) -- tell the C side whether Lua has
+ * entered the alt screen. Suspend/resume read this to know if SIGTSTP
+ * handling should leave/re-enter alt-screen, since chat mode never enters
+ * it and we don't want to corrupt the user's scrollback on Ctrl-Z. */
+static int lfn_tui_set_alt_screen_active(lua_State *L) {
+    int active = lua_toboolean(L, 1);
+    psi_vm_require_tui(L);
+    psi_tui_set_alt_screen_active(active);
+    return 0;
+}
+
 static int lfn_tui_set_tick_handler(lua_State *L) {
     struct psi_host_context *host = PSI_VM_HOST(L);
     struct psi_vm *vm = host != NULL ? host->vm : NULL;
@@ -3579,6 +3605,8 @@ static int lfn_tui_unavailable(lua_State *L) {
 #define lfn_tui_set_cursor lfn_tui_unavailable
 #define lfn_tui_refresh lfn_tui_unavailable
 #define lfn_tui_suspend lfn_tui_unavailable
+#define lfn_tui_write lfn_tui_unavailable
+#define lfn_tui_set_alt_screen_active lfn_tui_unavailable
 #define lfn_tui_set_tick_handler lfn_tui_unavailable
 #define lfn_tui_set_tool_progress_handler lfn_tui_unavailable
 
@@ -3829,6 +3857,8 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("tui_set_cursor", lfn_tui_set_cursor);
     PSI_REG("tui_refresh", lfn_tui_refresh);
     PSI_REG("tui_suspend", lfn_tui_suspend);
+    PSI_REG("tui_write", lfn_tui_write);
+    PSI_REG("tui_set_alt_screen_active", lfn_tui_set_alt_screen_active);
     PSI_REG("tui_set_tick_handler", lfn_tui_set_tick_handler);
     PSI_REG("tui_set_tool_progress_handler", lfn_tui_set_tool_progress_handler);
 
@@ -4323,6 +4353,10 @@ int psi_vm_run_lua_mode(
     if (options->thinking_level != NULL) {
         lua_pushstring(vm->L, options->thinking_level);
         lua_setfield(vm->L, -2, "thinking_level");
+    }
+    if (options->layout_mode != NULL) {
+        lua_pushstring(vm->L, options->layout_mode);
+        lua_setfield(vm->L, -2, "layout_mode");
     }
     lua_pushinteger(vm->L, (lua_Integer)options->max_tokens);
     lua_setfield(vm->L, -2, "max_tokens");

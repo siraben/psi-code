@@ -13,7 +13,7 @@
 #endif
 
 enum {
-    PSI_CLI_ARGTABLE_MAX = 16
+    PSI_CLI_ARGTABLE_MAX = 18
 };
 
 struct psi_cli_argtable {
@@ -32,6 +32,7 @@ struct psi_cli_argtable {
     struct arg_int *compact;
     struct arg_str *session;
     struct arg_lit *resume;
+    struct arg_lit *chat;
     struct arg_end *end;
     void *table[PSI_CLI_ARGTABLE_MAX];
     size_t table_count;
@@ -77,6 +78,8 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
         NULL, "compact", "N", "compact the current session, keeping the most recent N messages");
     args->session = arg_str0(NULL, "session", "FILE", "load and save a JSONL session file");
     args->resume = arg_lit0("r", "resume", "resume a session for the current directory");
+    args->chat = arg_lit0(
+        NULL, "chat", "use the chat-style TUI (transcript flows into terminal scrollback)");
     args->end = arg_end(20);
 
     status = psi_cli_argtable_add(args, args->help);
@@ -94,6 +97,7 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
     status |= psi_cli_argtable_add(args, args->compact);
     status |= psi_cli_argtable_add(args, args->session);
     status |= psi_cli_argtable_add(args, args->resume);
+    status |= psi_cli_argtable_add(args, args->chat);
     status |= psi_cli_argtable_add(args, args->end);
 
     if (status != PSI_STATUS_OK) {
@@ -164,6 +168,7 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     options->session_file = NULL;
     options->model = NULL;
     options->thinking_level = NULL;
+    options->layout_mode = NULL;
     options->max_tokens = 16384l;
     options->keep_recent = 12l;
     options->resume = 0;
@@ -231,6 +236,9 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     }
     if (args.resume->count > 0) {
         options->resume = 1;
+    }
+    if (args.chat->count > 0) {
+        options->layout_mode = "chat";
     }
     if (args.model->count > 0) {
         options->model = args.model->sval[0];
