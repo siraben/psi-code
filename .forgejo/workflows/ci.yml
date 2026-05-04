@@ -6,6 +6,10 @@ on:
       - "**"
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   NIX_CONFIG: |
     experimental-features = nix-command flakes
@@ -14,6 +18,16 @@ env:
   TERM: xterm-256color
   FORGEJO_CI_URL: http://127.0.0.1:3010
   FORGEJO_CI_REPOSITORY: siraben/psi-coding-agent
+  # actions/checkout is a JS action and the runner image (nixos/nix:latest)
+  # has no Node, so we hand-roll the fetch. The repo isn't on disk yet, so a
+  # composite action can't help here either: its action.yml lives in the repo.
+  FETCH_SCRIPT: |
+    token="${FORGEJO_TOKEN:-$GITHUB_TOKEN}"
+    auth_header="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
+    git init .
+    git remote add origin "${FORGEJO_CI_URL%/}/${FORGEJO_CI_REPOSITORY}"
+    GIT_TERMINAL_PROMPT=0 git -c "http.extraHeader=Authorization: Basic $auth_header" fetch --quiet --depth=1 origin "$GITHUB_SHA"
+    git checkout --detach FETCH_HEAD
 
 jobs:
   format:
@@ -21,91 +35,53 @@ jobs:
     runs-on: docker
     steps:
       - name: Checkout
-        run: |
-          token="${FORGEJO_TOKEN:-$GITHUB_TOKEN}"
-          auth_header="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
-          git init .
-          git remote add origin "${FORGEJO_CI_URL%/}/${FORGEJO_CI_REPOSITORY}"
-          GIT_TERMINAL_PROMPT=0 git -c "http.extraHeader=Authorization: Basic $auth_header" fetch --quiet --depth=1 origin "$GITHUB_SHA"
-          git checkout --detach FETCH_HEAD
-
-      - name: Check C formatting
-        run: |
-          export HOME="$PWD/.home"
-          export XDG_CACHE_HOME="$PWD/.cache"
-          mkdir -p "$HOME" "$XDG_CACHE_HOME"
-          nix develop --command make check-format-c
+        run: eval "$FETCH_SCRIPT"
+      - uses: ./.forgejo/actions/setup
+      - run: nix develop --command make check-format-c
 
   style:
     name: Style and static analysis
     runs-on: docker
     steps:
       - name: Checkout
-        run: |
-          token="${FORGEJO_TOKEN:-$GITHUB_TOKEN}"
-          auth_header="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
-          git init .
-          git remote add origin "${FORGEJO_CI_URL%/}/${FORGEJO_CI_REPOSITORY}"
-          GIT_TERMINAL_PROMPT=0 git -c "http.extraHeader=Authorization: Basic $auth_header" fetch --quiet --depth=1 origin "$GITHUB_SHA"
-          git checkout --detach FETCH_HEAD
-
-      - name: Run linters
-        run: |
-          export HOME="$PWD/.home"
-          export XDG_CACHE_HOME="$PWD/.cache"
-          export CI_BUILD_DIR="/tmp/psi-ci-${GITHUB_RUN_ID:-local}-${GITHUB_JOB:-style}-${GITHUB_RUN_ATTEMPT:-1}"
-          mkdir -p "$HOME" "$XDG_CACHE_HOME"
-          rm -rf build "$CI_BUILD_DIR"
-          mkdir -p "$CI_BUILD_DIR"
-          ln -s "$CI_BUILD_DIR" build
-          nix develop --command make BUILD_DIR="$CI_BUILD_DIR" lint
+        run: eval "$FETCH_SCRIPT"
+      - uses: ./.forgejo/actions/setup
+        with:
+          build-dir-suffix: ${{ github.job }}
+      - run: nix develop --command make BUILD_DIR="$CI_BUILD_DIR" lint
 
   infer:
     name: Infer static analysis
     runs-on: docker
+    needs: [format, style]
     steps:
       - name: Checkout
-        run: |
-          token="${FORGEJO_TOKEN:-$GITHUB_TOKEN}"
-          auth_header="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
-          git init .
-          git remote add origin "${FORGEJO_CI_URL%/}/${FORGEJO_CI_REPOSITORY}"
-          GIT_TERMINAL_PROMPT=0 git -c "http.extraHeader=Authorization: Basic $auth_header" fetch --quiet --depth=1 origin "$GITHUB_SHA"
-          git checkout --detach FETCH_HEAD
-
+        run: eval "$FETCH_SCRIPT"
+      - uses: ./.forgejo/actions/setup
       - name: Run Infer
         run: |
-          export HOME="$PWD/.home"
-          export XDG_CACHE_HOME="$PWD/.cache"
-          export INFER_BUILD_DIR="/tmp/psi-ci-${GITHUB_RUN_ID:-local}-${GITHUB_JOB:-infer}-${GITHUB_RUN_ATTEMPT:-1}-build"
-          export INFER_RESULTS_DIR="/tmp/psi-ci-${GITHUB_RUN_ID:-local}-${GITHUB_JOB:-infer}-${GITHUB_RUN_ATTEMPT:-1}-infer-out"
-          mkdir -p "$HOME" "$XDG_CACHE_HOME"
+          tag="/tmp/psi-ci-${GITHUB_RUN_ID}-${GITHUB_JOB}-${GITHUB_RUN_ATTEMPT}"
+          export INFER_BUILD_DIR="${tag}-build"
+          export INFER_RESULTS_DIR="${tag}-infer-out"
           nix run .#infer
 
   scan-build:
     name: Clang static analyzer
     runs-on: docker
+    needs: [format, style]
     steps:
       - name: Checkout
-        run: |
-          token="${FORGEJO_TOKEN:-$GITHUB_TOKEN}"
-          auth_header="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
-          git init .
-          git remote add origin "${FORGEJO_CI_URL%/}/${FORGEJO_CI_REPOSITORY}"
-          GIT_TERMINAL_PROMPT=0 git -c "http.extraHeader=Authorization: Basic $auth_header" fetch --quiet --depth=1 origin "$GITHUB_SHA"
-          git checkout --detach FETCH_HEAD
-
+        run: eval "$FETCH_SCRIPT"
+      - uses: ./.forgejo/actions/setup
       - name: Run scan-build
         run: |
-          export HOME="$PWD/.home"
-          export XDG_CACHE_HOME="$PWD/.cache"
-          export SCAN_BUILD_BUILD_DIR="/tmp/psi-ci-${GITHUB_RUN_ID:-local}-${GITHUB_JOB:-scan-build}-${GITHUB_RUN_ATTEMPT:-1}-build"
-          mkdir -p "$HOME" "$XDG_CACHE_HOME"
+          export SCAN_BUILD_BUILD_DIR="/tmp/psi-ci-${GITHUB_RUN_ID}-${GITHUB_JOB}-${GITHUB_RUN_ATTEMPT}-build"
           nix run .#scan-build
 
   feature-matrix:
     name: Build and smoke (${{ matrix.name }})
     runs-on: docker
+    needs: [format, style]
     strategy:
       fail-fast: false
       matrix:
@@ -130,67 +106,28 @@ jobs:
             smoke_excludes: "events/tui,render/tui,tui/,mode/tui,commands/rainbow,markdown/inline_code_no_backticks,theme/compound_ansi_mapping,theme/composite_ansi_remap"
     steps:
       - name: Checkout
-        run: |
-          token="${FORGEJO_TOKEN:-$GITHUB_TOKEN}"
-          auth_header="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
-          git init .
-          git remote add origin "${FORGEJO_CI_URL%/}/${FORGEJO_CI_REPOSITORY}"
-          GIT_TERMINAL_PROMPT=0 git -c "http.extraHeader=Authorization: Basic $auth_header" fetch --quiet --depth=1 origin "$GITHUB_SHA"
-          git checkout --detach FETCH_HEAD
-
+        run: eval "$FETCH_SCRIPT"
+      - uses: ./.forgejo/actions/setup
+        with:
+          build-dir-suffix: feature-${{ matrix.name }}
       - name: Build and run smoke tests
         env:
-          MATRIX_NAME: ${{ matrix.name }}
           MAKE_FLAGS: ${{ matrix.make_flags }}
           SMOKE_EXCLUDES: ${{ matrix.smoke_excludes }}
-        run: |
-          export HOME="$PWD/.home"
-          export XDG_CACHE_HOME="$PWD/.cache"
-          export CI_BUILD_DIR="/tmp/psi-ci-${GITHUB_RUN_ID:-local}-${GITHUB_JOB:-feature}-${GITHUB_RUN_ATTEMPT:-1}-${MATRIX_NAME:-default}"
-          mkdir -p "$HOME" "$XDG_CACHE_HOME"
-          rm -rf build "$CI_BUILD_DIR"
-          mkdir -p "$CI_BUILD_DIR"
-          ln -s "$CI_BUILD_DIR" build
-          nix develop --command bash -euxo pipefail -c '
-            make_args=()
-            if [ -n "$MAKE_FLAGS" ]; then
-              read -r -a make_args <<< "$MAKE_FLAGS"
-            fi
-
-            smoke_args=(--psi build/psi --no-live)
-            if [ -n "$SMOKE_EXCLUDES" ]; then
-              IFS=, read -r -a excludes <<< "$SMOKE_EXCLUDES"
-              for exclude in "${excludes[@]}"; do
-                smoke_args+=(--exclude "$exclude")
-              done
-            fi
-
-            make BUILD_DIR="$CI_BUILD_DIR" "${make_args[@]}"
-            python3 tests/smoke.py "${smoke_args[@]}"
-          '
+        run: bash scripts/ci/build-and-smoke.sh
 
   valgrind:
     name: Valgrind
     runs-on: docker
+    needs: [format, style]
     steps:
       - name: Checkout
-        run: |
-          token="${FORGEJO_TOKEN:-$GITHUB_TOKEN}"
-          auth_header="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
-          git init .
-          git remote add origin "${FORGEJO_CI_URL%/}/${FORGEJO_CI_REPOSITORY}"
-          GIT_TERMINAL_PROMPT=0 git -c "http.extraHeader=Authorization: Basic $auth_header" fetch --quiet --depth=1 origin "$GITHUB_SHA"
-          git checkout --detach FETCH_HEAD
-
+        run: eval "$FETCH_SCRIPT"
+      - uses: ./.forgejo/actions/setup
+        with:
+          build-dir-suffix: ${{ github.job }}
       - name: Run memcheck harness
         run: |
-          export HOME="$PWD/.home"
-          export XDG_CACHE_HOME="$PWD/.cache"
-          export CI_BUILD_DIR="/tmp/psi-ci-${GITHUB_RUN_ID:-local}-${GITHUB_JOB:-valgrind}-${GITHUB_RUN_ATTEMPT:-1}"
-          mkdir -p "$HOME" "$XDG_CACHE_HOME"
-          rm -rf build "$CI_BUILD_DIR"
-          mkdir -p "$CI_BUILD_DIR"
-          ln -s "$CI_BUILD_DIR" build
           nix develop --command bash -euxo pipefail -c '
             make BUILD_DIR="$CI_BUILD_DIR"
             bash tests/valgrind.sh
