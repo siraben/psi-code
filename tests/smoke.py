@@ -2121,6 +2121,31 @@ def t_tui_chat_mode_streams_to_scrollback(psi: Psi):
     )
 
 
+@test("tui/chat_mode_uses_crlf_line_separators")
+def t_tui_chat_mode_uses_crlf_line_separators(psi: Psi):
+    # Raw mode disables OPOST, so a bare "\n" is just LF — cursor moves
+    # down but stays at the previous column. Without "\r" before each
+    # newline, every committed and live-region line gets emitted starting
+    # where the previous line ended, producing the staircase artifact
+    # users saw before this fix.
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local snapshots = rt._debug_chat_redraw_sequence({\n'
+        + '  {kind="user", text="hello"},\n'
+        + '  {kind="assistant", text="Hello! How can I help you today?"},\n'
+        + '})\n'
+        + 'local s = snapshots[2]\n'
+        + 'local _, bare_lf = s.output:gsub("[^\\r]\\n", "")\n'
+        + 'local _, crlf = s.output:gsub("\\r\\n", "")\n'
+        + 'return tostring(bare_lf) .. "|" .. tostring(crlf > 0)'
+    )
+    assert_equals(
+        out,
+        "0|true",
+        "every newline in chat-mode output is preceded by a carriage return",
+    )
+
+
 @test("tui/chat_mode_uses_tui_write_not_render_frame")
 def t_tui_chat_mode_uses_tui_write_not_render_frame(psi: Psi):
     # Chat mode should bypass psi.tui_render_frame entirely so the output

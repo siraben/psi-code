@@ -1590,6 +1590,10 @@ function chat.redraw(state)
   if state.chat_committed_entry_count > #state.entries then
     state.chat_committed_entry_count = #state.entries
   end
+  -- Raw mode disables OPOST so "\n" is bare LF: cursor moves down but
+  -- stays at the current column. Use "\r\n" everywhere to anchor each
+  -- new line at column 1, otherwise the next line gets emitted starting
+  -- where the previous one ended.
   local committed_target = math.max(0, #state.entries - 1)
   while state.chat_committed_entry_count < committed_target do
     local idx = state.chat_committed_entry_count + 1
@@ -1597,15 +1601,15 @@ function chat.redraw(state)
     local prev = state.entries[idx - 1]
     local next_entry = state.entries[idx + 1]
     if idx > 1 and not panel_join(prev, entry) then
-      out[#out + 1] = "\n"
+      out[#out + 1] = "\r\n"
     end
     for _, line in ipairs(entry_render_lines(state, entry)) do
       out[#out + 1] = style_line(line)
-      out[#out + 1] = "\27[0m\n"
+      out[#out + 1] = "\27[0m\r\n"
     end
     if entry.kind == "tool_result" and (not next_entry or next_entry.kind ~= "tool_result") then
       out[#out + 1] = ansi.yellow("╰─")
-      out[#out + 1] = "\27[0m\n"
+      out[#out + 1] = "\27[0m\r\n"
     end
     state.chat_committed_entry_count = idx
   end
@@ -1701,7 +1705,7 @@ function chat.redraw(state)
     out[#out + 1] = line
     out[#out + 1] = "\27[0m"
     if i < #live_lines then
-      out[#out + 1] = "\n"
+      out[#out + 1] = "\r\n"
     end
   end
 
