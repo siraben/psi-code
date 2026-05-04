@@ -25,6 +25,7 @@
 local records = require("psi.records")
 local prelude = require("psi.prelude")
 local path_util = require("psi.path_utils")
+local utf8_text = require("psi.utf8_text")
 
 local M = {}
 
@@ -609,7 +610,7 @@ local function add_preview_line(preview, role, text)
   end
   local line = preview_label(role) .. ": " .. text:gsub("%s+", " ")
   if #line > 160 then
-    line = line:sub(1, 157) .. "..."
+    line = utf8_text.safe_head(line, 157) .. "..."
   end
   preview[#preview + 1] = line
 end
@@ -759,7 +760,7 @@ function M.describe_session(info)
   local label = info.name and info.name ~= "" and info.name or info.first_message or "(no messages)"
   label = tostring(label):gsub("%s+", " ")
   if #label > 72 then
-    label = label:sub(1, 69) .. "..."
+    label = utf8_text.safe_head(label, 69) .. "..."
   end
   return string.format(
     "%s  %s  msg:%d",
@@ -1341,7 +1342,7 @@ local function branch_entry_label(entry)
   end
   text = tostring(text or ""):gsub("%s+", " ")
   if #text > 70 then
-    text = text:sub(1, 67) .. "..."
+    text = utf8_text.safe_head(text, 67) .. "..."
   end
   return string.format("%s %s", role, text)
 end

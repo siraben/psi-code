@@ -137,18 +137,44 @@ local function decoder(text)
             err("bad unicode escape")
           end
           local cp = tonumber(hex, 16)
-          if cp < 128 then
+          i = i + 6
+          -- High surrogate: combine with the following low surrogate to
+          -- recover an astral codepoint (emoji / supplementary planes).
+          -- A high surrogate without a paired low surrogate is invalid
+          -- JSON; we surface that by erroring rather than silently
+          -- emitting CESU-8.
+          if cp >= 0xD800 and cp <= 0xDBFF then
+            if text:sub(i, i + 1) ~= "\\u" then
+              err("unpaired high surrogate")
+            end
+            local hex2 = text:sub(i + 2, i + 5)
+            if not hex2:match("^%x%x%x%x$") then
+              err("bad unicode escape after high surrogate")
+            end
+            local low = tonumber(hex2, 16)
+            if low < 0xDC00 or low > 0xDFFF then
+              err("expected low surrogate")
+            end
+            cp = 0x10000 + (cp - 0xD800) * 0x400 + (low - 0xDC00)
+            i = i + 6
+          elseif cp >= 0xDC00 and cp <= 0xDFFF then
+            err("unexpected low surrogate")
+          end
+          if cp < 0x80 then
             out[#out + 1] = string.char(cp)
-          elseif cp < 2048 then
-            out[#out + 1] = string.char(192 + math.floor(cp / 64), 128 + (cp % 64))
+          elseif cp < 0x800 then
+            out[#out + 1] = string.char(0xC0 + (cp >> 6), 0x80 + (cp & 0x3F))
+          elseif cp < 0x10000 then
+            out[#out + 1] =
+              string.char(0xE0 + (cp >> 12), 0x80 + ((cp >> 6) & 0x3F), 0x80 + (cp & 0x3F))
           else
             out[#out + 1] = string.char(
-              224 + math.floor(cp / 4096),
-              128 + (math.floor(cp / 64) % 64),
-              128 + (cp % 64)
+              0xF0 + (cp >> 18),
+              0x80 + ((cp >> 12) & 0x3F),
+              0x80 + ((cp >> 6) & 0x3F),
+              0x80 + (cp & 0x3F)
             )
           end
-          i = i + 6
         else
           err("bad escape")
         end

@@ -10,6 +10,7 @@ local session = require("psi.session_manager")
 local settings = require("psi.settings_manager")
 local tui = require("psi.tui_status")
 local tui_layout = require("psi.tui_layout")
+local utf8_text = require("psi.utf8_text")
 
 local M = {}
 
@@ -41,8 +42,8 @@ local CHAR_OSC = "]"
 local CHAR_PM = "^"
 local CHAR_APC = "_"
 local CHAR_ST = "\\"
-local UTF8_CONTINUATION_MASK = 0xC0
-local UTF8_CONTINUATION_TAG = 0x80
+local prev_cp = utf8_text.prev_cp
+local next_cp = utf8_text.next_cp
 
 local SETTING_PROMPT_MAX_ROWS = "tui.prompt.max_rows"
 local BUSY_ANIMATION_INTERVAL_MS = 600
@@ -168,25 +169,8 @@ local function sanitize_terminal_text(text, preserve_newlines)
 end
 
 local function display_width(text)
-  local width = 0
-  local i = 1
   text = strip_ansi(tostring(text or ""))
-  while i <= #text do
-    local ch = text:byte(i)
-    if ch == BYTE_ESC and text:sub(i + 1, i + 1) == "[" then
-      local j = i + 2
-      while j <= #text and text:sub(j, j) ~= "m" do
-        j = j + 1
-      end
-      i = j < #text and (j + 1) or (#text + 1)
-    else
-      if (ch & UTF8_CONTINUATION_MASK) ~= UTF8_CONTINUATION_TAG then
-        width = width + 1
-      end
-      i = i + 1
-    end
-  end
-  return width
+  return utf8_text.string_width(text)
 end
 
 local function limit_text(text)
@@ -301,6 +285,41 @@ local function input_wrap_width(width, prefix)
   return available
 end
 
+-- Walk forward from `start` (exclusive byte index) up to `line_end`,
+-- consuming whole codepoints until their combined display width would
+-- exceed `width_budget`. Returns the byte length of the chunk taken.
+-- Always advances by at least one codepoint when the budget is at
+-- least one column, so a single wide character on a 1-column line
+-- still progresses (we'd rather overflow by 1 than loop forever).
+local function take_columns(input, start, line_end, width_budget)
+  if width_budget < 1 then
+    width_budget = 1
+  end
+  local pos = start
+  local used = 0
+  while pos < line_end do
+    local nxt = next_cp(input, pos)
+    if nxt <= pos or nxt > line_end then
+      nxt = math.min(line_end, pos + 1)
+    end
+    local cp = utf8_text.codepoint_at(input, pos)
+    local w = utf8_text.cell_width(cp)
+    if w == 0 then
+      w = 0
+    end
+    if used + w > width_budget then
+      if pos == start then
+        -- single wide char at the start: take it anyway so we make progress.
+        pos = nxt
+      end
+      break
+    end
+    used = used + w
+    pos = nxt
+  end
+  return pos - start
+end
+
 local function build_input_lines(state)
   local input = state.input or EMPTY
   local input_length = #input
@@ -328,7 +347,11 @@ local function build_input_lines(state)
       while chunk_start < line_end do
         local prefix = (#lines == 0) and state.input_layout.prefix_first
           or state.input_layout.prefix_rest
-        local take = math.min(input_wrap_width(state.width, prefix), line_end - chunk_start)
+        local take =
+          take_columns(input, chunk_start, line_end, input_wrap_width(state.width, prefix))
+        if take <= 0 then
+          take = math.min(line_end - chunk_start, 1)
+        end
         lines[#lines + 1] = { start = chunk_start, len = take }
         if
           not cursor_found
@@ -387,17 +410,47 @@ local function is_fence_line(text)
   return text:match("^%s*```") ~= nil or text:match("^%s*~~~") ~= nil
 end
 
+-- Find a byte index (1-based, inclusive) at which to wrap `text` so the
+-- prefix renders in at most `width` display columns. Prefers an ASCII
+-- whitespace boundary; falls back to the largest codepoint-aligned cut
+-- that still fits the budget.
 local function find_break(text, width)
-  if #text <= width then
+  if width < 1 then
+    width = 1
+  end
+  if utf8_text.string_width(text) <= width then
     return #text
   end
-  for i = width, 1, -1 do
-    local b = text:byte(i)
-    if b ~= nil and is_space_byte(b) then
-      return i
+  -- Walk codepoints, recording the last position at or below the budget
+  -- and the last position at or below the budget that ended on a space.
+  local pos = 0
+  local used = 0
+  local last_fit = 0
+  local last_space_fit = 0
+  while pos < #text do
+    local nxt = next_cp(text, pos)
+    if nxt <= pos then
+      nxt = pos + 1
+    end
+    local cp = utf8_text.codepoint_at(text, pos)
+    local w = utf8_text.cell_width(cp)
+    if used + w > width then
+      break
+    end
+    used = used + w
+    pos = nxt
+    last_fit = pos
+    if cp ~= nil and is_space_byte(cp) then
+      last_space_fit = pos
     end
   end
-  return width
+  if last_space_fit > 0 then
+    return last_space_fit
+  end
+  if last_fit > 0 then
+    return last_fit
+  end
+  return math.min(#text, 1)
 end
 
 local clear_selection
@@ -1722,8 +1775,9 @@ function render_input_text_with_cursor(state, line, draw_cursor)
   local cell
   local after
   if offset < #text then
-    cell = sanitize_terminal_text(text:sub(offset + 1, offset + 1), false)
-    after = sanitize_terminal_text(text:sub(offset + 2), false)
+    local cell_end = next_cp(text, offset)
+    cell = sanitize_terminal_text(text:sub(offset + 1, cell_end), false)
+    after = sanitize_terminal_text(text:sub(cell_end + 1), false)
   else
     cell = " "
     after = ""
@@ -1745,8 +1799,9 @@ local function delete_backward(state)
     return
   end
   clear_busy_input_error(state)
-  state.input = state.input:sub(1, state.cursor - 1) .. state.input:sub(state.cursor + 1)
-  state.cursor = state.cursor - 1
+  local prev = prev_cp(state.input, state.cursor)
+  state.input = state.input:sub(1, prev) .. state.input:sub(state.cursor + 1)
+  state.cursor = prev
   state.dirty = true
 end
 
@@ -1756,7 +1811,8 @@ local function delete_forward(state)
     return
   end
   clear_busy_input_error(state)
-  state.input = state.input:sub(1, state.cursor) .. state.input:sub(state.cursor + 2)
+  local nxt = next_cp(state.input, state.cursor)
+  state.input = state.input:sub(1, state.cursor) .. state.input:sub(nxt + 1)
   state.dirty = true
 end
 
@@ -2610,14 +2666,14 @@ local function apply_action(state, action, arg)
   end
   if action == "move-left" then
     if state.cursor > 0 then
-      state.cursor = state.cursor - 1
+      state.cursor = prev_cp(state.input, state.cursor)
     end
     state.dirty = true
     return
   end
   if action == "move-right" then
     if state.cursor < #state.input then
-      state.cursor = state.cursor + 1
+      state.cursor = next_cp(state.input, state.cursor)
     end
     state.dirty = true
     return
@@ -2732,7 +2788,7 @@ local function apply_action(state, action, arg)
   end
   if action == "vim-append" then
     if state.cursor < #state.input then
-      state.cursor = state.cursor + 1
+      state.cursor = next_cp(state.input, state.cursor)
     end
     set_insert_mode(state)
     return

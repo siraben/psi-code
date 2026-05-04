@@ -2193,6 +2193,94 @@ def t_tui_input_cursor_prefix_width(psi: Psi):
     assert_equals(out, "4", "cursor column uses display width for unicode prompt prefix")
 
 
+@test("utf8/cell_width_basic")
+def t_utf8_cell_width(psi: Psi):
+    out = psi.eval(
+        "return string.format('%d|%d|%d|%d|%d',\n"
+        "  psi.cell_width(0x41),       -- 'A' -> 1\n"
+        "  psi.cell_width(0x4E2D),     -- '中' -> 2\n"
+        "  psi.cell_width(0x1F600),    -- emoji -> 2\n"
+        "  psi.cell_width(0x0301),     -- combining acute -> 0\n"
+        "  psi.cell_width(0x200D))     -- zero-width joiner -> 0"
+    )
+    assert_equals(out, "1|2|2|0|0", "cell_width covers ascii / wide / emoji / combining / format")
+
+
+@test("utf8/string_width_mixed")
+def t_utf8_string_width_mixed(psi: Psi):
+    out = psi.eval(
+        'local u = require("psi.utf8_text")\n'
+        + 'return tostring(u.string_width("a中é\\xF0\\x9F\\x98\\x80"))'
+    )
+    # ascii(1) + cjk(2) + latin-with-accent(1) + emoji(2) = 6
+    assert_equals(out, "6", "string_width sums per-codepoint cell widths")
+
+
+@test("utf8/cursor_step_multibyte")
+def t_utf8_cursor_step(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + '-- "café" = 5 bytes (a, b, c, c3, a9). After two move-left from\n'
+        + '-- end-of-buffer the cursor should land on the codepoint start\n'
+        + '-- of "é" (byte index 3), not in the middle of the sequence.\n'
+        + 'local s = rt._debug_edit_keys("café", 5,\n'
+        + '  {{key="left"}, {key="left"}}, false)\n'
+        + 'return tostring(s.cursor)'
+    )
+    assert_equals(out, "2", "move-left steps whole codepoints")
+
+
+@test("utf8/delete_backward_multibyte")
+def t_utf8_delete_backward(psi: Psi):
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + '-- backspace at end of "café" should remove "é" (2 bytes), not\n'
+        + '-- leave a dangling 0xC3.\n'
+        + 'local s = rt._debug_edit_keys("café", 5,\n'
+        + '  {{key="backspace"}}, false)\n'
+        + 'return s.input .. "|" .. tostring(s.cursor)'
+    )
+    assert_equals(out, "caf|3", "backspace removes a whole multi-byte codepoint")
+
+
+@test("utf8/wrap_wide_chars")
+def t_utf8_wrap_wide_chars(psi: Psi):
+    out = psi.eval(
+        'local d = require("psi.tui_runtime")._debug_input_lines(\n'
+        + '  string.rep("中", 5), 15, 8, "> ", "| ")\n'
+        + 'return tostring(#d.lines) .. "|" .. tostring(#d.lines[1])'
+    )
+    # available = 8 - 1 (frame) - display_width("> ") = 5 columns. Each
+    # 中 is 2 cols and 3 bytes; 2 fit per line. Line 1 = "> " + 2 wide
+    # chars = 2 + 6 = 8 bytes.
+    assert_equals(out, "3|8", "wrap budget is by display columns, not bytes")
+
+
+@test("utf8/json_surrogate_pair")
+def t_utf8_json_surrogate_pair(psi: Psi):
+    out = psi.eval(
+        'local j = require("psi.json_pure")\n'
+        + 'local s = j.decode("\\"\\\\uD83D\\\\uDE00\\"")\n'
+        + 'return string.format("%d:%d:%d:%d:%d",\n'
+        + '  #s, string.byte(s,1), string.byte(s,2), string.byte(s,3), string.byte(s,4))'
+    )
+    assert_equals(out, "4:240:159:152:128",
+                  "json_pure decodes surrogate pairs into 4-byte UTF-8")
+
+
+@test("utf8/safe_head_tail")
+def t_utf8_safe_truncation(psi: Psi):
+    out = psi.eval(
+        'local u = require("psi.utf8_text")\n'
+        + '-- "中A中" = E4 B8 AD 41 E4 B8 AD (7 bytes). Cap at 5 bytes:\n'
+        + '-- safe_head must not leave a dangling lead byte.\n'
+        + 'local h = u.safe_head("中A中", 5)\n'
+        + 'local t = u.safe_tail("中A中", 5)\n'
+        + 'return string.format("%s|%d|%s|%d", h, #h, t, #t)'
+    )
+    assert_equals(out, "中A|4|A中|4", "safe_head/tail snap to codepoint boundaries")
+
+
 @test("tui/busy_input_clears_transient_error")
 def t_tui_busy_input_clears_transient_error(psi: Psi):
     out = psi.eval(

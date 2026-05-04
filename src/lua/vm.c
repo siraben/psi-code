@@ -39,6 +39,7 @@
 #include "psi/runtime.h"
 #include "psi/session.h"
 #include "psi/vm.h"
+#include "psi/wcwidth.h"
 
 #ifndef PSI_ENABLE_TUI
 #define PSI_ENABLE_TUI 0
@@ -781,6 +782,43 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
     return NULL;
 }
 
+/*
+ * Assemble a UTF-8 code point starting from `lead`. Reads 1-3 continuation
+ * bytes from stdin and writes the full sequence into `out` (NUL-terminated).
+ * Returns 1 on success, 0 if the lead byte is invalid UTF-8 or any
+ * continuation byte fails to arrive / has the wrong shape (10xxxxxx).
+ *
+ * `out` must hold at least 5 bytes (4-byte sequence + NUL).
+ */
+static int psi_vm_tui_read_utf8_tail(unsigned int lead, char *out, size_t out_size) {
+    size_t expected;
+    size_t i;
+
+    if (out == NULL || out_size < 5u) {
+        return 0;
+    }
+    if (lead < 0xC2u || lead > 0xF4u) {
+        return 0;
+    }
+    if (lead < 0xE0u) {
+        expected = 1u;
+    } else if (lead < 0xF0u) {
+        expected = 2u;
+    } else {
+        expected = 3u;
+    }
+    out[0] = (char)lead;
+    for (i = 1u; i <= expected; i++) {
+        int ch = psi_vm_tui_read_byte(25);
+        if (ch < 0 || (ch & 0xC0) != 0x80) {
+            return 0;
+        }
+        out[i] = (char)ch;
+    }
+    out[expected + 1u] = '\0';
+    return 1;
+}
+
 static int psi_vm_tui_normalize_key(
     int ch, int restore_timeout_ms, struct psi_vm_tui_key_event *event) {
     char sequence[64];
@@ -820,6 +858,14 @@ static int psi_vm_tui_normalize_key(
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), ctrl_name);
         return 1;
     }
+    if (ch >= 0x80) {
+        /* Multi-byte UTF-8: assemble the full sequence into event->text. */
+        if (!psi_vm_tui_read_utf8_tail((unsigned int)ch, event->text, sizeof(event->text))) {
+            return 0;
+        }
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "text");
+        return 1;
+    }
     if (isprint(ch)) {
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "text");
         event->text[0] = (char)ch;
@@ -844,6 +890,18 @@ static int lfn_log(lua_State *L) {
     const char *msg = luaL_checkstring(L, 1);
     fprintf(stderr, "[psi] %s\n", msg);
     return 0;
+}
+
+/* psi.cell_width(codepoint): terminal cell count for a Unicode codepoint.
+ * Returns 0/1/2 (control chars clamp to 0). Backed by mk_wcwidth. */
+static int lfn_cell_width(lua_State *L) {
+    lua_Integer cp = luaL_checkinteger(L, 1);
+    int width = (cp < 0 || cp > 0x10FFFF) ? 1 : psi_wcwidth((int)cp);
+    if (width < 0) {
+        width = 0;
+    }
+    lua_pushinteger(L, (lua_Integer)width);
+    return 1;
 }
 
 static int lfn_session_message_count(lua_State *L) {
@@ -2622,6 +2680,7 @@ static void psi_vm_register_psi(lua_State *L) {
 
     PSI_REG("version", lfn_version);
     PSI_REG("log", lfn_log);
+    PSI_REG("cell_width", lfn_cell_width);
     PSI_REG("session_message_count", lfn_session_message_count);
     PSI_REG("read_file", lfn_read_file);
     PSI_REG("read_file_slice", lfn_read_file_slice);

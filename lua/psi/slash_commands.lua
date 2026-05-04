@@ -17,6 +17,7 @@ local keybindings = require("psi.keybindings")
 local session = require("psi.session_manager")
 local thinking = require("psi.thinking")
 local clipboard = require("psi.clipboard")
+local utf8_text = require("psi.utf8_text")
 
 local M = {}
 
@@ -438,7 +439,7 @@ local function queue_summary()
   for _, item in ipairs(items) do
     local text = (item.text or ""):gsub("%s+", " ")
     if #text > 72 then
-      text = text:sub(1, 69) .. "..."
+      text = utf8_text.safe_head(text, 69) .. "..."
     end
     lines[#lines + 1] = string.format("  %d. [%s] %s", item.index, item.kind, text)
   end

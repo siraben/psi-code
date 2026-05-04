@@ -14,6 +14,8 @@
 --
 -- truncate_line is for clipping individual long match lines (grep).
 
+local utf8_text = require("psi.utf8_text")
+
 local M = {}
 
 M.DEFAULT_MAX_LINES = 2000
@@ -56,23 +58,11 @@ function M.format_size(bytes)
   end
 end
 
--- Walk back to a UTF-8 character boundary so a tail slice doesn't
--- start in the middle of a multi-byte sequence. Bytes 0x80–0xBF are
--- continuation bytes; advance until we land on a leading byte.
-local function utf8_safe_tail(text, max_bytes)
-  if #text <= max_bytes then
-    return text
-  end
-  local start = #text - max_bytes + 1
-  while start <= #text do
-    local b = text:byte(start)
-    if b < 0x80 or b >= 0xC0 then
-      break
-    end
-    start = start + 1
-  end
-  return text:sub(start)
-end
+-- Walk forward/back to UTF-8 boundaries when slicing — so a cut never
+-- starts or ends inside a multi-byte sequence. The actual logic lives
+-- in psi.utf8_text; these are local aliases for readability.
+local utf8_safe_tail = utf8_text.safe_tail
+local utf8_safe_head = utf8_text.safe_head
 
 local function empty_result(content, total_lines, total_bytes, max_lines, max_bytes)
   return {
@@ -224,14 +214,17 @@ function M.truncate_tail(content, options)
   }
 end
 
--- Clip a single line to `max_chars` characters, adding a marker.
+-- Clip a single line to at most `max_chars` bytes, adding a marker if
+-- the cut actually happened. The byte budget is treated as an upper
+-- bound; the actual cut snaps back to the previous codepoint boundary
+-- so we never emit a half-character tail.
 function M.truncate_line(line, max_chars)
   max_chars = max_chars or M.GREP_MAX_LINE_LENGTH
   line = line or ""
   if #line <= max_chars then
     return line, false
   end
-  return line:sub(1, max_chars) .. "... [truncated]", true
+  return utf8_safe_head(line, max_chars) .. "... [truncated]", true
 end
 
 -- ---------------------------------------------------------------------------
@@ -271,7 +264,7 @@ function M.bytes(text, max_bytes, mode)
   if mode == "tail" then
     return utf8_safe_tail(text, max_bytes), true
   end
-  return text:sub(1, max_bytes), true
+  return utf8_safe_head(text, max_bytes), true
 end
 
 function M.notice(meta)
