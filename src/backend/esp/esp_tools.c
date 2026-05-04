@@ -499,7 +499,6 @@ static char *tool_forth_eval(const cJSON *input, char **err) {
     return json_to_string(r);
 }
 
-
 /* ------------------------------------------------------------------ */
 /* http_fetch                                                           */
 /* ------------------------------------------------------------------ */
@@ -715,17 +714,34 @@ static char *tool_wifi_scan(const cJSON *input, char **err) {
             cJSON_AddNumberToObject(o, "rssi", (double)aps[i].rssi);
             cJSON_AddNumberToObject(o, "channel", (double)aps[i].primary);
             snprintf(bssid, sizeof(bssid), "%02x:%02x:%02x:%02x:%02x:%02x", aps[i].bssid[0],
-                aps[i].bssid[1], aps[i].bssid[2], aps[i].bssid[3], aps[i].bssid[4], aps[i].bssid[5]);
+                aps[i].bssid[1], aps[i].bssid[2], aps[i].bssid[3], aps[i].bssid[4],
+                aps[i].bssid[5]);
             cJSON_AddStringToObject(o, "bssid", bssid);
             switch (aps[i].authmode) {
-                case WIFI_AUTH_OPEN: auth_name = "open"; break;
-                case WIFI_AUTH_WEP: auth_name = "wep"; break;
-                case WIFI_AUTH_WPA_PSK: auth_name = "wpa"; break;
-                case WIFI_AUTH_WPA2_PSK: auth_name = "wpa2"; break;
-                case WIFI_AUTH_WPA_WPA2_PSK: auth_name = "wpa/wpa2"; break;
-                case WIFI_AUTH_WPA3_PSK: auth_name = "wpa3"; break;
-                case WIFI_AUTH_WPA2_WPA3_PSK: auth_name = "wpa2/wpa3"; break;
-                default: auth_name = "?"; break;
+            case WIFI_AUTH_OPEN:
+                auth_name = "open";
+                break;
+            case WIFI_AUTH_WEP:
+                auth_name = "wep";
+                break;
+            case WIFI_AUTH_WPA_PSK:
+                auth_name = "wpa";
+                break;
+            case WIFI_AUTH_WPA2_PSK:
+                auth_name = "wpa2";
+                break;
+            case WIFI_AUTH_WPA_WPA2_PSK:
+                auth_name = "wpa/wpa2";
+                break;
+            case WIFI_AUTH_WPA3_PSK:
+                auth_name = "wpa3";
+                break;
+            case WIFI_AUTH_WPA2_WPA3_PSK:
+                auth_name = "wpa2/wpa3";
+                break;
+            default:
+                auth_name = "?";
+                break;
             }
             cJSON_AddStringToObject(o, "auth", auth_name);
             cJSON_AddItemToArray(arr, o);
@@ -834,12 +850,13 @@ const struct psi_esp_tool psi_esp_tool_table[] = {
                        "gpio_mode first). Defaults: count=5 cycles, period_ms=400 "
                        "(half on, half off). count is capped at 200, period_ms "
                        "clamped to [20,5000]. Returns when finished.",
-        .input_schema_json = "{\"type\":\"object\","
-                             "\"properties\":{"
-                             "\"pin\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":48},"
-                             "\"count\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":200},"
-                             "\"period_ms\":{\"type\":\"integer\",\"minimum\":20,\"maximum\":5000}},"
-                             "\"required\":[\"pin\"]}",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{"
+            "\"pin\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":48},"
+            "\"count\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":200},"
+            "\"period_ms\":{\"type\":\"integer\",\"minimum\":20,\"maximum\":5000}},"
+            "\"required\":[\"pin\"]}",
         .handler = tool_gpio_blink,
     },
     {
@@ -933,11 +950,12 @@ const struct psi_esp_tool psi_esp_tool_table[] = {
                        "serial output someone watches with screen/minicom). Useful "
                        "when the agent wants to leave a trace for the operator. "
                        "Level is 'info', 'warn', or 'error'.",
-        .input_schema_json = "{\"type\":\"object\","
-                             "\"properties\":{"
-                             "\"message\":{\"type\":\"string\"},"
-                             "\"level\":{\"type\":\"string\",\"enum\":[\"info\",\"warn\",\"error\"]}},"
-                             "\"required\":[\"message\"]}",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{"
+            "\"message\":{\"type\":\"string\"},"
+            "\"level\":{\"type\":\"string\",\"enum\":[\"info\",\"warn\",\"error\"]}},"
+            "\"required\":[\"message\"]}",
         .handler = tool_uart_log,
     },
     {

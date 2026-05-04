@@ -82,7 +82,7 @@ function M.ensure_default_path()
   end
   M.ensure_id()
   local id = psi.session_id()
-  local caps = (psi.runtime_info().capabilities) or {}
+  local caps = psi.runtime_info().capabilities or {}
   -- Without a host filesystem we still want autosave to work so the
   -- agent can resume sessions inside the process; route to RAMFS.
   if not caps.filesystem and caps.ramfs then

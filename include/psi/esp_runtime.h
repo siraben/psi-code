@@ -41,8 +41,8 @@ struct psi_agent_observer;
  * caller must free). The observer's on_turn_end is fired on success;
  * the caller fires the error frame on its own. */
 int psi_esp_agent_turn(const char *user_text, const char *system_prompt, const char *model,
-    long max_tokens, struct psi_agent_observer *observer, struct psi_abort_signal *abort_signal,
-    char **error_message);
+    long max_tokens, struct psi_agent_observer *observer,
+    const struct psi_abort_signal *abort_signal, char **error_message);
 
 #ifdef __cplusplus
 }

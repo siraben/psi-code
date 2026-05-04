@@ -49,8 +49,7 @@ local function strip_embedded(path)
 end
 
 local function is_embedded_path(path)
-  return type(path) == "string"
-    and (path == "@embedded" or path:sub(1, 10) == "@embedded/")
+  return type(path) == "string" and (path == "@embedded" or path:sub(1, 10) == "@embedded/")
 end
 
 local function embedded_lookup(name)
@@ -328,7 +327,7 @@ end
 -- path instead so spillover (e.g. tool_shell large output) keeps
 -- working. Desktop builds keep host /tmp.
 function psi.tempfile_path(prefix)
-  local caps = (psi.runtime_info().capabilities) or {}
+  local caps = psi.runtime_info().capabilities or {}
   if not caps.filesystem and caps.ramfs then
     return ramfs.tempfile_path(prefix)
   end
@@ -373,7 +372,7 @@ end
 -- using io.open and dofile without knowing about the namespaces, and
 -- a constrained build still rejects host paths everywhere.
 local function install_stdlib_shims()
-  local caps = (psi.runtime_info().capabilities) or {}
+  local caps = psi.runtime_info().capabilities or {}
   local fs_enabled = caps.filesystem == true
 
   local function is_namespaced(p)
@@ -678,7 +677,7 @@ M.install_stdlib_shims = install_stdlib_shims
 -- must be neutralized in Lua. With process capability on, leave them
 -- alone — desktop builds use os.execute in places (extension scripts).
 local function install_process_shims()
-  local caps = (psi.runtime_info().capabilities) or {}
+  local caps = psi.runtime_info().capabilities or {}
   if caps.process then
     return
   end

@@ -10,7 +10,7 @@ local M = {}
 -- would always fail. Desktop reports every capability true and
 -- registers everything; an ESP32 build with process=false drops
 -- bash/grep/find automatically.
-local caps = (psi.runtime_info().capabilities) or {}
+local caps = psi.runtime_info().capabilities or {}
 local has_storage = caps.filesystem or caps.ramfs
 local can_read = has_storage or caps.embedded_resources
 

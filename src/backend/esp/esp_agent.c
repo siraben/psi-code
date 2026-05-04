@@ -580,8 +580,8 @@ static int run_round(const char *system_prompt, const char *model, long max_toke
 /* ------------------------------------------------------------------ */
 
 int psi_esp_agent_turn(const char *user_text, const char *system_prompt, const char *model,
-    long max_tokens, struct psi_agent_observer *observer, struct psi_abort_signal *abort_signal,
-    char **error_message) {
+    long max_tokens, struct psi_agent_observer *observer,
+    const struct psi_abort_signal *abort_signal, char **error_message) {
     cJSON *messages;
     cJSON *user_msg;
     int round;

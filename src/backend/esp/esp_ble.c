@@ -250,9 +250,9 @@ char *psi_esp_ble_scan_json(int duration_ms, int max_results) {
     char addr_str[18];
     for (i = 0; i < st.count; i++) {
         cJSON *o = cJSON_CreateObject();
-        snprintf(addr_str, sizeof(addr_str), "%02x:%02x:%02x:%02x:%02x:%02x",
-            st.devs[i].addr[5], st.devs[i].addr[4], st.devs[i].addr[3], st.devs[i].addr[2],
-            st.devs[i].addr[1], st.devs[i].addr[0]);
+        snprintf(addr_str, sizeof(addr_str), "%02x:%02x:%02x:%02x:%02x:%02x", st.devs[i].addr[5],
+            st.devs[i].addr[4], st.devs[i].addr[3], st.devs[i].addr[2], st.devs[i].addr[1],
+            st.devs[i].addr[0]);
         cJSON_AddStringToObject(o, "addr", addr_str);
         cJSON_AddNumberToObject(o, "rssi", (double)st.devs[i].rssi);
         cJSON_AddNumberToObject(o, "addr_type", (double)st.devs[i].addr_type);

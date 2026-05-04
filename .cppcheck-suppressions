@@ -7,6 +7,7 @@
 # cppcheck's own caveats, not real bugs.
 
 # ---- infrastructure noise ----
+missingInclude
 missingIncludeSystem
 unusedFunction
 unmatchedSuppression
@@ -23,11 +24,30 @@ constParameterCallback:src/core/http_async.c
 # Windows fallback handles are intentionally opaque placeholders.
 unusedStructMember:src/core/process.c
 
+# vm.c has a `#if defined(__has_include) && __has_include(<cjson/cJSON.h>)`
+# fallback that probes for cjson's header location. cppcheck can't evaluate
+# __has_include and reports a fatal preprocessor error; the conditional is
+# benign (the gcc/clang/tcc compilers we actually use evaluate it correctly).
+preprocessorErrorDirective:src/lua/vm.c
+noValidConfiguration:src/lua/vm.c
+
 # ---- intentionally public C API ----
 # psi_strdup_n, psi_message_init_with_data, psi_message_free are part of
 # the public C headers (common.h, message.h) for future external callers.
 staticFunction:src/core/common.c
 staticFunction:src/core/session.c
+# psi_process_begin/poll/finish are declared in include/psi/process.h
+# and called by src/lua/vm.c; cppcheck only sees the TU in isolation.
+staticFunction:src/core/process.c
+# psi_esp_ble_init is declared in include/psi/esp_runtime.h and called
+# from esp_main.c during firmware startup.
+staticFunction:src/backend/esp/esp_ble.c
+
+# psi_embedded_html_table[0].name is potentially NULL when
+# PSI_INCLUDE_SPA=0 (the embed step writes a NULL-sentinel stub),
+# but cppcheck only sees the SPA-on entry definition and concludes
+# the check is dead. Keep the guard for the OFF case.
+knownConditionTrueFalse:src/backend/esp/esp_ws_server.c
 
 # ---- deliberate style in large TUI function ----
 # psi_tui_redraw et al declare locals C89-style at the top of the

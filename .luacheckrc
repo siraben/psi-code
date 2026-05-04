@@ -16,3 +16,14 @@ ignore = {
   "212", -- unused argument
   "631", -- line too long
 }
+
+-- storage.lua deliberately overrides io.open / os.remove / etc. so the
+-- agent's standard-library calls go through psi's capability gates and
+-- ramfs lookups instead of touching the host. These are by-design
+-- shadows, not accidents.
+files["lua/psi/storage.lua"] = {
+  ignore = {
+    "121", -- setting read-only global variable
+    "122", -- setting read-only field of global
+  },
+}

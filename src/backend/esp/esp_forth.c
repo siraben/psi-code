@@ -73,13 +73,12 @@ enum {
 static const char BODY1[] =
     "You are psi, a coding-agent runtime running on an ESP32 microcontroller "
     "(MAC ";
-static const char BODY2[] =
-    ") reachable on the local LAN. Tools: system_info, wifi_scan, ble_scan "
-    "(NimBLE GAP discovery, returns nearby BLE devices), http_fetch (HTTPS "
-    "via mbedTLS), gpio_mode/read/write/blink, nvs_get/set, time_now, "
-    "restart, uart_log, and forth_eval (run Forth source against the "
-    "firmware's persistent zforth dictionary; definitions stick). Prefer "
-    "tools over guessing. Keep replies short. [prompt built by zforth]";
+static const char BODY2[] = ") reachable on the local LAN. Tools: system_info, wifi_scan, ble_scan "
+                            "(NimBLE GAP discovery, returns nearby BLE devices), http_fetch (HTTPS "
+                            "via mbedTLS), gpio_mode/read/write/blink, nvs_get/set, time_now, "
+                            "restart, uart_log, and forth_eval (run Forth source against the "
+                            "firmware's persistent zforth dictionary; definitions stick). Prefer "
+                            "tools over guessing. Keep replies short. [prompt built by zforth]";
 
 /* Push a C string into Forth's dictionary memory and leave (addr len)
  * on the data stack. zforth's TELL syscall expects exactly this
@@ -99,37 +98,37 @@ static void zf_push_cstring(zf_ctx *ctx, const char *s, size_t n) {
 zf_input_state zf_host_sys(zf_ctx *ctx, zf_syscall_id id, const char *input) {
     (void)input;
     switch ((int)id) {
-        case ZF_SYSCALL_EMIT: {
-            char ch = (char)zf_pop(ctx);
-            prompt_buf_append(&ch, 1);
-            break;
-        }
-        case ZF_SYSCALL_PRINT: {
-            char num[24];
-            int n = snprintf(num, sizeof(num), "%ld", (long)zf_pop(ctx));
-            if (n > 0)
-                prompt_buf_append(num, (size_t)n);
-            break;
-        }
-        case ZF_SYSCALL_TELL: {
-            zf_cell len = zf_pop(ctx);
-            zf_cell addr = zf_pop(ctx);
-            uint8_t *dict = (uint8_t *)zf_dump(ctx, NULL);
-            prompt_buf_append((const char *)(dict + (zf_addr)addr), (size_t)len);
-            break;
-        }
-        case PSI_SYS_MAC:
-            zf_push_cstring(ctx, g_mac_str, strlen(g_mac_str));
-            break;
-        case PSI_SYS_BODY1:
-            zf_push_cstring(ctx, BODY1, sizeof(BODY1) - 1u);
-            break;
-        case PSI_SYS_BODY2:
-            zf_push_cstring(ctx, BODY2, sizeof(BODY2) - 1u);
-            break;
-        default:
-            ESP_LOGW(TAG, "unhandled syscall %d", id);
-            break;
+    case ZF_SYSCALL_EMIT: {
+        char ch = (char)zf_pop(ctx);
+        prompt_buf_append(&ch, 1);
+        break;
+    }
+    case ZF_SYSCALL_PRINT: {
+        char num[24];
+        int n = snprintf(num, sizeof(num), "%ld", (long)zf_pop(ctx));
+        if (n > 0)
+            prompt_buf_append(num, (size_t)n);
+        break;
+    }
+    case ZF_SYSCALL_TELL: {
+        zf_cell len = zf_pop(ctx);
+        zf_cell addr = zf_pop(ctx);
+        uint8_t *dict = (uint8_t *)zf_dump(ctx, NULL);
+        prompt_buf_append((const char *)(dict + (zf_addr)addr), (size_t)len);
+        break;
+    }
+    case PSI_SYS_MAC:
+        zf_push_cstring(ctx, g_mac_str, strlen(g_mac_str));
+        break;
+    case PSI_SYS_BODY1:
+        zf_push_cstring(ctx, BODY1, sizeof(BODY1) - 1u);
+        break;
+    case PSI_SYS_BODY2:
+        zf_push_cstring(ctx, BODY2, sizeof(BODY2) - 1u);
+        break;
+    default:
+        ESP_LOGW(TAG, "unhandled syscall %d", id);
+        break;
     }
     return ZF_INPUT_INTERPRET;
 }
@@ -157,13 +156,12 @@ zf_cell zf_host_parse_num(zf_ctx *ctx, const char *buf) {
  * Calling convention: `n sys` invokes zf_host_sys with id n.
  * ZF_SYSCALL_TELL=2 (pops addr+len, prints to host).
  * ZF_SYSCALL_USER=128: PSI_SYS_MAC=128, PSI_SYS_BODY1=129, _BODY2=130. */
-static const char PROMPT_FORTH[] =
-    ": tell        2 sys ;\n"
-    ": emit-mac    128 sys ;\n"
-    ": emit-body1  129 sys ;\n"
-    ": emit-body2  130 sys ;\n"
-    ": prompt  emit-body1 tell  emit-mac tell  emit-body2 tell ;\n"
-    "prompt\n";
+static const char PROMPT_FORTH[] = ": tell        2 sys ;\n"
+                                   ": emit-mac    128 sys ;\n"
+                                   ": emit-body1  129 sys ;\n"
+                                   ": emit-body2  130 sys ;\n"
+                                   ": prompt  emit-body1 tell  emit-mac tell  emit-body2 tell ;\n"
+                                   "prompt\n";
 
 /* One-time bootstrap of the persistent zforth context. Called by
  * both the prompt builder (at boot) and forth_eval (when the agent
