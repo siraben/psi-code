@@ -1,3 +1,8 @@
+/* TLS bundle discovery for libcurl. Tries a small list of env vars and
+ * common system paths, falls back to the embedded CA bundle when one
+ * was compiled in (PSI_HAVE_EMBEDDED_CA). Static binaries shipped
+ * without a host certificate store rely on the embedded path. */
+
 #include <stdlib.h>
 #include <unistd.h>
 #include <zlib.h>

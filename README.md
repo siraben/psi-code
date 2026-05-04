@@ -1,93 +1,116 @@
-# psi coding agent
+# psi
 
-`psi` is a rewrite of `pi` in C with Lua as its extension language.
+A coding agent that builds with `cc *.c -o psi`.
 
-The immediate goal is not feature parity with `pi-mono`. The goal is to keep
-the same minimal harness philosophy while rebuilding the core around a simpler
-runtime:
+---
 
-- C89 host runtime
-- Lua 5.5 as the embedded extension language
-- Nix flake based development and packaging
-- A small, explicit core that grows from a working vertical slice
+`psi` is a terminal coding agent. The model in your terminal is the
+same one in any other agent; what changes is what's underneath. Other
+agents are 30 MB of TypeScript on top of Node, or a Go binary that
+spawns Python subagents, or a Rust crate stack that takes ten minutes
+to compile and weighs more than the operating systems it targets.
+psi is a C89 host with a Lua 5.5 brain, written so the whole thing
+compiles on machines that no longer get release notes.
 
-## Current status
+It runs on Linux. It also runs on Haiku and 9front, and there are
+ports to AmigaOS and ReactOS in flight. Not as a stunt — as the
+single test that catches every assumption an agent might quietly make
+about its host.
 
-This repository currently contains:
+## Why
 
-- an architecture document in [docs/architecture.md](docs/architecture.md)
-- a port audit in [docs/port-status.md](docs/port-status.md)
-- an extension authoring guide in [docs/extensions.md](docs/extensions.md)
-- a provider catalogue in [docs/providers.md](docs/providers.md)
-- a Nix flake that builds `psi` and its dependencies, plus cross-
-  compile targets (`packages.psi-i686`, `packages.psi-static`,
-  `packages.psi-static-i686` for musl ILP32/LP64 static binaries)
-- `cJSON` for JSON session records and structured tool payloads
-- `libcurl` for HTTPS provider integration
-- `libedit` for interactive line editing without the GPL constraint of GNU Readline
-- ANSI terminal control for the full-screen TUI
-- `zlib` to gzip-compress embedded Lua sources and docs inside the binary
-- an embedded Lua 5.5 runtime with host glue in `src/lua/vm.c` and a
-  compressed embed-table (`include/psi/embedded_data.h`) so portable
-  static binaries carry their own Lua bootstrap and documentation
-- a Lua bootstrap layer under `lua/` that owns the tool registry,
-  prompt assembly, session records, render/markdown/diff helpers,
-  provider/model routing, settings/resource discovery, provider loops,
-  slash commands, and an extension loader
-- a default coding-agent system prompt assembled from tools, cwd,
-  date, global/project `AGENTS.md` / `CLAUDE.md`, and active tool scope
-- a streamed Anthropic-backed `--agent` mode with host tool
-  execution, prompt caching, dynamic token-accounting, and session
-  logging in a pi-compatible v3 JSONL format
-- Ollama and OpenRouter providers for local/open-router iteration (see
-  [docs/providers.md](docs/providers.md))
-- a default interactive coding-agent shell backed by the same
-  streamed agent loop, with slash commands (`/help`, `/hotkeys`,
-  `/session`, `/new`, `/clear`, `/resume`, `/import`, `/name`,
-  `/model`, `/thinking`, `/copy`, `/export`, `/compact`, `/fork`, `/clone`,
-  `/reload`, `/vim`, `/system-prompt`, `/quit`). Extensions add their own
-  via `psi.commands.register`.
-- a full-screen `--tui` mode with rich status (cwd / model /
-  session / token usage), unicode tool-call borders, live
-  markdown rendering, mode-aware hints, readline-style editing,
-  optional bundled Vim modal editing via `extensions.vim_keybindings.enabled`
-  in settings or `/vim`
-  (normal/insert/visual/block visual, `w`/`b`, `I`/`A`/`o`/`O`,
-  `^`/`$`, `gg`/`G`, `Ctrl-U`/`Ctrl-D`, `y`/`p`,
-  `Ctrl-A`/`Ctrl-E`), `Ctrl-G` abort while busy, `Ctrl-C`
-  clear-buffer, OSC 52 terminal clipboard yanks, and Ctrl-Z suspend/resume, plus a Lua-driven theme registry with a bundled
-  dark default. Single-threaded: the agent turn runs as
-  a Lua coroutine on the TUI thread, pumping input and
-  ANSI redraws between every cooperative yield
-- manual session compaction through `--compact` and `/compact`
-- cooperative abort plumbing (Ctrl-C for non-TUI, Ctrl-G in TUI)
-  that cancels the current curl transfer, kills any child
-  process, and persists a truncated tool result
-- static analysis wired into the flake (`nix run .#analyze`) with
-  cppcheck + `gcc -fanalyzer`
+A coding agent is mostly text I/O around an HTTPS POST. The frontier
+ships of this category have decided it's also: an Electron-class
+runtime, a package manager, a plugin marketplace, a sandboxed
+permissions UI, a sub-agent supervisor, a planner, a todo tracker, a
+file-watching hot-reloader, and an MCP server. Each addition argues
+for itself. Together they argue against being able to build the thing
+from source.
 
-It still does not contain the full `pi` interactive session tree UI, RPC
-protocol, or a rich skills/extensions ecosystem. The session schema and Lua
-runtime boundaries are now shaped for those pieces to be built incrementally.
+psi takes the opposite bet. The agent loop, prompts, session schema,
+TUI, providers, and tools are ~17k lines of pure Lua. The host —
+process spawning, HTTP, terminal raw mode, Lua VM glue — is ~5k
+lines of strict C89. Both halves fit in your head. There are no
+build artifacts you didn't compile yourself.
+
+## What's different
+
+**One language for the brain, one for the body.** Lua 5.5 owns the
+agent runtime: turn loop, providers, session JSONL, prompt assembly,
+markdown rendering, slash commands, the TUI. C exists only at the OS
+boundary. The split is enforced by the architecture, not just by
+discipline — `lua_State` has exactly one owner thread, and helper
+threads (libcurl, child processes) communicate through pollable
+handles, never through Lua. See [docs/architecture.md](docs/architecture.md).
+
+**Static binary, no runtime dependencies.** The Lua source and the
+docs are deflate-compressed into the binary at build time. A
+`packages.psi-static` musl build is a single self-contained file that
+runs without Lua, without Node, without an interpreter on `$PATH`.
+There's an i686 variant for the same reason there's a 9front port:
+because nothing in the design ought to require a 64-bit POSIX 2017
+host, and that's worth proving.
+
+**Pi's philosophy, less the JavaScript.** psi is a port of [Mario
+Zechner's pi-mono](https://github.com/badlogic/pi-mono) coding agent.
+Its philosophy is also pi's: aggressively extensible, no plan mode,
+no built-in todos, no permission popups, no MCP, no sub-agents, no
+background bash. Build what you need as a Lua extension, or don't
+build it. What's added on top is portability and a smaller surface:
+extensions are single-file Lua drops, not npm packages.
+
+**Portability as an honest test.** S9fES (Nils Holm's *Scheme 9 from
+Empty Space*) is the model: build cleanly anywhere a C compiler
+exists, replace one shim per platform, leave the rest untouched.
+psi has more dependencies than S9fES does, but the shape is the
+same — `src/core/process.c`, `src/core/http_async.c`,
+`src/core/http_buffered.c`, and `src/runtime/tui_mode.c` are the
+shims, the upstream `lua/psi/*.lua` brain is OS-agnostic. New port,
+new platform directory, no edits upstream. See
+[docs/portability.md](docs/portability.md).
+
+**Extensions you can read in five minutes.** A psi extension is a
+single `.lua` file dropped in `~/.config/psi/extensions/`. It
+receives the `psi` global, registers tools or events or slash
+commands, and that's it. There is no manifest, no version pinning, no
+sandbox. If the file is hostile, you have bigger problems than your
+agent. See [docs/extensions.md](docs/extensions.md).
+
+## What it isn't
+
+- A pi-mono replacement. Several pi features (session tree
+  navigation, RPC mode, branch-aware compaction, the broad
+  pi-managed model catalog) are tracked in [docs/port-status.md](docs/port-status.md)
+  but not yet here.
+- A platform. There is no plugin marketplace, no auto-update, no
+  telemetry, no hosted backend. psi is a binary you build.
+- An MCP host. Build a CLI and tell the model how to use it, or
+  write an extension. The case against MCP is in [pi-mono's
+  philosophy section](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#philosophy);
+  psi inherits the position.
+- A sandbox. Tools run with the privileges of the user. Run psi in a
+  container if that matters.
 
 ## Quick start
-
-Build with Nix:
 
 ```bash
 nix build
 ./result/bin/psi --help
-./result/bin/psi --eval '1 + 2 + 3'
-./result/bin/psi --eval 'psi.tool_call("read", {path = "README.md"})'
-./result/bin/psi --eval 'psi.tool_call("lua", {mode = "summary"})'
-./result/bin/psi --system-prompt
-ANTHROPIC_API_KEY=... ./result/bin/psi --agent 'Read README.md and summarize this repository.'
-./result/bin/psi --model openai-codex/gpt-5.5 --thinking xhigh --agent 'Read README.md and summarize this repository.'
-ANTHROPIC_API_KEY=... ./result/bin/psi --session /tmp/psi-session.jsonl
-ANTHROPIC_API_KEY=... ./result/bin/psi --tui --session /tmp/psi-session.jsonl
-ANTHROPIC_API_KEY=... ./result/bin/psi --session /tmp/psi-session.jsonl --compact 12
-./result/bin/psi --print 'hello'
-./result/bin/psi --session /tmp/psi-session.jsonl --print 'hello again'
+ANTHROPIC_API_KEY=... ./result/bin/psi
+```
+
+That opens the full-screen TUI. The other entry points are flags on
+the same binary:
+
+```bash
+psi --eval '1 + 2 + 3'                          # eval Lua against the runtime
+psi --eval 'psi.tool_call("read", {path = "README.md"})'
+psi --print 'hello'                             # one-shot, no streaming
+psi --agent 'Read README.md and summarize.'     # one streaming turn
+psi --repl                                      # libedit shell
+psi --system-prompt                             # dump the assembled system prompt
+psi --session /tmp/s.jsonl --compact 12         # auto-summarize older context
+psi --model openai-codex/gpt-5.5 --thinking xhigh --agent '...'
 ```
 
 For local development:
@@ -95,142 +118,88 @@ For local development:
 ```bash
 nix develop
 make
-./build/psi --eval '1 + 2 + 3'
-./build/psi --eval 'psi.tool_call("read", {path = "README.md"})'
-./build/psi --eval 'psi.tool_call("bash", {command = "true"})'
-./build/psi --eval 'psi.tool_call("lua", {mode = "eval", expression = "#psi.tools.specs()"})'
-./build/psi --system-prompt
-set -a && . ./.env.local && ./build/psi --agent 'Say exactly: psi streaming test'
-./build/psi --model openai-codex/gpt-5.5 --thinking xhigh --agent 'Say exactly: psi Codex test'
-set -a && . ./.env.local && ./build/psi --session .psi/session.jsonl
-set -a && . ./.env.local && ./build/psi --tui --session .psi/session.jsonl
-set -a && . ./.env.local && ./build/psi --session .psi/session.jsonl --compact 12
-./build/psi --print 'hello'
-./build/psi --session .psi/session.jsonl --print 'hello again'
+./build/psi --eval 'psi.tool_call("lua", {mode = "summary"})'
 ```
 
-Optional build flags are plain Make variables. They default to `1` and can be
-disabled per build:
+Optional Make flags (each defaults to `1`, set to `0` to disable):
 
-- `TUI=0`: build without the full-screen frontend. The Lua TUI requires ANSI;
-  `ANSI=0` disables TUI support at compile time.
-- `ANSI=0`: build without ANSI SGR emission/parsing.
-- `COLOR=0`: build ANSI text styles without color handling.
-- `REPL_EDITLINE=0`: build the REPL without libedit/history support.
+| Flag             | Effect                                                     |
+|------------------|------------------------------------------------------------|
+| `TUI`            | Full-screen frontend and `psi.tui_*` host primitives       |
+| `ANSI`           | ANSI SGR emission and parsing (TUI implies this)           |
+| `COLOR`          | Color SGR emission (non-color styles still allowed)        |
+| `REPL_EDITLINE`  | libedit-backed REPL with history; `fgets` fallback if off  |
 
-Use a separate `BUILD_DIR` when checking variants so object files do not mix:
+`make check-build-configs` builds the full toggle matrix into
+isolated `BUILD_DIR=build-*` trees — the regression check whenever
+preprocessor guards or optional dependencies move.
 
-```bash
-make BUILD_DIR=build-color0 COLOR=0
-make BUILD_DIR=build-no-tui TUI=0
-make check-build-configs
-```
+## Providers
 
-`make check-build-configs` builds the full `TUI` / `ANSI` / `COLOR` /
-`REPL_EDITLINE` toggle matrix and is the expected regression check for
-compile-time feature gates.
-
-When no `--session FILE` is set, psi assigns a default path under
-`$XDG_STATE_HOME/psi/sessions` or `~/.local/state/psi/sessions`. The on-disk
-format matches the pi-style v3 JSONL shape: a session header followed by typed
-entries with parent pointers, cache markers, file-op provenance, and custom
-extension entries. The session-picker/tree UI is still planned.
-
-Current structured host tools registered in `lua/psi/tools.lua`:
-
-- `read`
-- `write`
-- `edit`
-- `bash`
-- `grep`
-- `find`
-- `ls`
-- `lua`
-
-Tool inputs are plain Lua tables (or Lua alists when routed through the C
-glue). The bootstrap and extensions live in Lua and dispatch through
-`psi.tools.dispatch_alist` rather than a stringly JSON API.
-The `read` tool supports `offset` and `limit`; `write` and `edit` are
-serialized per path so concurrent tool calls cannot mutate the same file at
-the same time.
-
-`bash`, `grep`, `find`, and `ls` run through a small host process layer in
-`src/core/process.c` that captures output and exit status using `fork`/`exec`
-on POSIX.
-
-`--system-prompt` is the current bridge from scaffold to usable harness
-behavior. It emits the default coding-agent prompt that `psi` would hand to a
-model, including discovered `AGENTS.md` / `CLAUDE.md` files from the current
-working directory upward plus global files from `~/.config/psi/`.
-
-`--agent` is the first real coding-agent loop. It targets Anthropic's Messages
-API, streams text to stdout as it arrives, executes built-in host tools, and
-persists user/tool/assistant events in the session log. Starting `psi` with no
-explicit mode opens the full-screen TUI over the same runtime and uses the same
-Lua hook renderers for tool execution blocks and diffs. `--repl` opens the
-line-editor shell with `/help`, `/session`, `/system-prompt`, `/compact`, and
-`/quit`. The default model is
-`claude-opus-4-7`, overridable via `--model` or `PSI_ANTHROPIC_MODEL`.
-
-Session files are still flat JSONL, but assistant messages can persist an
-extra structured payload so replay into Anthropic is less lossy than the
-original plain-text-only form.
-
-Current limitations of `--agent`:
-
-- the TUI is smaller than `pi`'s; session tree navigation
-  (`/tree`) and an interactive session picker aren't built yet.
-  `/clone`, `/fork`, `/name`, `/import`, `/export` all work but
-  operate on flat JSONL files rather than a tree walker.
-- no RPC mode yet
-- no streaming resume/retry logic
-- session persistence is still a flat active-branch JSONL rather
-  than a full branch tree walker
-- compaction is summary-based and now dynamically token-aware, but
-  not branch-aware
-- three wired providers (Anthropic, Ollama, OpenRouter); extension-level
-  provider registration is not frozen yet
-
-## Extensions
-
-Lua files dropped into any of the following directories are
-loaded at startup and can register tools, subscribe to events, or
-add slash commands and themes. See [docs/extensions.md](docs/extensions.md)
-for the authoring guide.
-
-- `$PSI_EXTENSIONS_DIR` (colon-separated list, takes precedence)
-- `~/.config/psi/extensions/`
-- `./.psi/extensions/`
+Four are wired today: Anthropic (default), Ollama, OpenRouter, and
+OpenAI Codex via ChatGPT OAuth. Provider selection is by `--model
+<prefix>/<name>`, by `PSI_PROVIDER`, by `defaults.provider` in
+settings, or by Anthropic fallback. Full reference in
+[docs/providers.md](docs/providers.md).
 
 ## Layout
 
-- `docs/architecture.md`: planned runtime architecture
-- `docs/port-status.md`: audit against `pi-mono`
-- `docs/extensions.md`: extension API surface and authoring guide
-- `docs/providers.md`: provider catalogue and configuration
-- `include/psi/`: public project headers (`abort`, `agent`,
-  `anthropic`, `common`, `embedded_lua`, `host_ops`, `message`,
-  `process`, `runtime`, `session`, `vm`)
-- `src/main.c`: entry point and CLI dispatch
-- `src/core/`: core host runtime (abort signal, host ops,
-  process spawning, HTTP helpers, in-memory session backing)
-- `src/runtime/`: CLI parsing and the print/TUI runtime modes
-- `src/lua/vm.c`: Lua VM initialization, C-to-Lua glue, and the
-  embedded-asset searcher / inflate plumbing
-- `scripts/embed_lua.c`: build-time helper that deflate-compresses
-  Lua sources and docs into C byte arrays
-- `lua/boot.lua`: bootstrap that wires the `psi.*` Lua modules
-  together, registers bundled Lua extensions, bridges render hooks
-  onto the events bus, and loads user extensions
-- `lua/psi/`: Lua modules — tool registry, built-in tools, prompt
-  assembly, session records/format, provider registry, provider loops
-  (Anthropic, Ollama, OpenRouter), settings/resources, agent orchestration,
-  slash commands, events bus, context mirror, render/diff/ANSI/markdown
-  helpers, prelude
-- `tests/`: stdlib-only Python test harnesses —
-  `smoke.py` runs offline tests by default and live Anthropic
-  tests when `ANTHROPIC_API_KEY` is set; `bench.py` runs hot-path
-  microbenchmarks (markdown, sse parser, session save, run_all,
-  GC pressure) locally or on a remote target defined in
-  `tests/bench.targets.json` (template at `.example.json`); plus
-  the `valgrind.sh` memcheck harness.
+```
+src/main.c              entry + CLI dispatch
+src/core/               abort signal, process spawn, HTTP, sessions, TLS
+src/runtime/            CLI parser, print/repl/agent dispatcher, TUI mode
+src/lua/vm.c            Lua VM and the C↔Lua bridge
+include/psi/            public host headers
+scripts/embed.c         build-time deflate of Lua sources + docs into C arrays
+
+lua/boot.lua            Lua bootstrap; wires psi.* and loads extensions
+lua/psi/                tool registry, prompt assembly, session, scheduler,
+                        markdown, diff, ANSI, theme, slash commands, TUI runtime
+lua/psi/tools/          built-in tools (read/write/edit/bash/grep/find/ls/lua)
+lua/psi/providers/      anthropic, ollama, openrouter, openai_codex,
+                        openai_compat, oauth_openai_codex
+lua/psi/extensions/     bundled extensions (vim_keybindings, osc52_clipboard, btw)
+
+docs/architecture.md    runtime model, what belongs in C vs. Lua
+docs/portability.md     porting principles and per-OS predictions
+docs/port-status.md     audit against pi-mono
+docs/extensions.md      extension API surface and event catalog
+docs/providers.md       provider catalogue and configuration
+
+haiku/  9front/  amigaos/  reactos/   per-platform port artifacts
+tests/                                  Python harnesses (smoke, bench, valgrind)
+```
+
+## Sessions
+
+Sessions are append-only JSONL in pi's v3 schema: typed entries,
+parent pointers, cache markers, file-op provenance, custom entries.
+A session started under one provider can be resumed under another;
+provider-specific thinking and signature blocks may be downgraded
+during replay. Without `--session FILE`, psi assigns a path under
+`$XDG_STATE_HOME/psi/sessions` (or `~/.local/state/psi/sessions`).
+
+## Extensions
+
+Drop a Lua file in any of:
+
+- `$PSI_EXTENSIONS_DIR` (colon-separated, takes precedence)
+- `~/.config/psi/extensions/`
+- `./.psi/extensions/`
+
+It runs at boot with the `psi` global available. Register tools,
+subscribe to events, add slash commands or themes. The full API
+surface is documented in [docs/extensions.md](docs/extensions.md).
+
+## Status
+
+The harness works. There is one streamed Anthropic-backed agent loop
+shared by `--agent`, `--repl`, and `--tui`, plus three more provider
+loops behind the same contract. Tool execution, prompt caching,
+cooperative abort, dynamic token-aware compaction, OAuth flows
+(OpenAI Codex), and the pi v3 session format are all in place.
+
+What's missing relative to pi-mono is tracked in
+[docs/port-status.md](docs/port-status.md). The largest gaps are
+session-tree navigation, branch-aware compaction, RPC mode, and a
+frozen extension-level provider registration API.

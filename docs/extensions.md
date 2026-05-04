@@ -150,16 +150,23 @@ Built-in commands take precedence over registered ones —
 extensions cannot shadow them. Full list:
 
 ```
-/help  /hotkeys  /quit (+ /q, :quit, :q)  /session  /system-prompt  /vim
-/new (alias: /clear)  /reload  /copy  /login <provider>
-/resume <path>  /import <path>
-/name <text>  /model <spec>  /thinking <level>  /set <setting> <value>
-/export [path]  /fork [N]  /clone [path]  /compact [N]  /queue [...]
+/help (+ /h)  /hotkeys  /quit (+ /q, :quit, :q)
+/session  /system-prompt  /new (alias: /clear)
+/resume <path>  /import <path>  /name <text>
+/model <spec>  /set <setting> <value>  /thinking <level>
+/login <provider>  /copy  /export [path]
+/fork [N]  /clone [path]  /branch [entry-id]  /branches
+/compact [N]  /queue [...]  /reload  /rainbow
 ```
 
-Canonical source: `lua/psi/slash_commands.lua` (`BUILTIN_COMMANDS` plus the
-registered extension command table). `lua/psi/prompt.lua` delegates to
-the generated command help for compatibility.
+`/vim`, `/btw`, and any other dynamically registered commands come
+from packaged or user extensions (see "Packaged extensions" below) —
+bundled with psi, but extension-owned, so they are not in the
+built-in table.
+
+Canonical source: `BUILTIN_COMMANDS` in `lua/psi/slash_commands.lua`.
+`lua/psi/prompt.lua` delegates to the generated command help for
+compatibility.
 
 ### Keybindings — `psi.keybindings`
 

@@ -1,3 +1,8 @@
+/* Process spawning + output capture for shell-style tools. POSIX
+ * fork/exec on Unix; the _WIN32 arm is a placeholder for a future
+ * CreateProcess port. The pollable begin/poll/finish triple lets the
+ * Lua scheduler keep the TUI redraw loop running while a child runs. */
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>

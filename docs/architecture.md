@@ -53,7 +53,7 @@ Lua owns the runtime model:
 - session loading, saving, projection, and metadata in `lua/psi/session_manager.lua`
 - provider loops in `lua/psi/providers/anthropic.lua`,
   `lua/psi/providers/openai_compat.lua`, `lua/psi/providers/openrouter.lua`,
-  and `lua/psi/providers/ollama.lua`
+  `lua/psi/providers/openai_codex.lua`, and `lua/psi/providers/ollama.lua`
 - cooperative scheduling in `lua/psi/sched.lua`
 - tool registry and built-in tool implementations
 - prompt assembly, context shaping, render hooks, and event hooks

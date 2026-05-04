@@ -1,3 +1,8 @@
+/* TUI mode entrypoint: switches the terminal into raw ANSI mode,
+ * installs SIGWINCH/SIGTSTP handlers, and delegates the actual UI
+ * loop to lua/psi/tui_runtime.lua. C only owns the terminal boundary;
+ * Lua decides what gets drawn. */
+
 #include <locale.h>
 #include <stdio.h>
 #include <string.h>

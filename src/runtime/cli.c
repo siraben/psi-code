@@ -1,3 +1,7 @@
+/* CLI option parsing via argtable3. Produces a psi_cli_options struct
+ * that runtime/cli_mode.c hands directly to lua/psi/modes.lua; the
+ * dispatcher there decides which mode to run. */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -92,7 +92,7 @@ In priority order:
   `~/.config/psi/settings.json` or `./.psi/settings.json`.
 - `PSI_OPENAI_CODEX_VERBOSITY` — optional text verbosity
   (`low`, `medium`, `high`; default `low`).
-- Uses the Responses-shaped adapter in `lua/psi/openai_codex.lua`.
+- Uses the Responses-shaped adapter in `lua/psi/providers/openai_codex.lua`.
 
 ## Examples
 
