@@ -136,11 +136,30 @@ preprocessor guards or optional dependencies move.
 
 ## Providers
 
-Four are wired today: Anthropic (default), Ollama, OpenRouter, and
-OpenAI Codex via ChatGPT OAuth. Provider selection is by `--model
-<prefix>/<name>`, by `PSI_PROVIDER`, by `defaults.provider` in
-settings, or by Anthropic fallback. Full reference in
-[docs/providers.md](docs/providers.md).
+Provider selection is by `--model <prefix>/<name>`, by `PSI_PROVIDER`,
+by `defaults.provider` in settings, or by the Anthropic fallback.
+Full reference in [docs/providers.md](docs/providers.md). Wired
+providers:
+
+<!-- @generated:providers-inline -->
+`anthropic`, `ollama`, `openai-codex`, `openrouter`
+<!-- @end -->
+
+## Built-in tools
+
+Available to the model out of the box; extensions register more with
+`psi.tools.register`.
+
+<!-- @generated:builtin-tools -->
+- `bash` — Execute a shell command in the current working directory and return its output. Output is tail-truncated to the last 2000 lines or 50KB (whichever is hit first). When truncated, the full output is also saved to a temp file whose path is returned in the result; use the read tool with that path to inspect more.
+- `edit` — Edit a single file using exact text replacement. Prefer small, precise edits over broad rewrites.
+- `find` — Find files by glob pattern relative to a directory. Output is truncated to 50KB. Use limit= to cap result count.
+- `grep` — Search file contents for a pattern and return matching lines with file paths and line numbers. Output is truncated to 2000 lines or 50KB (whichever is hit first). Long match lines are clipped to 500 chars.
+- `ls` — List directory contents. Returns entries sorted alphabetically, with '/' suffix for directories. Includes dotfiles. Output is truncated to 50KB.
+- `lua` — Inspect or evaluate expressions in psi's embedded Lua runtime. Use this to inspect loaded helpers, prompt state, tool specs, or runtime environment.
+- `read` — Read the contents of a file. Use this to inspect source files, configuration, and other project assets.
+- `write` — Write content to a file. Creates the file if it does not exist, overwrites it if it does, and creates parent directories.
+<!-- @end -->
 
 ## Layout
 
@@ -155,7 +174,7 @@ scripts/embed.c         build-time deflate of Lua sources + docs into C arrays
 lua/boot.lua            Lua bootstrap; wires psi.* and loads extensions
 lua/psi/                tool registry, prompt assembly, session, scheduler,
                         markdown, diff, ANSI, theme, slash commands, TUI runtime
-lua/psi/tools/          built-in tools (read/write/edit/bash/grep/find/ls/lua)
+lua/psi/tools/          built-in tools — see "Built-in tools" above
 lua/psi/providers/      anthropic, ollama, openrouter, openai_codex,
                         openai_compat, oauth_openai_codex
 lua/psi/extensions/     bundled extensions (vim_keybindings, osc52_clipboard, btw)

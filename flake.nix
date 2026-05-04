@@ -413,6 +413,18 @@
           '';
         };
 
+        # `nix run .#check-docs` — assert auto-generated doc regions are
+        # up to date with their Lua/C sources.
+        apps.check-docs = mkApp {
+          name = "psi-check-docs";
+          description = "Verify @generated:* doc regions match source";
+          extraInputs = [ pkgs.gcc pkgs.git ];
+          text = ''
+            cd "''${PSI_SRC:-$PWD}"
+            make check-docs
+          '';
+        };
+
         # `nix run .#scan-build` — Clang Static Analyzer.
         apps.scan-build = let
           curl = curlWithMbedtls pkgs;
@@ -471,6 +483,8 @@
             luacheck lua
             echo "=== c analyze ==="
             make analyze
+            echo "=== docs drift ==="
+            make check-docs
           '';
         };
 

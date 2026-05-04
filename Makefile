@@ -5,6 +5,8 @@ PREFIX     ?= /usr/local
 BINDIR      = $(PREFIX)/bin
 INCLUDEDIR  = $(PREFIX)/include
 SHAREDIR    = $(PREFIX)/share/psi
+MANDIR     ?= $(PREFIX)/share/man
+MAN1DIR     = $(MANDIR)/man1
 
 # ---- Toolchain ----
 CC              ?= cc
@@ -179,12 +181,13 @@ $(TARGET): $(OBJECTS) $(GEN_OBJECTS) | check-curl-ca $(BUILD_DIR)
 
 # ---- Install / clean ----
 install: $(TARGET)
-	$(INSTALL_DIR) $(DESTDIR)$(BINDIR) $(DESTDIR)$(INCLUDEDIR)/psi $(DESTDIR)$(SHAREDIR)/psi
+	$(INSTALL_DIR) $(DESTDIR)$(BINDIR) $(DESTDIR)$(INCLUDEDIR)/psi $(DESTDIR)$(SHAREDIR)/psi $(DESTDIR)$(MAN1DIR)
 	$(INSTALL_PROGRAM) $(TARGET) $(DESTDIR)$(BINDIR)/psi
 	$(INSTALL_DATA) include/psi/*.h $(DESTDIR)$(INCLUDEDIR)/psi/
 	$(INSTALL_DATA) lua/boot.lua $(DESTDIR)$(SHAREDIR)/boot.lua
 	cd lua && find psi -type d -exec $(INSTALL_DIR) '$(DESTDIR)$(SHAREDIR)'/{} \;
 	cd lua && find psi -type f -name '*.lua' -exec $(INSTALL_DATA) {} '$(DESTDIR)$(SHAREDIR)'/{} \;
+	$(INSTALL_DATA) psi.1 $(DESTDIR)$(MAN1DIR)/psi.1
 
 clean:
 	rm -rf $(BUILD_DIR)
@@ -234,7 +237,26 @@ lint:   lint-lua lint-c
 check-build-configs:
 	sh tests/build_configs.sh
 
+# Regenerate the @generated:* regions in README.md / docs/*.md and emit psi.1.
+# Source of truth: lua/psi/{slash_commands,keybindings,api_registry,tools/*}.lua,
+# src/runtime/cli.c (argtable3 calls), src/lua/vm.c (PSI_REG calls).
+docs: $(TARGET)
+	./$(TARGET) --eval 'dofile("scripts/gen-docs.lua")'
+
+# Drift check: regenerate, then assert nothing changed under version control.
+# Runs in CI alongside analyze.
+check-docs: $(TARGET)
+	./$(TARGET) --eval 'dofile("scripts/gen-docs.lua")'
+	@if ! git diff --quiet -- README.md docs/ psi.1; then \
+		echo ""; \
+		echo "ERROR: generated docs are out of sync with their Lua/C sources."; \
+		echo "Run 'make docs' and commit the result."; \
+		echo ""; \
+		git --no-pager diff --stat -- README.md docs/ psi.1; \
+		exit 1; \
+	fi
+
 .PHONY: all clean install \
         lint lint-lua lint-c format format-lua format-c check-format-c \
         analyze analyze-cppcheck analyze-gcc analyze-scan-build analyze-infer \
-        check-build-configs
+        check-build-configs docs check-docs
