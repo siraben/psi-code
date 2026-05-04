@@ -474,6 +474,124 @@ local function cmd_queue(rest)
   return records.new_command_action("print", "usage: /queue [list|clear|drop N|edit N text]")
 end
 
+-- ---------- self-documenting commands ----------
+
+-- Resolve a user-typed key to the canonical psi.doc entry key. Users
+-- type "/help" or "help"; tools as "read" or "tool:read"; primitives
+-- as "psi.cwd" or "cwd"; keybindings as "tui.input.submit". The
+-- resolver tries the input verbatim, then a few plausible prefixes.
+local function resolve_doc_key(input)
+  local doc = require("psi.doc")
+  if doc.get(input) then
+    return input
+  end
+  local prefixes = { "/", "psi.", "tool:", "provider:" }
+  for _, prefix in ipairs(prefixes) do
+    local key = prefix .. input
+    if doc.get(key) then
+      return key
+    end
+  end
+  -- Strip leading "/" if user typed "/foo" but registry has "foo"
+  -- (shouldn't happen for slash commands, but cheap to check).
+  local trimmed = input:gsub("^/", "")
+  if trimmed ~= input and doc.get(trimmed) then
+    return trimmed
+  end
+  return nil
+end
+
+local function format_describe_entry(key, entry)
+  local lines = {}
+  lines[#lines + 1] = string.format("%s  [%s]", key, entry.kind)
+  lines[#lines + 1] = ""
+  if entry.doc and entry.doc ~= "" then
+    lines[#lines + 1] = entry.doc
+  else
+    lines[#lines + 1] = "(no docstring)"
+  end
+  if entry.source and entry.source ~= "" then
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "Defined in: " .. entry.source
+  end
+  if entry.kind == "tool" and entry.extra then
+    if entry.extra.input_schema and entry.extra.input_schema.required then
+      lines[#lines + 1] = ""
+      lines[#lines + 1] = "Required input fields: "
+        .. table.concat(entry.extra.input_schema.required, ", ")
+    end
+  end
+  if entry.kind == "key" and entry.extra and entry.extra.default_keys then
+    local kb = require("psi.keybindings")
+    local resolved = kb.keys(entry.extra.id)
+    if resolved and #resolved > 0 then
+      lines[#lines + 1] = ""
+      lines[#lines + 1] = "Bound keys: " .. table.concat(resolved, ", ")
+    end
+  end
+  return table.concat(lines, "\n")
+end
+
+local function cmd_describe(rest)
+  rest = prelude.trim(rest or "")
+  if rest == "" then
+    return records.new_command_action(
+      "print",
+      "usage: /describe <symbol>\n\n"
+        .. "Examples: /describe /help, /describe psi.cwd, /describe tool:read,\n"
+        .. "          /describe tui.input.submit, /describe provider:anthropic.\n\n"
+        .. "See also: /apropos <pattern>"
+    )
+  end
+  local doc = require("psi.doc")
+  local key = resolve_doc_key(rest)
+  if not key then
+    return records.new_command_action(
+      "print",
+      "no entry for '" .. rest .. "'.  Try /apropos " .. rest
+    )
+  end
+  return records.new_command_action("print", format_describe_entry(key, doc.get(key)))
+end
+
+local function cmd_apropos(rest)
+  rest = prelude.trim(rest or "")
+  if rest == "" then
+    return records.new_command_action("print", "usage: /apropos <pattern>")
+  end
+  local doc = require("psi.doc")
+  local hits = doc.apropos(rest)
+  if #hits == 0 then
+    return records.new_command_action("print", "no matches for '" .. rest .. "'")
+  end
+  local lines = {}
+  for _, hit in ipairs(hits) do
+    local snippet = (hit.doc or ""):match("^[^\n]+") or ""
+    if #snippet > 80 then
+      snippet = snippet:sub(1, 77) .. "..."
+    end
+    lines[#lines + 1] = string.format("%-32s [%s]  %s", hit.key, hit.kind, snippet)
+  end
+  return records.new_command_action("print", table.concat(lines, "\n"))
+end
+
+local function cmd_find_source(rest)
+  rest = prelude.trim(rest or "")
+  if rest == "" then
+    return records.new_command_action("print", "usage: /find-source <symbol>")
+  end
+  local doc = require("psi.doc")
+  local key = resolve_doc_key(rest)
+  if not key then
+    return records.new_command_action("print", "no entry for '" .. rest .. "'")
+  end
+  local entry = doc.get(key)
+  return records.new_command_action(
+    "print",
+    string.format("%s -> %s", key, entry.source or "(unknown)")
+  )
+end
+
 -- ---------- dispatcher + registry ----------
 
 local BUILTIN_COMMANDS = {
@@ -584,6 +702,21 @@ local BUILTIN_COMMANDS = {
   {
     name = "system-prompt",
     description = "Print the current coding-agent system prompt",
+  },
+  {
+    name = "describe",
+    argument_hint = "<symbol>",
+    description = "Show the docstring for a slash command, tool, primitive, key, or provider",
+  },
+  {
+    name = "apropos",
+    argument_hint = "<pattern>",
+    description = "Search docstrings for a substring (Emacs-style)",
+  },
+  {
+    name = "find-source",
+    argument_hint = "<symbol>",
+    description = "Print the file path that defines a documented symbol",
   },
 }
 
@@ -860,6 +993,15 @@ function M.handle(line)
   end
   if starts_word(line, "/queue") then
     return cmd_queue(arg_after(line, "/queue"))
+  end
+  if starts_word(line, "/describe") then
+    return cmd_describe(arg_after(line, "/describe"))
+  end
+  if starts_word(line, "/apropos") then
+    return cmd_apropos(arg_after(line, "/apropos"))
+  end
+  if starts_word(line, "/find-source") then
+    return cmd_find_source(arg_after(line, "/find-source"))
   end
   if starts_word(line, "/model") then
     local spec = arg_after(line, "/model")

@@ -2612,7 +2612,15 @@ static void psi_vm_register_psi(lua_State *L) {
     psi_vm_register_gc_mt(L, PSI_HTTP_STREAM_MT, lfn_http_stream_gc);
     psi_vm_register_gc_mt(L, PSI_PROCESS_HANDLE_MT, lfn_process_gc);
 
+    lua_newtable(L); /* psi */
+
+    /* Sub-table for host-primitive docstrings: psi.__doc_host[name] = doc.
+     * lua/psi/doc.lua harvests these at boot into psi.doc. Kept as a
+     * sub-table on the psi global so it survives across reloads without
+     * extra plumbing. The "__" prefix is the convention for internal-only
+     * surface — `/describe` reads it but extensions shouldn't rely on it. */
     lua_newtable(L);
+    lua_setfield(L, -2, "__doc_host");
 
 #define PSI_REG(name, fn)                                                                          \
     do {                                                                                           \
@@ -2620,29 +2628,60 @@ static void psi_vm_register_psi(lua_State *L) {
         lua_setfield(L, -2, name);                                                                 \
     } while (0)
 
-    PSI_REG("version", lfn_version);
-    PSI_REG("log", lfn_log);
+/* Register a host primitive AND attach a docstring queryable via
+ * psi.doc.get("name"). The docstring is one line, present-tense, and
+ * describes the contract — not the implementation. Always pass a
+ * non-empty string literal; the Lua side has no NULL handling. */
+#define PSI_REG_DOC(name, fn, doc)                                                                 \
+    do {                                                                                           \
+        lua_pushcfunction(L, fn);                                                                  \
+        lua_setfield(L, -2, name);                                                                 \
+        lua_getfield(L, -1, "__doc_host");                                                         \
+        lua_pushstring(L, doc);                                                                    \
+        lua_setfield(L, -2, name);                                                                 \
+        lua_pop(L, 1);                                                                             \
+    } while (0)
+
+    PSI_REG_DOC("version", lfn_version, "Return psi's version string.");
+    PSI_REG_DOC(
+        "log", lfn_log, "Append one line to the host debug log ($XDG_STATE_HOME/psi/debug.log).");
     PSI_REG("session_message_count", lfn_session_message_count);
-    PSI_REG("read_file", lfn_read_file);
-    PSI_REG("read_file_slice", lfn_read_file_slice);
-    PSI_REG("file_write", lfn_file_write);
+    PSI_REG_DOC("read_file", lfn_read_file,
+        "Read a file off disk. Returns text on success, nil + error string on failure.");
+    PSI_REG_DOC("read_file_slice", lfn_read_file_slice,
+        "Read a [offset, offset+limit) line range from a file without slurping the whole "
+        "file. Returns text plus line/truncation metadata.");
+    PSI_REG_DOC("file_write", lfn_file_write,
+        "Write text to a file (truncating). Creates parent directories if needed.");
     PSI_REG("file_write_secure", lfn_file_write_secure);
     PSI_REG("file_write_atomic", lfn_file_write_atomic);
-    PSI_REG("file_append", lfn_file_append);
-    PSI_REG("tempfile_path", lfn_tempfile_path);
-    PSI_REG("current_date", lfn_current_date);
-    PSI_REG("cwd", lfn_cwd);
-    PSI_REG("parent_directory", lfn_parent_directory);
-    PSI_REG("path_join", lfn_path_join);
-    PSI_REG("path_expand", lfn_path_expand);
-    PSI_REG("path_resolve", lfn_path_resolve);
-    PSI_REG("file_exists", lfn_file_exists);
-    PSI_REG("file_type", lfn_file_type);
-    PSI_REG("list_dir", lfn_list_dir);
-    PSI_REG("mkdir_p", lfn_mkdir_p);
+    PSI_REG_DOC("file_append", lfn_file_append,
+        "Append text to a file in 'ab' mode. Used by tools that spill long output.");
+    PSI_REG_DOC("tempfile_path", lfn_tempfile_path,
+        "Return a unique path under $TMPDIR (or /tmp) without creating the file.");
+    PSI_REG_DOC("current_date", lfn_current_date,
+        "Return the current date as 'YYYY-MM-DD' in the host's local timezone.");
+    PSI_REG_DOC("cwd", lfn_cwd, "Return the host process's current working directory.");
+    PSI_REG_DOC("parent_directory", lfn_parent_directory, "Return the parent directory of a path.");
+    PSI_REG_DOC("path_join", lfn_path_join,
+        "Join a base path and a name with the host's separator, normalizing duplicates.");
+    PSI_REG_DOC("path_expand", lfn_path_expand,
+        "Expand leading '~' and '@' in a path, returning the absolute form.");
+    PSI_REG_DOC("path_resolve", lfn_path_resolve,
+        "Anchor a relative path at the current working directory; absolute paths pass through.");
+    PSI_REG_DOC(
+        "file_exists", lfn_file_exists, "Return true when a path exists in the filesystem.");
+    PSI_REG_DOC("file_type", lfn_file_type,
+        "Return 'file', 'directory', 'other', or nil for the path's stat kind.");
+    PSI_REG_DOC("list_dir", lfn_list_dir,
+        "Return an array of names in a directory, excluding '.' and '..'.");
+    PSI_REG_DOC("mkdir_p", lfn_mkdir_p,
+        "Create a directory and any missing parents; succeeds if the path already exists.");
     PSI_REG("mkdir_parent", lfn_mkdir_parent);
-    PSI_REG("runtime_info", lfn_runtime_info);
-    PSI_REG("time_ms", lfn_time_ms);
+    PSI_REG_DOC("runtime_info", lfn_runtime_info,
+        "Return a table describing compiled-in capabilities (TUI, ANSI, COLOR, REPL_EDITLINE).");
+    PSI_REG_DOC(
+        "time_ms", lfn_time_ms, "Return a monotonic millisecond timestamp; useful for timings.");
     PSI_REG("session_messages", lfn_session_messages);
     PSI_REG("session_messages_from", lfn_session_messages_from);
     PSI_REG("session_token_estimate_from", lfn_session_token_estimate_from);
@@ -2661,23 +2700,34 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("session_set_id", lfn_session_set_id);
     PSI_REG("session_set_path", lfn_session_set_path);
     PSI_REG("session_set_parent_id", lfn_session_set_parent_id);
-    PSI_REG("is_aborted", lfn_is_aborted);
+    PSI_REG_DOC("is_aborted", lfn_is_aborted,
+        "Return true when Ctrl-C/Ctrl-G has fired; long-running Lua should poll this.");
     PSI_REG("abort_trigger", lfn_abort_trigger);
     PSI_REG("abort_reset", lfn_abort_reset);
     PSI_REG("set_usage", lfn_set_usage);
-    PSI_REG("embedded_doc", lfn_embedded_doc);
-    PSI_REG("embedded_doc_names", lfn_embedded_doc_names);
-    PSI_REG("embedded_source", lfn_embedded_source);
+    PSI_REG_DOC("embedded_doc", lfn_embedded_doc,
+        "Return the bytes of a doc embedded into the binary (e.g. 'README.md').");
+    PSI_REG_DOC("embedded_doc_names", lfn_embedded_doc_names,
+        "Return the array of names available to psi.embedded_doc.");
+    PSI_REG_DOC("embedded_source", lfn_embedded_source,
+        "Return the raw Lua source of an embedded module (e.g. 'psi.render').");
     PSI_REG("embedded_source_names", lfn_embedded_source_names);
-    PSI_REG("json_encode", lfn_json_encode);
-    PSI_REG("json_decode", lfn_json_decode);
+    PSI_REG_DOC("json_encode", lfn_json_encode,
+        "Encode a Lua value as JSON. Tables with string keys become objects; numeric become "
+        "arrays.");
+    PSI_REG_DOC("json_decode", lfn_json_decode,
+        "Decode a JSON string into Lua values. Returns nil + error on parse failure.");
     PSI_REG("http_post", lfn_http_post);
     PSI_REG("http_get", lfn_http_get);
     PSI_REG("http_stream_begin", lfn_http_stream_begin);
     PSI_REG("http_stream_poll", lfn_http_stream_poll);
     PSI_REG("http_stream_finish", lfn_http_stream_finish);
-    PSI_REG("tool_call", lfn_tool_call);
-    PSI_REG("readline", lfn_readline);
+    PSI_REG_DOC("tool_call", lfn_tool_call,
+        "Dispatch a tool through the full before/after hook chain. Prefer this over calling "
+        "tool.impl directly, which skips hook processing.");
+    PSI_REG_DOC("readline", lfn_readline,
+        "Prompt for one line of input via libedit (when REPL_EDITLINE=1) or fgets fallback. "
+        "Returns nil on EOF.");
     PSI_REG("add_history", lfn_add_history);
     PSI_REG("stdout_write", lfn_stdout_write);
     PSI_REG("sleep_ms", lfn_sleep_ms);

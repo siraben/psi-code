@@ -1,14 +1,11 @@
--- gen-docs.lua: regenerate the auto-generated sections of psi's docs
--- and emit psi.1.
+-- gen-docs.lua: emit psi.1 and rewrite the @generated:cli-options
+-- region of docs/architecture.md from src/runtime/cli.c.
 --
--- Source of truth lives in Lua (slash commands, keybindings, tools,
--- provider registry) and in C (argtable3 calls in src/runtime/cli.c,
--- PSI_REG calls in src/lua/vm.c). This script introspects those
--- sources and rewrites the regions between
---   <!-- @generated:NAME -->
---   ...
---   <!-- @end -->
--- markers in the relevant markdown files.
+-- Most introspection happens at runtime via psi.doc + /describe +
+-- /apropos (lua/psi/doc.lua). Only the surface that someone needs
+-- *before* installing psi (CLI flags) and the man page (read by
+-- people who have the binary but want quick reference outside the
+-- agent) are pre-rendered into markdown / mdoc.
 --
 -- Run via:
 --   ./build/psi --eval 'dofile("scripts/gen-docs.lua")'
@@ -16,8 +13,6 @@
 -- Or `make docs` / `make check-docs` (the latter asserts no diff).
 
 local slash = require("psi.slash_commands")
-local keybindings = require("psi.keybindings")
-local tools = require("psi.tools")
 local api_registry = require("psi.api_registry")
 
 local M = {}
@@ -62,116 +57,6 @@ local function replace_region(body, name, replacement)
 end
 
 -- -------------------------------------------------------- generators --
-
-local function fmt_aliases(cmd)
-  if not cmd.aliases or #cmd.aliases == 0 then
-    return ""
-  end
-  local parts = {}
-  for _, a in ipairs(cmd.aliases) do
-    if a:sub(1, 1) == ":" then
-      parts[#parts + 1] = a
-    else
-      parts[#parts + 1] = "/" .. a
-    end
-  end
-  return table.concat(parts, ", ")
-end
-
-function M.slash_commands_table()
-  local cmds = slash.builtin_commands()
-  local lines = {
-    "| Command | Aliases | Args | Description |",
-    "|---|---|---|---|",
-  }
-  for _, cmd in ipairs(cmds) do
-    lines[#lines + 1] = string.format(
-      "| `/%s` | %s | %s | %s |",
-      cmd.name,
-      fmt_aliases(cmd) ~= "" and "`" .. fmt_aliases(cmd) .. "`" or "—",
-      cmd.argument_hint and "`" .. cmd.argument_hint .. "`" or "—",
-      cmd.description or ""
-    )
-  end
-  return table.concat(lines, "\n")
-end
-
-function M.keybindings_table()
-  local defs = keybindings.definitions()
-  local sections = {}
-  for _, def in ipairs(defs) do
-    sections[def.section] = sections[def.section] or {}
-    table.insert(sections[def.section], def)
-  end
-  local order = { "Navigation", "Editing", "Other" }
-  local lines = {}
-  for _, section in ipairs(order) do
-    if sections[section] then
-      lines[#lines + 1] = string.format("**%s**", section)
-      lines[#lines + 1] = ""
-      lines[#lines + 1] = "| Action | Default keys | Description |"
-      lines[#lines + 1] = "|---|---|---|"
-      for _, def in ipairs(sections[section]) do
-        local keys = {}
-        for _, k in ipairs(def.default_keys or {}) do
-          keys[#keys + 1] = "`" .. k .. "`"
-        end
-        local key_text = #keys > 0 and table.concat(keys, ", ") or "—"
-        lines[#lines + 1] = string.format(
-          "| `%s` | %s | %s |",
-          def.id,
-          key_text,
-          def.description or ""
-        )
-      end
-      lines[#lines + 1] = ""
-    end
-  end
-  return (table.concat(lines, "\n"):gsub("\n+$", ""))
-end
-
-function M.tools_list()
-  local all = tools.all()
-  local names = {}
-  for _, t in ipairs(all) do
-    names[#names + 1] = t.name
-  end
-  table.sort(names)
-  local lines = {}
-  for _, name in ipairs(names) do
-    local tool = tools.find(name)
-    local desc = tool and tool.description or ""
-    lines[#lines + 1] = string.format("- `%s` — %s", name, desc:match("^[^\n]+") or "")
-  end
-  return table.concat(lines, "\n")
-end
-
-function M.providers_table()
-  local entries = api_registry.all_providers()
-  local lines = {
-    "| Provider | Default model | Model env override |",
-    "|---|---|---|",
-  }
-  for _, entry in ipairs(entries) do
-    local spec = api_registry.provider(entry.name)
-    lines[#lines + 1] = string.format(
-      "| `%s` | `%s` | `%s` |",
-      entry.name,
-      (spec and spec.default_model) or "—",
-      (spec and spec.model_env) or "—"
-    )
-  end
-  return table.concat(lines, "\n")
-end
-
-function M.providers_list_inline()
-  local entries = api_registry.all_providers()
-  local names = {}
-  for _, entry in ipairs(entries) do
-    names[#names + 1] = entry.name
-  end
-  return "`" .. table.concat(names, "`, `") .. "`"
-end
 
 -- ----------------------------------------------------------- C parsing --
 
@@ -233,34 +118,6 @@ function M.cli_options_table()
     lines[#lines + 1] = string.format("| %s | %s | %s |", flag, arg, opt.desc)
   end
   return table.concat(lines, "\n")
-end
-
--- ------------------------------------------------- psi.* primitives --
-
-local function parse_psi_reg(source)
-  local names = {}
-  for name in source:gmatch('PSI_REG%("([%w_]+)"') do
-    names[#names + 1] = name
-  end
-  table.sort(names)
-  return names
-end
-
-function M.psi_primitives_list()
-  local source = read_file("src/lua/vm.c")
-  local names = parse_psi_reg(source)
-  local cols = 3
-  local lines = {}
-  for i = 1, #names, cols do
-    local row = {}
-    for j = 0, cols - 1 do
-      if names[i + j] then
-        row[#row + 1] = "`psi." .. names[i + j] .. "`"
-      end
-    end
-    lines[#lines + 1] = table.concat(row, " · ")
-  end
-  return table.concat(lines, "  \n")
 end
 
 -- ------------------------------------------------------- man page --
@@ -372,20 +229,15 @@ local function update(path, regions)
   print("updated " .. path)
 end
 
+-- The set of regions kept in markdown is deliberately small: just
+-- the things a reader needs *before* installing psi (CLI flags) plus
+-- the man page (read by someone who has the binary but doesn't want
+-- to launch it). Slash commands, tools, keybindings, providers, and
+-- host primitives are all queryable at runtime via /describe and
+-- /apropos — see lua/psi/doc.lua. Don't add a new generated region
+-- for something the running program already knows about itself.
 local function run()
-  update("README.md", {
-    ["builtin-tools"] = M.tools_list(),
-    ["providers-inline"] = M.providers_list_inline(),
-  })
-  update("docs/extensions.md", {
-    ["slash-commands"] = M.slash_commands_table(),
-    ["keybindings"] = M.keybindings_table(),
-  })
-  update("docs/providers.md", {
-    ["providers-table"] = M.providers_table(),
-  })
   update("docs/architecture.md", {
-    ["host-primitives"] = M.psi_primitives_list(),
     ["cli-options"] = M.cli_options_table(),
   })
   write_file("psi.1", M.man_page())

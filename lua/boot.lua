@@ -65,6 +65,13 @@ psi.install_builtin_extensions()
 psi.modes = require("psi.modes")
 psi.markdown = require("psi.markdown")
 
+-- Self-documenting registry. Harvests descriptions from existing
+-- registries (slash commands, tools, keybindings, providers) plus
+-- the C-side PSI_REG_DOC table so /describe and /apropos can work
+-- without any new annotation step on each entry's home file.
+psi.doc = require("psi.doc")
+psi.doc.bootstrap(psi)
+
 local function load_packaged_extension(module_name)
   local ok, ext = pcall(require, module_name)
   if not ok then
