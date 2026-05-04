@@ -456,7 +456,13 @@ local function system_as_blocks(system_prompt)
   if type(system_prompt) == "table" then
     return system_prompt
   end
-  local text = system_prompt or ""
+  -- Anthropic rejects requests whose body contains lone UTF-16
+  -- surrogates with HTTP 400 "str is not valid UTF-8: surrogates not
+  -- allowed". The system prompt is assembled from project-context files
+  -- (AGENTS.md / CLAUDE.md) and tool descriptions, any of which may
+  -- contain bytes the model later echoes back. Match pi-mono's
+  -- anthropic.ts which sanitizes the system prompt as well.
+  local text = prelude.sanitize_surrogates(system_prompt or "")
   local block = { type = "text", text = text }
   if caching_enabled() and text ~= "" then
     block.cache_control = EPHEMERAL
@@ -572,12 +578,15 @@ function M.complete_text(opts)
     io.stderr:write(msg .. "\n")
     return false, msg
   end
+  -- Same surrogate sanitisation as the streaming path; both fields
+  -- arrive on the wire as JSON strings and Anthropic refuses lone
+  -- UTF-16 surrogates anywhere in the body.
   local request = {
     model = resolve_model(opts.model),
     max_tokens = opts.max_tokens or 2048,
-    system = opts.system_prompt or "",
+    system = prelude.sanitize_surrogates(opts.system_prompt or ""),
     messages = prelude.as_array({
-      { role = "user", content = opts.user_text or "" },
+      { role = "user", content = prelude.sanitize_surrogates(opts.user_text or "") },
     }),
     stream = false,
   }
@@ -714,6 +723,9 @@ M._test = {
   finalize_blocks = finalize_blocks,
   state_assistant_text = state_assistant_text,
   build_api_messages = build_api_messages,
+  system_as_blocks = system_as_blocks,
+  pi_content_to_anthropic = pi_content_to_anthropic,
+  tool_result_block = tool_result_block,
 }
 
 return M

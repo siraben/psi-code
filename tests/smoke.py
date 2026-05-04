@@ -1129,6 +1129,29 @@ def t_anthropic_orphan_drop(psi: Psi):
     assert_true(int(parts[1]) >= 1, f"expected at least one wire message: {out!r}")
 
 
+@test("anthropic/strips_surrogates_from_system_prompt")
+def t_anthropic_system_prompt_surrogate(psi: Psi):
+    """system_as_blocks must strip lone UTF-16 surrogate bytes
+    (CESU-8 ED [A0-BF] [80-BF]) from the system prompt before it
+    goes on the wire. Anthropic returns HTTP 400 \"str is not valid
+    UTF-8: surrogates not allowed\" otherwise. Project-context files
+    like AGENTS.md / CLAUDE.md can carry these bytes if a previous
+    tool surfaced them."""
+    out = psi.eval(
+        'local a = require("psi.providers.anthropic")\n'
+        # "hi<U+D800>!" with U+D800 encoded as the 3-byte CESU-8
+        # sequence ED A0 80 — exactly what Anthropic rejects.
+        + 'local raw = "hi\\xED\\xA0\\x80!"\n'
+        + 'local blocks = a._test.system_as_blocks(raw)\n'
+        + 'local b = blocks[1]\n'
+        + 'return tostring(b.type) .. "|" .. b.text .. "|" .. tostring(#b.text)'
+    )
+    btype, text, blen = out.strip().split("|")
+    assert_equals(btype, "text", f"unexpected block type: {out!r}")
+    assert_equals(text, "hi!", f"surrogate not stripped: {out!r}")
+    assert_equals(blen, "3", f"unexpected length after strip: {out!r}")
+
+
 @test("session/ensure_default_path")
 def t_session_default_path(psi: Psi):
     """Without --session, TUI calls psi.session.ensure_default_path
