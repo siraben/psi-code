@@ -2121,6 +2121,37 @@ def t_tui_chat_mode_streams_to_scrollback(psi: Psi):
     )
 
 
+@test("tui/chat_mode_keystroke_does_not_drift")
+def t_tui_chat_mode_keystroke_does_not_drift(psi: Psi):
+    # After a redraw the cursor sits inside the input box, not below the
+    # live region. The next redraw must move up by chat_cursor_offset
+    # (cursor-row to live-region-top), NOT by chat_live_rows. Otherwise
+    # each keystroke shifts the live region up the screen and erases
+    # whatever's above it (the user's shell prompt and scrollback).
+    out = psi.eval(
+        'local rt = require("psi.tui_runtime")\n'
+        + 'local snapshots = rt._debug_chat_redraw_sequence({\n'
+        + '  {kind="set_input", text=""},\n'
+        + '  {kind="set_input", text="a"},\n'
+        + '  {kind="set_input", text="ab"},\n'
+        + '})\n'
+        + 'local s2, s3 = snapshots[2], snapshots[3]\n'
+        + 'local up_seq = "\\27[" .. tostring(snapshots[1].cursor_offset) .. "F"\n'
+        + 'return table.concat({\n'
+        + '  tostring(s2.cursor_offset == snapshots[1].cursor_offset),\n'
+        + '  tostring(s3.cursor_offset == s2.cursor_offset),\n'
+        + '  tostring(s2.cursor_offset > 0),\n'
+        + '  tostring(s2.cursor_offset < s2.live_rows),\n'
+        + '  tostring(s2.output:sub(1, #up_seq) == up_seq),\n'
+        + '}, "|")'
+    )
+    assert_equals(
+        out,
+        "true|true|true|true|true",
+        "chat-mode redraw moves up by cursor offset, keeping live region anchored",
+    )
+
+
 @test("tui/chat_mode_uses_crlf_line_separators")
 def t_tui_chat_mode_uses_crlf_line_separators(psi: Psi):
     # Raw mode disables OPOST, so a bare "\n" is just LF — cursor moves

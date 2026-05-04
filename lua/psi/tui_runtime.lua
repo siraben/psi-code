@@ -579,6 +579,7 @@ local function new_state(opts)
     layout_mode = chat.resolve_mode(opts),
     chat_committed_entry_count = 0,
     chat_live_rows = 0,
+    chat_cursor_offset = 0,
     chat_first_paint = false,
   }
   refresh_input_layout(state)
@@ -1243,6 +1244,7 @@ local function rebuild_from_session(state)
   state.chat_committed_entry_count = 0
   state.chat_first_paint = false
   state.chat_live_rows = 0
+  state.chat_cursor_offset = 0
   state.dirty = true
 end
 
@@ -1575,12 +1577,21 @@ function chat.redraw(state)
   end
 
   -- 1. Erase previous live region or prepare clean line for first paint.
+  --
+  -- After the previous redraw, the cursor sits at the prompt row INSIDE
+  -- the live region (state.chat_cursor_offset rows below the region's
+  -- top). To re-anchor we go up that offset to reach the top, then
+  -- erase from there to end of screen. Using chat_live_rows here would
+  -- overshoot and clobber whatever's above (the user's shell prompt and
+  -- any terminal scrollback).
   if state.chat_first_paint then
-    if state.chat_live_rows > 0 then
-      out[#out + 1] = "\27[" .. state.chat_live_rows .. "F\27[J"
+    local up = tonumber(state.chat_cursor_offset) or 0
+    if up > 0 then
+      out[#out + 1] = "\27[" .. up .. "F"
     else
-      out[#out + 1] = "\r\27[J"
+      out[#out + 1] = "\r"
     end
+    out[#out + 1] = "\27[J"
   else
     out[#out + 1] = "\r\27[J"
     state.chat_first_paint = true
@@ -1725,6 +1736,7 @@ function chat.redraw(state)
   out[#out + 1] = "\27[?25h\27[?2026l"
 
   state.chat_live_rows = #live_lines
+  state.chat_cursor_offset = math.max(0, cursor_target_idx - 1)
   if type(psi.tui_write) == "function" then
     psi.tui_write(table.concat(out))
   end
@@ -4230,6 +4242,7 @@ function M._debug_chat_redraw_sequence(steps)
         output = table.concat(writes),
         committed_entries = state.chat_committed_entry_count,
         live_rows = state.chat_live_rows,
+        cursor_offset = state.chat_cursor_offset,
         entries = #state.entries,
       }
     end
