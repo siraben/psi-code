@@ -211,13 +211,25 @@ end
 local function fit_text(text, width)
   text = tostring(text or "")
   width = math.max(0, tonumber(width) or 0)
-  if #text <= width then
+  if display_width(text) <= width then
     return text
   end
-  if width <= 3 then
-    return text:sub(1, width)
+  local target = width <= 3 and width or (width - 3)
+  if target <= 0 then
+    return ""
   end
-  return text:sub(1, width - 3) .. "..."
+  local cells = 0
+  local n = #text
+  for i = 1, n do
+    local ch = text:byte(i)
+    if (ch & UTF8_CONTINUATION_MASK) ~= UTF8_CONTINUATION_TAG then
+      if cells == target then
+        return width <= 3 and text:sub(1, i - 1) or (text:sub(1, i - 1) .. "...")
+      end
+      cells = cells + 1
+    end
+  end
+  return text
 end
 
 local function current_size()
@@ -377,19 +389,25 @@ local function active_command_completions(state)
   if state.busy or state.cursor ~= #(state.input or "") then
     state.command_completion_index = 1
     state.command_completion_input = nil
+    state.command_completion_items = nil
     return {}
   end
   if not state.input:match("^/[%w%-%_]*$") then
     state.command_completion_index = 1
     state.command_completion_input = nil
+    state.command_completion_items = nil
     return {}
+  end
+  if state.command_completion_input == state.input and state.command_completion_items then
+    return state.command_completion_items
   end
   if state.command_completion_input ~= state.input then
     state.command_completion_input = state.input
     state.command_completion_index = 1
   end
 
-  local items = commands.command_suggestions(state.input, 128)
+  local items = commands.command_suggestions(state.input, 32)
+  state.command_completion_items = items
   if #items == 0 then
     state.command_completion_index = 1
     return items
@@ -411,6 +429,7 @@ local function accept_command_completion(state)
   state.input = next_input
   state.cursor = #state.input
   state.command_completion_input = state.input
+  state.command_completion_items = nil
   state.dirty = true
   return true
 end
@@ -429,8 +448,8 @@ local function format_command_completion(item, selected, width)
 
   local label_width = math.min(28, math.max(12, math.floor((tonumber(width) or 80) * 0.36)))
   label = fit_text(label, label_width)
-  local padded = label .. string.rep(" ", math.max(1, label_width - #label + 1))
-  local desc_width = math.max(0, (tonumber(width) or 80) - #marker - label_width - 2)
+  local padded = label .. string.rep(" ", math.max(1, label_width - display_width(label) + 1))
+  local desc_width = math.max(0, (tonumber(width) or 80) - 2 - label_width - 2)
   desc = fit_text(desc, desc_width)
 
   if selected then
@@ -532,6 +551,7 @@ local function new_state(opts)
     history_search_index = nil,
     command_completion_index = 1,
     command_completion_input = nil,
+    command_completion_items = nil,
     dirty = true,
   }
   refresh_input_layout(state)

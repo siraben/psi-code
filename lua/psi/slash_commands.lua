@@ -588,6 +588,9 @@ local BUILTIN_COMMANDS = {
 }
 
 local registered = {}
+local registered_version = 0
+local registered_sorted_cache = nil
+local registered_sorted_version = -1
 
 local function normalize_command_name(name)
   if type(name) ~= "string" then
@@ -613,6 +616,7 @@ function M.register(name, handler, opts)
     description = opts.description,
     argument_hint = opts.argument_hint or opts["argument-hint"],
   }
+  registered_version = registered_version + 1
 end
 
 function M.unregister(name)
@@ -620,7 +624,10 @@ function M.unregister(name)
   if not name then
     return
   end
-  registered[name] = nil
+  if registered[name] ~= nil then
+    registered[name] = nil
+    registered_version = registered_version + 1
+  end
 end
 
 function M.builtin_commands()
@@ -632,6 +639,9 @@ function M.builtin_commands()
 end
 
 function M.registered_commands()
+  if registered_sorted_cache and registered_sorted_version == registered_version then
+    return registered_sorted_cache
+  end
   local out = {}
   for _, cmd in pairs(registered) do
     out[#out + 1] = {
@@ -643,6 +653,8 @@ function M.registered_commands()
   table.sort(out, function(a, b)
     return a.name < b.name
   end)
+  registered_sorted_cache = out
+  registered_sorted_version = registered_version
   return out
 end
 
@@ -664,6 +676,21 @@ local function command_matches(name, prefix)
   return prefix == "" or name:sub(1, #prefix) == prefix
 end
 
+local prompt_templates_module = nil
+local function get_prompt_templates()
+  if prompt_templates_module == nil then
+    local ok, mod = pcall(require, "psi.prompt_templates")
+    prompt_templates_module = (ok and mod) or false
+  end
+  return prompt_templates_module or nil
+end
+
+local suggestions_cache_text = nil
+local suggestions_cache_limit = nil
+local suggestions_cache_registered_version = -1
+local suggestions_cache_templates_version = -1
+local suggestions_cache_result = nil
+
 function M.command_suggestions(text, limit)
   if type(text) ~= "string" or text:sub(1, 1) ~= "/" then
     return {}
@@ -674,6 +701,19 @@ function M.command_suggestions(text, limit)
   end
 
   limit = tonumber(limit) or 32
+  local templates = get_prompt_templates()
+  local templates_version = (templates and templates.version and templates.version()) or 0
+
+  if
+    suggestions_cache_result
+    and suggestions_cache_text == text
+    and suggestions_cache_limit == limit
+    and suggestions_cache_registered_version == registered_version
+    and suggestions_cache_templates_version == templates_version
+  then
+    return suggestions_cache_result
+  end
+
   local out = {}
   local seen = {}
 
@@ -694,8 +734,7 @@ function M.command_suggestions(text, limit)
     end
   end
 
-  local ok, templates = pcall(require, "psi.prompt_templates")
-  if ok and templates and templates.list then
+  if templates and templates.list then
     for _, tmpl in ipairs(templates.list()) do
       if command_matches(tmpl.name, prefix) then
         append_suggestion(out, seen, tmpl, "prompt", tmpl.name)
@@ -710,13 +749,15 @@ function M.command_suggestions(text, limit)
     return a.name < b.name
   end)
 
-  if #out > limit then
-    local trimmed = {}
-    for i = 1, limit do
-      trimmed[i] = out[i]
-    end
-    return trimmed
+  for i = #out, limit + 1, -1 do
+    out[i] = nil
   end
+
+  suggestions_cache_text = text
+  suggestions_cache_limit = limit
+  suggestions_cache_registered_version = registered_version
+  suggestions_cache_templates_version = templates_version
+  suggestions_cache_result = out
   return out
 end
 

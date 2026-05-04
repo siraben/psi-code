@@ -182,8 +182,13 @@ local function load_from_dir(dir)
   end
 end
 
+local version = 0
+local sorted_cache = nil
+local sorted_cache_version = -1
+
 function M.load()
   templates = {}
+  version = version + 1
   local env_dirs = os.getenv("PSI_PROMPTS_DIR") or ""
   for dir in (env_dirs .. ":"):gmatch("([^:]*):") do
     if dir ~= "" then
@@ -202,7 +207,14 @@ function M.load()
   load_from_dir("./.psi/prompts")
 end
 
+function M.version()
+  return version
+end
+
 function M.list()
+  if sorted_cache and sorted_cache_version == version then
+    return sorted_cache
+  end
   local out = {}
   for _, t in pairs(templates) do
     out[#out + 1] = t
@@ -210,6 +222,8 @@ function M.list()
   table.sort(out, function(a, b)
     return a.name < b.name
   end)
+  sorted_cache = out
+  sorted_cache_version = version
   return out
 end
 
