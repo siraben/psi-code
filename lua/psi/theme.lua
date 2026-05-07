@@ -10,7 +10,7 @@ local registry = {}
 local current_name = nil
 local current_theme = nil
 
-local DEFAULT_THEME_NAME = "midnight-ember"
+local DEFAULT_THEME_NAME = "pi-dark"
 local TUI_SLOTS = {
   "header",
   "accent",
@@ -22,15 +22,39 @@ local TUI_SLOTS = {
 }
 
 local DEFAULT_THEME = {
-  ansi = {},
+  -- pi-mono dark theme color aliases, translated to SGR. See
+  -- /root/pi-mono/packages/coding-agent/src/modes/interactive/theme/dark.json
+  ansi = {
+    ["2"] = "38;2;102;102;102", -- dim #666666
+    ["31"] = "38;2;204;102;102", -- error/red #cc6666
+    ["32"] = "38;2;181;189;104", -- success/green #b5bd68
+    ["33"] = "38;2;255;255;0", -- warning/yellow #ffff00
+    ["34"] = "38;2;95;135;255", -- border/blue #5f87ff
+    ["36"] = "38;2;138;190;183", -- accent #8abeb7
+    ["37"] = "37", -- pi text is default fg; keep white-ish ANSI fallback
+    ["90"] = "38;2;102;102;102", -- dimGray #666666
+    ["96"] = "38;2;0;215;255", -- cyan #00d7ff
+    ["1;36"] = "1;38;2;138;190;183",
+    ["38;5;242"] = "38;2;128;128;128", -- gray/toolOutput #808080
+    ["38;5;245"] = "38;2;128;128;128",
+    ["38;5;81"] = "38;2;0;215;255",
+    ["38;5;108"] = "38;2;181;189;104",
+    ["38;5;174"] = "38;2;204;102;102",
+    ["38;5;221"] = "38;2;255;255;0",
+    ["48;5;236"] = "48;2;40;40;50",
+    ["48;5;22"] = "48;2;40;50;40",
+    ["48;5;52"] = "48;2;60;40;40",
+    ["48;5;237"] = "48;2;58;58;74",
+    ["48;5;238"] = "48;2;52;53;65",
+  },
   tui = {
-    header = { fg = 111, bg = 234 },
-    accent = { fg = 81, bg = 234 },
+    header = { fg = 81, bg = 234 },
+    accent = { fg = 115, bg = 234 },
     text = { fg = 253, bg = 234 },
-    warning = { fg = 223, bg = 234 },
+    warning = { fg = 226, bg = 234 },
     success = { fg = 150, bg = 234 },
-    error = { fg = 210, bg = 234 },
-    chrome = { fg = 245, bg = 234 },
+    error = { fg = 174, bg = 234 },
+    chrome = { fg = 244, bg = 234 },
   },
 }
 
@@ -68,6 +92,8 @@ local function merge(dst, src)
 end
 
 local function normalize(theme)
+  local user_ansi = type(theme) == "table" and type(theme.ansi) == "table" and theme.ansi or {}
+  local user_tui = type(theme) == "table" and type(theme.tui) == "table" and theme.tui or {}
   local merged = merge(deep_copy(DEFAULT_THEME), theme or {})
   for _, slot in ipairs(TUI_SLOTS) do
     local spec = merged.tui[slot] or {}
@@ -77,7 +103,10 @@ local function normalize(theme)
     }
   end
   for code, slot in pairs(ANSI_SLOT_CODES) do
-    if merged.ansi[code] == nil then
+    if user_ansi[code] == nil and user_tui[slot] ~= nil then
+      local fg = merged.tui[slot] and merged.tui[slot].fg or -1
+      merged.ansi[code] = fg >= 0 and ("38;5;" .. tostring(fg)) or code
+    elseif merged.ansi[code] == nil then
       local fg = merged.tui[slot] and merged.tui[slot].fg or -1
       if fg >= 0 then
         merged.ansi[code] = "38;5;" .. tostring(fg)

@@ -3,5 +3,6 @@
 expect = "true|true"
 ]==]
 local out = require("psi.tui_runtime")._debug_tool_call_text_after_assistant()
+local plain = require("psi.tui_text").strip_ansi(out)
 return tostring(out:sub(1, 1) ~= "\n") .. "|"
-  .. tostring(out:find("read README.md", 1, true) ~= nil)
+  .. tostring(plain:find("read README.md", 1, true) ~= nil)

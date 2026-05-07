@@ -1408,7 +1408,7 @@ static void psi_vm_text_wrap_context_free(struct psi_vm_text_wrap_context *ctx) 
 }
 
 static int psi_vm_text_wrap_push_line(struct psi_vm_text_wrap_context *ctx, int final_line) {
-    if (!final_line && ctx->line.len > 0u) {
+    if (!final_line && ctx->line.len > 0u && ctx->active.len > 0u) {
         if (!psi_vm_text_builder_append(
                 &ctx->line, PSI_VM_TEXT_SGR_RESET, sizeof(PSI_VM_TEXT_SGR_RESET) - 1u)) {
             return 0;

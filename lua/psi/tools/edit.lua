@@ -6,26 +6,7 @@ local prelude = require("psi.prelude")
 local path_util = require("psi.path_utils")
 local mutation_queue = require("psi.file_mutation_queue")
 local helpers = require("psi.tool_helpers")
-
-local function apply_edits(text, edits)
-  local current, count = text, 0
-  for _, entry in ipairs(edits) do
-    if type(entry) ~= "table" then
-      return nil, nil
-    end
-    local old_text, new_text = entry.oldText, entry.newText
-    if type(old_text) ~= "string" or type(new_text) ~= "string" then
-      return nil, nil
-    end
-    local next_text = prelude.replace_first(current, old_text, new_text)
-    if not next_text then
-      return nil, nil
-    end
-    current = next_text
-    count = count + 1
-  end
-  return current, count
-end
+local diff = require("psi.diff")
 
 local function impl(input)
   local raw_path = registry.require_string(input, "path")
@@ -42,28 +23,35 @@ local function impl(input)
       return records.tool_failure("edit", "could not read file")
     end
 
-    local edited, replacements
+    local edits_to_apply, replacements
     if type(edits) == "table" and #edits > 0 then
-      edited, replacements = apply_edits(original, edits)
+      edits_to_apply = diff.edits_from_input({ edits = edits })
+      replacements = edits_to_apply and #edits_to_apply or nil
     elseif type(old_text) == "string" and type(new_text) == "string" then
-      edited = prelude.replace_first(original, old_text, new_text)
-      replacements = edited and 1 or nil
+      edits_to_apply = diff.edits_from_input({ oldText = old_text, newText = new_text })
+      replacements = edits_to_apply and 1 or nil
     elseif type(old_text) ~= "string" then
       return records.tool_failure("edit", "missing string field: oldText")
     elseif type(new_text) ~= "string" then
       return records.tool_failure("edit", "missing string field: newText")
     end
 
-    if not edited then
-      return records.tool_failure("edit", "target text not found")
+    if not edits_to_apply then
+      return records.tool_failure("edit", "invalid edits")
     end
-    if not psi.file_write(path, edited) then
+    local preview, preview_err = diff.preview_edits(original, edits_to_apply, raw_path)
+    if not preview then
+      return records.tool_failure("edit", preview_err or "target text not found")
+    end
+    if not psi.file_write(path, preview.output) then
       return records.tool_failure("edit", "could not write full file")
     end
     return records.new_tool_result(true, "edit", nil, {
       path = raw_path,
       resolved_path = path,
       replacements = replacements,
+      diff = preview.diff,
+      firstChangedLine = preview.firstChangedLine,
     })
   end)
 end

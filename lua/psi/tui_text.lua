@@ -293,6 +293,24 @@ function M.byte_index_for_width(text, width)
   return #text
 end
 
+local update_active_from_text
+
+function M.clip_ansi(text, width)
+  text = tostring(text or EMPTY)
+  width = math.max(0, tonumber(width) or 0)
+  if M.visible_width(text) <= width then
+    return text
+  end
+  local byte_index = M.byte_index_for_width(text, width)
+  local clipped = text:sub(1, byte_index)
+  local active = {}
+  update_active_from_text(active, clipped)
+  if #active > 0 then
+    clipped = clipped .. ESC .. "[0m"
+  end
+  return clipped
+end
+
 local function is_space_cluster(cluster)
   local byte = cluster ~= nil and cluster:byte(1) or nil
   return byte == BYTE_SPACE or byte == BYTE_TAB
@@ -320,7 +338,7 @@ local function update_active_sgr(active, seq)
   active[#active + 1] = seq
 end
 
-local function update_active_from_text(active, text)
+update_active_from_text = function(active, text)
   local i = 1
   while i <= #text do
     local seq, next_i = read_escape(text, i)
@@ -349,7 +367,7 @@ function M.wrap_ansi(text, width)
 
   local function emit_line()
     local rendered = table.concat(line)
-    if rendered ~= "" then
+    if rendered ~= "" and #active > 0 then
       rendered = rendered .. ESC .. "[0m"
     end
     lines[#lines + 1] = rendered

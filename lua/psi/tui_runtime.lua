@@ -4,13 +4,14 @@ local commands = require("psi.slash_commands")
 local context = require("psi.context")
 local markdown = require("psi.markdown")
 local prelude = require("psi.prelude")
+local records = require("psi.records")
 local render = require("psi.render")
 local sched = require("psi.sched")
 local session = require("psi.session_manager")
 local settings = require("psi.settings_manager")
 local tui = require("psi.tui_status")
-local tui_chrome = require("psi.tui_components.chrome")
 local tui_markdown = require("psi.tui_components.markdown")
+local tool_execution = require("psi.tui_components.tool_execution")
 local tui_component = require("psi.tui_component")
 local tui_layout = require("psi.tui_layout")
 local tui_renderer = require("psi.tui_renderer")
@@ -20,6 +21,17 @@ local M = {}
 
 local MAX_RENDER_TEXT = 8192
 local MAX_RENDER_TRUNCATION_SUFFIX = "\n\n[output truncated]"
+local MAX_COMMAND_COMPLETION_ROWS = 6
+local PI_STYLE = {
+  bg_tool_error = "48;5;52",
+  bg_tool_pending = "48;5;236",
+  bg_tool_success = "48;5;22",
+  bg_selected = "48;5;237",
+  bg_user_message = "48;5;238",
+  border = "34",
+  erase_to_eol = "\27[K",
+  sgr_reset = "\27[0m",
+}
 
 local DEFAULT_WIDTH = 80
 local DEFAULT_HEIGHT = 24
@@ -28,26 +40,28 @@ local MIN_HEIGHT = 12
 local PROMPT_RESERVED_ROWS = 6
 local FRAME_WIDTH_MARGIN = 1
 
-local BYTE_TAB = 9
-local BYTE_LF = 10
-local BYTE_VTAB = 11
-local BYTE_FF = 12
-local BYTE_CR = 13
-local BYTE_ESC = 27
-local BYTE_SPACE = 32
-local BYTE_BEL = 7
-local BYTE_BACKSLASH = 92
-local BYTE_DEL = 127
-local BYTE_CSI_FINAL_START = 64
-local BYTE_CSI_FINAL_END = 126
-local CHAR_CSI = "["
-local CHAR_DCS = "P"
-local CHAR_OSC = "]"
-local CHAR_PM = "^"
-local CHAR_APC = "_"
-local CHAR_ST = "\\"
-local SETTING_PROMPT_MAX_ROWS = "tui.prompt.max_rows"
-local BUSY_ANIMATION_INTERVAL_MS = 600
+local TUI_CONST = {
+  busy_animation_interval_ms = 600,
+  byte_bel = 7,
+  byte_backslash = 92,
+  byte_cr = 13,
+  byte_csi_final_end = 126,
+  byte_csi_final_start = 64,
+  byte_del = 127,
+  byte_esc = 27,
+  byte_ff = 12,
+  byte_lf = 10,
+  byte_space = 32,
+  byte_tab = 9,
+  byte_vtab = 11,
+  char_apc = "_",
+  char_csi = "[",
+  char_dcs = "P",
+  char_osc = "]",
+  char_pm = "^",
+  char_st = "\\",
+  setting_prompt_max_rows = "tui.prompt.max_rows",
+}
 
 -- Bundled chat-layout helpers. Single local keeps tui_runtime under Lua's
 -- 200-locals-per-function chunk limit.
@@ -99,12 +113,12 @@ local function clamp(value, low, high)
 end
 
 local function is_space_byte(b)
-  return b == BYTE_SPACE
-    or b == BYTE_TAB
-    or b == BYTE_LF
-    or b == BYTE_VTAB
-    or b == BYTE_FF
-    or b == BYTE_CR
+  return b == TUI_CONST.byte_space
+    or b == TUI_CONST.byte_tab
+    or b == TUI_CONST.byte_lf
+    or b == TUI_CONST.byte_vtab
+    or b == TUI_CONST.byte_ff
+    or b == TUI_CONST.byte_cr
 end
 
 local function trim_trailing_newlines(text)
@@ -128,10 +142,10 @@ local function find_string_terminator(text, start)
   local i = start
   while i <= #text do
     local byte = text:byte(i)
-    if byte == BYTE_BEL then
+    if byte == TUI_CONST.byte_bel then
       return i + 1
     end
-    if byte == BYTE_ESC and text:byte(i + 1) == BYTE_BACKSLASH then
+    if byte == TUI_CONST.byte_esc and text:byte(i + 1) == TUI_CONST.byte_backslash then
       return i + 2
     end
     i = i + 1
@@ -143,7 +157,7 @@ local function find_csi_terminator(text, start)
   local i = start
   while i <= #text do
     local byte = text:byte(i)
-    if byte >= BYTE_CSI_FINAL_START and byte <= BYTE_CSI_FINAL_END then
+    if byte >= TUI_CONST.byte_csi_final_start and byte <= TUI_CONST.byte_csi_final_end then
       return i + 1
     end
     i = i + 1
@@ -151,7 +165,7 @@ local function find_csi_terminator(text, start)
   return #text + 1
 end
 
-local function sanitize_terminal_text(text, preserve_newlines)
+local function sanitize_terminal_text(text, preserve_newlines, preserve_line_erase, preserve_sgr)
   text = tostring(text or EMPTY)
   if preserve_newlines then
     if text:find("[\0-\9\11-\31\127]") == nil then
@@ -166,25 +180,34 @@ local function sanitize_terminal_text(text, preserve_newlines)
   while i <= #text do
     local byte = text:byte(i)
     local next_char = text:sub(i + 1, i + 1)
-    if byte == BYTE_ESC then
-      if next_char == CHAR_CSI then
-        i = find_csi_terminator(text, i + 2)
+    if byte == TUI_CONST.byte_esc then
+      if next_char == TUI_CONST.char_csi then
+        local csi_end = find_csi_terminator(text, i + 2)
+        -- Preserve SGR (m-terminated) codes verbatim so foreground,
+        -- background, bold, dim, etc. survive into the rendered TUI
+        -- buffer. Drop every other CSI (cursor moves, scroll, etc.)
+        -- because they would corrupt our line-based layout.
+        local terminator = text:sub(csi_end - 1, csi_end - 1)
+        if (preserve_sgr and terminator == "m") or (preserve_line_erase and terminator == "K") then
+          out[#out + 1] = text:sub(i, csi_end - 1)
+        end
+        i = csi_end
       elseif
-        next_char == CHAR_OSC
-        or next_char == CHAR_DCS
-        or next_char == CHAR_PM
-        or next_char == CHAR_APC
+        next_char == TUI_CONST.char_osc
+        or next_char == TUI_CONST.char_dcs
+        or next_char == TUI_CONST.char_pm
+        or next_char == TUI_CONST.char_apc
       then
         i = find_string_terminator(text, i + 2)
-      elseif next_char == CHAR_ST then
+      elseif next_char == TUI_CONST.char_st then
         i = i + 2
       else
         i = i + 2
       end
-    elseif byte == BYTE_LF and preserve_newlines then
+    elseif byte == TUI_CONST.byte_lf and preserve_newlines then
       out[#out + 1] = NEWLINE
       i = i + 1
-    elseif byte < BYTE_SPACE or byte == BYTE_DEL then
+    elseif byte < TUI_CONST.byte_space or byte == TUI_CONST.byte_del then
       out[#out + 1] = " "
       i = i + 1
     else
@@ -203,14 +226,86 @@ local function limit_text(text)
   return text:sub(1, MAX_RENDER_TEXT) .. MAX_RENDER_TRUNCATION_SUFFIX
 end
 
-local function limit_live_tool_progress_text(text)
-  text = text or EMPTY
-  if #text <= MAX_RENDER_TEXT then
-    return text
+M._live_progress = {}
+
+function M._live_progress.clip_line(line)
+  line = tostring(line or EMPTY)
+  if #line <= 1000 then
+    return line
   end
-  local prefix = "[earlier output truncated]\n\n"
-  local keep = math.max(0, MAX_RENDER_TEXT - #prefix)
-  return prefix .. text:sub(#text - keep + 1)
+  local prefix = "[earlier output truncated] "
+  local keep = math.max(0, 1000 - #prefix)
+  return prefix .. line:sub(#line - keep + 1)
+end
+
+function M._live_progress.push_line(entry, line)
+  entry.progress_lines = entry.progress_lines or {}
+  entry.progress_total_lines = (entry.progress_total_lines or 0) + 1
+  entry.progress_lines[#entry.progress_lines + 1] = M._live_progress.clip_line(line)
+  while #entry.progress_lines > 8 do
+    table.remove(entry.progress_lines, 1)
+  end
+end
+
+function M._live_progress.display(entry)
+  local lines = {}
+  for _, line in ipairs(entry.progress_lines or {}) do
+    lines[#lines + 1] = line
+  end
+  local partial = entry.progress_partial or EMPTY
+  local total = entry.progress_total_lines or 0
+  if partial ~= EMPTY then
+    lines[#lines + 1] = M._live_progress.clip_line(partial)
+    total = total + 1
+  end
+  while #lines > 8 do
+    table.remove(lines, 1)
+  end
+  local omitted = math.max(0, total - #lines)
+  local body = table.concat(lines, NEWLINE)
+  if omitted > 0 then
+    local shown = #lines
+    local header = "[Showing last "
+      .. tostring(shown)
+      .. " of "
+      .. tostring(total)
+      .. " lines; earlier output truncated]"
+    return body ~= EMPTY and (header .. NEWLINE .. NEWLINE .. body) or header
+  end
+  return body
+end
+
+function M._live_progress.update(entry, chunk, replace)
+  if replace then
+    entry.progress_lines = {}
+    entry.progress_partial = EMPTY
+    entry.progress_total_lines = 0
+  end
+  chunk = tostring(chunk or EMPTY)
+  if chunk == EMPTY then
+    return M._live_progress.display(entry)
+  end
+  entry.progress_lines = entry.progress_lines or {}
+  entry.progress_partial = entry.progress_partial or EMPTY
+  entry.progress_total_lines = entry.progress_total_lines or 0
+
+  local text = entry.progress_partial .. chunk
+  local start = 1
+  while true do
+    local nl = text:find(NEWLINE, start, true)
+    if not nl then
+      entry.progress_partial = text:sub(start)
+      break
+    end
+    M._live_progress.push_line(entry, text:sub(start, nl - 1))
+    start = nl + 1
+  end
+  return M._live_progress.display(entry)
+end
+
+local function limit_live_tool_progress_text(text)
+  local entry = {}
+  return M._live_progress.update(entry, text or EMPTY, true)
 end
 
 local function fit_text(text, width)
@@ -225,6 +320,46 @@ local function fit_text(text, width)
   end
   local byte_index = tui_text.byte_index_for_width(text, target)
   return width <= 3 and text:sub(1, byte_index) or (text:sub(1, byte_index) .. "...")
+end
+
+local function apply_bg_line(bg_code, text)
+  text = tostring(text or "")
+  if not ansi.enabled or not ansi.color_enabled then
+    return text
+  end
+  local bg = "\27[" .. ansi.resolve(bg_code) .. "m"
+  text = text:gsub("\27%[0m", PI_STYLE.sgr_reset .. bg)
+  return bg .. text .. PI_STYLE.erase_to_eol .. PI_STYLE.sgr_reset
+end
+
+local function render_boxed_lines(source_lines, width, bg_code, padding_x, padding_y)
+  width = math.max(1, tonumber(width) or 1)
+  padding_x = math.max(0, tonumber(padding_x) or 0)
+  padding_y = math.max(0, tonumber(padding_y) or 0)
+  source_lines = type(source_lines) == "table" and source_lines or {}
+  local content_width = math.max(1, width - (padding_x * 2))
+  local pad = string.rep("", 0)
+  if padding_x > 0 then
+    pad = string.rep(" ", padding_x)
+  end
+  local out = {}
+  for _ = 1, padding_y do
+    out[#out + 1] = apply_bg_line(bg_code, string.rep(" ", width))
+  end
+  for _, line in ipairs(source_lines) do
+    local clipped = line
+    if display_width(clipped) > content_width then
+      local limit = tui_text.byte_index_for_width(clipped, content_width)
+      clipped = clipped:sub(1, limit)
+    end
+    local text = pad .. clipped
+    text = text .. string.rep(" ", math.max(0, width - display_width(text)))
+    out[#out + 1] = apply_bg_line(bg_code, text)
+  end
+  for _ = 1, padding_y do
+    out[#out + 1] = apply_bg_line(bg_code, string.rep(" ", width))
+  end
+  return out
 end
 
 local function current_size()
@@ -309,7 +444,7 @@ local function refresh_input_layout(state)
     height = state.height,
     busy = state.busy,
     scroll = state.scroll_offset,
-    max_rows = settings.get(SETTING_PROMPT_MAX_ROWS, nil),
+    max_rows = settings.get(TUI_CONST.setting_prompt_max_rows, nil),
   }
   local layout = tui_layout.input_layout_table and tui_layout.input_layout_table(arg)
     or safe_decode(tui_layout.input_layout(psi.json_encode(arg)), {})
@@ -349,7 +484,7 @@ local function build_input_lines(state)
 
   while true do
     local line_end = pos
-    while line_end < input_length and input:byte(line_end + 1) ~= BYTE_LF do
+    while line_end < input_length and input:byte(line_end + 1) ~= TUI_CONST.byte_lf do
       line_end = line_end + 1
     end
 
@@ -479,10 +614,10 @@ local function entry_prefixes(entry)
     return EMPTY, EMPTY
   end
   if kind == "tool_call" then
-    return "╭─ ", "│  "
+    return EMPTY, EMPTY
   end
   if kind == "tool_result" then
-    return "│  ", "│  "
+    return EMPTY, EMPTY
   end
   if kind == "error" then
     return "error: ", EMPTY
@@ -497,17 +632,42 @@ local function is_fence_line(text)
   return text:match("^%s*```") ~= nil or text:match("^%s*~~~") ~= nil
 end
 
+-- Returns a byte index in `text` such that text:sub(1, idx) fits in
+-- `width` display columns. SGR (m-terminated CSI) sequences embedded
+-- in the text are skipped over for column counting but kept in place,
+-- so colored output still wraps on visual cell boundaries.
 local function find_break(text, width)
-  if #text <= width then
+  local UTF8_CONTINUATION_MASK = 0xc0
+  local UTF8_CONTINUATION_TAG = 0x80
+
+  if #text <= width and display_width(text) <= width then
     return #text
   end
-  for i = width, 1, -1 do
+  local last_break = nil
+  local cells = 0
+  local i = 1
+  while i <= #text do
     local b = text:byte(i)
-    if b ~= nil and is_space_byte(b) then
-      return i
+    if b == TUI_CONST.byte_esc and text:sub(i + 1, i + 1) == TUI_CONST.char_csi then
+      local j = i + 2
+      while j <= #text and text:sub(j, j) ~= "m" do
+        j = j + 1
+      end
+      i = j < #text and (j + 1) or (#text + 1)
+    else
+      if (b & UTF8_CONTINUATION_MASK) ~= UTF8_CONTINUATION_TAG then
+        cells = cells + 1
+      end
+      if cells > width then
+        return last_break or (i - 1)
+      end
+      if b ~= nil and is_space_byte(b) then
+        last_break = i
+      end
+      i = i + 1
     end
   end
-  return width
+  return #text
 end
 
 local clear_selection
@@ -787,6 +947,14 @@ local function add_entry(state, kind, text, title, is_error, tool_call_id)
   return #state.entries
 end
 
+local function add_component_entry(state, kind, component, title, is_error, tool_call_id)
+  local index = add_entry(state, kind, "", title, is_error, tool_call_id)
+  state.entries[index].component = component
+  state.entries[index].render_cache_width = nil
+  state.entries[index].render_cache_lines = nil
+  return index
+end
+
 local function entry_text(entry)
   if not entry then
     return ""
@@ -805,6 +973,7 @@ local function set_entry_text(state, index, text)
   local entry = state.entries[index]
   entry.text = text or ""
   entry.text_parts = nil
+  entry.component = nil
   entry.render_cache_width = nil
   entry.render_cache_lines = nil
   invalidate_render_totals(state)
@@ -863,6 +1032,31 @@ local function find_entry_by_tool_id(state, kind, tool_call_id)
   return nil
 end
 
+local function recolor_tool_call_block(state, tool_call_id, is_error)
+  local component_index = find_entry_by_tool_id(state, "tool_execution", tool_call_id)
+  local component_entry = component_index and state.entries[component_index] or nil
+  if component_entry and component_entry.component then
+    component_entry.is_error = not not is_error
+    component_entry.render_cache_width = nil
+    component_entry.render_cache_lines = nil
+    invalidate_render_totals(state)
+    state.dirty = true
+    return
+  end
+  local index = find_entry_by_tool_id(state, "tool_call", tool_call_id)
+  local entry = index and state.entries[index] or nil
+  if not entry then
+    return
+  end
+  local target = ansi.resolve(is_error and PI_STYLE.bg_tool_error or PI_STYLE.bg_tool_success)
+  local text = entry_text(entry)
+  for _, bg in ipairs({ PI_STYLE.bg_tool_pending, PI_STYLE.bg_tool_success, PI_STYLE.bg_tool_error }) do
+    local resolved_bg = ansi.resolve(bg)
+    text = text:gsub("\27%[" .. resolved_bg:gsub(";", "%%;") .. "m", "\27[" .. target .. "m")
+  end
+  set_entry_text(state, index, text)
+end
+
 local function finish_streaming_assistant(state)
   local index = state.streaming_assistant_index
   if index ~= nil and state.entries[index] and entry_text(state.entries[index]) == "" then
@@ -879,16 +1073,26 @@ local function discard_empty_streaming_assistant(state)
   end
 end
 
-local function render_event_plain(event, payload)
+local function render_event_plain(event, payload, allow_empty)
   local ok, text = pcall(render.handle_event, event, payload or {})
   if not ok then
     return nil
   end
-  text = limit_text(trim_edge_newlines(strip_ansi(text or "")))
+  -- Keep SGR styling from render.lua's pi-mono tool renderers; the
+  -- line sanitizer below preserves SGR and drops layout-affecting CSI.
+  text = limit_text(trim_edge_newlines(text or ""))
   if text == "" then
-    return nil
+    return allow_empty and "" or nil
   end
   return text
+end
+
+local function render_event_details(event, payload)
+  local ok, text, replaced = pcall(render.handle_event_details, event, payload or {})
+  if not ok then
+    return nil, false
+  end
+  return text, not not replaced
 end
 
 local function format_tool_call(tool_name, input)
@@ -961,16 +1165,83 @@ local function tool_result_text(tool_call_id, tool_name, result)
     id = tool_call_id or "",
     tool = tool_name or "tool",
     result = result or {},
-  })
-  if rendered and rendered ~= "" then
+  }, true)
+  if rendered ~= nil then
     return rendered, result ~= nil and result.ok == false
   end
   return format_tool_result(tool_name or "tool", result)
 end
 
+local function new_tool_execution_component(tool_call_id, tool_name, input, opts)
+  opts = opts or {}
+  local payload = {
+    id = tool_call_id or "",
+    tool = tool_name or "tool",
+    input = input or {},
+  }
+  if opts.capture ~= false then
+    pcall(render.handle_event, "tool-call", payload)
+  end
+  return tool_execution.new({
+    id = payload.id,
+    tool = payload.tool,
+    input = payload.input,
+    frame = payload.id ~= "" and render.lookup_frame(payload.id) or nil,
+  })
+end
+
+local function update_tool_execution_component(entry, result, is_partial)
+  if not entry or not entry.component or type(entry.component.set_result) ~= "function" then
+    return false
+  end
+  entry.component:set_result(records.tool_result_from_alist(result or {}), is_partial)
+  entry.is_error = result ~= nil and result.ok == false
+  entry.render_cache_width = nil
+  entry.render_cache_lines = nil
+  return true
+end
+
+local function persisted_tool_result_payload(message, content_text)
+  message = type(message) == "table" and message or {}
+  local payload = safe_decode(content_text, nil)
+  if type(payload) ~= "table" then
+    return {
+      ok = not message.isError,
+      error = message.isError and content_text or nil,
+      output = content_text,
+      result = content_text,
+    }
+  end
+  -- Stored Codex tool results are often JSON strings inside text blocks.
+  -- Decode them so replay renders the actual output instead of raw JSON.
+  if message.isError then
+    payload.ok = false
+    payload.error = payload.error or content_text
+  elseif payload.ok == nil then
+    payload.ok = true
+  end
+  return payload
+end
+
 local function entry_render_lines(state, entry)
   if entry.render_cache_width == state.width and entry.render_cache_lines ~= nil then
     return entry.render_cache_lines
+  end
+
+  if entry.component ~= nil and type(entry.component.render) == "function" then
+    local rendered = entry.component:render(state.width)
+    local lines = {}
+    for _, line in ipairs(rendered) do
+      lines[#lines + 1] = {
+        kind = "ansi",
+        text = line,
+        raw = strip_ansi(line),
+        entry = entry,
+      }
+    end
+    entry.render_cache_width = state.width
+    entry.render_cache_lines = lines
+    return lines
   end
 
   if entry.kind == "ansi" then
@@ -1017,9 +1288,35 @@ local function entry_render_lines(state, entry)
     return lines
   end
 
+  if entry.kind == "user" then
+    local trimmed = sanitize_terminal_text(trim_trailing_newlines(entry_text(entry)), true)
+    entry.markdown_component = entry.markdown_component or tui_markdown.new()
+    entry.markdown_component:set_text(trimmed)
+    entry.markdown_component:set_prefixes("", "")
+    local rendered = entry.markdown_component:render(math.max(1, state.width - 1))
+    local boxed = render_boxed_lines(rendered, state.width, PI_STYLE.bg_user_message, 1, 1)
+    local lines = {}
+    for _, line in ipairs(boxed) do
+      lines[#lines + 1] = {
+        kind = "ansi",
+        text = line,
+        raw = strip_ansi(line),
+        entry = entry,
+      }
+    end
+    entry.render_cache_width = state.width
+    entry.render_cache_lines = lines
+    return lines
+  end
+
   local lines = {}
   local first_prefix, rest_prefix = entry_prefixes(entry)
-  local trimmed = sanitize_terminal_text(trim_trailing_newlines(entry_text(entry)), true)
+  local trimmed = sanitize_terminal_text(
+    trim_trailing_newlines(entry_text(entry)),
+    true,
+    entry.kind == "tool_call" or entry.kind == "tool_result",
+    entry.kind == "tool_call" or entry.kind == "tool_result"
+  )
   local prefix = first_prefix
   local cursor = 1
   local fence_state = false
@@ -1082,7 +1379,6 @@ local function flattened_render_lines(state)
   local total = 0
   for i, entry in ipairs(state.entries) do
     local prev = state.entries[i - 1]
-    local next_entry = state.entries[i + 1]
     local same_panel_as_prev = (prev and prev.kind == "tool_call" and entry.kind == "tool_result")
       or (prev and prev.kind == "tool_result" and entry.kind == "tool_result")
     if total > 0 and not same_panel_as_prev then
@@ -1093,10 +1389,6 @@ local function flattened_render_lines(state)
     for j = 1, #entry_lines do
       total = total + 1
       lines[total] = entry_lines[j]
-    end
-    if entry.kind == "tool_result" and (not next_entry or next_entry.kind ~= "tool_result") then
-      total = total + 1
-      lines[total] = { kind = "panel_close", text = "╰─" }
     end
   end
   state.flat_cache_width = state.width
@@ -1161,10 +1453,15 @@ local function add_session_entry(state, msg)
             add_entry(state, "assistant", block.text)
             added_text = true
           elseif block.type == "toolCall" then
-            add_entry(
+            add_component_entry(
               state,
-              "tool_call",
-              tool_call_text(block.id, block.name, block.arguments or {}),
+              "tool_execution",
+              new_tool_execution_component(
+                block.id,
+                block.name,
+                block.arguments or {},
+                { capture = false }
+              ),
               block.name,
               false,
               block.id
@@ -1206,13 +1503,21 @@ local function add_session_entry(state, msg)
         content_text = table.concat(parts)
       end
     end
-    local result_text, is_error = tool_result_text(message.toolCallId, message.toolName, {
-      ok = not message.isError,
-      error = message.isError and content_text or nil,
-      output = content_text,
-      result = content_text,
-    })
-    add_entry(state, "tool_result", result_text, message.toolName, is_error, message.toolCallId)
+    local payload = persisted_tool_result_payload(message, content_text)
+    local tool_name = message.toolName or payload.tool
+    local component_index = find_entry_by_tool_id(state, "tool_execution", message.toolCallId)
+    if component_index ~= nil and state.entries[component_index] then
+      local entry = state.entries[component_index]
+      entry.title = tool_name
+      update_tool_execution_component(entry, payload, false)
+      invalidate_render_totals(state)
+      return
+    end
+    local result_text, is_error = tool_result_text(message.toolCallId, tool_name, payload)
+    recolor_tool_call_block(state, message.toolCallId, is_error)
+    if result_text and result_text ~= "" then
+      add_entry(state, "tool_result", result_text, tool_name, is_error, message.toolCallId)
+    end
     return
   end
 
@@ -1255,31 +1560,16 @@ local function style_line(line)
     return ansi.bold(ansi.cyan(line.text))
   end
   if line.kind == "tool_call" then
-    return ansi.yellow(line.text)
+    -- render.lua's pi-mono renderers emit fully styled SGR text already
+    -- (bold title, accent path, muted output, colored background).
+    -- Pass through unchanged so we don't double-paint over our own colors.
+    return line.text
   end
   if line.kind == "btw" then
     return ansi.yellow(line.text)
   end
   if line.kind == "tool_result" then
-    local title = line.entry.title
-    if title == "write" or title == "edit" then
-      if line.raw:sub(1, 2) == "+ " then
-        return ansi.bold(ansi.green(line.text))
-      end
-      if line.raw:sub(1, 2) == "- " then
-        return ansi.bold(ansi.red(line.text))
-      end
-      if line.raw:sub(1, 2) == "  " then
-        return ansi.dim(line.text)
-      end
-    end
-    if line.entry.is_error then
-      return ansi.red(line.text)
-    end
-    return ansi.green(line.text)
-  end
-  if line.kind == "panel_close" then
-    return ansi.yellow(line.text)
+    return line.text
   end
   if line.kind == "error" then
     return ansi.bold(ansi.red(line.text))
@@ -1319,7 +1609,8 @@ local function layout_rows(state)
   local command_completions = active_command_completions(state)
   local completion_anchor_row = status_visible and (status_row - 1) or (input_start_row - 1)
   local max_completion_rows = math.max(0, completion_anchor_row - transcript_start)
-  local command_completion_rows = math.min(#command_completions, 6, max_completion_rows)
+  local command_completion_rows =
+    math.min(#command_completions, MAX_COMMAND_COMPLETION_ROWS, max_completion_rows)
   local command_completion_first = 1
   if command_completion_rows > 0 then
     command_completion_first = (state.command_completion_index or 1) - command_completion_rows + 1
@@ -1385,7 +1676,7 @@ local function style_input_fill(width)
 end
 
 local function style_input_border(width)
-  return ansi.gray(string.rep("─", math.max(0, width)))
+  return ansi.color(PI_STYLE.border, string.rep("─", math.max(0, width)))
 end
 
 local function input_box_line(content, width)
@@ -1397,6 +1688,30 @@ end
 local render_input_text
 local render_input_text_with_cursor
 local input_line_selected
+
+local function ensure_frame_components(state)
+  if state.frame_components ~= nil then
+    return state.frame_components
+  end
+  local frame = {
+    workspace = tui_component.block({}, { pad = true }),
+    transcript = tui_component.block({}, { pad = true }),
+    completions = tui_component.block({}, { pad = true }),
+    status = tui_component.block({}, { pad = true }),
+    input = tui_component.block({}, { pad = true }),
+    footer = tui_component.block({}, { pad = true }),
+  }
+  frame.root = tui_component.container({
+    frame.workspace,
+    frame.transcript,
+    frame.completions,
+    frame.status,
+    frame.input,
+    frame.footer,
+  })
+  state.frame_components = frame
+  return frame
+end
 
 local function redraw(state)
   if state.layout_mode == chat.CHAT then
@@ -1412,7 +1727,7 @@ local function redraw(state)
   local status_arg
   local status_text = ""
   local cwd
-  local components = {}
+  local frame = ensure_frame_components(state)
   local frame_width
 
   state.scroll_offset = clamp(state.scroll_offset, 0, max_scroll)
@@ -1423,9 +1738,9 @@ local function redraw(state)
   end
   frame_width = math.max(1, state.width)
   cwd = psi.cwd() or "."
-  components[#components + 1] = tui_chrome.line(function(width)
-    return tui.compose_bar(tui.workspace_bar_for_width(cwd, width), width)
-  end)
+  frame.workspace:set_lines({
+    tui.compose_bar(tui.workspace_bar_for_width(cwd, frame_width), frame_width),
+  })
 
   local first_line = total_lines - rows.transcript_height - state.scroll_offset + 1
   if first_line < 1 then
@@ -1437,7 +1752,7 @@ local function redraw(state)
     local line = transcript_lines[i + 1]
     transcript_component_lines[#transcript_component_lines + 1] = line and style_line(line) or ""
   end
-  components[#components + 1] = tui_chrome.transcript(transcript_component_lines)
+  frame.transcript:set_lines(transcript_component_lines)
 
   if rows.command_completion_rows > 0 then
     local completion_lines = {}
@@ -1450,7 +1765,9 @@ local function redraw(state)
         frame_width
       )
     end
-    components[#components + 1] = tui_component.fixed(completion_lines)
+    frame.completions:set_lines(completion_lines)
+  else
+    frame.completions:set_lines({})
   end
 
   status_arg = {
@@ -1478,9 +1795,9 @@ local function redraw(state)
     )
   end
   if rows.status_visible then
-    components[#components + 1] = tui_chrome.line(function()
-      return status_text
-    end)
+    frame.status:set_lines({ status_text })
+  else
+    frame.status:set_lines({})
   end
 
   local input_width = frame_width
@@ -1498,7 +1815,7 @@ local function redraw(state)
     end
     local input_text
     if input_line_selected and input_line_selected(state, line) then
-      input_text = ansi.color("7", input_box_line(prefix .. text, input_width))
+      input_text = apply_bg_line(PI_STYLE.bg_selected, input_box_line(prefix .. text, input_width))
     else
       input_text = input_box_line(
         style_input_prefix(prefix, line_index == 1)
@@ -1512,11 +1829,9 @@ local function redraw(state)
     input_component_lines[#input_component_lines + 1] = input_text
   end
   input_component_lines[#input_component_lines + 1] = style_input_border(input_width)
-  components[#components + 1] = tui_chrome.input_box(input_component_lines)
+  frame.input:set_lines(input_component_lines)
 
-  components[#components + 1] = tui_chrome.line(function(width)
-    return tui.compose_bar(tui.status_bar(status_arg) or "", width)
-  end)
+  frame.footer:set_lines({ tui.compose_bar(tui.status_bar(status_arg) or "", frame_width) })
   local visible_cursor_line = rows.cursor_line - rows.input_first_line + 1
   local cursor_prefix = rows.cursor_line == 1 and state.input_layout.prefix_first
     or state.input_layout.prefix_rest
@@ -1525,8 +1840,7 @@ local function redraw(state)
   cursor_row = clamp(cursor_row, rows.input_start_row + 1, rows.input_start_row + rows.input_rows)
   cursor_col = clamp(cursor_col, 1, math.max(1, state.width))
 
-  local root = tui_component.stack(components)
-  local frame_lines = root:render(frame_width)
+  local frame_lines = frame.root:render(frame_width)
   local frame_height = #frame_lines
   local viewport_top = math.max(1, (state.terminal_height or state.height) - frame_height + 1)
   state.renderer = state.renderer:render({
@@ -2474,15 +2788,26 @@ local function observer_tool_call(state, tool_call_id, tool_name, input_json)
   local input = safe_decode(input_json, {})
   finish_streaming_assistant(state)
   state.streaming_thinking_index = nil
-  add_entry(
+  local override_text, replaced = render_event_details("tool-call", {
+    id = tool_call_id or "",
+    tool = tool_name or "tool",
+    input = input or {},
+  })
+  if replaced then
+    if override_text ~= nil and override_text ~= "" then
+      add_entry(state, "tool_call", override_text, tool_name, false, tool_call_id)
+    end
+    scroll_anchor_after(state, before)
+    return
+  end
+  add_component_entry(
     state,
-    "tool_call",
-    tool_call_text(tool_call_id, tool_name, input),
+    "tool_execution",
+    new_tool_execution_component(tool_call_id, tool_name, input, { capture = false }),
     tool_name,
     false,
     tool_call_id
   )
-  add_entry(state, "tool_result", "", tool_name, false, tool_call_id)
   scroll_anchor_after(state, before)
 end
 
@@ -2495,18 +2820,39 @@ local function observer_tool_progress(state, tool_call_id, chunk)
   if chunk:sub(1, 1) == "{" and chunk:find('"psi_progress_replace"', 1, true) then
     payload = safe_decode(chunk, nil)
   end
-  local index = find_entry_by_tool_id(state, "tool_result", tool_call_id)
+  local index = find_entry_by_tool_id(state, "tool_execution", tool_call_id)
+  if index ~= nil and state.entries[index] and state.entries[index].component then
+    local entry = state.entries[index]
+    local text
+    if type(payload) == "table" and payload.psi_progress_replace == true then
+      text = M._live_progress.update(entry, tostring(payload.text or ""), true)
+    else
+      text = M._live_progress.update(entry, chunk, false)
+    end
+    update_tool_execution_component(entry, { ok = true, output = text }, true)
+    invalidate_render_totals(state)
+    state.dirty = true
+    scroll_anchor_after(state, before)
+    return
+  end
+  index = find_entry_by_tool_id(state, "tool_result", tool_call_id)
   if index == nil then
     index = add_entry(state, "tool_result", "", nil, false, tool_call_id)
   end
   if type(payload) == "table" and payload.psi_progress_replace == true then
     local entry = state.entries[index]
     if entry then
-      set_entry_text(state, index, limit_live_tool_progress_text(tostring(payload.text or "")))
+      set_entry_text(
+        state,
+        index,
+        M._live_progress.update(entry, tostring(payload.text or ""), true)
+      )
     end
   else
     local entry = state.entries[index]
-    set_entry_text(state, index, limit_live_tool_progress_text(entry_text(entry) .. chunk))
+    if entry then
+      set_entry_text(state, index, M._live_progress.update(entry, chunk, false))
+    end
   end
   scroll_anchor_after(state, before)
 end
@@ -2514,15 +2860,72 @@ end
 local function observer_tool_result(state, tool_call_id, tool_name, output_json)
   local before = scroll_anchor_before(state)
   local result = safe_decode(output_json, nil)
+  local override_text, replaced = render_event_details("tool-result", {
+    id = tool_call_id or "",
+    tool = tool_name or "tool",
+    result = result or {},
+  })
+  if replaced then
+    local index = find_entry_by_tool_id(state, "tool_execution", tool_call_id)
+      or find_entry_by_tool_id(state, "tool_result", tool_call_id)
+    if index ~= nil and state.entries[index] then
+      if override_text ~= nil and override_text ~= "" then
+        local entry = state.entries[index]
+        entry.kind = "tool_result"
+        entry.title = tool_name
+        entry.is_error = result ~= nil and result.ok == false
+        entry.progress_lines = nil
+        entry.progress_partial = nil
+        entry.progress_total_lines = nil
+        set_entry_text(state, index, override_text or "")
+      else
+        remove_entry(state, index)
+      end
+    elseif override_text ~= nil and override_text ~= "" then
+      add_entry(
+        state,
+        "tool_result",
+        override_text,
+        tool_name,
+        result ~= nil and result.ok == false,
+        tool_call_id
+      )
+    end
+    scroll_anchor_after(state, before)
+    return
+  end
+  local component_index = find_entry_by_tool_id(state, "tool_execution", tool_call_id)
+  if component_index ~= nil and state.entries[component_index] then
+    local entry = state.entries[component_index]
+    entry.title = tool_name
+    entry.progress_lines = nil
+    entry.progress_partial = nil
+    entry.progress_total_lines = nil
+    update_tool_execution_component(entry, result, false)
+    invalidate_render_totals(state)
+    state.dirty = true
+    scroll_anchor_after(state, before)
+    return
+  end
   local text, is_error = tool_result_text(tool_call_id, tool_name, result)
   local index = find_entry_by_tool_id(state, "tool_result", tool_call_id)
+  local has_text = text ~= nil and text ~= ""
+
+  recolor_tool_call_block(state, tool_call_id, is_error)
 
   if index ~= nil and state.entries[index] then
-    local entry = state.entries[index]
-    entry.title = tool_name
-    entry.is_error = not not is_error
-    set_entry_text(state, index, text or "")
-  else
+    if has_text then
+      local entry = state.entries[index]
+      entry.title = tool_name
+      entry.is_error = not not is_error
+      entry.progress_lines = nil
+      entry.progress_partial = nil
+      entry.progress_total_lines = nil
+      set_entry_text(state, index, text or "")
+    else
+      remove_entry(state, index)
+    end
+  elseif has_text then
     add_entry(state, "tool_result", text or "", tool_name, is_error, tool_call_id)
   end
 
@@ -2655,7 +3058,7 @@ local function run_compact(state, keep_recent)
   state.busy_label = "compacting"
   state.busy_phase = 0
   state.busy_tick = 0
-  state.busy_next_frame_at = now_ms() + BUSY_ANIMATION_INTERVAL_MS
+  state.busy_next_frame_at = now_ms() + TUI_CONST.busy_animation_interval_ms
   state.busy_started_at = os.time()
   psi.abort_reset()
   set_status(state, "", false)
@@ -2723,7 +3126,7 @@ local function run_btw(state, question)
   state.busy_label = "btw"
   state.busy_phase = 0
   state.busy_tick = 0
-  state.busy_next_frame_at = now_ms() + BUSY_ANIMATION_INTERVAL_MS
+  state.busy_next_frame_at = now_ms() + TUI_CONST.busy_animation_interval_ms
   state.busy_started_at = os.time()
   psi.abort_reset()
   set_status(state, "", false)
@@ -2967,7 +3370,7 @@ local function submit(state)
   state.busy_label = tui.pick_busy_status() or "working"
   state.busy_phase = 0
   state.busy_tick = 0
-  state.busy_next_frame_at = now_ms() + BUSY_ANIMATION_INTERVAL_MS
+  state.busy_next_frame_at = now_ms() + TUI_CONST.busy_animation_interval_ms
   state.busy_started_at = os.time()
   psi.abort_reset()
   set_status(state, "", false)
@@ -3307,7 +3710,7 @@ local function tick(state)
     if state.busy_next_frame_at == nil or now >= state.busy_next_frame_at then
       state.busy_tick = (state.busy_tick or 0) + 1
       state.busy_phase = ((state.busy_phase or 0) % 3) + 1
-      state.busy_next_frame_at = now + BUSY_ANIMATION_INTERVAL_MS
+      state.busy_next_frame_at = now + TUI_CONST.busy_animation_interval_ms
       state.dirty = true
     end
   end
@@ -3475,22 +3878,26 @@ function M.run(opts)
   agent.configure(opts)
 
   local layout_mode = chat.resolve_mode(opts)
+  local alt_screen_active = layout_mode == chat.CHAT or not not opts.resume
 
-  -- Always enter alt-screen for bootstrap so the resume picker (which uses
-  -- absolute positioning) doesn't clobber the user's terminal. We leave it
-  -- before the chat-mode main loop so transcript output flows into native
-  -- scrollback.
-  chat.set_alt_screen(true)
+  -- The resume picker and chat bootstrap use absolute positioning; keep that
+  -- contained in alt-screen without making inline TUI the default.
+  if alt_screen_active then
+    chat.set_alt_screen(true)
+  end
 
   local ok, err = bootstrap_session(opts)
   if not ok then
-    chat.set_alt_screen(false)
+    if alt_screen_active then
+      chat.set_alt_screen(false)
+    end
     io.stderr:write("failed to load session file: " .. tostring(err) .. "\n")
     return false
   end
 
-  if layout_mode == chat.CHAT then
+  if alt_screen_active then
     chat.set_alt_screen(false)
+    alt_screen_active = false
   end
 
   local state = new_state(opts)
@@ -3527,7 +3934,7 @@ function M.run(opts)
     if type(psi.tui_write) == "function" then
       psi.tui_write("\27[0m\27[?25h\n")
     end
-  else
+  elseif alt_screen_active then
     chat.set_alt_screen(false)
   end
 
@@ -3628,6 +4035,52 @@ function M._debug_tool_call_text_after_assistant()
   render.handle_event("before-turn", {})
   render.handle_event("assistant-text", { text = "assistant text" })
   return tool_call_text("toolu_debug", "read", { path = "README.md" })
+end
+
+function M._debug_completed_write_tool_block()
+  local state = {
+    width = 80,
+    entries = {},
+    dirty = false,
+    entries_version = 0,
+    flat_cache_width = nil,
+    flat_cache_version = nil,
+    flat_cache_lines = nil,
+    total_cache_width = nil,
+    total_cache_version = nil,
+    total_cache_lines = nil,
+    scroll_offset = 0,
+    streaming_assistant_index = nil,
+    streaming_thinking_index = nil,
+  }
+  observer_tool_call(
+    state,
+    "toolu_write",
+    "write",
+    psi.json_encode({ path = "notes.txt", content = "alpha\nbeta" })
+  )
+  observer_tool_result(
+    state,
+    "toolu_write",
+    "write",
+    psi.json_encode({ ok = true, path = "notes.txt", bytes_written = 10 })
+  )
+  local out = {}
+  for _, line in ipairs(flattened_render_lines(state)) do
+    out[#out + 1] = line.text or ""
+  end
+  return table.concat(out, "\n")
+end
+
+function M._debug_persisted_tool_result_text(tool_name, content_text, is_error)
+  local message = {
+    toolCallId = "toolu_debug",
+    toolName = tool_name,
+    isError = is_error,
+  }
+  local payload = persisted_tool_result_payload(message, content_text or "")
+  local rendered = tool_result_text(message.toolCallId, message.toolName, payload)
+  return rendered or ""
 end
 
 function M._debug_busy_animation_frames(times)
@@ -3979,8 +4432,10 @@ function M._debug_redraw_counts(input, debug_options)
     calls.cursor_sets = 0
     calls.refreshes = 0
   end
+  local debug_width = math.max(1, tonumber(debug_options.width) or 80)
+  local debug_height = math.max(1, tonumber(debug_options.height) or 24)
   psi.tui_size = function()
-    return { width = 80, height = 24 }
+    return { width = debug_width, height = debug_height }
   end
   psi.tui_clear = function(force)
     if force then
@@ -4098,11 +4553,11 @@ function M._debug_redraw_counts(input, debug_options)
       status_is_error = false,
       show_thinking = false,
       show_hardware_cursor = not not debug_options.show_hardware_cursor,
-      width = 80,
-      height = inline_viewport_height(24),
-      terminal_height = 24,
+      width = debug_width,
+      height = inline_viewport_height(debug_height),
+      terminal_height = debug_height,
       renderer = tui_renderer.new({ line_primitive = true }),
-      input_layout = default_input_layout(inline_viewport_height(24)),
+      input_layout = default_input_layout(inline_viewport_height(debug_height)),
       tui_caps = { raw_ansi = false },
       streaming_assistant_index = nil,
       streaming_thinking_index = nil,

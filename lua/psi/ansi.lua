@@ -24,8 +24,12 @@ local function is_color_code(code)
     or code:match("^10[0-7]$") ~= nil
     or code:match("^38;5;%d+$") ~= nil
     or code:match("^48;5;%d+$") ~= nil
+    or code:match("^38;2;%d+;%d+;%d+$") ~= nil
+    or code:match("^48;2;%d+;%d+;%d+$") ~= nil
     or code:match("38;5;%d+") ~= nil
     or code:match("48;5;%d+") ~= nil
+    or code:match("38;2;%d+;%d+;%d+") ~= nil
+    or code:match("48;2;%d+;%d+;%d+") ~= nil
     or code:match("^%d+;3[0-7]$") ~= nil
     or code:match("^%d+;9[0-7]$") ~= nil
     or code:match("^%d+;4[0-7]$") ~= nil
@@ -38,10 +42,46 @@ local function resolve_code(code)
   if code_map[code] ~= nil then
     return code_map[code]
   end
+  local values = {}
   for part in code:gmatch("[^;]+") do
-    parts[#parts + 1] = code_map[part] or part
+    values[#values + 1] = part
+  end
+  local i = 1
+  while i <= #values do
+    local part = values[i]
+    local next_part = values[i + 1]
+    if (part == "38" or part == "48") and next_part == "5" and values[i + 2] ~= nil then
+      local extended = part .. ";" .. next_part .. ";" .. values[i + 2]
+      parts[#parts + 1] = code_map[extended] or extended
+      i = i + 3
+    elseif
+      (part == "38" or part == "48")
+      and next_part == "2"
+      and values[i + 2] ~= nil
+      and values[i + 3] ~= nil
+      and values[i + 4] ~= nil
+    then
+      local truecolor = part
+        .. ";"
+        .. next_part
+        .. ";"
+        .. values[i + 2]
+        .. ";"
+        .. values[i + 3]
+        .. ";"
+        .. values[i + 4]
+      parts[#parts + 1] = code_map[truecolor] or truecolor
+      i = i + 5
+    else
+      parts[#parts + 1] = code_map[part] or part
+      i = i + 1
+    end
   end
   return #parts > 0 and table.concat(parts, ";") or code
+end
+
+function M.resolve(code)
+  return resolve_code(code)
 end
 
 function M.set_code_map(next_map)
@@ -86,6 +126,9 @@ function M.gray(text)
 end
 function M.italic(text)
   return M.color("3", M.gray(text))
+end
+function M.inverse(text)
+  return M.color("7", text)
 end
 
 -- Autodetect environments that can't render ANSI. Called from

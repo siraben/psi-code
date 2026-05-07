@@ -1,5 +1,5 @@
 --[==[psi-test
-expect = "midnight-ember|233|234"
+expect = "pi-dark|233|234"
 cwd = "theme-reload-project"
 env = { PSI_EXTENSIONS_DIR = "{TMP}/theme-reload-ext" }
 files = [

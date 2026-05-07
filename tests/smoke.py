@@ -990,7 +990,7 @@ def t_tui_busy_status(psi: Psi):
         "working (0:04  • Ctrl-G to interrupt) ...",
         "busy status renders selected label, hint, and animated dots",
     )
-    assert_contains(out, "\x1b[96m", "busy label has a subtle shimmer")
+    assert_contains(out, "\x1b[38;2;0;215;255m", "busy label has a subtle shimmer")
 
 
 @test("tui/differential_redraw_uses_changed_rows")
@@ -1452,8 +1452,8 @@ def t_tui_input_box_background(psi: Psi):
     assert_bytes_not_contains(raw, b"\x1b[4m", "input box should not render a Lua-owned cursor cell")
     assert_bytes_not_contains(raw, b"\x1b[48;5;238m",
                               "input box should not paint a filled background")
-    assert_bytes_contains(raw, b"\x1b[38;5;245m",
-                          "input box border color did not reach rendered output")
+    assert_bytes_contains(raw, b"\x1b[38;2;95;135;255m",
+                          "pi-style input border color did not reach rendered output")
 
 @test("mode/tui_lf_submit")
 def t_tui_lf_submit(psi: Psi):
@@ -1597,17 +1597,12 @@ def t_live_parallel_panels(psi: Psi):
     text = strip_ansi(raw)
     # Each fruit must appear in the rendered output (progress or final).
     # This is the semantic check: if all three appear, three tools ran
-    # in the same turn. Counting "╭─" substrings is too tight — terminal
-    # repaints many frames and sometimes clobbers earlier panel headers
-    # before the PTY capture window closes (model emits narration text
-    # before tool calls, first-token latency eats into the 25 s budget,
-    # etc.). At least ONE ╭─ confirms the tool-panel drawer wired up.
+    # in the same turn. The pi-style renderer uses filled tool blocks
+    # instead of unicode panel chrome, so assert on the pending block
+    # background in the raw capture rather than a border glyph.
     for fruit in ("apple", "banana", "cherry"):
         assert_contains(text, fruit, f"{fruit} in TUI output")
-    assert_true(
-        "╭─" in text,
-        "no tool-call panel header in the captured pty stream",
-    )
+    assert_bytes_contains(raw, b"\x1b[48;2;40;40;50m", "no pi-style tool block in TUI stream")
 
 # ---------------------------------------------------------------------------
 # Pytest driver. The script entrypoint below preserves the old smoke.py CLI by

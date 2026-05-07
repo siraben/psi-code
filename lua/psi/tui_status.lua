@@ -638,17 +638,31 @@ local function split_bar(text)
   return text:sub(1, start_pos - 1), text:sub(end_pos + 1)
 end
 
+local function clip_cells(text, width)
+  text = tostring(text or "")
+  width = math.max(0, tonumber(width) or 0)
+  if tui_text.visible_width(text) <= width then
+    return text
+  end
+  return tui_text.clip_ansi(text, width)
+end
+
 function M.compose_bar(text, width)
   local left, right = split_bar(text)
   local total_width = math.max(1, tonumber(width) or 80)
+  left = clip_cells(left, total_width)
   local left_width = tui_text.visible_width(left)
-  local right_width = tui_text.visible_width(right)
-  local gap = total_width - left_width - right_width
   if right == "" then
     return left
   end
+  right = clip_cells(right, math.max(0, total_width - left_width))
+  local right_width = tui_text.visible_width(right)
+  local gap = total_width - left_width - right_width
   if gap < 2 then
-    gap = 2
+    local right_budget = math.max(0, total_width - left_width - 1)
+    right = clip_cells(right, right_budget)
+    right_width = tui_text.visible_width(right)
+    gap = total_width - left_width - right_width
   end
   return left .. string.rep(" ", gap) .. right
 end

@@ -36,11 +36,11 @@ local function clamp(value, low, high)
   return value
 end
 
-local function cursor_from_frame(frame, height)
+local function cursor_from_frame(frame, height, width)
   local cursor = type(frame.cursor) == "table" and frame.cursor or {}
   return {
     row = clamp(tonumber(cursor.row) or tonumber(frame.cursor_row) or 1, 1, height),
-    col = math.max(1, tonumber(cursor.col) or tonumber(frame.cursor_col) or 1),
+    col = clamp(tonumber(cursor.col) or tonumber(frame.cursor_col) or 1, 1, width),
     visible = not not (cursor.visible or frame.cursor_visible),
   }
 end
@@ -103,11 +103,11 @@ local function normalize_frame(frame)
   local height = math.max(1, tonumber(frame.height) or #raw_lines or 1)
   local top = math.max(1, tonumber(frame.top) or tonumber(frame.viewport_top) or 1)
   local lines, marker_cursor = M.extract_cursor(normalize_lines(raw_lines, height))
-  local cursor = cursor_from_frame(frame, height)
+  local cursor = cursor_from_frame(frame, height, width)
 
   if marker_cursor ~= nil then
     cursor.row = clamp(marker_cursor.row, 1, height)
-    cursor.col = math.max(1, marker_cursor.col)
+    cursor.col = clamp(marker_cursor.col, 1, width)
   end
 
   return {

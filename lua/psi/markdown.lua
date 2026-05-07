@@ -14,6 +14,11 @@ local ansi = require("psi.ansi")
 
 local M = {}
 
+local PI_ACCENT = "36" -- mdCode / list bullets, theme accent
+local PI_HEADING = "33" -- mdHeading, theme warning/gold slot
+local PI_LINK = "34" -- mdLink, theme header/link slot
+local PI_GRAY = "38;5;242" -- mdQuote/mdHr/toolOutput, theme chrome slot
+
 -- ---------- inline renderer ----------
 
 local function italic(text)
@@ -179,9 +184,10 @@ local function render_tokens(tokens)
     if token.kind == "text" then
       out[#out + 1] = token.text
     elseif token.kind == "code" then
-      out[#out + 1] = ansi.color("33", token.text)
+      out[#out + 1] = ansi.color(PI_ACCENT, token.text)
     elseif token.kind == "link" then
-      out[#out + 1] = underline(render_tokens(token.label)) .. ansi.dim(" (" .. token.url .. ")")
+      out[#out + 1] = ansi.color(PI_LINK, underline(render_tokens(token.label)))
+        .. ansi.dim(" (" .. token.url .. ")")
     elseif token.kind == "strong" then
       out[#out + 1] = ansi.bold(render_tokens(token.children))
     elseif token.kind == "emph" then
@@ -217,10 +223,10 @@ local function render_line(line, state)
   local fence = line:match("^%s*(```+)") or line:match("^%s*(~~~+)")
   if fence then
     state.in_code_fence = not state.in_code_fence
-    return ansi.dim(line)
+    return ansi.color(PI_GRAY, line)
   end
   if state.in_code_fence then
-    return ansi.dim(line)
+    return ansi.color(PI_GRAY, line)
   end
 
   -- Headers: # ... ######
@@ -228,11 +234,11 @@ local function render_line(line, state)
   if hashes and #hashes <= 6 then
     local body = render_inline(rest)
     if #hashes == 1 then
-      return ansi.bold(ansi.cyan("# " .. body))
+      return ansi.bold(ansi.color(PI_HEADING, "# " .. body))
     elseif #hashes == 2 then
-      return ansi.bold("## " .. body)
+      return ansi.bold(ansi.color(PI_HEADING, "## " .. body))
     else
-      return ansi.cyan(string.rep("#", #hashes) .. " " .. body)
+      return ansi.color(PI_HEADING, string.rep("#", #hashes) .. " " .. body)
     end
   end
 
@@ -242,25 +248,25 @@ local function render_line(line, state)
     or line:match("^%s*%*%*%*+%s*$")
     or line:match("^%s*___+%s*$")
   then
-    return ansi.dim(line)
+    return ansi.color(PI_GRAY, line)
   end
 
   -- Bullet list: -, *, + (but not horizontal-rule-like)
   local indent, body = line:match("^(%s*)[%-%*%+]%s+(.*)$")
   if indent and body then
-    return indent .. ansi.cyan("•") .. " " .. render_inline(body)
+    return indent .. ansi.color(PI_ACCENT, "•") .. " " .. render_inline(body)
   end
 
   -- Numbered list
   local num_indent, num, num_body = line:match("^(%s*)(%d+%.)%s+(.*)$")
   if num then
-    return num_indent .. ansi.cyan(num) .. " " .. render_inline(num_body)
+    return num_indent .. ansi.color(PI_ACCENT, num) .. " " .. render_inline(num_body)
   end
 
   -- Blockquote
   local bq = line:match("^>%s?(.*)$")
   if bq then
-    return ansi.dim("│ ") .. render_inline(bq)
+    return ansi.color(PI_GRAY, "│ ") .. render_inline(bq)
   end
 
   -- Plain paragraph line

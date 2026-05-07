@@ -105,9 +105,17 @@ function M.tool_result_from_alist(t)
   if type(t) ~= "table" then
     return M.new_tool_result(false, "unknown", "invalid result", {})
   end
+  if getmetatable(t) == ToolResult then
+    return t
+  end
   local extras = {}
+  if type(t.extras) == "table" then
+    for k, v in pairs(t.extras) do
+      extras[k] = v
+    end
+  end
   for k, v in pairs(t) do
-    if k ~= "ok" and k ~= "tool" and k ~= "error" then
+    if k ~= "ok" and k ~= "tool" and k ~= "error" and k ~= "extras" then
       extras[k] = v
     end
   end
