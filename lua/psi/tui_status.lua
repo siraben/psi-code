@@ -12,8 +12,13 @@ local settings = require("psi.settings_manager")
 
 local M = {}
 local BAR_SPLIT = string.char(31)
+local NON_PRINTABLE_ASCII_PATTERN = "[^\32-\126]"
+local BYTE_ESC = 27
+local UTF8_CONTINUATION_MASK = 0xC0
+local UTF8_CONTINUATION_TAG = 0x80
 local busy_rng_seeded = false
 local enabled_setting
+M._visible_width_cache = { entries = 0 }
 
 local DEFAULT_BUSY_LABELS = {
   { label = "working", weight = 1 },
@@ -510,23 +515,46 @@ local function tilde_path(path)
 end
 
 local function visible_width(text)
+  text = tostring(text or "")
+  if text:find(NON_PRINTABLE_ASCII_PATTERN) == nil then
+    return #text
+  end
+  local cache = M._visible_width_cache
+  if #text <= 4096 then
+    local cached = cache[text]
+    if cached ~= nil then
+      return cached
+    end
+  end
+
   local width = 0
   local i = 1
-  text = tostring(text or "")
   while i <= #text do
     local ch = text:byte(i)
-    if ch == 27 and text:sub(i + 1, i + 1) == "[" then
+    if ch == BYTE_ESC and text:byte(i + 1) == 91 then
       local j = i + 2
-      while j <= #text and text:sub(j, j) ~= "m" do
+      while j <= #text do
+        local byte = text:byte(j)
+        if byte >= 64 and byte <= 126 then
+          break
+        end
         j = j + 1
       end
       i = j < #text and (j + 1) or (#text + 1)
     else
-      if (ch & 0xC0) ~= 0x80 then
+      if (ch & UTF8_CONTINUATION_MASK) ~= UTF8_CONTINUATION_TAG then
         width = width + 1
       end
       i = i + 1
     end
+  end
+  if #text <= 4096 then
+    if cache.entries >= 1024 then
+      cache = { entries = 0 }
+      M._visible_width_cache = cache
+    end
+    cache[text] = width
+    cache.entries = cache.entries + 1
   end
   return width
 end

@@ -56,6 +56,7 @@ local EMPTY = ""
 local NEWLINE = "\n"
 local FALLBACK_PROMPT_PREFIX_FIRST = "> "
 local FALLBACK_PROMPT_PREFIX_REST = "| "
+M._display_width_cache = { entries = 0 }
 
 local function safe_decode(text, fallback)
   return prelude.safe_json_decode(text, fallback)
@@ -134,6 +135,14 @@ end
 
 local function sanitize_terminal_text(text, preserve_newlines)
   text = tostring(text or EMPTY)
+  if preserve_newlines then
+    if text:find("[\0-\9\11-\31\127]") == nil then
+      return text
+    end
+  elseif text:find("[\0-\31\127]") == nil then
+    return text
+  end
+
   local out = {}
   local i = 1
   while i <= #text do
@@ -169,23 +178,45 @@ local function sanitize_terminal_text(text, preserve_newlines)
 end
 
 local function display_width(text)
+  text = tostring(text or "")
+  if text:find("[^\32-\126]") == nil then
+    return #text
+  end
+  local cache = M._display_width_cache
+  if #text <= 4096 then
+    local cached = cache[text]
+    if cached ~= nil then
+      return cached
+    end
+  end
+
   local width = 0
   local i = 1
-  text = strip_ansi(tostring(text or ""))
   while i <= #text do
     local ch = text:byte(i)
-    if ch == BYTE_ESC and text:sub(i + 1, i + 1) == "[" then
-      local j = i + 2
-      while j <= #text and text:sub(j, j) ~= "m" do
-        j = j + 1
+    if ch == BYTE_ESC then
+      local next_byte = text:byte(i + 1)
+      if next_byte == 91 then
+        i = find_csi_terminator(text, i + 2)
+      elseif next_byte == 93 or next_byte == 80 or next_byte == 94 or next_byte == 95 then
+        i = find_string_terminator(text, i + 2)
+      else
+        i = i + 2
       end
-      i = j < #text and (j + 1) or (#text + 1)
     else
       if (ch & UTF8_CONTINUATION_MASK) ~= UTF8_CONTINUATION_TAG then
         width = width + 1
       end
       i = i + 1
     end
+  end
+  if #text <= 4096 then
+    if cache.entries >= 1024 then
+      cache = { entries = 0 }
+      M._display_width_cache = cache
+    end
+    cache[text] = width
+    cache.entries = cache.entries + 1
   end
   return width
 end
