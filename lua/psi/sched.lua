@@ -20,16 +20,16 @@ local M = {}
 local prelude = require("psi.prelude")
 
 -- The TUI (or any other host) can install a per-resume hook that
--- advances its own state one step. The default is a no-op (print/
--- agent/REPL don't need to interleave with anything else).
-local tick_hook = function() end
+-- advances its own state one step. Most modes do not install one, so
+-- keep the default nil and skip the protected call entirely.
+local tick_hook = nil
 
 function M.set_tick_hook(fn)
-  tick_hook = fn or function() end
+  tick_hook = fn
 end
 
 function M.clear_tick_hook()
-  tick_hook = function() end
+  tick_hook = nil
 end
 
 -- Default resolvers for the built-in request kinds. The table is
@@ -93,9 +93,11 @@ function M.run(fn, ...)
     if psi.host_tick ~= nil then
       psi.host_tick()
     end
-    local ok_tick, tick_err = pcall(tick_hook, req)
-    if not ok_tick then
-      io.stderr:write("psi.sched tick hook error: " .. tostring(tick_err) .. "\n")
+    if tick_hook ~= nil then
+      local ok_tick, tick_err = pcall(tick_hook, req)
+      if not ok_tick then
+        io.stderr:write("psi.sched tick hook error: " .. tostring(tick_err) .. "\n")
+      end
     end
     local resolver = M.resolvers[req.kind]
     if resolver == nil then

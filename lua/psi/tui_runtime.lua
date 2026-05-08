@@ -542,6 +542,9 @@ local function new_state(opts)
     total_cache_width = nil,
     total_cache_version = nil,
     total_cache_lines = nil,
+    flat_cache_width = nil,
+    flat_cache_version = nil,
+    flat_cache_lines = nil,
     prompt_history = {},
     history_index = nil,
     history_draft = "",
@@ -726,6 +729,9 @@ local function invalidate_render_totals(state)
   state.total_cache_width = nil
   state.total_cache_version = nil
   state.total_cache_lines = nil
+  state.flat_cache_width = nil
+  state.flat_cache_version = nil
+  state.flat_cache_lines = nil
 end
 
 function set_status(state, text, is_error)
@@ -749,6 +755,7 @@ local function add_entry(state, kind, text, title, is_error, tool_call_id)
   local entry = {
     kind = kind,
     text = text or "",
+    text_parts = nil,
     title = title,
     is_error = not not is_error,
     tool_call_id = tool_call_id,
@@ -759,12 +766,24 @@ local function add_entry(state, kind, text, title, is_error, tool_call_id)
   return #state.entries
 end
 
+local function entry_text(entry)
+  if not entry then
+    return ""
+  end
+  if entry.text_parts ~= nil and entry.text == nil then
+    entry.text = table.concat(entry.text_parts)
+    entry.text_parts = entry.text ~= "" and { entry.text } or {}
+  end
+  return entry.text or ""
+end
+
 local function set_entry_text(state, index, text)
   if index == nil or not state.entries[index] then
     return
   end
   local entry = state.entries[index]
   entry.text = text or ""
+  entry.text_parts = nil
   entry.render_cache_width = nil
   entry.render_cache_lines = nil
   invalidate_render_totals(state)
@@ -776,7 +795,19 @@ local function append_entry_text(state, index, text)
     return
   end
   local entry = state.entries[index]
-  set_entry_text(state, index, (entry.text or "") .. text)
+  if text == "" then
+    return
+  end
+  if entry.text_parts == nil then
+    local current = entry.text or ""
+    entry.text_parts = current ~= "" and { current } or {}
+  end
+  entry.text_parts[#entry.text_parts + 1] = text
+  entry.text = nil
+  entry.render_cache_width = nil
+  entry.render_cache_lines = nil
+  invalidate_render_totals(state)
+  state.dirty = true
 end
 
 local function remove_entry(state, index)
@@ -813,7 +844,7 @@ end
 
 local function finish_streaming_assistant(state)
   local index = state.streaming_assistant_index
-  if index ~= nil and state.entries[index] and state.entries[index].text == "" then
+  if index ~= nil and state.entries[index] and entry_text(state.entries[index]) == "" then
     remove_entry(state, index)
   end
   state.streaming_assistant_index = nil
@@ -821,7 +852,7 @@ end
 
 local function discard_empty_streaming_assistant(state)
   local index = state.streaming_assistant_index
-  if index ~= nil and state.entries[index] and state.entries[index].text == "" then
+  if index ~= nil and state.entries[index] and entry_text(state.entries[index]) == "" then
     remove_entry(state, index)
     state.streaming_assistant_index = nil
   end
@@ -923,7 +954,7 @@ local function entry_render_lines(state, entry)
 
   if entry.kind == "ansi" then
     local lines = {}
-    local text = trim_trailing_newlines(entry.text or "")
+    local text = trim_trailing_newlines(entry_text(entry))
     local cursor = 1
     while true do
       local nl = text:find("\n", cursor, true)
@@ -946,7 +977,7 @@ local function entry_render_lines(state, entry)
 
   local lines = {}
   local first_prefix, rest_prefix = entry_prefixes(entry)
-  local trimmed = sanitize_terminal_text(trim_trailing_newlines(entry.text or ""), true)
+  local trimmed = sanitize_terminal_text(trim_trailing_newlines(entry_text(entry)), true)
   local prefix = first_prefix
   local cursor = 1
   local fence_state = false
@@ -997,8 +1028,42 @@ local function entry_render_lines(state, entry)
   return lines
 end
 
-local function count_entry_lines(state, entry)
-  return #entry_render_lines(state, entry)
+local function flattened_render_lines(state)
+  if
+    state.flat_cache_width == state.width
+    and state.flat_cache_version == state.entries_version
+    and state.flat_cache_lines ~= nil
+  then
+    return state.flat_cache_lines
+  end
+  local lines = {}
+  local total = 0
+  for i, entry in ipairs(state.entries) do
+    local prev = state.entries[i - 1]
+    local next_entry = state.entries[i + 1]
+    local same_panel_as_prev = (prev and prev.kind == "tool_call" and entry.kind == "tool_result")
+      or (prev and prev.kind == "tool_result" and entry.kind == "tool_result")
+    if total > 0 and not same_panel_as_prev then
+      total = total + 1
+      lines[total] = { kind = "blank", text = "" }
+    end
+    local entry_lines = entry_render_lines(state, entry)
+    for j = 1, #entry_lines do
+      total = total + 1
+      lines[total] = entry_lines[j]
+    end
+    if entry.kind == "tool_result" and (not next_entry or next_entry.kind ~= "tool_result") then
+      total = total + 1
+      lines[total] = { kind = "panel_close", text = "╰─" }
+    end
+  end
+  state.flat_cache_width = state.width
+  state.flat_cache_version = state.entries_version
+  state.flat_cache_lines = lines
+  state.total_cache_width = state.width
+  state.total_cache_version = state.entries_version
+  state.total_cache_lines = total
+  return lines
 end
 
 local function total_rendered_lines(state)
@@ -1009,24 +1074,8 @@ local function total_rendered_lines(state)
   then
     return state.total_cache_lines
   end
-  local total = 0
-  for i, entry in ipairs(state.entries) do
-    local prev = state.entries[i - 1]
-    local next_entry = state.entries[i + 1]
-    local same_panel_as_prev = (prev and prev.kind == "tool_call" and entry.kind == "tool_result")
-      or (prev and prev.kind == "tool_result" and entry.kind == "tool_result")
-    if total > 0 and not same_panel_as_prev then
-      total = total + 1
-    end
-    total = total + count_entry_lines(state, entry)
-    if entry.kind == "tool_result" and (not next_entry or next_entry.kind ~= "tool_result") then
-      total = total + 1
-    end
-  end
-  state.total_cache_width = state.width
-  state.total_cache_version = state.entries_version
-  state.total_cache_lines = total
-  return total
+  local lines = flattened_render_lines(state)
+  return #lines
 end
 
 local function scroll_anchor_before(state)
@@ -1197,42 +1246,10 @@ end
 
 local function build_render_window(state, first_line, count)
   local lines = prelude.array(count)
-  local pos = 0
-  local last_line = first_line + count - 1
-
-  local function push(line)
-    pos = pos + 1
-    if pos >= first_line and pos <= last_line then
-      lines[pos - first_line + 1] = line
-    end
-    return pos >= last_line
+  local flat = flattened_render_lines(state)
+  for i = 1, count do
+    lines[i] = flat[first_line + i - 1]
   end
-
-  for i, entry in ipairs(state.entries) do
-    local prev = state.entries[i - 1]
-    local next_entry = state.entries[i + 1]
-    local same_panel_as_prev = (prev and prev.kind == "tool_call" and entry.kind == "tool_result")
-      or (prev and prev.kind == "tool_result" and entry.kind == "tool_result")
-
-    if pos > 0 and not same_panel_as_prev then
-      if push({ kind = "blank", text = "" }) then
-        return lines
-      end
-    end
-
-    for _, line in ipairs(entry_render_lines(state, entry)) do
-      if push(line) then
-        return lines
-      end
-    end
-
-    if entry.kind == "tool_result" and (not next_entry or next_entry.kind ~= "tool_result") then
-      if push({ kind = "panel_close", text = "╰─" }) then
-        return lines
-      end
-    end
-  end
-
   return lines
 end
 
@@ -2237,11 +2254,7 @@ local function observer_tool_progress(state, tool_call_id, chunk)
     end
   else
     local entry = state.entries[index]
-    set_entry_text(
-      state,
-      index,
-      limit_live_tool_progress_text((entry and entry.text or "") .. chunk)
-    )
+    set_entry_text(state, index, limit_live_tool_progress_text(entry_text(entry) .. chunk))
   end
   scroll_anchor_after(state, before)
 end
