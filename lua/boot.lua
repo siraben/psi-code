@@ -42,6 +42,10 @@ psi.providers = require("psi.api_registry")
 psi.resources = require("psi.resource_loader")
 psi.session = require("psi.session_manager")
 psi.tools = require("psi.tools")
+if psi.runtime_info().mcp then
+  psi.mcp = require("psi.mcp")
+  psi.events.on("session-shutdown", psi.mcp.shutdown_all)
+end
 psi.anthropic = require("psi.providers.anthropic")
 psi.ollama = require("psi.providers.ollama")
 psi.prompt = require("psi.prompt")

@@ -182,6 +182,28 @@ local function session_status()
   return table.concat(lines, "\n")
 end
 
+local function mcp_status(include_tools)
+  local info = psi.runtime_info()
+  if not info.mcp then
+    return "MCP servers: disabled at compile time"
+  end
+  local ok, mcp = pcall(require, "psi.mcp")
+  if not ok or type(mcp) ~= "table" or type(mcp.status_text) ~= "function" then
+    return "MCP servers: unavailable"
+  end
+  -- Trigger lazy MCP initialization so the user sees current server
+  -- state on first /mcp or /status invocation, not "MCP servers: none".
+  local tools_mod = require("psi.tools")
+  if type(tools_mod.ensure_mcp_started) == "function" then
+    tools_mod.ensure_mcp_started()
+  end
+  return mcp.status_text({ tools = include_tools and true or false })
+end
+
+local function full_status()
+  return session_status() .. "\n\n" .. mcp_status(false)
+end
+
 -- ---------- clipboard (/copy) ----------
 
 local function last_assistant_text()
@@ -614,6 +636,14 @@ local BUILTIN_COMMANDS = {
     description = "Show current session info",
   },
   {
+    name = "status",
+    description = "Show session and MCP status",
+  },
+  {
+    name = "mcp",
+    description = "List MCP servers and tools",
+  },
+  {
     name = "new",
     aliases = { "clear" },
     description = "Start a fresh session in place",
@@ -974,6 +1004,12 @@ function M.handle(line)
   end
   if line == "/session" then
     return records.new_command_action("print", session_status())
+  end
+  if line == "/status" then
+    return records.new_command_action("print", full_status())
+  end
+  if line == "/mcp" then
+    return records.new_command_action("print", mcp_status(true))
   end
   if line == "/system-prompt" then
     local prompt = require("psi.prompt")

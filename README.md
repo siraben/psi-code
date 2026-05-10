@@ -128,6 +128,7 @@ Optional Make flags (each defaults to `1`, set to `0` to disable):
 | `TUI`            | Full-screen frontend and `psi.tui_*` host primitives       |
 | `ANSI`           | ANSI SGR emission and parsing (TUI implies this)           |
 | `COLOR`          | Color SGR emission (non-color styles still allowed)        |
+| `MCP`            | MCP stdio process primitives and Lua MCP client loading    |
 | `REPL_EDITLINE`  | libedit-backed REPL with history; `fgets` fallback if off  |
 
 `make check-build-configs` builds the full toggle matrix into
@@ -158,6 +159,35 @@ psi> /apropos tool:
 psi> /describe tool:bash
 ```
 
+When built with `MCP=1`, MCP stdio servers can add tools at startup.
+Configure them in `~/.config/psi/settings.json` or `./.psi/settings.json`:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "filesystem": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+        "env": { "EXAMPLE": "value" }
+      }
+    }
+  }
+}
+```
+
+Discovered MCP tools are registered as `mcp_<server>_<tool>` and dispatched
+through the normal psi tool hook chain. Use `/mcp` to list configured servers,
+connection state, and discovered tools. Use `/status` for the current session
+status plus MCP server status.
+
+The default Nix package wraps `psi` with `forgejo-mcp` and `linear-mcp` on
+`PATH`. If no explicit server named `forgejo` exists and `FORGEJO_ACCESS_TOKEN`
+or `FORGEJO_URL` is set, psi auto-registers Forgejo. If no explicit server
+named `linear` exists and `LINEAR_API_KEY` or `LINEAR_MCP_AUTO` is set, psi
+auto-registers Linear. Disable those defaults with
+`"mcp": { "auto_forgejo": false, "auto_linear": false }`.
+
 ## Layout
 
 ```
@@ -170,7 +200,7 @@ scripts/embed.c         build-time deflate of Lua sources + docs into C arrays
 
 lua/boot.lua            Lua bootstrap; wires psi.* and loads extensions
 lua/psi/                tool registry, prompt assembly, session, scheduler,
-                        markdown, diff, ANSI, theme, slash commands, TUI runtime
+                        markdown, diff, ANSI, theme, MCP, slash commands, TUI runtime
 lua/psi/tools/          built-in tools — see "Built-in tools" above
 lua/psi/providers/      anthropic, ollama, openrouter, openai_codex,
                         openai_compat, oauth_openai_codex

@@ -196,6 +196,7 @@ function M.run_eval(opts)
   local ok, value = prelude.eval_expression(opts.payload or "")
   if not ok then
     io.stderr:write("eval error: " .. tostring(value) .. "\n")
+    session.announce_shutdown()
     return false
   end
   if value == nil then
@@ -205,11 +206,13 @@ function M.run_eval(opts)
   else
     print(tostring(value))
   end
+  session.announce_shutdown()
   return true
 end
 
 function M.run_system_prompt(_opts)
   print(prompt.system_prompt())
+  session.announce_shutdown()
   return true
 end
 
@@ -270,9 +273,11 @@ function M.run_compact(opts)
   local saved, err = session.save()
   if not saved then
     io.stderr:write("failed to save session file: " .. tostring(err) .. "\n")
+    session.announce_shutdown()
     return false
   end
   print(summary or "")
+  session.announce_shutdown()
   return true
 end
 
@@ -407,6 +412,7 @@ function M.run_repl(opts)
     if line:sub(1, 1) == "/" then
       local ok, quit = handle_slash_command(opts, line)
       if not ok then
+        session.announce_shutdown()
         return false
       end
       if quit then

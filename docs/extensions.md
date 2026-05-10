@@ -311,6 +311,7 @@ These are part of the stable surface:
 | `psi.is_aborted()` | `true` when Ctrl-C / Esc requested. Poll during long work. |
 | `psi.json_encode(v)` / `psi.json_decode(s)` | JSON. |
 | `psi.session_message_count()` / `psi.session_messages()` | Read current in-memory session. |
+| `psi.process_begin_stdio_argv(argv, env_pairs)` / `psi.process_write(handle, data)` / `psi.process_try_write(handle, data)` / `psi.process_poll(handle, ms)` / `psi.process_close_stdin(handle)` / `psi.process_terminate(handle)` / `psi.process_finish(handle)` | Bidirectional stdio process primitives used by the MCP client. These are available only when built with `MCP=1`; prefer higher-level tools unless you are implementing a protocol bridge. |
 | `psi.embedded_doc(name)` / `psi.embedded_doc_names()` | Fetch doc files bundled into the binary (e.g. `README.md`). |
 | `psi.embedded_source(name)` / `psi.embedded_source_names()` | Fetch the raw Lua source of an embedded module (e.g. `psi.render`). Useful for live introspection when there is no on-disk path. |
 | `psi.tool_call(name, input)` | Dispatch a tool through the full before/after hook chain. **Prefer this over calling `tool.impl` directly** — `impl` skips hook processing (permissions, redaction, extension transforms). |
@@ -453,7 +454,8 @@ What we **intentionally** do not support yet — open tickets, not bugs:
   the files you install.
 - No extension manifest, versioning, or compatibility checks.
 - No file-watcher hot reload. `/reload` is the explicit manual reload path.
-- No MCP bridge.
+- MCP support is stdio-only. HTTP/SSE MCP transports, resources, prompts, and
+  sampling callbacks are not wired yet.
 - No dedicated system-prompt event. Use `psi.prompt.register_transformer(fn)`
   for extension-controlled prompt rewrites.
 - pi ships ~27 events; psi starts with the 10 above. New ones will be

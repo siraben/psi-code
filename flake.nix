@@ -98,6 +98,96 @@
 
         # ---- Package builder --------------------------------------------
         #
+
+        forgejoMcp = pkgs.buildGoModule {
+          pname = "forgejo-mcp";
+          version = "2.18.0";
+
+          src = pkgs.fetchFromGitHub {
+            owner = "goern";
+            repo = "forgejo-mcp";
+            rev = "v2.18.0";
+            hash = "sha256-KWNRQJHW9+21+azIKjO2ryAPEDS7Ka0BuFnCFIko+FY=";
+          };
+
+          vendorHash = "sha256-5CV4drUaYKtZ/RoydAatblhsqU8VWYzYByjhcb9KZVY=";
+
+          meta = {
+            description = "Model Context Protocol server for Forgejo";
+            homepage = "https://github.com/goern/forgejo-mcp";
+            license = pkgs.lib.licenses.mit;
+            mainProgram = "forgejo-mcp";
+          };
+        };
+
+        mcpRemote = pkgs.stdenv.mkDerivation rec {
+          pname = "mcp-remote";
+          version = "0.1.38";
+
+          src = pkgs.fetchFromGitHub {
+            owner = "geelen";
+            repo = "mcp-remote";
+            rev = "v${version}";
+            hash = "sha256-+oNI2Uq7gW3sLzJS4ky2+BXhTmo44+WpcdYgieGPpmI=";
+          };
+
+          pnpmDeps = pkgs.fetchPnpmDeps {
+            inherit pname version src;
+            fetcherVersion = 2;
+            hash = "sha256-ULwS0Z9+r7Si3e8/ZGbv9OVgKEnok3xIJ9EEaDYcCBs=";
+          };
+
+          nativeBuildInputs = [
+            pkgs.nodejs
+            pkgs.pnpm
+            pkgs.pnpmConfigHook
+            pkgs.makeWrapper
+          ];
+
+          buildPhase = ''
+            runHook preBuild
+            pnpm build
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            mkdir -p "$out/libexec/mcp-remote" "$out/bin"
+            cp -R dist package.json node_modules "$out/libexec/mcp-remote/"
+            makeWrapper ${pkgs.nodejs}/bin/node "$out/bin/mcp-remote" \
+              --add-flags "$out/libexec/mcp-remote/dist/proxy.js"
+            makeWrapper ${pkgs.nodejs}/bin/node "$out/bin/mcp-remote-client" \
+              --add-flags "$out/libexec/mcp-remote/dist/client.js"
+            runHook postInstall
+          '';
+
+          meta = {
+            description = "Stdio bridge for remote MCP servers";
+            homepage = "https://github.com/geelen/mcp-remote";
+            license = pkgs.lib.licenses.mit;
+            mainProgram = "mcp-remote";
+          };
+        };
+
+        linearMcp = pkgs.writeShellApplication {
+          name = "linear-mcp";
+          runtimeInputs = [ mcpRemote ];
+          text = ''
+            set -eu
+            url="''${LINEAR_MCP_URL:-https://mcp.linear.app/mcp}"
+            if [ -n "''${LINEAR_API_KEY:-}" ]; then
+              exec mcp-remote "$url" --header "Authorization: Bearer ''${LINEAR_API_KEY}"
+            fi
+            exec mcp-remote "$url"
+          '';
+          meta = {
+            description = "Linear MCP stdio bridge";
+            homepage = "https://linear.app/docs/mcp";
+            license = pkgs.lib.licenses.mit;
+            mainProgram = "linear-mcp";
+          };
+        };
+
         # Build the psi derivation against an arbitrary package set.
         # Accepts:
         #   - native pkgs                                  (x86_64 dynamic)
@@ -111,9 +201,8 @@
         # LDFLAGS.  Works cleanly only on musl-based pkgsStatic because
         # glibc cannot be fully statically linked in general (NSS
         # modules, dlopen).
-
         mkPsi = { p, static ? false, extraMakeFlags ? [], extraNativeBuildInputs ? [],
-                   deps ? buildDeps { inherit p; } }:
+                   deps ? buildDeps { inherit p; }, extraPostInstall ? "" }:
           let
             # When cross-compiling, embed (the host helper that bakes
             # Lua/doc files into a .c) must run on the build machine, so
@@ -169,6 +258,13 @@
           # Most are picked up by pkg-config; we just need their .pc
           # files visible, which buildInputs already arranges.
 
+          installPhase = ''
+            runHook preInstall
+            make "''${makeFlagsArray[@]}" PREFIX=$out install
+            ${extraPostInstall}
+            runHook postInstall
+          '';
+
           # Keep the binary stripped only for dynamic builds.  For
           # static/musl builds we want to preserve debug symbols so
           # the resulting ELF can be inspected with gdb on any host.
@@ -179,7 +275,17 @@
 
         # ---- Packages ---------------------------------------------------
 
-        packages.default = mkPsi { p = pkgs; };
+        packages.forgejo-mcp = forgejoMcp;
+        packages.mcp-remote = mcpRemote;
+        packages.linear-mcp = linearMcp;
+        packages.default = mkPsi {
+          p = pkgs;
+          extraNativeBuildInputs = [ pkgs.makeWrapper ];
+          extraPostInstall = ''
+            wrapProgram "$out/bin/psi" \
+              --prefix PATH : ${pkgs.lib.makeBinPath [ forgejoMcp linearMcp ]}
+          '';
+        };
         packages.psi-gcc = self.packages.${system}.default;
 
         packages.psi-clang = mkPsi {
@@ -454,10 +560,15 @@
               "PSI_CFLAGS_LUA=-I${lib.getDev lua}/include"
               "PSI_LIBS_LUA=-L${lib.getLib lua}/lib -llua"
               "PSI_CFLAGS_CJSON=-I${lib.getDev pkgs.cjson}/include -I${lib.getDev pkgs.cjson}/include/cjson"
+              "PSI_LIBS_CJSON=-L${lib.getLib pkgs.cjson}/lib -lcjson"
               "PSI_CFLAGS_CURL=-I${lib.getDev curl}/include"
+              "PSI_LIBS_CURL=-L${lib.getLib curl}/lib -lcurl"
               "PSI_CFLAGS_ZLIB=-I${lib.getDev pkgs.zlib}/include"
+              "PSI_LIBS_ZLIB=-L${lib.getLib pkgs.zlib}/lib -lz"
               "PSI_CFLAGS_EDIT=-I${lib.getDev pkgs.libedit}/include -I${lib.getDev pkgs.libedit}/include/editline"
+              "PSI_LIBS_EDIT=-L${lib.getLib pkgs.libedit}/lib -ledit"
               "PSI_CFLAGS_ARGTABLE=-I${lib.getDev pkgs.argtable}/include"
+              "PSI_LIBS_ARGTABLE=-L${lib.getLib pkgs.argtable}/lib -largtable3"
               "HOST_CFLAGS_ZLIB=''${scan_cppflags[*]} -I${lib.getDev pkgs.zlib}/include"
               "HOST_LIBS_ZLIB=-L${lib.getLib pkgs.zlib}/lib -lz"
             )
@@ -517,10 +628,15 @@
               "PSI_CFLAGS_LUA=-I${lib.getDev lua}/include"
               "PSI_LIBS_LUA=-L${lib.getLib lua}/lib -llua"
               "PSI_CFLAGS_CJSON=-I${lib.getDev pkgs.cjson}/include -I${lib.getDev pkgs.cjson}/include/cjson"
+              "PSI_LIBS_CJSON=-L${lib.getLib pkgs.cjson}/lib -lcjson"
               "PSI_CFLAGS_CURL=-I${lib.getDev curl}/include"
+              "PSI_LIBS_CURL=-L${lib.getLib curl}/lib -lcurl"
               "PSI_CFLAGS_ZLIB=-I${lib.getDev pkgs.zlib}/include"
+              "PSI_LIBS_ZLIB=-L${lib.getLib pkgs.zlib}/lib -lz"
               "PSI_CFLAGS_EDIT=-I${lib.getDev pkgs.libedit}/include -I${lib.getDev pkgs.libedit}/include/editline"
+              "PSI_LIBS_EDIT=-L${lib.getLib pkgs.libedit}/lib -ledit"
               "PSI_CFLAGS_ARGTABLE=-I${lib.getDev pkgs.argtable}/include"
+              "PSI_LIBS_ARGTABLE=-L${lib.getLib pkgs.argtable}/lib -largtable3"
               "HOST_CFLAGS_ZLIB=''${infer_cppflags[*]} -I${lib.getDev pkgs.zlib}/include"
               "HOST_LIBS_ZLIB=-L${lib.getLib pkgs.zlib}/lib -lz"
             )
@@ -567,6 +683,9 @@
             pkgs.cppcheck
             pkgs.fd
             pkgs.gdb
+            forgejoMcp
+            linearMcp
+            mcpRemote
             pkgs.lua54Packages.luacheck
             (pkgs.python3.withPackages (ps: [
               ps.pexpect
