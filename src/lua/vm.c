@@ -49,6 +49,9 @@
 #ifndef PSI_ENABLE_COLOR
 #define PSI_ENABLE_COLOR 0
 #endif
+#ifndef PSI_ENABLE_MCP
+#define PSI_ENABLE_MCP 0
+#endif
 #ifndef PSI_ENABLE_REPL_EDITLINE
 #define PSI_ENABLE_REPL_EDITLINE 0
 #endif
@@ -1469,6 +1472,7 @@ static int lfn_process_gc(lua_State *L) {
     if (*ud != NULL) {
         char *out = NULL;
         int ex = -1, tr = 0;
+        psi_process_terminate(*ud);
         psi_process_finish(*ud, &out, &ex, &tr);
         free(out);
         *ud = NULL;
@@ -1580,6 +1584,135 @@ static int lfn_process_begin_argv(lua_State *L) {
     luaL_setmetatable(L, PSI_PROCESS_HANDLE_MT);
     return 1;
 }
+
+#if PSI_ENABLE_MCP
+static int lfn_process_begin_stdio_argv(lua_State *L) {
+    const struct psi_host_context *host = PSI_VM_HOST(L);
+    struct psi_process_handle *h;
+    struct psi_process_handle **ud;
+    char **argv;
+    char **env_pairs;
+    int argc;
+    int env_count;
+    int status;
+
+    argc = 0;
+    argv = psi_vm_argv_from_table(L, 1, &argc);
+    if (argv == NULL || argc <= 0) {
+        psi_vm_argv_free(argv);
+        lua_pushnil(L);
+        lua_pushstring(L, "invalid argv");
+        return 2;
+    }
+
+    env_pairs = NULL;
+    env_count = 0;
+    if (lua_istable(L, 2)) {
+        env_pairs = psi_vm_argv_from_table(L, 2, &env_count);
+    }
+
+    h = NULL;
+    status = psi_process_begin_stdio_argv(
+        argv, (const char *const *)env_pairs, env_count, host ? host->abort_signal : NULL, &h);
+    psi_vm_argv_free(argv);
+    psi_vm_argv_free(env_pairs);
+    if (status != PSI_STATUS_OK || h == NULL) {
+        lua_pushnil(L);
+        lua_pushstring(L, "failed to spawn stdio process");
+        return 2;
+    }
+    ud = (struct psi_process_handle **)lua_newuserdata(L, sizeof(*ud));
+    *ud = h;
+    luaL_setmetatable(L, PSI_PROCESS_HANDLE_MT);
+    return 1;
+}
+
+static int lfn_process_write(lua_State *L) {
+    struct psi_process_handle **ud;
+    struct psi_process_handle *h;
+    const char *data;
+    size_t data_len;
+
+    ud = psi_vm_process_ud_check(L, 1);
+    h = *ud;
+    if (h == NULL) {
+        lua_pushnil(L);
+        lua_pushstring(L, "process_write: handle already finished");
+        return 2;
+    }
+    data = luaL_checklstring(L, 2, &data_len);
+    if (psi_process_write(h, data, data_len) != PSI_STATUS_OK) {
+        lua_pushnil(L);
+        lua_pushstring(L, "process_write failed");
+        return 2;
+    }
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+static int lfn_process_try_write(lua_State *L) {
+    struct psi_process_handle **ud;
+    struct psi_process_handle *h;
+    const char *data;
+    size_t data_len;
+    size_t written;
+
+    ud = psi_vm_process_ud_check(L, 1);
+    h = *ud;
+    if (h == NULL) {
+        lua_pushnil(L);
+        lua_pushstring(L, "process_try_write: handle already finished");
+        return 2;
+    }
+    data = luaL_checklstring(L, 2, &data_len);
+    written = 0u;
+    if (psi_process_try_write(h, data, data_len, &written) != PSI_STATUS_OK) {
+        lua_pushnil(L);
+        lua_pushstring(L, "process_try_write failed");
+        return 2;
+    }
+    lua_pushinteger(L, (lua_Integer)written);
+    return 1;
+}
+
+static int lfn_process_close_stdin(lua_State *L) {
+    struct psi_process_handle **ud;
+    struct psi_process_handle *h;
+
+    ud = psi_vm_process_ud_check(L, 1);
+    h = *ud;
+    if (h == NULL) {
+        lua_pushboolean(L, 1);
+        return 1;
+    }
+    if (psi_process_close_stdin(h) != PSI_STATUS_OK) {
+        lua_pushnil(L);
+        lua_pushstring(L, "process_close_stdin failed");
+        return 2;
+    }
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+static int lfn_process_terminate(lua_State *L) {
+    struct psi_process_handle **ud;
+    struct psi_process_handle *h;
+
+    ud = psi_vm_process_ud_check(L, 1);
+    h = *ud;
+    if (h == NULL) {
+        lua_pushboolean(L, 1);
+        return 1;
+    }
+    if (psi_process_terminate(h) != PSI_STATUS_OK) {
+        lua_pushnil(L);
+        lua_pushstring(L, "process_terminate failed");
+        return 2;
+    }
+    lua_pushboolean(L, 1);
+    return 1;
+}
+#endif
 
 static int lfn_process_poll(lua_State *L) {
     struct psi_process_handle **ud;
@@ -2249,6 +2382,8 @@ static int lfn_runtime_info(lua_State *L) {
     lua_setfield(L, -2, "ansi");
     lua_pushboolean(L, (PSI_ENABLE_ANSI && PSI_ENABLE_COLOR) ? 1 : 0);
     lua_setfield(L, -2, "color");
+    lua_pushboolean(L, PSI_ENABLE_MCP ? 1 : 0);
+    lua_setfield(L, -2, "mcp");
     lua_pushboolean(L, PSI_ENABLE_REPL_EDITLINE ? 1 : 0);
     lua_setfield(L, -2, "repl-editline");
     lua_pushboolean(L, PSI_ENABLE_TUI ? 1 : 0);
@@ -2691,6 +2826,13 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("process_run_argv", lfn_process_run_argv);
     PSI_REG("process_begin", lfn_process_begin);
     PSI_REG("process_begin_argv", lfn_process_begin_argv);
+#if PSI_ENABLE_MCP
+    PSI_REG("process_begin_stdio_argv", lfn_process_begin_stdio_argv);
+    PSI_REG("process_write", lfn_process_write);
+    PSI_REG("process_try_write", lfn_process_try_write);
+    PSI_REG("process_close_stdin", lfn_process_close_stdin);
+    PSI_REG("process_terminate", lfn_process_terminate);
+#endif
     PSI_REG("process_poll", lfn_process_poll);
     PSI_REG("process_finish", lfn_process_finish);
     PSI_REG("session_append", lfn_session_append);

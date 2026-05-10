@@ -51,6 +51,37 @@ int psi_process_begin(const char *command, const struct psi_abort_signal *abort_
 int psi_process_begin_argv(char *const argv[], const struct psi_abort_signal *abort_signal,
     struct psi_process_handle **out);
 
+/* Start a process intended for stdio protocols: child stdin is a
+ * writable pipe owned by the parent, child stdout is the pollable
+ * output stream, and child stderr is kept out of the protocol stream.
+ * env_pairs is an optional array of "KEY=VALUE" strings (env_count
+ * entries) that are set in the child via setenv() before exec.  Pass
+ * NULL / 0 to inherit the parent environment unmodified. */
+int psi_process_begin_stdio_argv(char *const argv[], const char *const *env_pairs, int env_count,
+    const struct psi_abort_signal *abort_signal, struct psi_process_handle **out);
+
+int psi_process_write(struct psi_process_handle *h, const char *data, size_t len);
+
+/* Single non-blocking write attempt. Honors abort_signal: if abort fires,
+ * SIGTERMs the child group and returns PSI_STATUS_ERROR. Otherwise:
+ *   - returns PSI_STATUS_OK with *written set to the byte count actually
+ *     accepted by the kernel (0 on EAGAIN, len on full acceptance, or
+ *     a partial count). Never sleeps, never loops.
+ *   - returns PSI_STATUS_ERROR on a hard error (EPIPE, EINVAL, etc).
+ * Callers must drive the retry loop themselves and yield cooperatively
+ * (psi.sched.sleep_ms / psi.sched.yield_tick) so the host event loop
+ * stays responsive while a slow MCP child drains stdin. */
+int psi_process_try_write(
+    struct psi_process_handle *h, const char *data, size_t len, size_t *written);
+
+int psi_process_close_stdin(struct psi_process_handle *h);
+
+/* Best-effort termination for leaked or failed protocol children.
+ * Closes child stdin and sends SIGTERM if the child has not been
+ * reaped yet. The handle is still owned by the caller and must still
+ * be passed to psi_process_finish. */
+int psi_process_terminate(struct psi_process_handle *h);
+
 /* Drain one read() worth of output.
  *
  * Returns:

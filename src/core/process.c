@@ -19,6 +19,10 @@
 #include "psi/common.h"
 #include "psi/process.h"
 
+#ifndef PSI_ENABLE_MCP
+#define PSI_ENABLE_MCP 0
+#endif
+
 static const size_t PSI_PROCESS_OUTPUT_MAX_BYTES = 262144u;
 
 /* Per-iteration read() size when draining the child's stdout/stderr.
@@ -81,6 +85,7 @@ static int psi_process_append_bytes(
 struct psi_process_handle {
     pid_t child_pid;
     int pipe_fd; /* read end of stdout/stderr pipe */
+    int stdin_fd; /* write end of optional stdin pipe, or -1 */
     int aborted; /* 1 if abort_signal fired mid-run */
     int eof_seen; /* 1 if read() returned 0 */
     int reaped; /* 1 if waitpid already called */
@@ -99,9 +104,11 @@ struct psi_process_handle {
 };
 
 static int psi_process_begin_exec(char *const argv[], const struct psi_abort_signal *abort_signal,
+    int use_stdin_pipe, int protocol_stdout, const char *const *env_pairs, int env_count,
     struct psi_process_handle **out) {
     struct psi_process_handle *h;
     int pipe_fds[2];
+    int stdin_fds[2];
     pid_t child_pid;
     int flags;
 
@@ -111,13 +118,24 @@ static int psi_process_begin_exec(char *const argv[], const struct psi_abort_sig
     if (argv == NULL || argv[0] == NULL)
         return PSI_STATUS_ERROR;
 
+    stdin_fds[0] = -1;
+    stdin_fds[1] = -1;
     if (pipe(pipe_fds) != 0)
         return PSI_STATUS_ERROR;
+    if (use_stdin_pipe && pipe(stdin_fds) != 0) {
+        close(pipe_fds[0]);
+        close(pipe_fds[1]);
+        return PSI_STATUS_ERROR;
+    }
 
     child_pid = fork();
     if (child_pid < 0) {
         close(pipe_fds[0]);
         close(pipe_fds[1]);
+        if (stdin_fds[0] >= 0)
+            close(stdin_fds[0]);
+        if (stdin_fds[1] >= 0)
+            close(stdin_fds[1]);
         return PSI_STATUS_ERROR;
     }
 
@@ -133,7 +151,10 @@ static int psi_process_begin_exec(char *const argv[], const struct psi_abort_sig
         int devnull;
         /* New pgrp so abort can signal the whole tree, not just sh. */
         (void)setpgid(0, 0);
+        signal(SIGPIPE, SIG_DFL);
         if (close(pipe_fds[0]) != 0)
+            _exit(127);
+        if (stdin_fds[1] >= 0 && close(stdin_fds[1]) != 0)
             _exit(127);
         /* Detach the child from the controlling TTY's input so that
          * keypresses (notably ESC, used in TUI mode to interrupt the
@@ -142,19 +163,52 @@ static int psi_process_begin_exec(char *const argv[], const struct psi_abort_sig
          * child inherits stdin = the parent's tty, which is in raw
          * mode under TUI and races with the parent's getch() for
          * each byte the user types. */
-        devnull = open("/dev/null", O_RDONLY);
-        if (devnull < 0)
-            _exit(127);
-        if (dup2(devnull, 0) < 0)
-            _exit(127);
-        if (devnull > 2 && close(devnull) != 0)
-            _exit(127);
+        if (use_stdin_pipe) {
+            if (dup2(stdin_fds[0], 0) < 0)
+                _exit(127);
+            if (stdin_fds[0] > 2 && close(stdin_fds[0]) != 0)
+                _exit(127);
+        } else {
+            devnull = open("/dev/null", O_RDONLY);
+            if (devnull < 0)
+                _exit(127);
+            if (dup2(devnull, 0) < 0)
+                _exit(127);
+            if (devnull > 2 && close(devnull) != 0)
+                _exit(127);
+        }
         if (dup2(pipe_fds[1], 1) < 0)
             _exit(127);
-        if (dup2(pipe_fds[1], 2) < 0)
-            _exit(127);
+        if (protocol_stdout) {
+            devnull = open("/dev/null", O_WRONLY);
+            if (devnull < 0)
+                _exit(127);
+            if (dup2(devnull, 2) < 0)
+                _exit(127);
+            if (devnull > 2 && close(devnull) != 0)
+                _exit(127);
+        } else {
+            if (dup2(pipe_fds[1], 2) < 0)
+                _exit(127);
+        }
         if (close(pipe_fds[1]) != 0)
             _exit(127);
+        {
+            int ei;
+            for (ei = 0; ei < env_count && env_pairs != NULL && env_pairs[ei] != NULL; ei++) {
+                const char *pair = env_pairs[ei];
+                const char *eq = strchr(pair, '=');
+                if (eq != NULL && eq != pair) {
+                    char key[256];
+                    size_t klen = (size_t)(eq - pair);
+                    if (klen < sizeof(key)) {
+                        memcpy(key, pair, klen);
+                        key[klen] = '\0';
+                        setenv(key, eq + 1, 1);
+                    }
+                }
+            }
+        }
         execvp(argv[0], argv);
         _exit(127);
 #if defined(__GNUC__) && !defined(__clang__) && !defined(__TINYC__) && __GNUC__ >= 13
@@ -163,9 +217,16 @@ static int psi_process_begin_exec(char *const argv[], const struct psi_abort_sig
     }
 
     close(pipe_fds[1]);
+    if (stdin_fds[0] >= 0)
+        close(stdin_fds[0]);
     flags = fcntl(pipe_fds[0], F_GETFL, 0);
     if (flags != -1) {
         fcntl(pipe_fds[0], F_SETFL, flags | O_NONBLOCK);
+    }
+    if (stdin_fds[1] >= 0) {
+        flags = fcntl(stdin_fds[1], F_GETFL, 0);
+        if (flags != -1)
+            fcntl(stdin_fds[1], F_SETFL, flags | O_NONBLOCK);
     }
 
     /* Mirror the child's setpgid so the group exists race-free; an
@@ -175,6 +236,8 @@ static int psi_process_begin_exec(char *const argv[], const struct psi_abort_sig
     h = (struct psi_process_handle *)calloc(1u, sizeof(*h));
     if (h == NULL) {
         close(pipe_fds[0]);
+        if (stdin_fds[1] >= 0)
+            close(stdin_fds[1]);
         /* Can't reap child cleanly here; fall through to OS cleanup. */
         kill(-child_pid, SIGTERM);
         waitpid(child_pid, NULL, 0);
@@ -182,6 +245,7 @@ static int psi_process_begin_exec(char *const argv[], const struct psi_abort_sig
     }
     h->child_pid = child_pid;
     h->pipe_fd = pipe_fds[0];
+    h->stdin_fd = stdin_fds[1];
     h->abort_signal = abort_signal;
     *out = h;
     return PSI_STATUS_OK;
@@ -189,7 +253,22 @@ static int psi_process_begin_exec(char *const argv[], const struct psi_abort_sig
 
 int psi_process_begin_argv(char *const argv[], const struct psi_abort_signal *abort_signal,
     struct psi_process_handle **out) {
-    return psi_process_begin_exec(argv, abort_signal, out);
+    return psi_process_begin_exec(argv, abort_signal, 0, 0, NULL, 0, out);
+}
+
+int psi_process_begin_stdio_argv(char *const argv[], const char *const *env_pairs, int env_count,
+    const struct psi_abort_signal *abort_signal, struct psi_process_handle **out) {
+#if PSI_ENABLE_MCP
+    return psi_process_begin_exec(argv, abort_signal, 1, 1, env_pairs, env_count, out);
+#else
+    PSI_UNUSED(argv);
+    PSI_UNUSED(env_pairs);
+    PSI_UNUSED(env_count);
+    PSI_UNUSED(abort_signal);
+    if (out != NULL)
+        *out = NULL;
+    return PSI_STATUS_ERROR;
+#endif
 }
 
 int psi_process_begin(const char *command, const struct psi_abort_signal *abort_signal,
@@ -201,7 +280,151 @@ int psi_process_begin(const char *command, const struct psi_abort_signal *abort_
     argv[3] = NULL;
     if (command == NULL)
         return PSI_STATUS_ERROR;
-    return psi_process_begin_exec(argv, abort_signal, out);
+    return psi_process_begin_exec(argv, abort_signal, 0, 0, NULL, 0, out);
+}
+
+int psi_process_write(struct psi_process_handle *h, const char *data, size_t len) {
+#if PSI_ENABLE_MCP
+    size_t written;
+    struct sigaction ignore_pipe;
+    struct sigaction old_pipe;
+    int have_old_pipe;
+    int status;
+
+    if (h == NULL || data == NULL)
+        return PSI_STATUS_ERROR;
+    if (h->stdin_fd < 0)
+        return PSI_STATUS_ERROR;
+
+    memset(&ignore_pipe, 0, sizeof(ignore_pipe));
+    memset(&old_pipe, 0, sizeof(old_pipe));
+    ignore_pipe.sa_handler = SIG_IGN;
+    sigemptyset(&ignore_pipe.sa_mask);
+    have_old_pipe = sigaction(SIGPIPE, &ignore_pipe, &old_pipe) == 0;
+
+    status = PSI_STATUS_OK;
+    written = 0u;
+    while (written < len) {
+        ssize_t n;
+        if (psi_abort_signal_is_triggered(h->abort_signal) && !h->aborted) {
+            h->aborted = 1;
+            kill(-h->child_pid, SIGTERM);
+            status = PSI_STATUS_ERROR;
+            break;
+        }
+        n = write(h->stdin_fd, data + written, len - written);
+        if (n > 0) {
+            written += (size_t)n;
+            continue;
+        }
+        if (n < 0 && errno == EINTR) {
+            continue;
+        }
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            struct timespec delay;
+            delay.tv_sec = 0;
+            delay.tv_nsec = PSI_PROCESS_POLL_DELAY_NS;
+            nanosleep(&delay, NULL);
+            continue;
+        }
+        status = PSI_STATUS_ERROR;
+        break;
+    }
+
+    if (have_old_pipe) {
+        sigaction(SIGPIPE, &old_pipe, NULL);
+    }
+    return status;
+#else
+    PSI_UNUSED(h);
+    PSI_UNUSED(data);
+    PSI_UNUSED(len);
+    return PSI_STATUS_ERROR;
+#endif
+}
+
+int psi_process_close_stdin(struct psi_process_handle *h) {
+#if PSI_ENABLE_MCP
+    if (h == NULL)
+        return PSI_STATUS_ERROR;
+    if (h->stdin_fd >= 0) {
+        close(h->stdin_fd);
+        h->stdin_fd = -1;
+    }
+    return PSI_STATUS_OK;
+#else
+    PSI_UNUSED(h);
+    return PSI_STATUS_ERROR;
+#endif
+}
+
+int psi_process_try_write(
+    struct psi_process_handle *h, const char *data, size_t len, size_t *written) {
+#if PSI_ENABLE_MCP
+    struct sigaction ignore_pipe;
+    struct sigaction old_pipe;
+    int have_old_pipe;
+    int status;
+    ssize_t n;
+
+    if (written != NULL)
+        *written = 0u;
+    if (h == NULL || data == NULL)
+        return PSI_STATUS_ERROR;
+    if (h->stdin_fd < 0)
+        return PSI_STATUS_ERROR;
+    if (len == 0u)
+        return PSI_STATUS_OK;
+
+    if (psi_abort_signal_is_triggered(h->abort_signal) && !h->aborted) {
+        h->aborted = 1;
+        kill(-h->child_pid, SIGTERM);
+        return PSI_STATUS_ERROR;
+    }
+
+    memset(&ignore_pipe, 0, sizeof(ignore_pipe));
+    memset(&old_pipe, 0, sizeof(old_pipe));
+    ignore_pipe.sa_handler = SIG_IGN;
+    sigemptyset(&ignore_pipe.sa_mask);
+    have_old_pipe = sigaction(SIGPIPE, &ignore_pipe, &old_pipe) == 0;
+
+    status = PSI_STATUS_OK;
+    n = write(h->stdin_fd, data, len);
+    if (n > 0) {
+        if (written != NULL)
+            *written = (size_t)n;
+    } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+        /* Caller retries after a cooperative yield. */
+    } else {
+        status = PSI_STATUS_ERROR;
+    }
+
+    if (have_old_pipe) {
+        sigaction(SIGPIPE, &old_pipe, NULL);
+    }
+    return status;
+#else
+    PSI_UNUSED(h);
+    PSI_UNUSED(data);
+    PSI_UNUSED(len);
+    if (written != NULL)
+        *written = 0u;
+    return PSI_STATUS_ERROR;
+#endif
+}
+
+int psi_process_terminate(struct psi_process_handle *h) {
+    if (h == NULL)
+        return PSI_STATUS_ERROR;
+    if (h->stdin_fd >= 0) {
+        close(h->stdin_fd);
+        h->stdin_fd = -1;
+    }
+    if (!h->reaped) {
+        h->aborted = 1;
+        kill(-h->child_pid, SIGTERM);
+    }
+    return PSI_STATUS_OK;
 }
 
 int psi_process_poll(
@@ -306,7 +529,7 @@ int psi_process_poll(
 
             if (psi_abort_signal_is_triggered(h->abort_signal) && !h->aborted) {
                 h->aborted = 1;
-                kill(h->child_pid, SIGTERM);
+                kill(-h->child_pid, SIGTERM);
             }
             continue;
         }
@@ -322,6 +545,10 @@ int psi_process_finish(
         return PSI_STATUS_ERROR;
 
     if (!h->reaped) {
+        if (h->stdin_fd >= 0) {
+            close(h->stdin_fd);
+            h->stdin_fd = -1;
+        }
         close(h->pipe_fd);
         /* On abort, poll for up to 500ms then escalate to SIGKILL,
          * capping abort latency at ~1.5s for SIGTERM-ignoring trees. */
@@ -410,6 +637,39 @@ int psi_process_begin_argv(char *const argv[], const struct psi_abort_signal *ab
     PSI_UNUSED(abort_signal);
     if (out != NULL)
         *out = NULL;
+    return PSI_STATUS_ERROR;
+}
+int psi_process_begin_stdio_argv(char *const argv[], const char *const *env_pairs, int env_count,
+    const struct psi_abort_signal *abort_signal, struct psi_process_handle **out) {
+    PSI_UNUSED(argv);
+    PSI_UNUSED(env_pairs);
+    PSI_UNUSED(env_count);
+    PSI_UNUSED(abort_signal);
+    if (out != NULL)
+        *out = NULL;
+    return PSI_STATUS_ERROR;
+}
+int psi_process_write(struct psi_process_handle *h, const char *data, size_t len) {
+    PSI_UNUSED(h);
+    PSI_UNUSED(data);
+    PSI_UNUSED(len);
+    return PSI_STATUS_ERROR;
+}
+int psi_process_close_stdin(struct psi_process_handle *h) {
+    PSI_UNUSED(h);
+    return PSI_STATUS_ERROR;
+}
+int psi_process_try_write(
+    struct psi_process_handle *h, const char *data, size_t len, size_t *written) {
+    PSI_UNUSED(h);
+    PSI_UNUSED(data);
+    PSI_UNUSED(len);
+    if (written)
+        *written = 0u;
+    return PSI_STATUS_ERROR;
+}
+int psi_process_terminate(struct psi_process_handle *h) {
+    PSI_UNUSED(h);
     return PSI_STATUS_ERROR;
 }
 int psi_process_poll(

@@ -29,6 +29,7 @@ STYLUA          ?= stylua
 TUI           ?= 1
 ANSI          ?= 1
 COLOR         ?= 1
+MCP           ?= 1
 REPL_EDITLINE ?= 1
 STATIC        ?= 0
 
@@ -108,6 +109,7 @@ LOCAL_CPPFLAGS  = -Iinclude -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600 \
                   -DPSI_ENABLE_TUI=$(TUI) \
                   -DPSI_ENABLE_ANSI=$(ANSI) \
                   -DPSI_ENABLE_COLOR=$(COLOR) \
+                  -DPSI_ENABLE_MCP=$(MCP) \
                   -DPSI_ENABLE_REPL_EDITLINE=$(REPL_EDITLINE)
 LOCAL_CPPFLAGS += $(EMBED_CA_CPPFLAGS)
 LOCAL_CPPFLAGS += $(CA_BUNDLE_CPPFLAGS)
