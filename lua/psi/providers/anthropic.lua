@@ -85,8 +85,9 @@ local safe_decode = prelude.safe_json_decode
 -- becomes the `tool_result` user-message block.
 --
 -- Parity with pi's transform-messages.ts + anthropic.ts:
---   * text: strip lone UTF-16 surrogates (Anthropic rejects them);
---     then skip the block entirely if it's empty-after-trim.
+--   * text: strip ill-formed UTF-8 (Anthropic rejects any byte that
+--     isn't a valid UTF-8 scalar value with HTTP 400 "surrogates not
+--     allowed"); then skip the block entirely if it's empty-after-trim.
 --   * toolCall → tool_use: verbatim id/name, input-object pass-through.
 --   * thinking: re-emit with signature so interleaved-thinking stays
 --     coherent if thinking is enabled; if the signature is missing
@@ -125,8 +126,9 @@ end
 local function tool_result_block(msg)
   -- pi stores toolResult.content as an array of content blocks; Anthropic
   -- accepts either a string or an array. Concatenate text blocks with
-  -- "\n" (matches pi) and strip surrogates so the on-wire body is
-  -- always valid UTF-8.
+  -- "\n" (matches pi) and run the result through sanitize_surrogates,
+  -- which strips any byte that isn't part of a valid UTF-8 scalar
+  -- value so the on-wire body always validates.
   local parts = prelude.array(#(msg.content or {}))
   if type(msg.content) == "table" then
     for _, b in ipairs(msg.content) do
@@ -456,8 +458,8 @@ local function system_as_blocks(system_prompt)
   if type(system_prompt) == "table" then
     return system_prompt
   end
-  -- Anthropic rejects requests whose body contains lone UTF-16
-  -- surrogates with HTTP 400 "str is not valid UTF-8: surrogates not
+  -- Anthropic rejects any request body that isn't well-formed UTF-8
+  -- with HTTP 400 "str is not valid UTF-8: surrogates not
   -- allowed". The system prompt is assembled from project-context files
   -- (AGENTS.md / CLAUDE.md) and tool descriptions, any of which may
   -- contain bytes the model later echoes back. Match pi-mono's
@@ -578,9 +580,9 @@ function M.complete_text(opts)
     io.stderr:write(msg .. "\n")
     return false, msg
   end
-  -- Same surrogate sanitisation as the streaming path; both fields
-  -- arrive on the wire as JSON strings and Anthropic refuses lone
-  -- UTF-16 surrogates anywhere in the body.
+  -- Same UTF-8 sanitisation as the streaming path; both fields arrive
+  -- on the wire as JSON strings and Anthropic refuses any malformed
+  -- UTF-8 anywhere in the body.
   local request = {
     model = resolve_model(opts.model),
     max_tokens = opts.max_tokens or 2048,
