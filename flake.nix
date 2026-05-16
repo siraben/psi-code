@@ -352,6 +352,7 @@
           psi = mkPsi { p = pkgs; };
           default = self.packages.${system}.psi;
           psi-gcc = self.packages.${system}.psi;
+          c-ward = pkgs.callPackage ./nix/c-ward.nix {};
 
           psi-clang = mkPsi {
             p = pkgs;

@@ -137,6 +137,75 @@ jobs:
           SMOKE_EXCLUDES: ${{ matrix.smoke_excludes }}
         run: bash scripts/ci/build-and-smoke.sh
 
+  libc-matrix:
+    name: Libc package and smoke (${{ matrix.name }})
+    runs-on: docker
+    needs: [format, style]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: glibc
+            package: psi-gcc
+            nix_build_flags: ""
+            smoke_excludes: ""
+          - name: musl-static
+            package: psi-static
+            nix_build_flags: ""
+            smoke_excludes: ""
+          - name: fil-c
+            package: psi-filc
+            nix_build_flags: "--cores 1 --max-jobs 1"
+            smoke_excludes: ""
+          - name: cosmo
+            package: psi-cosmocc
+            nix_build_flags: ""
+            smoke_excludes: ""
+          - name: c-ward
+            package: c-ward
+            nix_build_flags: ""
+            smoke_excludes: ""
+    steps:
+      - name: Checkout
+        run: eval "$FETCH_SCRIPT"
+      - uses: ./.forgejo/actions/setup
+      - name: Build package and run smoke tests when applicable
+        env:
+          PACKAGE_ATTR: ${{ matrix.package }}
+          NIX_BUILD_FLAGS: ${{ matrix.nix_build_flags }}
+          SMOKE_EXCLUDES: ${{ matrix.smoke_excludes }}
+        run: bash scripts/ci/package-smoke.sh
+
+  compiler-matrix:
+    name: Compiler package and smoke (${{ matrix.name }})
+    runs-on: docker
+    needs: [format, style]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: gcc
+            package: psi-gcc
+            smoke_excludes: ""
+          - name: clang
+            package: psi-clang
+            smoke_excludes: ""
+          - name: tcc
+            package: psi-tcc
+            smoke_excludes: ""
+          - name: compcert
+            package: psi-compcert
+            smoke_excludes: ""
+    steps:
+      - name: Checkout
+        run: eval "$FETCH_SCRIPT"
+      - uses: ./.forgejo/actions/setup
+      - name: Build package and run smoke tests
+        env:
+          PACKAGE_ATTR: ${{ matrix.package }}
+          SMOKE_EXCLUDES: ${{ matrix.smoke_excludes }}
+        run: bash scripts/ci/package-smoke.sh
+
   valgrind:
     name: Valgrind
     runs-on: docker
