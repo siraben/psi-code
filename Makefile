@@ -43,9 +43,7 @@ CFLAGS        ?= -O2
 CPPFLAGS      ?=
 LDFLAGS       ?=
 RPATH_LDFLAGS ?=
-# Read Git metadata directly instead of invoking git; source/archive builds
-# without a .git directory fall back to unknown. Callers can still override.
-GIT_COMMIT   ?= $(shell scripts/git-commit-from-files.sh --short 2>/dev/null || printf unknown)
+GIT_COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || printf unknown)
 
 # -Wno-long-long suppresses the C90-pedantic warning Lua forces
 # via lua_Integer being long long.
