@@ -1386,7 +1386,7 @@ local function redraw(state)
   frame_width = math.max(1, state.width)
   cwd = psi.cwd() or "."
   components[#components + 1] = tui_chrome.line(function(width)
-    return tui.compose_bar(tui.workspace_bar(cwd, width), width)
+    return tui.compose_bar(tui.workspace_bar_for_width(cwd, width), width)
   end)
 
   local first_line = total_lines - rows.transcript_height - state.scroll_offset + 1

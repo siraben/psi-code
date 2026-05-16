@@ -561,6 +561,74 @@ local function build_commit()
   return commit
 end
 
+local function workspace_model(cwd)
+  local repo, worktree = split_workspace(cwd)
+  local commit = build_commit()
+  local right_parts = {}
+  if repo ~= nil and worktree ~= nil then
+    right_parts[#right_parts + 1] = pair("worktree", worktree, true)
+    if commit ~= "" then
+      right_parts[#right_parts + 1] = pair("build", commit, true)
+    end
+    return {
+      kind = "worktree",
+      left = pair("repo", repo, false),
+      right_parts = right_parts,
+    }
+  end
+
+  if commit ~= "" then
+    right_parts[#right_parts + 1] = pair("build", commit, true)
+  end
+  return {
+    kind = "cwd",
+    path = tilde_path(cwd or "-"),
+    right_parts = right_parts,
+  }
+end
+
+local function workspace_right(model)
+  return table.concat(model.right_parts or {}, sep())
+end
+
+local function render_workspace_left(model, path)
+  if model.kind == "worktree" then
+    return model.left
+  end
+  return pair("cwd", path or model.path or "-", false)
+end
+
+local function render_workspace_bar(model, path, right)
+  return render_workspace_left(model, path) .. BAR_SPLIT .. (right or workspace_right(model))
+end
+
+local function render_workspace_line(model)
+  local parts = { render_workspace_left(model) }
+  for _, part in ipairs(model.right_parts or {}) do
+    parts[#parts + 1] = part
+  end
+  return table.concat(parts, sep())
+end
+
+local function fit_cwd_path(path, right, width)
+  local total_width = tonumber(width)
+  if total_width == nil then
+    return path, right
+  end
+
+  local right_width = right ~= "" and tui_text.visible_width(right) or 0
+  local label_width = tui_text.visible_width(label("cwd") .. " ")
+  local min_left_width = label_width + 1
+  if right ~= "" and total_width - right_width - 2 < min_left_width then
+    right = ""
+    right_width = 0
+  end
+
+  local gap = right ~= "" and 3 or 0
+  local path_width = math.max(1, total_width - right_width - gap - label_width)
+  return shorten_middle(path, path_width), right
+end
+
 local function split_bar(text)
   text = tostring(text or "")
   local start_pos, end_pos = text:find(BAR_SPLIT, 1, true)
@@ -680,50 +748,22 @@ function M.footer_hint(arg_json)
 end
 
 function M.workspace_line(cwd)
-  local repo, worktree = split_workspace(cwd)
-  local parts
-  if repo ~= nil and worktree ~= nil then
-    parts = { pair("repo", repo, false), pair("worktree", worktree, true) }
-  else
-    parts = { pair("cwd", tilde_path(cwd or "-"), false) }
-  end
-  local commit = build_commit()
-  if commit ~= "" then
-    parts[#parts + 1] = pair("build", commit, true)
-  end
-  return table.concat(parts, sep())
+  return render_workspace_line(workspace_model(cwd))
 end
 
-function M.workspace_bar(cwd, width)
-  local repo, worktree = split_workspace(cwd)
-  local commit = build_commit()
-  local right_parts = {}
-  local left
-  if repo ~= nil and worktree ~= nil then
-    left = pair("repo", repo, false)
-    right_parts[#right_parts + 1] = pair("worktree", worktree, true)
-  else
-    left = pair("cwd", tilde_path(cwd or "-"), false)
+function M.workspace_bar(cwd)
+  return render_workspace_bar(workspace_model(cwd))
+end
+
+function M.workspace_bar_for_width(cwd, width)
+  local model = workspace_model(cwd)
+  local right = workspace_right(model)
+  if model.kind == "cwd" then
+    local path
+    path, right = fit_cwd_path(model.path, right, width)
+    return render_workspace_bar(model, path, right)
   end
-  if commit ~= "" then
-    right_parts[#right_parts + 1] = pair("build", commit, true)
-  end
-  local right = table.concat(right_parts, sep())
-  local total_width = tonumber(width)
-  if repo == nil and total_width ~= nil then
-    local right_width = right ~= "" and tui_text.visible_width(right) or 0
-    local label_width = tui_text.visible_width(label("cwd") .. " ")
-    local min_left_width = label_width + 1
-    if right ~= "" and total_width - right_width - 2 < min_left_width then
-      right = ""
-      right_width = 0
-    end
-    local gap = right ~= "" and 3 or 0
-    local path_width = math.max(1, total_width - right_width - gap - label_width)
-    local path = shorten_middle(tilde_path(cwd or "-"), path_width)
-    left = pair("cwd", path, false)
-  end
-  return left .. BAR_SPLIT .. right
+  return render_workspace_bar(model, nil, right)
 end
 
 function M.render_busy_status(label_text, phase, elapsed_seconds, glisten_phase)
