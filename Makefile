@@ -43,7 +43,9 @@ CFLAGS        ?= -O2
 CPPFLAGS      ?=
 LDFLAGS       ?=
 RPATH_LDFLAGS ?=
-GIT_COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || printf unknown)
+# Set by callers that want an embedded build hash. Keep the default static so
+# source/archive builds do not require a git checkout or git binary.
+GIT_COMMIT   ?= unknown
 
 # -Wno-long-long suppresses the C90-pedantic warning Lua forces
 # via lua_Integer being long long.

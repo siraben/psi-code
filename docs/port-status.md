@@ -14,14 +14,14 @@ architecture it is porting.
 | Project context discovery | `packages/coding-agent/src/core/resource-loader.ts` | Ported for global/project `AGENTS.md` / `CLAUDE.md` discovery. Prompt templates and Lua-native theme loading are ported; skills are still not ported. |
 | System prompt assembly | `packages/coding-agent/src/core/system-prompt.ts` | Ported via `psi.prompt`. Assembled from tool metadata, guidelines, cwd, date, and project context files; prompt caching applied per `pi`. |
 | Interactive shell | `packages/coding-agent/src/modes/interactive/` | Ported. `libedit`-backed coding-agent shell over the streamed loop. The full slash-command set is documented in `docs/extensions.md`; canonical source is `BUILTIN_COMMANDS` in `lua/psi/slash_commands.lua`. |
-| Full-screen TUI | `packages/tui/` | Ported core. `--tui` runs the streamed agent loop in raw terminal mode with Lua-owned ANSI rendering on a single thread — the agent turn is a Lua coroutine driven by `psi.sched`, yielding cooperatively on HTTP / process poll so the redraw loop keeps up. Rich status line (cwd / model / session / token usage), unicode tool-call borders, live markdown, readline editing (Alt-B/F/D/Backspace, Ctrl-W/K/U), optional bundled Vim modal editing via settings or `/vim`, Ctrl-G abort, Ctrl-Z suspend, and a Lua-driven theme registry with a bundled dark default. Smaller than `pi`'s TUI: no session tree view, no modals, no interactive theme picker. |
+| Inline TUI | `packages/tui/` | Ported core. `--tui` runs the streamed agent loop in raw terminal mode with Lua-owned ANSI rendering on a single thread, but defaults to the normal terminal screen buffer instead of alt screen so terminal scrollback and tmux selection behave more naturally. The agent turn is a Lua coroutine driven by `psi.sched`, yielding cooperatively on HTTP / process poll so the redraw loop keeps up. Rich status line (cwd / model / session / token usage), unicode tool-call borders, live markdown, readline editing (Alt-B/F/D/Backspace, Ctrl-W/K/U), hardware-cursor prompt editing by default, optional bundled Vim modal editing via settings or `/vim`, Ctrl-G abort, Ctrl-Z suspend, and a Lua-driven theme registry with a bundled dark default. Smaller than `pi`'s TUI: no session tree view, no modals, no interactive theme picker. |
 | RPC mode | `packages/coding-agent/src/modes/rpc/` | Not started. |
 | Compaction and summaries | `packages/coding-agent/src/core/compaction/` | Ported. Manual and dynamic token-aware auto-compaction; file-op provenance from `psi.session` feeds the compaction prompt. Not yet branch-aware. |
 | Hooks and extensions | `packages/coding-agent/src/core/skills.ts`, `src/core/extensions/` | Early-to-partial. `psi.tool_registry` exposes before/after tool-call hooks; `psi.events` is a neutral pub/sub bus; `psi.commands.register` opens slash commands to extensions; boot loads Lua files from `$PSI_EXTENSIONS_DIR`, `~/.config/psi/extensions/`, and `./.psi/extensions/`. No npm/git package manager, no TS transpile, no sandboxing. |
 | Abort / cancel plumbing | `packages/coding-agent/src/core/abort-signal.ts` | Ported. `AbortSignal` threaded through turn, compact, curl, and shell execution; transcript state ("aborted" / "error") recorded on each content block so the next turn sees a clean slate. |
 | Provider/model loop | `packages/ai/`, `packages/coding-agent/src/modes/print-mode.ts` | Partial-to-ported. Anthropic Messages, local Ollama, OpenRouter, and OpenAI Codex (Responses + ChatGPT OAuth) share Lua provider routing plus the OpenAI-compatible adapter where applicable. Extension-level provider registration and the broad pi model catalog are not ported. |
 | Tool output truncation | `packages/coding-agent/src/core/tools/truncate.ts` | Ported. `lua/psi/truncate.lua` mirrors `truncateHead` / `truncateTail` / `truncateLine` (2000 lines / 50 KiB / 500 chars) with UTF-8-safe tail slicing and the `[Showing lines X-Y of Z. Full output: /tmp/...]` continuation hints. `bash` tail-truncates and spills the full payload to a temp file via `psi.file_append` + `psi.tempfile_path`; `grep` head-truncates and clips long match lines; `find` / `ls` head-truncate by bytes; `read` keeps its `offset`/`limit` paging. |
-| Markdown rendering of assistant output | `packages/tui/src/...` | Ported. Single pure-Lua `psi.markdown` module serves every mode; the TUI runs each wrapped line through `psi.markdown.render_line` on the main thread and paints the resulting ANSI escapes via a small C SGR parser. The earlier C duplicate has been deleted (see architecture §4.3). |
+| Markdown rendering of assistant output | `packages/tui/src/...` | Ported. Assistant output now flows through a Lua component path: markdown inline tokens are parsed before styling, paragraph blocks are wrapped after styling with ANSI-aware display width, and tables render as reusable TUI component output. C owns the shared terminal text primitives (ANSI/OSC stripping, UTF-8 cell width, clipping, padding, wrapping) and the terminal boundary receives logical line frames for differential row rendering when `--tui` is active. |
 | Concurrency model | event loop / worker threads in `packages/coding-agent/src/core/` | Ported as single-threaded + Lua coroutines. The agent turn runs inside a `psi.sched` coroutine on the one thread that owns `lua_State`; HTTP streaming (`src/core/http_async.c`) and shell execution (`src/core/process.c`) use begin/poll/finish triples so every blocking point yields cooperatively, giving the TUI main loop a chance to pump input and redraw. |
 
 ## Dependency audit
@@ -33,7 +33,7 @@ architecture it is porting.
   instead of GPL.
 - `libcurl`: pragmatic choice for HTTPS provider integration. Heavier than the
   rest, but the portability tradeoff is worth it here.
-- ANSI terminal control: used by `--tui` for full-screen rendering. A UTF-8
+- ANSI terminal control: used by `--tui` for inline rendering. A UTF-8
   locale is set before entering raw mode so unicode glyphs render correctly.
   The Lua TUI has no non-ANSI renderer, so `ANSI=0` disables TUI support at
   compile time.
@@ -49,7 +49,10 @@ architecture it is porting.
 ## Next porting priority
 
 The biggest remaining user-visible gaps are around session management
-and extension richness:
+and extension richness. The TUI now has the pi-mono-style component and
+differential rendering base needed for larger interactive surfaces; see
+[docs/tui-differential-rendering-plan.md](tui-differential-rendering-plan.md)
+for the design that this implementation follows.
 
 1. **Session tree navigation.** Walk the `parentSession` pointers
    in session headers; add `/tree` and branch-aware forks that

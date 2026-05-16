@@ -9,13 +9,10 @@ local context = require("psi.context")
 local keybindings = require("psi.keybindings")
 local prelude = require("psi.prelude")
 local settings = require("psi.settings_manager")
+local tui_text = require("psi.tui_text")
 
 local M = {}
 local BAR_SPLIT = string.char(31)
-local NON_PRINTABLE_ASCII_PATTERN = "[^\32-\126]"
-local BYTE_ESC = 27
-local UTF8_CONTINUATION_MASK = 0xC0
-local UTF8_CONTINUATION_TAG = 0x80
 local busy_rng_seeded = false
 local enabled_setting
 M._visible_width_cache = { entries = 0 }
@@ -495,6 +492,14 @@ enabled_setting = function(path, env_name, default_value)
   return default_value
 end
 
+local function split_path(path)
+  local parts = {}
+  for part in tostring(path or ""):gmatch("[^/]+") do
+    parts[#parts + 1] = part
+  end
+  return parts
+end
+
 local function tilde_path(path)
   local home = os.getenv("HOME")
   if type(path) ~= "string" or path == "" then
@@ -506,17 +511,27 @@ local function tilde_path(path)
   return path
 end
 
+local function split_workspace(path)
+  local parts = split_path(path)
+  for index = 1, #parts - 1 do
+    if parts[index] == ".worktrees" then
+      return parts[index - 1], parts[index + 1]
+    end
+  end
+  return nil, nil
+end
+
 local function shorten_middle(text, width)
   text = tostring(text or "")
   width = tonumber(width) or #text
   if width <= 0 then
     return ""
   end
-  if #text <= width then
+  if tui_text.visible_width(text) <= width then
     return text
   end
   if width <= 3 then
-    return text:sub(1, width)
+    return text:sub(1, tui_text.byte_index_for_width(text, width))
   end
   local left = math.max(1, math.floor((width - 3) / 2))
   local right = math.max(1, width - 3 - left)
@@ -546,51 +561,6 @@ local function build_commit()
   return commit
 end
 
-local function visible_width(text)
-  text = tostring(text or "")
-  if text:find(NON_PRINTABLE_ASCII_PATTERN) == nil then
-    return #text
-  end
-  local cache = M._visible_width_cache
-  if #text <= 4096 then
-    local cached = cache[text]
-    if cached ~= nil then
-      return cached
-    end
-  end
-
-  local width = 0
-  local i = 1
-  while i <= #text do
-    local ch = text:byte(i)
-    if ch == BYTE_ESC and text:byte(i + 1) == 91 then
-      local j = i + 2
-      while j <= #text do
-        local byte = text:byte(j)
-        if byte >= 64 and byte <= 126 then
-          break
-        end
-        j = j + 1
-      end
-      i = j < #text and (j + 1) or (#text + 1)
-    else
-      if (ch & UTF8_CONTINUATION_MASK) ~= UTF8_CONTINUATION_TAG then
-        width = width + 1
-      end
-      i = i + 1
-    end
-  end
-  if #text <= 4096 then
-    if cache.entries >= 1024 then
-      cache = { entries = 0 }
-      M._visible_width_cache = cache
-    end
-    cache[text] = width
-    cache.entries = cache.entries + 1
-  end
-  return width
-end
-
 local function split_bar(text)
   text = tostring(text or "")
   local start_pos, end_pos = text:find(BAR_SPLIT, 1, true)
@@ -603,9 +573,9 @@ end
 function M.compose_bar(text, width)
   local left, right = split_bar(text)
   local total_width = math.max(1, tonumber(width) or 80)
-  local left_width = visible_width(left)
-  local right_width = visible_width(right)
-  local gap = total_width - left_width - right_width - 1
+  local left_width = tui_text.visible_width(left)
+  local right_width = tui_text.visible_width(right)
+  local gap = total_width - left_width - right_width
   if right == "" then
     return left
   end
@@ -710,7 +680,13 @@ function M.footer_hint(arg_json)
 end
 
 function M.workspace_line(cwd)
-  local parts = { pair("cwd", tilde_path(cwd or "-"), false) }
+  local repo, worktree = split_workspace(cwd)
+  local parts
+  if repo ~= nil and worktree ~= nil then
+    parts = { pair("repo", repo, false), pair("worktree", worktree, true) }
+  else
+    parts = { pair("cwd", tilde_path(cwd or "-"), false) }
+  end
   local commit = build_commit()
   if commit ~= "" then
     parts[#parts + 1] = pair("build", commit, true)
@@ -719,23 +695,35 @@ function M.workspace_line(cwd)
 end
 
 function M.workspace_bar(cwd, width)
+  local repo, worktree = split_workspace(cwd)
   local commit = build_commit()
-  local right = commit ~= "" and pair("build", commit, true) or ""
-  local path = tilde_path(cwd or "-")
+  local right_parts = {}
+  local left
+  if repo ~= nil and worktree ~= nil then
+    left = pair("repo", repo, false)
+    right_parts[#right_parts + 1] = pair("worktree", worktree, true)
+  else
+    left = pair("cwd", tilde_path(cwd or "-"), false)
+  end
+  if commit ~= "" then
+    right_parts[#right_parts + 1] = pair("build", commit, true)
+  end
+  local right = table.concat(right_parts, sep())
   local total_width = tonumber(width)
-  if total_width ~= nil then
-    local right_width = right ~= "" and visible_width(right) or 0
-    local min_left_width = visible_width(label("cwd") .. " ") + 1
+  if repo == nil and total_width ~= nil then
+    local right_width = right ~= "" and tui_text.visible_width(right) or 0
+    local label_width = tui_text.visible_width(label("cwd") .. " ")
+    local min_left_width = label_width + 1
     if right ~= "" and total_width - right_width - 2 < min_left_width then
       right = ""
       right_width = 0
     end
     local gap = right ~= "" and 3 or 0
-    local label_width = visible_width(label("cwd") .. " ")
     local path_width = math.max(1, total_width - right_width - gap - label_width)
-    path = shorten_middle(path, path_width)
+    local path = shorten_middle(tilde_path(cwd or "-"), path_width)
+    left = pair("cwd", path, false)
   end
-  return pair("cwd", path, false) .. BAR_SPLIT .. right
+  return left .. BAR_SPLIT .. right
 end
 
 function M.render_busy_status(label_text, phase, elapsed_seconds, glisten_phase)

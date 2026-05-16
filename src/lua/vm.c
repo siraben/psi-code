@@ -39,6 +39,7 @@
 #include "psi/runtime.h"
 #include "psi/session.h"
 #include "psi/vm.h"
+#include "psi/wcwidth.h"
 
 #ifndef PSI_ENABLE_TUI
 #define PSI_ENABLE_TUI 0
@@ -512,6 +513,49 @@ static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx) {
 
 #define PSI_VM_TUI_KEY_NAME_MAX 32
 #define PSI_VM_TUI_KEY_TEXT_MAX 8
+#define PSI_VM_TUI_ESCAPE_SEQUENCE_MAX 64
+#define PSI_VM_TUI_DEFAULT_WIDTH 80
+#define PSI_VM_TUI_DEFAULT_HEIGHT 24
+#define PSI_VM_TUI_FIRST_TERMINAL_CELL 1
+#define PSI_VM_TUI_POLL_INFINITE_MS (-1)
+#define PSI_VM_TUI_POLL_MAX_MS 3600000
+#define PSI_VM_TUI_ESCAPE_INITIAL_TIMEOUT_MS 25
+#define PSI_VM_TUI_ESCAPE_CONTINUE_TIMEOUT_MS 5
+#define PSI_VM_TUI_ESCAPE_BYTE 27
+#define PSI_VM_TUI_BACKSPACE_DELETE 127
+#define PSI_VM_TUI_BACKSPACE_ASCII 8
+#define PSI_VM_TUI_UTF8_CONTINUE_TIMEOUT_MS 25
+#define PSI_VM_TUI_UTF8_LEAD_TWO_MIN 0xc2u
+#define PSI_VM_TUI_UTF8_LEAD_TWO_MAX 0xdfu
+#define PSI_VM_TUI_UTF8_LEAD_THREE_MIN 0xe0u
+#define PSI_VM_TUI_UTF8_LEAD_THREE_MAX 0xefu
+#define PSI_VM_TUI_UTF8_LEAD_FOUR_MIN 0xf0u
+#define PSI_VM_TUI_UTF8_LEAD_FOUR_MAX 0xf4u
+#define PSI_VM_TUI_UTF8_CONTINUATION_MASK 0xc0
+#define PSI_VM_TUI_UTF8_CONTINUATION_TAG 0x80
+#define PSI_VM_TUI_UTF8_TEXT_MIN_BUFFER 5u
+#define PSI_VM_TUI_CONTROL_MIN 1
+#define PSI_VM_TUI_CONTROL_MAX 26
+#define PSI_VM_TUI_CONTROL_A_OFFSET 1
+#define PSI_VM_TUI_CSI_PRIMARY_PARAM 1u
+#define PSI_VM_TUI_MODIFIER_CTRL 5u
+#define PSI_VM_TUI_MODIFIER_ALT 3u
+#define PSI_VM_TUI_MODIFIER_SHIFT_MIN 2u
+#define PSI_VM_TUI_LEGACY_ENTER_CODE 13u
+#define PSI_VM_TUI_KITTY_SHIFT_ENTER_CODE 57414u
+#define PSI_VM_TUI_MOUSE_WHEEL_FLAG 64u
+#define PSI_VM_TUI_MOUSE_BUTTON_MASK 3u
+#define PSI_VM_TUI_MOUSE_WHEEL_UP 0u
+#define PSI_VM_TUI_MOUSE_WHEEL_DOWN 1u
+
+static const char PSI_VM_TUI_SYNC_BEGIN[] = "\033[?2026h";
+static const char PSI_VM_TUI_SYNC_END[] = "\033[?2026l";
+static const char PSI_VM_TUI_CURSOR_HIDE[] = "\033[?25l";
+static const char PSI_VM_TUI_CURSOR_SHOW[] = "\033[?25h";
+static const char PSI_VM_TUI_RESET_STYLE[] = "\033[0m";
+static const char PSI_VM_TUI_CLEAR_LINE[] = "\033[2K";
+static const char PSI_VM_TUI_CLOSE_OSC8[] = "\033]8;;\a";
+static const char PSI_VM_TUI_CLEAR_SCREEN[] = "\033[2J\033[3J\033[H";
 
 struct psi_vm_tui_key_event {
     char key_name[PSI_VM_TUI_KEY_NAME_MAX];
@@ -591,6 +635,28 @@ extern void psi_tui_suspend_terminal(void);
 extern void psi_tui_resume_terminal(void);
 
 static int psi_vm_tui_frame_active = 0;
+static char **psi_vm_tui_previous_lines = NULL;
+static size_t psi_vm_tui_previous_line_count = 0u;
+static long psi_vm_tui_previous_top = PSI_VM_TUI_FIRST_TERMINAL_CELL;
+static long psi_vm_tui_previous_cursor_row = 0;
+static long psi_vm_tui_previous_cursor_col = 0;
+static int psi_vm_tui_previous_cursor_visible = 0;
+
+static void psi_vm_tui_reset_render_cache(void) {
+    if (psi_vm_tui_previous_lines != NULL) {
+        size_t i;
+        for (i = 0u; i < psi_vm_tui_previous_line_count; i++) {
+            free(psi_vm_tui_previous_lines[i]);
+        }
+        free(psi_vm_tui_previous_lines);
+    }
+    psi_vm_tui_previous_lines = NULL;
+    psi_vm_tui_previous_line_count = 0u;
+    psi_vm_tui_previous_top = PSI_VM_TUI_FIRST_TERMINAL_CELL;
+    psi_vm_tui_previous_cursor_row = 0;
+    psi_vm_tui_previous_cursor_col = 0;
+    psi_vm_tui_previous_cursor_visible = 0;
+}
 
 static int psi_vm_tui_read_byte(int timeout_ms) {
     struct pollfd pfd;
@@ -617,7 +683,13 @@ static void psi_vm_tui_write(const char *text) {
 }
 
 static void psi_vm_tui_draw_raw_line(long row, const char *text) {
-    printf("\033[%ld;1H\033[2K%s\033[0m", row, text != NULL ? text : "");
+    printf("\033[%ld;%dH%s%s%s", row, PSI_VM_TUI_FIRST_TERMINAL_CELL, PSI_VM_TUI_CLEAR_LINE,
+        text != NULL ? text : "", PSI_VM_TUI_RESET_STYLE);
+}
+
+static void psi_vm_tui_draw_frame_line(long row, const char *text) {
+    printf("\033[%ld;%dH%s%s%s%s", row, PSI_VM_TUI_FIRST_TERMINAL_CELL, PSI_VM_TUI_CLEAR_LINE,
+        text != NULL ? text : "", PSI_VM_TUI_RESET_STYLE, PSI_VM_TUI_CLOSE_OSC8);
 }
 
 static void psi_vm_tui_suspend(void) {
@@ -651,7 +723,8 @@ static int psi_vm_tui_collect_escape_sequence(
 
     length = 0u;
     buffer[0] = '\0';
-    timeout_ms = 25;
+    /* An ESC byte can be a lone Escape key or the prefix of a terminal sequence. */
+    timeout_ms = PSI_VM_TUI_ESCAPE_INITIAL_TIMEOUT_MS;
     for (;;) {
         int ch;
 
@@ -668,7 +741,7 @@ static int psi_vm_tui_collect_escape_sequence(
             (ch >= 'a' && ch <= 'z')) {
             break;
         }
-        timeout_ms = 5;
+        timeout_ms = PSI_VM_TUI_ESCAPE_CONTINUE_TIMEOUT_MS;
     }
 
     PSI_UNUSED(restore_timeout_ms);
@@ -731,7 +804,9 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
     if (strcmp(sequence, "[6~") == 0) {
         return "page-down";
     }
-    if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 && first == 1u && second == 5u) {
+    /* Common CSI modified-arrow form: ESC [ 1 ; <modifier> <arrow>. */
+    if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 &&
+        first == PSI_VM_TUI_CSI_PRIMARY_PARAM && second == PSI_VM_TUI_MODIFIER_CTRL) {
         if (final == 'A') {
             return "ctrl-up";
         }
@@ -745,7 +820,8 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
             return "ctrl-left";
         }
     }
-    if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 && first == 1u && second == 3u) {
+    if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 &&
+        first == PSI_VM_TUI_CSI_PRIMARY_PARAM && second == PSI_VM_TUI_MODIFIER_ALT) {
         if (final == 'A') {
             return "alt-up";
         }
@@ -763,30 +839,65 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
         (final == 'M' || final == 'm')) {
         PSI_UNUSED(column);
         PSI_UNUSED(row);
-        if (final == 'M' && (button & 64u) != 0u) {
-            if ((button & 3u) == 0u) {
+        /* SGR mouse reports wheel direction in the low button bits. */
+        if (final == 'M' && (button & PSI_VM_TUI_MOUSE_WHEEL_FLAG) != 0u) {
+            if ((button & PSI_VM_TUI_MOUSE_BUTTON_MASK) == PSI_VM_TUI_MOUSE_WHEEL_UP) {
                 return "wheel-up";
             }
-            if ((button & 3u) == 1u) {
+            if ((button & PSI_VM_TUI_MOUSE_BUTTON_MASK) == PSI_VM_TUI_MOUSE_WHEEL_DOWN) {
                 return "wheel-down";
             }
         }
         return NULL;
     }
     if (sscanf(sequence, "[%u;%u;%u%c", &first, &second, &third, &final) == 4 && final == '~' &&
-        first == 27u && third == 13u && second >= 2u) {
+        first == (unsigned int)PSI_VM_TUI_ESCAPE_BYTE && third == PSI_VM_TUI_LEGACY_ENTER_CODE &&
+        second >= PSI_VM_TUI_MODIFIER_SHIFT_MIN) {
         return "shift-enter";
     }
     if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 &&
-        (final == 'u' || final == '~') && (first == 13u || first == 57414u) && second >= 2u) {
+        (final == 'u' || final == '~') &&
+        (first == PSI_VM_TUI_LEGACY_ENTER_CODE || first == PSI_VM_TUI_KITTY_SHIFT_ENTER_CODE) &&
+        second >= PSI_VM_TUI_MODIFIER_SHIFT_MIN) {
         return "shift-enter";
     }
     return NULL;
 }
 
+static int psi_vm_tui_read_utf8_tail(unsigned int lead, char *out, size_t out_size) {
+    size_t expected;
+    size_t i;
+
+    if (out == NULL || out_size < PSI_VM_TUI_UTF8_TEXT_MIN_BUFFER ||
+        lead < PSI_VM_TUI_UTF8_LEAD_TWO_MIN || lead > PSI_VM_TUI_UTF8_LEAD_FOUR_MAX) {
+        return 0;
+    }
+    if (lead <= PSI_VM_TUI_UTF8_LEAD_TWO_MAX) {
+        expected = 1u;
+    } else if (lead <= PSI_VM_TUI_UTF8_LEAD_THREE_MAX) {
+        expected = 2u;
+    } else {
+        expected = 3u;
+    }
+    out[0] = (char)lead;
+    for (i = 1u; i <= expected; i++) {
+        int ch;
+
+        ch = psi_vm_tui_read_byte(PSI_VM_TUI_UTF8_CONTINUE_TIMEOUT_MS);
+        if (ch < 0 ||
+            (((unsigned int)ch) & PSI_VM_TUI_UTF8_CONTINUATION_MASK) !=
+                PSI_VM_TUI_UTF8_CONTINUATION_TAG) {
+            return 0;
+        }
+        out[i] = (char)ch;
+    }
+    out[expected + 1u] = '\0';
+    return 1;
+}
+
 static int psi_vm_tui_normalize_key(
     int ch, int restore_timeout_ms, struct psi_vm_tui_key_event *event) {
-    char sequence[64];
+    char sequence[PSI_VM_TUI_ESCAPE_SEQUENCE_MAX];
     char ctrl_name[7];
     const char *key_name;
 
@@ -795,7 +906,7 @@ static int psi_vm_tui_normalize_key(
     }
     memset(event, 0, sizeof(*event));
 
-    if (ch == 27) {
+    if (ch == PSI_VM_TUI_ESCAPE_BYTE) {
         psi_vm_tui_collect_escape_sequence(sequence, sizeof(sequence), restore_timeout_ms);
         key_name = psi_vm_tui_escape_sequence_key(sequence);
         if (key_name == NULL) {
@@ -804,7 +915,7 @@ static int psi_vm_tui_normalize_key(
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), key_name);
         return 1;
     }
-    if (ch == 127 || ch == 8) {
+    if (ch == PSI_VM_TUI_BACKSPACE_DELETE || ch == PSI_VM_TUI_BACKSPACE_ASCII) {
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "backspace");
         return 1;
     }
@@ -812,15 +923,22 @@ static int psi_vm_tui_normalize_key(
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "enter");
         return 1;
     }
-    if (ch >= 1 && ch <= 26) {
+    if (ch >= PSI_VM_TUI_CONTROL_MIN && ch <= PSI_VM_TUI_CONTROL_MAX) {
         ctrl_name[0] = 'c';
         ctrl_name[1] = 't';
         ctrl_name[2] = 'r';
         ctrl_name[3] = 'l';
         ctrl_name[4] = '-';
-        ctrl_name[5] = (char)('a' + ch - 1);
+        ctrl_name[5] = (char)('a' + ch - PSI_VM_TUI_CONTROL_A_OFFSET);
         ctrl_name[6] = '\0';
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), ctrl_name);
+        return 1;
+    }
+    if (ch >= (int)PSI_VM_TUI_UTF8_LEAD_TWO_MIN) {
+        if (!psi_vm_tui_read_utf8_tail((unsigned int)ch, event->text, sizeof(event->text))) {
+            return 0;
+        }
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "text");
         return 1;
     }
     if (isprint(ch)) {
@@ -847,6 +965,694 @@ static int lfn_log(lua_State *L) {
     const char *msg = luaL_checkstring(L, 1);
     fprintf(stderr, "[psi] %s\n", msg);
     return 0;
+}
+
+/* ------------------------------------------------------------------
+ * Terminal text primitives. These intentionally do not require TUI mode:
+ * no-tui builds still need the same wrapping and width semantics for tests
+ * and for any caller rendering terminal text off-screen.
+ * ------------------------------------------------------------------ */
+
+#define PSI_VM_TEXT_BUILDER_INITIAL_CAP 64u
+#define PSI_VM_TEXT_ESC_BYTE 0x1bu
+#define PSI_VM_TEXT_BEL_BYTE 0x07u
+#define PSI_VM_TEXT_TAB_BYTE 0x09u
+#define PSI_VM_TEXT_SPACE_BYTE 0x20u
+#define PSI_VM_TEXT_CSI_FINAL_MIN 0x40u
+#define PSI_VM_TEXT_CSI_FINAL_MAX 0x7eu
+#define PSI_VM_TEXT_ASCII_LIMIT 0x80u
+#define PSI_VM_TEXT_UTF8_CONTINUATION_MIN 0x80u
+#define PSI_VM_TEXT_UTF8_CONTINUATION_MAX 0xbfu
+#define PSI_VM_TEXT_UTF8_CONTINUATION_BASE 0x80u
+#define PSI_VM_TEXT_UTF8_TWO_BYTE_MIN 0xc2u
+#define PSI_VM_TEXT_UTF8_TWO_BYTE_MAX 0xdfu
+#define PSI_VM_TEXT_UTF8_TWO_BYTE_BASE 0xc0u
+#define PSI_VM_TEXT_UTF8_THREE_BYTE_MIN 0xe0u
+#define PSI_VM_TEXT_UTF8_THREE_BYTE_MAX 0xefu
+#define PSI_VM_TEXT_UTF8_THREE_BYTE_BASE 0xe0u
+#define PSI_VM_TEXT_UTF8_FOUR_BYTE_MIN 0xf0u
+#define PSI_VM_TEXT_UTF8_FOUR_BYTE_MAX 0xf4u
+#define PSI_VM_TEXT_UTF8_FOUR_BYTE_BASE 0xf0u
+#define PSI_VM_TEXT_UTF8_PAYLOAD_BITS_PER_CONTINUATION 0x40u
+#define PSI_VM_TEXT_UTF8_THREE_BYTE_LEAD_MULTIPLIER 0x1000u
+#define PSI_VM_TEXT_UTF8_FOUR_BYTE_LEAD_MULTIPLIER 0x40000u
+#define PSI_VM_TEXT_CODEPOINT_NUL 0u
+#define PSI_VM_TEXT_CODEPOINT_TAB 0x09u
+#define PSI_VM_TEXT_CODEPOINT_C0_CONTROL_MAX 0x20u
+#define PSI_VM_TEXT_CODEPOINT_DELETE 0x7fu
+#define PSI_VM_TEXT_CODEPOINT_C1_CONTROL_MAX 0x9fu
+#define PSI_VM_TEXT_CODEPOINT_ZERO_WIDTH_JOINER 0x200du
+#define PSI_VM_TEXT_UNICODE_MAX 0x10ffffu
+#define PSI_VM_TEXT_WIDTH_ZERO 0
+#define PSI_VM_TEXT_WIDTH_NARROW 1
+#define PSI_VM_TEXT_WIDTH_WIDE 2
+#define PSI_VM_TEXT_WIDTH_TAB 3
+
+static const char PSI_VM_TEXT_SGR_RESET[] = "\033[0m";
+
+struct psi_vm_text_builder {
+    char *data;
+    size_t len;
+    size_t cap;
+    lua_Alloc allocf;
+    void *alloc_ud;
+};
+
+struct psi_vm_text_wrap_context {
+    lua_State *L;
+    int table_index;
+    int line_count;
+    int line_width;
+    int word_width;
+    int pending_space;
+    int width;
+    struct psi_vm_text_builder line;
+    struct psi_vm_text_builder word;
+    struct psi_vm_text_builder active;
+};
+
+static void psi_vm_text_builder_init(struct psi_vm_text_builder *b, lua_State *L) {
+    b->data = NULL;
+    b->len = 0u;
+    b->cap = 0u;
+    b->allocf = lua_getallocf(L, &b->alloc_ud);
+}
+
+static void psi_vm_text_builder_free(struct psi_vm_text_builder *b) {
+    if (b->data != NULL && b->allocf != NULL) {
+        b->allocf(b->alloc_ud, b->data, b->cap, 0u);
+    }
+    b->data = NULL;
+    b->len = 0u;
+    b->cap = 0u;
+}
+
+static void psi_vm_text_builder_clear(struct psi_vm_text_builder *b) {
+    b->len = 0u;
+    if (b->data != NULL) {
+        b->data[0] = '\0';
+    }
+}
+
+static int psi_vm_text_builder_reserve(struct psi_vm_text_builder *b, size_t extra) {
+    size_t needed;
+    size_t next_cap;
+    char *next;
+
+    if (extra > (size_t)-1 - b->len) {
+        return 0;
+    }
+    needed = b->len + extra + 1u;
+    if (needed <= b->cap && b->data != NULL) {
+        return 1;
+    }
+    next_cap = b->cap == 0u ? PSI_VM_TEXT_BUILDER_INITIAL_CAP : b->cap;
+    while (next_cap < needed) {
+        if (next_cap > ((size_t)-1 / 2u)) {
+            next_cap = needed;
+            break;
+        }
+        next_cap *= 2u;
+    }
+    if (b->allocf == NULL) {
+        return 0;
+    }
+    next = (char *)b->allocf(b->alloc_ud, b->data, b->cap, next_cap);
+    if (next == NULL) {
+        return 0;
+    }
+    b->data = next;
+    b->cap = next_cap;
+    return 1;
+}
+
+static int psi_vm_text_builder_append(struct psi_vm_text_builder *b, const char *text, size_t len) {
+    if (len == 0u) {
+        return 1;
+    }
+    if (!psi_vm_text_builder_reserve(b, len)) {
+        return 0;
+    }
+    if (b->data == NULL) {
+        return 0;
+    }
+    memcpy(b->data + b->len, text, len);
+    b->len += len;
+    b->data[b->len] = '\0';
+    return 1;
+}
+
+static int psi_vm_text_builder_append_char(struct psi_vm_text_builder *b, char ch) {
+    return psi_vm_text_builder_append(b, &ch, 1u);
+}
+
+static int psi_vm_text_read_escape(const char *text, size_t len, size_t i, size_t *next_i) {
+    size_t j;
+    unsigned char next_byte;
+    unsigned char byte;
+
+    if (i >= len || (unsigned char)text[i] != PSI_VM_TEXT_ESC_BYTE) {
+        return 0;
+    }
+    if (i + 1u >= len) {
+        *next_i = i + 1u;
+        return 1;
+    }
+    next_byte = (unsigned char)text[i + 1u];
+    if (next_byte == (unsigned char)'[') {
+        j = i + 2u;
+        while (j < len) {
+            byte = (unsigned char)text[j];
+            if (byte >= PSI_VM_TEXT_CSI_FINAL_MIN && byte <= PSI_VM_TEXT_CSI_FINAL_MAX) {
+                *next_i = j + 1u;
+                return 1;
+            }
+            j++;
+        }
+        *next_i = len;
+        return 1;
+    }
+    if (next_byte == (unsigned char)']' || next_byte == (unsigned char)'_') {
+        j = i + 2u;
+        while (j < len) {
+            byte = (unsigned char)text[j];
+            if (byte == PSI_VM_TEXT_BEL_BYTE) {
+                *next_i = j + 1u;
+                return 1;
+            }
+            if (byte == PSI_VM_TEXT_ESC_BYTE && j + 1u < len && text[j + 1u] == '\\') {
+                *next_i = j + 2u;
+                return 1;
+            }
+            j++;
+        }
+        *next_i = len;
+        return 1;
+    }
+    if (next_byte == (unsigned char)'=' || next_byte == (unsigned char)'>') {
+        *next_i = i + 2u;
+        return 1;
+    }
+    *next_i = i + 2u;
+    return 1;
+}
+
+static unsigned long psi_vm_text_decode_utf8(
+    const char *text, size_t len, size_t i, size_t *next_i) {
+    unsigned char b1;
+    unsigned char b2;
+    unsigned char b3;
+    unsigned char b4;
+
+    if (i >= len) {
+        *next_i = i;
+        return PSI_VM_TEXT_CODEPOINT_NUL;
+    }
+    b1 = (unsigned char)text[i];
+    if (b1 < PSI_VM_TEXT_ASCII_LIMIT) {
+        *next_i = i + 1u;
+        return (unsigned long)b1;
+    }
+    b2 = i + 1u < len ? (unsigned char)text[i + 1u] : 0u;
+    b3 = i + 2u < len ? (unsigned char)text[i + 2u] : 0u;
+    b4 = i + 3u < len ? (unsigned char)text[i + 3u] : 0u;
+    if (b1 >= PSI_VM_TEXT_UTF8_TWO_BYTE_MIN && b1 <= PSI_VM_TEXT_UTF8_TWO_BYTE_MAX &&
+        b2 >= PSI_VM_TEXT_UTF8_CONTINUATION_MIN && b2 <= PSI_VM_TEXT_UTF8_CONTINUATION_MAX) {
+        *next_i = i + 2u;
+        return (unsigned long)((b1 - PSI_VM_TEXT_UTF8_TWO_BYTE_BASE) *
+                PSI_VM_TEXT_UTF8_PAYLOAD_BITS_PER_CONTINUATION +
+            (b2 - PSI_VM_TEXT_UTF8_CONTINUATION_BASE));
+    }
+    if (b1 >= PSI_VM_TEXT_UTF8_THREE_BYTE_MIN && b1 <= PSI_VM_TEXT_UTF8_THREE_BYTE_MAX &&
+        b2 >= PSI_VM_TEXT_UTF8_CONTINUATION_MIN && b2 <= PSI_VM_TEXT_UTF8_CONTINUATION_MAX &&
+        b3 >= PSI_VM_TEXT_UTF8_CONTINUATION_MIN && b3 <= PSI_VM_TEXT_UTF8_CONTINUATION_MAX) {
+        *next_i = i + 3u;
+        return (unsigned long)((b1 - PSI_VM_TEXT_UTF8_THREE_BYTE_BASE) *
+                PSI_VM_TEXT_UTF8_THREE_BYTE_LEAD_MULTIPLIER +
+            (b2 - PSI_VM_TEXT_UTF8_CONTINUATION_BASE) *
+                PSI_VM_TEXT_UTF8_PAYLOAD_BITS_PER_CONTINUATION +
+            (b3 - PSI_VM_TEXT_UTF8_CONTINUATION_BASE));
+    }
+    if (b1 >= PSI_VM_TEXT_UTF8_FOUR_BYTE_MIN && b1 <= PSI_VM_TEXT_UTF8_FOUR_BYTE_MAX &&
+        b2 >= PSI_VM_TEXT_UTF8_CONTINUATION_MIN && b2 <= PSI_VM_TEXT_UTF8_CONTINUATION_MAX &&
+        b3 >= PSI_VM_TEXT_UTF8_CONTINUATION_MIN && b3 <= PSI_VM_TEXT_UTF8_CONTINUATION_MAX &&
+        b4 >= PSI_VM_TEXT_UTF8_CONTINUATION_MIN && b4 <= PSI_VM_TEXT_UTF8_CONTINUATION_MAX) {
+        *next_i = i + 4u;
+        return (unsigned long)((b1 - PSI_VM_TEXT_UTF8_FOUR_BYTE_BASE) *
+                PSI_VM_TEXT_UTF8_FOUR_BYTE_LEAD_MULTIPLIER +
+            (b2 - PSI_VM_TEXT_UTF8_CONTINUATION_BASE) *
+                PSI_VM_TEXT_UTF8_THREE_BYTE_LEAD_MULTIPLIER +
+            (b3 - PSI_VM_TEXT_UTF8_CONTINUATION_BASE) *
+                PSI_VM_TEXT_UTF8_PAYLOAD_BITS_PER_CONTINUATION +
+            (b4 - PSI_VM_TEXT_UTF8_CONTINUATION_BASE));
+    }
+    *next_i = i + 1u;
+    return (unsigned long)b1;
+}
+
+static int psi_vm_text_in_range(unsigned long cp, unsigned long first, unsigned long last) {
+    return cp >= first && cp <= last;
+}
+
+static int psi_vm_text_is_regional_indicator(unsigned long cp) {
+    return psi_vm_text_in_range(cp, 0x1f1e6u, 0x1f1ffu);
+}
+
+static int psi_vm_text_is_control(unsigned long cp) {
+    return cp < PSI_VM_TEXT_CODEPOINT_C0_CONTROL_MAX ||
+        psi_vm_text_in_range(
+            cp, PSI_VM_TEXT_CODEPOINT_DELETE, PSI_VM_TEXT_CODEPOINT_C1_CONTROL_MAX);
+}
+
+static int psi_vm_text_codepoint_width(unsigned long cp) {
+    int width;
+
+    if (cp == PSI_VM_TEXT_CODEPOINT_TAB) {
+        return PSI_VM_TEXT_WIDTH_TAB;
+    }
+    if (cp > PSI_VM_TEXT_UNICODE_MAX || psi_vm_text_is_control(cp)) {
+        return cp > PSI_VM_TEXT_UNICODE_MAX ? PSI_VM_TEXT_WIDTH_NARROW : PSI_VM_TEXT_WIDTH_ZERO;
+    }
+    width = psi_wcwidth((int)cp);
+    if (width <= 0) {
+        return PSI_VM_TEXT_WIDTH_ZERO;
+    }
+    if (width >= PSI_VM_TEXT_WIDTH_WIDE) {
+        return PSI_VM_TEXT_WIDTH_WIDE;
+    }
+    return PSI_VM_TEXT_WIDTH_NARROW;
+}
+
+static int psi_vm_text_is_zero_width_cluster_modifier(unsigned long cp) {
+    if (cp == PSI_VM_TEXT_CODEPOINT_ZERO_WIDTH_JOINER || cp > PSI_VM_TEXT_UNICODE_MAX ||
+        psi_vm_text_is_control(cp)) {
+        return 0;
+    }
+    return psi_wcwidth((int)cp) == PSI_VM_TEXT_WIDTH_ZERO;
+}
+
+static void psi_vm_text_next_cluster(
+    const char *text, size_t len, size_t i, size_t *next_i, int *cluster_width) {
+    size_t start;
+    size_t after;
+    unsigned long cp;
+    int width;
+    int saw_zwj;
+
+    start = i;
+    cp = psi_vm_text_decode_utf8(text, len, i, &after);
+    width = psi_vm_text_codepoint_width(cp);
+    if (psi_vm_text_is_regional_indicator(cp)) {
+        size_t after2;
+        unsigned long cp2;
+        cp2 = psi_vm_text_decode_utf8(text, len, after, &after2);
+        if (psi_vm_text_is_regional_indicator(cp2)) {
+            *next_i = after2;
+            *cluster_width = 2;
+            PSI_UNUSED(start);
+            return;
+        }
+    }
+
+    i = after;
+    saw_zwj = 0;
+    while (i < len) {
+        unsigned long next_cp;
+        size_t next_after;
+        next_cp = psi_vm_text_decode_utf8(text, len, i, &next_after);
+        if (psi_vm_text_is_zero_width_cluster_modifier(next_cp)) {
+            i = next_after;
+        } else if (next_cp == PSI_VM_TEXT_CODEPOINT_ZERO_WIDTH_JOINER) {
+            saw_zwj = 1;
+            i = next_after;
+        } else if (saw_zwj) {
+            int next_width;
+            next_width = psi_vm_text_codepoint_width(next_cp);
+            if (next_width > width) {
+                width = next_width;
+            }
+            if (width < PSI_VM_TEXT_WIDTH_WIDE) {
+                width = PSI_VM_TEXT_WIDTH_WIDE;
+            }
+            saw_zwj = 0;
+            i = next_after;
+        } else {
+            break;
+        }
+    }
+    *next_i = i;
+    *cluster_width = width;
+}
+
+static int psi_vm_text_visible_width_bytes(const char *text, size_t len) {
+    size_t i;
+    int width;
+
+    i = 0u;
+    width = 0;
+    while (i < len) {
+        size_t next_i = i;
+        int cluster_width;
+        if (!psi_vm_text_read_escape(text, len, i, &next_i)) {
+            psi_vm_text_next_cluster(text, len, i, &next_i, &cluster_width);
+            width += cluster_width;
+        }
+        i = next_i;
+    }
+    return width;
+}
+
+static int psi_vm_text_sgr_resets(const char *seq, size_t len) {
+    size_t i;
+    int value;
+    int saw_digit;
+
+    if (len < 3u || (unsigned char)seq[0] != PSI_VM_TEXT_ESC_BYTE || seq[1] != '[' ||
+        seq[len - 1u] != 'm') {
+        return 0;
+    }
+    if (len == 3u) {
+        return 1;
+    }
+    i = 2u;
+    value = 0;
+    saw_digit = 0;
+    while (i + 1u < len) {
+        unsigned char ch;
+        ch = (unsigned char)seq[i];
+        if (ch >= (unsigned char)'0' && ch <= (unsigned char)'9') {
+            value = value * 10 + (int)(ch - (unsigned char)'0');
+            saw_digit = 1;
+        } else {
+            if (saw_digit && value == 0) {
+                return 1;
+            }
+            value = 0;
+            saw_digit = 0;
+        }
+        i++;
+    }
+    return saw_digit && value == 0;
+}
+
+static int psi_vm_text_update_active_sgr(
+    struct psi_vm_text_builder *active, const char *seq, size_t len) {
+    if (len < 3u || (unsigned char)seq[0] != PSI_VM_TEXT_ESC_BYTE || seq[1] != '[' ||
+        seq[len - 1u] != 'm') {
+        return 1;
+    }
+    if (psi_vm_text_sgr_resets(seq, len)) {
+        psi_vm_text_builder_clear(active);
+        return 1;
+    }
+    return psi_vm_text_builder_append(active, seq, len);
+}
+
+static int psi_vm_text_update_active_from_text(
+    struct psi_vm_text_builder *active, const char *text, size_t len) {
+    size_t i;
+
+    i = 0u;
+    while (i < len) {
+        size_t next_i = i;
+        if (psi_vm_text_read_escape(text, len, i, &next_i)) {
+            if (!psi_vm_text_update_active_sgr(active, text + i, next_i - i)) {
+                return 0;
+            }
+        } else {
+            next_i = i + 1u;
+        }
+        i = next_i;
+    }
+    return 1;
+}
+
+static void psi_vm_text_wrap_context_init(
+    struct psi_vm_text_wrap_context *ctx, lua_State *L, int table_index, int width) {
+    ctx->L = L;
+    ctx->table_index = table_index;
+    ctx->line_count = 0;
+    ctx->line_width = 0;
+    ctx->word_width = 0;
+    ctx->pending_space = 0;
+    ctx->width = width;
+    psi_vm_text_builder_init(&ctx->line, L);
+    psi_vm_text_builder_init(&ctx->word, L);
+    psi_vm_text_builder_init(&ctx->active, L);
+}
+
+static void psi_vm_text_wrap_context_free(struct psi_vm_text_wrap_context *ctx) {
+    psi_vm_text_builder_free(&ctx->line);
+    psi_vm_text_builder_free(&ctx->word);
+    psi_vm_text_builder_free(&ctx->active);
+}
+
+static int psi_vm_text_wrap_push_line(struct psi_vm_text_wrap_context *ctx, int final_line) {
+    if (!final_line && ctx->line.len > 0u) {
+        if (!psi_vm_text_builder_append(
+                &ctx->line, PSI_VM_TEXT_SGR_RESET, sizeof(PSI_VM_TEXT_SGR_RESET) - 1u)) {
+            return 0;
+        }
+    }
+    ctx->line_count++;
+    lua_pushlstring(ctx->L, ctx->line.data != NULL ? ctx->line.data : "", ctx->line.len);
+    lua_rawseti(ctx->L, ctx->table_index, (lua_Integer)ctx->line_count);
+    psi_vm_text_builder_clear(&ctx->line);
+    if (!final_line && ctx->active.len > 0u) {
+        if (!psi_vm_text_builder_append(&ctx->line, ctx->active.data, ctx->active.len)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int psi_vm_text_wrap_append_piece(
+    struct psi_vm_text_wrap_context *ctx, const char *piece, size_t piece_len, int piece_width) {
+    if (piece_width == 0) {
+        return psi_vm_text_builder_append(&ctx->line, piece, piece_len);
+    }
+    if (ctx->line_width > 0 && ctx->line_width + piece_width > ctx->width) {
+        if (!psi_vm_text_wrap_push_line(ctx, 0)) {
+            return 0;
+        }
+        ctx->line_width = 0;
+    }
+    if (!psi_vm_text_builder_append(&ctx->line, piece, piece_len)) {
+        return 0;
+    }
+    ctx->line_width += piece_width;
+    return 1;
+}
+
+static int psi_vm_text_wrap_flush_word(struct psi_vm_text_wrap_context *ctx) {
+    if (ctx->word.len == 0u) {
+        return 1;
+    }
+    if (ctx->pending_space && ctx->line_width > 0 &&
+        ctx->line_width + 1 + ctx->word_width <= ctx->width) {
+        if (!psi_vm_text_builder_append_char(&ctx->line, (char)PSI_VM_TEXT_SPACE_BYTE)) {
+            return 0;
+        }
+        ctx->line_width++;
+    } else if (ctx->pending_space && ctx->line_width > 0) {
+        if (!psi_vm_text_wrap_push_line(ctx, 0)) {
+            return 0;
+        }
+        ctx->line_width = 0;
+    }
+    ctx->pending_space = 0;
+
+    if (ctx->word_width <= ctx->width) {
+        if (!psi_vm_text_wrap_append_piece(ctx, ctx->word.data, ctx->word.len, ctx->word_width)) {
+            return 0;
+        }
+        if (!psi_vm_text_update_active_from_text(&ctx->active, ctx->word.data, ctx->word.len)) {
+            return 0;
+        }
+    } else {
+        size_t j;
+        j = 0u;
+        while (j < ctx->word.len) {
+            size_t next_j = j;
+            if (psi_vm_text_read_escape(ctx->word.data, ctx->word.len, j, &next_j)) {
+                if (!psi_vm_text_builder_append(&ctx->line, ctx->word.data + j, next_j - j)) {
+                    return 0;
+                }
+                if (!psi_vm_text_update_active_sgr(&ctx->active, ctx->word.data + j, next_j - j)) {
+                    return 0;
+                }
+            } else {
+                int cluster_width;
+                psi_vm_text_next_cluster(ctx->word.data, ctx->word.len, j, &next_j, &cluster_width);
+                if (!psi_vm_text_wrap_append_piece(
+                        ctx, ctx->word.data + j, next_j - j, cluster_width)) {
+                    return 0;
+                }
+            }
+            j = next_j;
+        }
+    }
+
+    /* A flushed word is disposable scratch; free it so ownership stays local. */
+    psi_vm_text_builder_free(&ctx->word);
+    ctx->word_width = 0;
+    return 1;
+}
+
+static int lfn_cell_width(lua_State *L) {
+    lua_Integer cp;
+    int width;
+
+    cp = luaL_checkinteger(L, 1);
+    if (cp < 0 || cp > (lua_Integer)PSI_VM_TEXT_UNICODE_MAX) {
+        lua_pushinteger(L, PSI_VM_TEXT_WIDTH_NARROW);
+        return 1;
+    }
+    width = psi_wcwidth((int)cp);
+    if (width < PSI_VM_TEXT_WIDTH_ZERO) {
+        width = PSI_VM_TEXT_WIDTH_ZERO;
+    }
+    lua_pushinteger(L, (lua_Integer)width);
+    return 1;
+}
+
+static int lfn_tui_text_strip_ansi(lua_State *L) {
+    size_t len;
+    size_t i;
+    const char *text;
+    luaL_Buffer buffer;
+
+    text = luaL_optlstring(L, 1, "", &len);
+    luaL_buffinit(L, &buffer);
+    i = 0u;
+    while (i < len) {
+        size_t next_i = i;
+        if (!psi_vm_text_read_escape(text, len, i, &next_i)) {
+            luaL_addchar(&buffer, text[i]);
+            next_i = i + 1u;
+        }
+        i = next_i;
+    }
+    luaL_pushresult(&buffer);
+    return 1;
+}
+
+static int lfn_tui_text_visible_width(lua_State *L) {
+    size_t len;
+    const char *text;
+
+    text = luaL_optlstring(L, 1, "", &len);
+    lua_pushinteger(L, (lua_Integer)psi_vm_text_visible_width_bytes(text, len));
+    return 1;
+}
+
+static int lfn_tui_text_byte_index_for_width(lua_State *L) {
+    size_t len;
+    size_t i;
+    const char *text;
+    lua_Integer width_arg;
+    int width;
+    int seen;
+
+    text = luaL_optlstring(L, 1, "", &len);
+    width_arg = luaL_optinteger(L, 2, 0);
+    width = width_arg < 0 ? 0 : (int)width_arg;
+    if (width <= 0) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+    i = 0u;
+    seen = 0;
+    while (i < len) {
+        size_t next_i = i;
+        int cluster_width;
+        if (!psi_vm_text_read_escape(text, len, i, &next_i)) {
+            psi_vm_text_next_cluster(text, len, i, &next_i, &cluster_width);
+            if (seen + cluster_width > width) {
+                lua_pushinteger(L, (lua_Integer)i);
+                return 1;
+            }
+            seen += cluster_width;
+        }
+        i = next_i;
+    }
+    lua_pushinteger(L, (lua_Integer)len);
+    return 1;
+}
+
+static int lfn_tui_text_pad_line(lua_State *L) {
+    size_t len;
+    const char *text;
+    lua_Integer width_arg;
+    int width;
+    int visible_width;
+    int spaces;
+    luaL_Buffer buffer;
+
+    text = luaL_optlstring(L, 1, "", &len);
+    width_arg = luaL_optinteger(L, 2, 1);
+    width = width_arg < 1 ? 1 : (int)width_arg;
+    visible_width = psi_vm_text_visible_width_bytes(text, len);
+    spaces = width > visible_width ? width - visible_width : 0;
+    luaL_buffinit(L, &buffer);
+    luaL_addlstring(&buffer, text, len);
+    while (spaces > 0) {
+        luaL_addchar(&buffer, ' ');
+        spaces--;
+    }
+    luaL_pushresult(&buffer);
+    return 1;
+}
+
+static int lfn_tui_text_wrap_ansi(lua_State *L) {
+    size_t len;
+    size_t i;
+    const char *text;
+    lua_Integer width_arg;
+    int width;
+    int ok;
+    int table_index;
+    struct psi_vm_text_wrap_context wrap;
+
+    text = luaL_optlstring(L, 1, "", &len);
+    width_arg = luaL_optinteger(L, 2, 1);
+    width = width_arg < 1 ? 1 : (int)width_arg;
+    lua_newtable(L);
+    table_index = lua_gettop(L);
+    psi_vm_text_wrap_context_init(&wrap, L, table_index, width);
+    ok = 1;
+
+    i = 0u;
+    while (ok && i < len) {
+        size_t next_i = i;
+        if (psi_vm_text_read_escape(text, len, i, &next_i)) {
+            ok = psi_vm_text_builder_append(&wrap.word, text + i, next_i - i);
+        } else {
+            int cluster_width;
+            psi_vm_text_next_cluster(text, len, i, &next_i, &cluster_width);
+            if ((unsigned char)text[i] == PSI_VM_TEXT_SPACE_BYTE ||
+                (unsigned char)text[i] == PSI_VM_TEXT_TAB_BYTE) {
+                ok = psi_vm_text_wrap_flush_word(&wrap);
+                wrap.pending_space = 1;
+            } else {
+                ok = psi_vm_text_builder_append(&wrap.word, text + i, next_i - i);
+                wrap.word_width += cluster_width;
+            }
+        }
+        i = next_i;
+    }
+    if (ok) {
+        ok = psi_vm_text_wrap_flush_word(&wrap);
+    }
+    if (ok && (wrap.line.len > 0u || wrap.line_count == 0)) {
+        ok = psi_vm_text_wrap_push_line(&wrap, 1);
+    }
+
+    psi_vm_text_wrap_context_free(&wrap);
+    if (!ok) {
+        return luaL_error(L, "out of memory");
+    }
+    return 1;
 }
 
 static int lfn_session_message_count(lua_State *L) {
@@ -2470,8 +3276,8 @@ static int lfn_add_history(lua_State *L) {
 
 static int lfn_tui_size(lua_State *L) {
     struct winsize ws;
-    int height = 24;
-    int width = 80;
+    int height = PSI_VM_TUI_DEFAULT_HEIGHT;
+    int width = PSI_VM_TUI_DEFAULT_WIDTH;
 
     psi_vm_require_tui(L);
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
@@ -2496,12 +3302,12 @@ static int lfn_tui_poll_key(lua_State *L) {
     struct psi_vm_tui_key_event event;
 
     psi_vm_require_tui(L);
-    timeout_ms = luaL_optinteger(L, 1, -1);
-    if (timeout_ms < -1) {
-        timeout_ms = -1;
+    timeout_ms = luaL_optinteger(L, 1, PSI_VM_TUI_POLL_INFINITE_MS);
+    if (timeout_ms < PSI_VM_TUI_POLL_INFINITE_MS) {
+        timeout_ms = PSI_VM_TUI_POLL_INFINITE_MS;
     }
-    if (timeout_ms > 3600000) {
-        timeout_ms = 3600000;
+    if (timeout_ms > PSI_VM_TUI_POLL_MAX_MS) {
+        timeout_ms = PSI_VM_TUI_POLL_MAX_MS;
     }
     ch = psi_vm_tui_read_byte((int)timeout_ms);
     if (ch < 0) {
@@ -2527,7 +3333,8 @@ static int lfn_tui_clear(lua_State *L) {
     int force_physical_clear = lua_toboolean(L, 1);
     psi_vm_require_tui(L);
     if (force_physical_clear) {
-        psi_vm_tui_write("\033[2J\033[3J\033[H");
+        psi_vm_tui_reset_render_cache();
+        psi_vm_tui_write(PSI_VM_TUI_CLEAR_SCREEN);
     }
     return 0;
 }
@@ -2537,8 +3344,8 @@ static int lfn_tui_draw_raw_line(lua_State *L) {
     const char *text = lua_type(L, 2) == LUA_TSTRING ? lua_tostring(L, 2) : "";
 
     psi_vm_require_tui(L);
-    if (row < 1) {
-        row = 1;
+    if (row < PSI_VM_TUI_FIRST_TERMINAL_CELL) {
+        row = PSI_VM_TUI_FIRST_TERMINAL_CELL;
     }
 
     psi_vm_tui_draw_raw_line((long)row, text);
@@ -2551,52 +3358,173 @@ static int lfn_tui_draw_line(lua_State *L) {
 
 static int lfn_tui_render_frame(lua_State *L) {
     const char *frame = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : "";
-    lua_Integer row = luaL_optinteger(L, 2, 1);
-    lua_Integer col = luaL_optinteger(L, 3, 1);
+    lua_Integer row = luaL_optinteger(L, 2, PSI_VM_TUI_FIRST_TERMINAL_CELL);
+    lua_Integer col = luaL_optinteger(L, 3, PSI_VM_TUI_FIRST_TERMINAL_CELL);
     int visible = lua_toboolean(L, 4);
 
     psi_vm_require_tui(L);
-    if (row < 1) {
-        row = 1;
+    if (row < PSI_VM_TUI_FIRST_TERMINAL_CELL) {
+        row = PSI_VM_TUI_FIRST_TERMINAL_CELL;
     }
-    if (col < 1) {
-        col = 1;
+    if (col < PSI_VM_TUI_FIRST_TERMINAL_CELL) {
+        col = PSI_VM_TUI_FIRST_TERMINAL_CELL;
     }
     if (visible) {
-        printf("\033[?2026h\033[?25l%s\033[0m\033[%ld;%ldH\033[?25h\033[?2026l", frame, (long)row,
-            (long)col);
+        printf("%s%s%s%s\033[%ld;%ldH%s%s", PSI_VM_TUI_SYNC_BEGIN, PSI_VM_TUI_CURSOR_HIDE, frame,
+            PSI_VM_TUI_RESET_STYLE, (long)row, (long)col, PSI_VM_TUI_CURSOR_SHOW,
+            PSI_VM_TUI_SYNC_END);
     } else {
-        printf("\033[?2026h\033[?25l%s\033[0m\033[?2026l", frame);
+        printf("%s%s%s%s%s", PSI_VM_TUI_SYNC_BEGIN, PSI_VM_TUI_CURSOR_HIDE, frame,
+            PSI_VM_TUI_RESET_STYLE, PSI_VM_TUI_SYNC_END);
     }
     fflush(stdout);
     psi_vm_tui_frame_active = 0;
     return 0;
 }
 
+static int lfn_tui_render_lines(lua_State *L) {
+    char **next_lines;
+    size_t line_count;
+    size_t i;
+    lua_Integer cursor_row_arg;
+    lua_Integer cursor_col_arg;
+    lua_Integer top_arg;
+    long top;
+    long cursor_row;
+    long cursor_col;
+    long physical_cursor_row;
+    int cursor_visible;
+    int force_full;
+    int full_redraw;
+    int any_output;
+    int cursor_changed;
+
+    psi_vm_require_tui(L);
+    luaL_checktype(L, 1, LUA_TTABLE);
+    line_count = (size_t)lua_rawlen(L, 1);
+    if (line_count == 0u) {
+        line_count = 1u;
+    }
+    next_lines = (char **)calloc(line_count, sizeof(char *));
+    if (next_lines == NULL) {
+        return luaL_error(L, "out of memory");
+    }
+    for (i = 0u; i < line_count; i++) {
+        const char *line;
+        lua_rawgeti(L, 1, (lua_Integer)i + 1);
+        line = lua_type(L, -1) == LUA_TSTRING ? lua_tostring(L, -1) : "";
+        next_lines[i] = psi_strdup(line != NULL ? line : "");
+        lua_pop(L, 1);
+        if (next_lines[i] == NULL) {
+            size_t j;
+            for (j = 0u; j < i; j++) {
+                free(next_lines[j]);
+            }
+            free(next_lines);
+            return luaL_error(L, "out of memory");
+        }
+    }
+
+    cursor_row_arg = luaL_optinteger(L, 2, PSI_VM_TUI_FIRST_TERMINAL_CELL);
+    cursor_col_arg = luaL_optinteger(L, 3, PSI_VM_TUI_FIRST_TERMINAL_CELL);
+    cursor_visible = lua_toboolean(L, 4);
+    force_full = lua_toboolean(L, 5);
+    top_arg = luaL_optinteger(L, 6, PSI_VM_TUI_FIRST_TERMINAL_CELL);
+    cursor_row = cursor_row_arg < PSI_VM_TUI_FIRST_TERMINAL_CELL ? PSI_VM_TUI_FIRST_TERMINAL_CELL :
+                                                                   (long)cursor_row_arg;
+    cursor_col = cursor_col_arg < PSI_VM_TUI_FIRST_TERMINAL_CELL ? PSI_VM_TUI_FIRST_TERMINAL_CELL :
+                                                                   (long)cursor_col_arg;
+    top = top_arg < PSI_VM_TUI_FIRST_TERMINAL_CELL ? PSI_VM_TUI_FIRST_TERMINAL_CELL : (long)top_arg;
+    if (cursor_row > (long)line_count) {
+        cursor_row = (long)line_count;
+    }
+    /* Lua frames are 1-based and local to the viewport; terminals are physical rows. */
+    physical_cursor_row = top + cursor_row - PSI_VM_TUI_FIRST_TERMINAL_CELL;
+
+    /* A moved viewport invalidates every cached physical row, even if line text matches. */
+    full_redraw = force_full || psi_vm_tui_previous_lines == NULL ||
+        psi_vm_tui_previous_line_count != line_count || psi_vm_tui_previous_top != top;
+    cursor_changed = psi_vm_tui_previous_cursor_row != cursor_row ||
+        psi_vm_tui_previous_cursor_col != cursor_col ||
+        psi_vm_tui_previous_cursor_visible != cursor_visible;
+    any_output = full_redraw || cursor_changed;
+
+    if (!any_output) {
+        for (i = 0u; i < line_count; i++) {
+            if (strcmp(psi_vm_tui_previous_lines[i], next_lines[i]) != 0) {
+                any_output = 1;
+                break;
+            }
+        }
+    }
+
+    if (any_output) {
+        psi_vm_tui_write(PSI_VM_TUI_SYNC_BEGIN);
+        psi_vm_tui_write(PSI_VM_TUI_CURSOR_HIDE);
+        if (full_redraw && psi_vm_tui_previous_lines != NULL &&
+            (psi_vm_tui_previous_top != top || psi_vm_tui_previous_line_count != line_count)) {
+            /* Clear rows that belonged to the previous viewport before drawing the new one. */
+            for (i = 0u; i < psi_vm_tui_previous_line_count; i++) {
+                printf("\033[%ld;%dH%s", psi_vm_tui_previous_top + (long)i,
+                    PSI_VM_TUI_FIRST_TERMINAL_CELL, PSI_VM_TUI_CLEAR_LINE);
+            }
+        }
+        if (full_redraw) {
+            for (i = 0u; i < line_count; i++) {
+                psi_vm_tui_draw_frame_line(top + (long)i, next_lines[i]);
+            }
+        } else {
+            for (i = 0u; i < line_count; i++) {
+                if (strcmp(psi_vm_tui_previous_lines[i], next_lines[i]) != 0) {
+                    psi_vm_tui_draw_frame_line(top + (long)i, next_lines[i]);
+                }
+            }
+        }
+        if (cursor_visible) {
+            printf("\033[%ld;%ldH%s", physical_cursor_row, cursor_col, PSI_VM_TUI_CURSOR_SHOW);
+        } else {
+            psi_vm_tui_write(PSI_VM_TUI_CURSOR_HIDE);
+        }
+        psi_vm_tui_write(PSI_VM_TUI_SYNC_END);
+        fflush(stdout);
+    }
+
+    psi_vm_tui_reset_render_cache();
+    psi_vm_tui_previous_lines = next_lines;
+    psi_vm_tui_previous_line_count = line_count;
+    psi_vm_tui_previous_top = top;
+    psi_vm_tui_previous_cursor_row = cursor_row;
+    psi_vm_tui_previous_cursor_col = cursor_col;
+    psi_vm_tui_previous_cursor_visible = cursor_visible;
+    psi_vm_tui_frame_active = 0;
+    return 0;
+}
+
 static int lfn_tui_set_cursor(lua_State *L) {
-    lua_Integer row = luaL_optinteger(L, 1, 1);
-    lua_Integer col = luaL_optinteger(L, 2, 1);
+    lua_Integer row = luaL_optinteger(L, 1, PSI_VM_TUI_FIRST_TERMINAL_CELL);
+    lua_Integer col = luaL_optinteger(L, 2, PSI_VM_TUI_FIRST_TERMINAL_CELL);
     int visible = lua_toboolean(L, 3);
 
     psi_vm_require_tui(L);
-    if (row < 1) {
-        row = 1;
+    if (row < PSI_VM_TUI_FIRST_TERMINAL_CELL) {
+        row = PSI_VM_TUI_FIRST_TERMINAL_CELL;
     }
-    if (col < 1) {
-        col = 1;
+    if (col < PSI_VM_TUI_FIRST_TERMINAL_CELL) {
+        col = PSI_VM_TUI_FIRST_TERMINAL_CELL;
     }
     if (!visible && !psi_vm_tui_frame_active) {
-        psi_vm_tui_write("\033[?2026h");
+        psi_vm_tui_write(PSI_VM_TUI_SYNC_BEGIN);
         psi_vm_tui_frame_active = 1;
     }
-    printf("%s\033[%ld;%ldH", visible ? "\033[?25h" : "\033[?25l", (long)row, (long)col);
+    printf("%s\033[%ld;%ldH", visible ? PSI_VM_TUI_CURSOR_SHOW : PSI_VM_TUI_CURSOR_HIDE, (long)row,
+        (long)col);
     return 0;
 }
 
 static int lfn_tui_refresh(lua_State *L) {
     psi_vm_require_tui(L);
     if (psi_vm_tui_frame_active) {
-        psi_vm_tui_write("\033[?2026l");
+        psi_vm_tui_write(PSI_VM_TUI_SYNC_END);
         psi_vm_tui_frame_active = 0;
     }
     fflush(stdout);
@@ -2647,6 +3575,7 @@ static int lfn_tui_unavailable(lua_State *L) {
 #define lfn_tui_draw_line lfn_tui_unavailable
 #define lfn_tui_draw_raw_line lfn_tui_unavailable
 #define lfn_tui_render_frame lfn_tui_unavailable
+#define lfn_tui_render_lines lfn_tui_unavailable
 #define lfn_tui_set_cursor lfn_tui_unavailable
 #define lfn_tui_refresh lfn_tui_unavailable
 #define lfn_tui_suspend lfn_tui_unavailable
@@ -2817,6 +3746,18 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("mkdir_parent", lfn_mkdir_parent);
     PSI_REG_DOC("runtime_info", lfn_runtime_info,
         "Return a table describing compiled-in capabilities (TUI, ANSI, COLOR, REPL_EDITLINE).");
+    PSI_REG_DOC("cell_width", lfn_cell_width,
+        "Return terminal display cell width for a Unicode codepoint.");
+    PSI_REG_DOC("tui_text_strip_ansi", lfn_tui_text_strip_ansi,
+        "Strip ANSI CSI/OSC terminal control sequences from text.");
+    PSI_REG_DOC("tui_text_visible_width", lfn_tui_text_visible_width,
+        "Return terminal display cell width for UTF-8 text, ignoring ANSI control sequences.");
+    PSI_REG_DOC("tui_text_byte_index_for_width", lfn_tui_text_byte_index_for_width,
+        "Return the byte length that fits within a terminal display cell width.");
+    PSI_REG_DOC("tui_text_pad_line", lfn_tui_text_pad_line,
+        "Pad text with spaces until it reaches a terminal display cell width.");
+    PSI_REG_DOC("tui_text_wrap_ansi", lfn_tui_text_wrap_ansi,
+        "Wrap styled terminal text to a display cell width while preserving SGR state.");
     PSI_REG_DOC("time_ms", lfn_time_ms,
         "Return a wall-clock millisecond timestamp (gettimeofday); useful for timings, "
         "but not guaranteed monotonic across system clock adjustments.");
@@ -2884,6 +3825,7 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("tui_draw_line", lfn_tui_draw_line);
     PSI_REG("tui_draw_raw_line", lfn_tui_draw_raw_line);
     PSI_REG("tui_render_frame", lfn_tui_render_frame);
+    PSI_REG("tui_render_lines", lfn_tui_render_lines);
     PSI_REG("tui_set_cursor", lfn_tui_set_cursor);
     PSI_REG("tui_refresh", lfn_tui_refresh);
     PSI_REG("tui_suspend", lfn_tui_suspend);
@@ -3062,6 +4004,9 @@ int psi_vm_init(
 void psi_vm_destroy(struct psi_vm *vm) {
     if (!vm || !vm->L)
         return;
+#if PSI_ENABLE_TUI
+    psi_vm_tui_reset_render_cache();
+#endif
     if (vm->tui_tick_callback_ref != PSI_VM_NOREF) {
         luaL_unref(vm->L, LUA_REGISTRYINDEX, vm->tui_tick_callback_ref);
         vm->tui_tick_callback_ref = PSI_VM_NOREF;

@@ -1,5 +1,5 @@
 --[==[psi-test
-expect = "1|1|true|0|true|0|0|0|0|0"
+expect = "1|0|false|0|true|1|0|0|0|0"
 ]==]
 local d = require("psi.tui_runtime")._debug_redraw_counts("hello\nhi")
 return table.concat({

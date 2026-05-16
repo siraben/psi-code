@@ -535,6 +535,176 @@ def t_markdown_inline_code_no_backticks(psi: Psi):
     assert_contains(out, "\x1b[", "inline code should still be highlighted")
 
 
+@test("markdown/unmatched_asterisk_literal")
+def t_markdown_unmatched_asterisk_literal(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local ansi = require("psi.ansi")\n'
+        + 'ansi.color_enabled = true\n'
+        + 'return require("psi.markdown").render_inline("Use * for globbing")',
+    ).stdout.rstrip("\n")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_equals(plain, "Use * for globbing", "unmatched emphasis markers should stay literal")
+
+
+@test("markdown/component_multiline_emphasis")
+def t_markdown_component_multiline_emphasis(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local ansi = require("psi.ansi")\n'
+        + 'ansi.color_enabled = true\n'
+        + 'local c = require("psi.tui_components.markdown").new({ text = "**bold\\ncontinued** and tail" })\n'
+        + 'return tostring((psi.runtime_info() or {}).ansi ~= false) .. "\\n" .. table.concat(c:render(80), "\\n")',
+    ).stdout.rstrip("\n")
+    ansi_enabled, rendered = out.split("\n", 1)
+    out = rendered
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_equals(plain, "bold continued and tail", "paragraph inline spans should cross soft line breaks")
+    if ansi_enabled == "true":
+        assert_contains(out, "\x1b[1m", "multiline bold should still emit bold styling")
+
+
+@test("tui_text/grapheme_display_width")
+def t_tui_text_grapheme_display_width(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local t = require("psi.tui_text")\n'
+        + 'return tostring(t.visible_width("á")) .. "," .. tostring(t.visible_width("界")) .. "," .. tostring(t.visible_width("👨‍👩‍👧‍👦"))',
+    ).stdout.rstrip("\n")
+    assert_equals(out, "1,2,2", "display width should handle combining marks, CJK, and ZWJ emoji")
+
+
+@test("tui_text/unicode17_cell_widths")
+def t_tui_text_unicode17_cell_widths(psi: Psi):
+    out = psi.eval(
+        'local t = require("psi.tui_text")\n'
+        + 'return table.concat({\n'
+        + '  psi.cell_width(0x41),\n'
+        + '  psi.cell_width(0x4E2D),\n'
+        + '  psi.cell_width(0x1F600),\n'
+        + '  psi.cell_width(0x0301),\n'
+        + '  psi.cell_width(0x200D),\n'
+        + '  psi.cell_width(0x17000),\n'
+        + '  t.visible_width("𗀀"),\n'
+        + '}, ",")'
+    )
+    assert_equals(out, "1,2,2,0,0,2,2", "Unicode 17 cell widths should match host table")
+
+
+@test("tui_text/c_primitives_match_lua_contract")
+def t_tui_text_c_primitives_match_lua_contract(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local t = require("psi.tui_text")\n'
+        + 'local ansi = string.char(27) .. "[1mwide 界 family 👨‍👩‍👧‍👦" .. string.char(27) .. "[0m"\n'
+        + 'local wrapped = t.wrap_ansi(ansi .. " tail words", 8)\n'
+        + 'return table.concat({\n'
+        + '  t.strip_ansi(ansi),\n'
+        + '  tostring(t.visible_width(ansi)),\n'
+        + '  tostring(t.byte_index_for_width("á界x", 3)),\n'
+        + '  tostring(#wrapped),\n'
+        + '  t.strip_ansi(table.concat(wrapped, "|")),\n'
+        + '}, "\\n")',
+    ).stdout.rstrip("\n")
+    lines = out.split("\n")
+    assert_equals(lines[0], "wide 界 family 👨‍👩‍👧‍👦", "C strip should remove SGR")
+    assert_equals(lines[1], "17", "C width should match terminal cell contract")
+    assert_equals(lines[2], "6", "C byte index should stop on cluster boundaries")
+    assert_equals(lines[3], "4", "C ANSI wrap should emit expected row count")
+    assert_contains(lines[4], "wide 界", "wrapped output should preserve text content")
+    assert_contains(lines[4], "tail", "wrapped output should include trailing words")
+
+
+@test("markdown/component_table_rendering")
+def t_markdown_component_table_rendering(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local c = require("psi.tui_components.markdown").new({\n'
+        + '  text = "| Verb | Weight |\\n| --- | --- |\\n| read | 1 |\\n| write | 1 |"\n'
+        + '})\n'
+        + 'return table.concat(c:render(64), "\\n")',
+    ).stdout.rstrip("\n")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_contains(plain, "┌", "markdown table should render a top border")
+    assert_contains(plain, "│ Verb", "markdown table should render the header")
+    assert_contains(plain, "│ read", "markdown table should render body rows")
+    assert_contains(plain, "└", "markdown table should render a bottom border")
+
+
+@test("markdown/component_table_wraps_cells")
+def t_markdown_component_table_wraps_cells(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local c = require("psi.tui_components.markdown").new({\n'
+        + '  text = "| Name | Notes |\\n| --- | --- |\\n| alpha | one two three four five six |"\n'
+        + '})\n'
+        + 'return table.concat(c:render(28), "\\n")',
+    ).stdout.rstrip("\n")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_contains(plain, "one two", "markdown table should keep wrapped content")
+    assert_contains(plain, "three", "markdown table should wrap wide cells onto later lines")
+
+
+@test("markdown/component_table_escaped_pipe")
+def t_markdown_component_table_escaped_pipe(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local c = require("psi.tui_components.markdown").new({\n'
+        + '  text = "| Expr | Meaning |\\n| --- | --- |\\n| `a\\\\|b` | pipe literal |"\n'
+        + '})\n'
+        + 'return table.concat(c:render(80), "\\n")',
+    ).stdout.rstrip("\n")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_contains(plain, "a|b", "escaped pipes should stay in the table cell")
+    assert_contains(plain, "pipe literal", "escaped pipe row should keep following cells")
+    assert_true("`" not in plain, "inline code in table cells should not render backticks")
+
+
+@test("markdown/component_table_stops_before_paragraph")
+def t_markdown_component_table_stops_before_paragraph(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local c = require("psi.tui_components.markdown").new({\n'
+        + '  text = "| A | B |\\n| --- | --- |\\nNext paragraph with | character"\n'
+        + '})\n'
+        + 'return table.concat(c:render(80), "\\n")',
+    ).stdout.rstrip("\n")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_contains(plain, "Next paragraph with | character",
+                    "paragraph after table should still render")
+    assert_true("│ Next paragraph" not in plain,
+                "paragraph with a pipe should not be swallowed as a table row")
+
+
+@test("markdown/component_table_without_outer_pipes")
+def t_markdown_component_table_without_outer_pipes(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local c = require("psi.tui_components.markdown").new({\n'
+        + '  text = "Verb | Weight\\n--- | ---\\nread | 1"\n'
+        + '})\n'
+        + 'return table.concat(c:render(64), "\\n")',
+    ).stdout.rstrip("\n")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_contains(plain, "│ Verb", "tables without outer pipes should render")
+    assert_contains(plain, "│ read", "tables without outer pipes should keep rows")
+
+
+@test("markdown/component_table_too_narrow_falls_back")
+def t_markdown_component_table_too_narrow_falls_back(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local c = require("psi.tui_components.markdown").new({\n'
+        + '  text = "| A | B | C |\\n| --- | --- | --- |\\n| one | two | three |"\n'
+        + '})\n'
+        + 'return table.concat(c:render(8), "\\n")',
+    ).stdout.rstrip("\n")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_contains(plain, "| A |", "narrow tables should fall back to raw markdown")
+    assert_contains(plain, "| ---", "narrow fallback should include the separator row")
+    assert_true("┌" not in plain, "narrow fallback should not render a boxed table")
+
+
 @test("compaction/snaps_past_orphan_tool_result")
 def t_compact_snap(psi: Psi):
     """Regression for the Haiku session failure: do_compact must never
@@ -806,6 +976,208 @@ def t_session_find_by_id(psi: Psi):
     assert_contains(out, "session-messages: 3", "prefix-resume reloaded prior turns")
 
 
+@test("tui/busy_status")
+def t_tui_busy_status(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local ansi = require("psi.ansi")\n'
+        + 'ansi.color_enabled = true\n'
+        + 'return require("psi.tui_status").render_busy_status("working", 2, 4)',
+    ).stdout.rstrip("\n")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_equals(
+        plain,
+        "working (0:04  • Ctrl-G to interrupt) ...",
+        "busy status renders selected label, hint, and animated dots",
+    )
+    assert_contains(out, "\x1b[96m", "busy label has a subtle shimmer")
+
+
+@test("tui/differential_redraw_uses_changed_rows")
+def t_tui_differential_redraw_uses_changed_rows(psi: Psi):
+    out = psi.eval(r"""
+local d = require("psi.tui_runtime")._debug_redraw_counts("hello\nhi")
+return table.concat({
+  tostring(d.first_frames),
+  tostring(d.second_frames),
+  tostring(d.second_writes),
+  tostring(d.second_input_draws > 0),
+  tostring(d.second_clears),
+  tostring(d.stale_clears > 0),
+  tostring(d.line_clears),
+  tostring(d.draw_rows),
+  tostring(d.raw_draws),
+  tostring(d.cursor_sets),
+  tostring(d.refreshes),
+  tostring(d.renderer_full),
+  tostring(d.renderer_diff >= 1),
+  tostring(d.renderer_last_mode),
+  tostring(d.first_line_width)
+}, "|")
+""")
+    assert_equals(out, "1|0|1|false|0|true|1|0|0|0|0|1|true|diff|80",
+                  "stable-size redraw uses changed-row diff output")
+
+
+@test("tui/renderer_cursor_marker")
+def t_tui_renderer_cursor_marker(psi: Psi):
+    out = psi.eval(r"""
+local r = require("psi.tui_renderer")
+local lines, cursor = r.extract_cursor({"ab" .. r.cursor_marker() .. "cd", "ef"})
+return table.concat({lines[1], lines[2], tostring(cursor.row), tostring(cursor.col)}, "|")
+""")
+    assert_equals(out, "abcd|ef|1|3", "renderer strips cursor marker and reports position")
+
+
+@test("tui/renderer_full_redraw_clears_rows")
+def t_tui_renderer_full_redraw_clears_rows(psi: Psi):
+    out = psi.eval(r"""
+local r = require("psi.tui_renderer")
+local old_frame = psi.tui_render_frame
+local old_write = psi.stdout_write
+local frame
+psi.tui_render_frame = function(f) frame = f end
+psi.stdout_write = function() end
+local renderer = r.new()
+renderer:render({lines={"abcdef"}, width=10, height=1})
+renderer:render({lines={"x"}, width=10, height=1, force_full=true})
+psi.tui_render_frame = old_frame
+psi.stdout_write = old_write
+return tostring((frame or ""):find("\27[2K", 1, true) ~= nil)
+""")
+    assert_equals(out, "true", "full redraw should clear rows before shorter lines")
+
+
+@test("tui/renderer_moves_cursor_without_line_changes")
+def t_tui_renderer_moves_cursor_without_line_changes(psi: Psi):
+    out = psi.eval(r"""
+local r = require("psi.tui_renderer")
+local old_frame = psi.tui_render_frame
+local old_write = psi.stdout_write
+local writes = {}
+psi.tui_render_frame = function() end
+psi.stdout_write = function(text) writes[#writes + 1] = text or "" end
+local renderer = r.new()
+renderer:render({lines={"abc"}, width=10, height=1, cursor={row=1, col=1, visible=true}})
+renderer:render({lines={"abc"}, width=10, height=1, cursor={row=1, col=3, visible=true}})
+psi.tui_render_frame = old_frame
+psi.stdout_write = old_write
+return table.concat({
+  renderer.last_mode,
+  tostring(#writes),
+  tostring((writes[1] or ""):find("\27[1;3H", 1, true) ~= nil)
+}, "|")
+""")
+    assert_equals(out, "diff|1|true", "cursor-only redraw should move hardware cursor")
+
+
+@test("tui/renderer_applies_cursor_marker_and_resets")
+def t_tui_renderer_applies_cursor_marker_and_resets(psi: Psi):
+    out = psi.eval(r"""
+local r = require("psi.tui_renderer")
+local old_frame = psi.tui_render_frame
+local old_write = psi.stdout_write
+local frame, row, col, visible
+psi.tui_render_frame = function(f, r0, c0, v0) frame, row, col, visible = f, r0, c0, v0 end
+psi.stdout_write = function() end
+r.new():render({lines={"ab" .. r.cursor_marker() .. "cd"}, width=10, height=1, cursor={visible=true}})
+psi.tui_render_frame = old_frame
+psi.stdout_write = old_write
+return table.concat({
+  tostring(frame:find(r.cursor_marker(), 1, true) == nil),
+  tostring(frame:find("\27]8;;\7", 1, true) ~= nil),
+  tostring(row), tostring(col), tostring(visible)
+}, "|")
+""")
+    assert_equals(out, "true|true|1|3|true",
+                  "renderer strips marker, appends line reset, and uses marker cursor")
+
+
+@test("tui/renderer_uses_discrete_dirty_ranges")
+def t_tui_renderer_uses_discrete_dirty_ranges(psi: Psi):
+    out = psi.eval(r"""
+local r = require("psi.tui_renderer")
+local old_frame = psi.tui_render_frame
+local old_write = psi.stdout_write
+local writes = {}
+psi.tui_render_frame = function() end
+psi.stdout_write = function(text) writes[#writes + 1] = text or "" end
+local renderer = r.new()
+renderer:render({lines={"a", "b", "c", "d"}, width=10, height=4})
+renderer:render({lines={"x", "b", "y", "d"}, width=10, height=4})
+psi.tui_render_frame = old_frame
+psi.stdout_write = old_write
+local out = writes[1] or ""
+local ranges = renderer.last_changed_ranges
+return table.concat({
+  renderer.last_mode,
+  tostring(#ranges),
+  tostring(ranges[1] and ranges[1].first),
+  tostring(ranges[1] and ranges[1].last),
+  tostring(ranges[2] and ranges[2].first),
+  tostring(ranges[2] and ranges[2].last),
+  tostring(out:find("\27[1;1H", 1, true) ~= nil),
+  tostring(out:find("\27[2;1H", 1, true) == nil),
+  tostring(out:find("\27[3;1H", 1, true) ~= nil)
+}, "|")
+""")
+    assert_equals(out, "diff|2|1|1|3|3|true|true|true",
+                  "renderer should emit discrete dirty row ranges")
+
+
+@test("tui/renderer_offsets_viewport_top")
+def t_tui_renderer_offsets_viewport_top(psi: Psi):
+    out = psi.eval(r"""
+local r = require("psi.tui_renderer")
+local old_frame = psi.tui_render_frame
+local old_write = psi.stdout_write
+local frame, row, col
+psi.tui_render_frame = function(f, r0, c0) frame, row, col = f, r0, c0 end
+psi.stdout_write = function() end
+r.new():render({lines={"abc"}, width=10, height=1, top=9, cursor={row=1, col=2, visible=true}})
+psi.tui_render_frame = old_frame
+psi.stdout_write = old_write
+return table.concat({
+  tostring((frame or ""):find("\27[9;1H", 1, true) ~= nil),
+  tostring(row),
+  tostring(col)
+}, "|")
+""")
+    assert_equals(out, "true|9|2", "renderer should offset local frame rows by viewport top")
+
+
+@test("tui/hardware_cursor_uses_input_marker")
+def t_tui_hardware_cursor_uses_input_marker(psi: Psi):
+    out = psi.eval(
+        'local d = require("psi.tui_runtime")._debug_redraw_counts("hello", {show_hardware_cursor=true})\n'
+        + 'local marker = require("psi.tui_renderer").cursor_marker()\n'
+        + 'return table.concat({\n'
+        + '  tostring(d.first_visible),\n'
+        + '  tostring(d.first_col),\n'
+        + '  tostring((d.first_frame or ""):find(marker, 1, true) == nil)\n'
+        + '}, "|")'
+    )
+    assert_equals(out, "true|9|true", "hardware cursor is positioned from input marker")
+
+
+@test("tui/show_thinking_config")
+def t_tui_show_thinking_config(psi: Psi):
+    default_out = psi.eval('return require("psi.tui_status").show_thinking()')
+    assert_equals(default_out, "0", "thinking hidden by default in TUI")
+
+    project = psi.tmp / "thinking-config-project"
+    (project / ".psi").mkdir(parents=True, exist_ok=True)
+    (project / ".psi" / "settings.json").write_text(
+        json.dumps({"tui": {"show_thinking": True}})
+    )
+    out = psi.run(
+        "--eval",
+        'return require("psi.tui_status").show_thinking()',
+        cwd=project,
+    ).stdout.strip()
+    assert_equals(out, "1", "project setting enables thinking in TUI")
+
+
 @test("session/list_sessions_includes_preview")
 def t_session_list_sessions_includes_preview(psi: Psi):
     project = psi.tmp / "project-preview"
@@ -890,6 +1262,21 @@ def t_session_list_sessions_recency_scans_large_files(psi: Psi):
         env_extra=env,
     ).stdout.strip()
     assert_equals(out, "long|81", "large session recency uses tail entries")
+
+
+@test("tui/no_color_diff_frame")
+def t_tui_no_color_diff_frame(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local d = require("psi.tui_runtime")._debug_redraw_counts("hello")\n'
+        + 'local frame = d.second_output or ""\n'
+        + 'return table.concat({\n'
+        + '  tostring(frame:find("48;5;", 1, true) == nil),\n'
+        + '  tostring(frame:find("38;5;", 1, true) == nil)\n'
+        + '}, "|")',
+        env_extra={"NO_COLOR": "1", "TERM": "xterm-256color"},
+    ).stdout.strip()
+    assert_equals(out, "true|true", "diff renderer respects NO_COLOR")
 
 @test("session/cwd_scoped_dirs_do_not_collide")
 def t_session_cwd_scoped_dirs_do_not_collide(psi: Psi):
@@ -1053,10 +1440,16 @@ def t_tui_input_box_background(psi: Psi):
     raw.assert_clean_exit()
     assert_true(b"\x1b[0;7m" not in raw and b"\x1b[7m" not in raw,
                 "input box should not use reverse-video")
-    assert_bytes_contains(raw, b"\x1b[?25l", "redraw should keep the hardware cursor hidden")
+    assert_bytes_not_contains(raw, b"\x1b[?1049h",
+                              "default TUI should not enter alternate screen")
+    assert_bytes_not_contains(raw, b"\x1b[?1000h",
+                              "default TUI should not enable mouse capture")
+    assert_bytes_not_contains(raw, b"\x1b[?1006h",
+                              "default TUI should not enable SGR mouse capture")
     assert_true(b"\x1b[?2026h" in raw and b"\x1b[?2026l" in raw,
                 "redraw should use synchronized terminal output")
-    assert_bytes_contains(raw, b"\x1b[4m", "input box should render a Lua-owned cursor cell")
+    assert_bytes_contains(raw, b"\x1b[?25h", "input box should show the hardware cursor")
+    assert_bytes_not_contains(raw, b"\x1b[4m", "input box should not render a Lua-owned cursor cell")
     assert_bytes_not_contains(raw, b"\x1b[48;5;238m",
                               "input box should not paint a filled background")
     assert_bytes_contains(raw, b"\x1b[38;5;245m",
