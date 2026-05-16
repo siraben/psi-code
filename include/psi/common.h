@@ -5,6 +5,10 @@
 
 #define PSI_VERSION "0.1.0"
 
+#ifndef PSI_GIT_COMMIT
+#define PSI_GIT_COMMIT "unknown"
+#endif
+
 #ifndef PSI_LUA_BOOT_FILE
 #define PSI_LUA_BOOT_FILE ""
 #endif

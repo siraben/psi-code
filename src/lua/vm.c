@@ -2364,6 +2364,8 @@ static int lfn_runtime_info(lua_State *L) {
 
     lua_pushstring(L, PSI_VERSION);
     lua_setfield(L, -2, "version");
+    lua_pushstring(L, PSI_GIT_COMMIT);
+    lua_setfield(L, -2, "git-commit");
 
     if (host && host->vm && host->vm->boot_file) {
         lua_pushstring(L, host->vm->boot_file);

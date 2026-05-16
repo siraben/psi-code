@@ -43,6 +43,7 @@ CFLAGS        ?= -O2
 CPPFLAGS      ?=
 LDFLAGS       ?=
 RPATH_LDFLAGS ?=
+GIT_COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || printf unknown)
 
 # -Wno-long-long suppresses the C90-pedantic warning Lua forces
 # via lua_Integer being long long.
@@ -106,6 +107,7 @@ PKG_DEPS += $(if $(filter 1,$(REPL_EDITLINE)),EDIT:libedit)
 
 LOCAL_CPPFLAGS  = -Iinclude -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600 \
                   -DPSI_LUA_BOOT_FILE=\"$(LUA_BOOT_FILE)\" \
+                  -DPSI_GIT_COMMIT=\"$(GIT_COMMIT)\" \
                   -DPSI_ENABLE_TUI=$(TUI) \
                   -DPSI_ENABLE_ANSI=$(ANSI) \
                   -DPSI_ENABLE_COLOR=$(COLOR) \

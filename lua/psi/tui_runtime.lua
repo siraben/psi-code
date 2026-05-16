@@ -1416,8 +1416,11 @@ local function redraw(state)
   state.force_physical_clear = false
   frame_width = math.max(1, state.width - 1)
   cwd = psi.cwd() or "."
-  frame[#frame + 1] =
-    frame_line(rows.header_row, tui.compose_bar(tui.workspace_bar(cwd), frame_width), frame_width)
+  frame[#frame + 1] = frame_line(
+    rows.header_row,
+    tui.compose_bar(tui.workspace_bar(cwd, frame_width), frame_width),
+    frame_width
+  )
 
   local first_line = total_lines - rows.transcript_height - state.scroll_offset + 1
   if first_line < 1 then

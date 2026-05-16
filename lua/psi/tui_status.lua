@@ -495,14 +495,6 @@ enabled_setting = function(path, env_name, default_value)
   return default_value
 end
 
-local function split_path(path)
-  local parts = {}
-  for part in tostring(path or ""):gmatch("[^/]+") do
-    parts[#parts + 1] = part
-  end
-  return parts
-end
-
 local function tilde_path(path)
   local home = os.getenv("HOME")
   if type(path) ~= "string" or path == "" then
@@ -512,6 +504,46 @@ local function tilde_path(path)
     return "~" .. path:sub(#home + 1)
   end
   return path
+end
+
+local function shorten_middle(text, width)
+  text = tostring(text or "")
+  width = tonumber(width) or #text
+  if width <= 0 then
+    return ""
+  end
+  if #text <= width then
+    return text
+  end
+  if width <= 3 then
+    return text:sub(1, width)
+  end
+  local left = math.max(1, math.floor((width - 3) / 2))
+  local right = math.max(1, width - 3 - left)
+  return text:sub(1, left) .. "..." .. text:sub(#text - right + 1)
+end
+
+local runtime_info_cache = false
+
+local function runtime_info()
+  if runtime_info_cache ~= false then
+    return runtime_info_cache
+  end
+  if type(psi.runtime_info) ~= "function" then
+    runtime_info_cache = {}
+    return runtime_info_cache
+  end
+  local ok, info = pcall(psi.runtime_info)
+  runtime_info_cache = ok and type(info) == "table" and info or {}
+  return runtime_info_cache
+end
+
+local function build_commit()
+  local commit = runtime_info()["git-commit"]
+  if type(commit) ~= "string" or commit == "" or commit == "unknown" then
+    return ""
+  end
+  return commit
 end
 
 local function visible_width(text)
@@ -581,16 +613,6 @@ function M.compose_bar(text, width)
     gap = 2
   end
   return left .. string.rep(" ", gap) .. right
-end
-
-local function split_workspace(path)
-  local parts = split_path(path)
-  for index = 1, #parts - 1 do
-    if parts[index] == ".worktrees" then
-      return parts[index - 1], parts[index + 1]
-    end
-  end
-  return nil, nil
 end
 
 -- Format a pi-ish status line. `arg_json` is a JSON object emitted by
@@ -688,19 +710,32 @@ function M.footer_hint(arg_json)
 end
 
 function M.workspace_line(cwd)
-  local repo, worktree = split_workspace(cwd)
-  if repo ~= nil and worktree ~= nil then
-    return pair("repo", repo, false) .. sep() .. pair("worktree", worktree, true)
+  local parts = { pair("cwd", tilde_path(cwd or "-"), false) }
+  local commit = build_commit()
+  if commit ~= "" then
+    parts[#parts + 1] = pair("build", commit, true)
   end
-  return pair("cwd", tilde_path(cwd or "-"), false)
+  return table.concat(parts, sep())
 end
 
-function M.workspace_bar(cwd)
-  local repo, worktree = split_workspace(cwd)
-  if repo ~= nil and worktree ~= nil then
-    return pair("repo", repo, false) .. BAR_SPLIT .. pair("worktree", worktree, true)
+function M.workspace_bar(cwd, width)
+  local commit = build_commit()
+  local right = commit ~= "" and pair("build", commit, true) or ""
+  local path = tilde_path(cwd or "-")
+  local total_width = tonumber(width)
+  if total_width ~= nil then
+    local right_width = right ~= "" and visible_width(right) or 0
+    local min_left_width = visible_width(label("cwd") .. " ") + 1
+    if right ~= "" and total_width - right_width - 2 < min_left_width then
+      right = ""
+      right_width = 0
+    end
+    local gap = right ~= "" and 3 or 0
+    local label_width = visible_width(label("cwd") .. " ")
+    local path_width = math.max(1, total_width - right_width - gap - label_width)
+    path = shorten_middle(path, path_width)
   end
-  return pair("cwd", tilde_path(cwd or "-"), false) .. BAR_SPLIT .. ""
+  return pair("cwd", path, false) .. BAR_SPLIT .. right
 end
 
 function M.render_busy_status(label_text, phase, elapsed_seconds, glisten_phase)
