@@ -75,7 +75,7 @@ they're useful before the binary is on the system. Regenerated from
 | `--session` | `FILE` | load and save a JSONL session file |
 | `--system-prompt` | — | print the default coding-agent system prompt |
 | `--thinking` | `LEVEL` | thinking level: off, minimal, low, medium, high, xhigh |
-| `--tui` | — | run the full-screen interactive TUI |
+| `--tui` | — | run the inline interactive TUI |
 | `--version` | — | show version |
 <!-- @end -->
 
@@ -107,7 +107,7 @@ Frontends consume the same runtime and differ only in presentation:
 - `--print` emits a single rendered response
 - `--agent` runs one streaming turn through the stdout renderer
 - `--repl` loops on line input and reuses the same agent/session pipeline
-- `--tui` renders a full-screen terminal UI through Lua-owned state
+- `--tui` renders an inline terminal UI through Lua-owned state
 
 Frontends should not fork their own provider or session semantics.
 
@@ -188,7 +188,10 @@ runtime in a state where the next turn can start normally.
 
 ### Ownership split
 
-The full-screen TUI is Lua-owned.
+The TUI is Lua-owned. It now defaults to an inline raw-mode terminal surface:
+the normal screen buffer and terminal scrollback stay in use, while the TUI
+renderer updates the visible viewport with ANSI line frames. Alt-screen mode is
+kept as an explicit compatibility/debug path via `PSI_TUI_ALT_SCREEN=1`.
 
 Lua owns:
 
@@ -206,7 +209,10 @@ C owns only the terminal boundary:
 
 - raw terminal bootstrap and teardown
 - key normalization from terminal escape sequences to semantic keys
+- ANSI/OSC stripping, UTF-8 cluster measurement, cell-width clipping,
+  padding, and ANSI-aware wrapping primitives
 - line drawing primitives
+- line-frame differential rendering primitives
 - cursor visibility/placement primitives
 - screen clear/refresh primitives
 - terminal size queries
@@ -215,16 +221,22 @@ C owns only the terminal boundary:
 ### TUI module boundaries
 
 - `src/runtime/tui_mode.c` switches the terminal into raw mode and delegates to Lua mode
+  without entering the alternate screen by default
 - `src/lua/vm.c` exposes the `psi.tui_*` host primitives
 - `lua/psi/tui_runtime.lua` owns the runtime state machine for `--tui`
+- `lua/psi/tui_renderer.lua` owns logical frame normalization, cursor extraction,
+  and the choice between full and differential frame rendering
+- `lua/psi/tui_component.lua` and `lua/psi/tui_components/*` own composable
+  layout/rendering surfaces such as transcript markdown and chrome
 - `lua/psi/tui_status.lua` exposes TUI hook/status/key APIs, while
   `lua/psi/tui_runtime.lua` owns the runtime state machine and default
   edit/navigation actions
 - `lua/psi/tui_layout.lua` owns layout policy such as prefixes, footer text,
   and row caps
 
-The intended rule is simple: C reports terminal facts and writes terminal
-bytes; Lua decides what the interface means and what the screen should say.
+The intended rule is simple: C reports terminal facts, implements stable
+terminal text math, and writes terminal bytes; Lua decides what the interface
+means and what the screen should say.
 
 ### TUI rendering path
 
@@ -236,7 +248,9 @@ variables.
 Rendering policy:
 
 - Use raw ANSI line drawing when ANSI is compiled in, the terminal is not
-  `dumb`, and `psi.tui_draw_raw_line` is available.
+  `dumb`, and `psi.tui_draw_raw_line` is available. Logical frames may carry a
+  viewport top row; C maps local rows and cursor positions onto physical
+  terminal rows before writing.
 - Fall back to plain-text frames when ANSI or color is disabled by the
   runtime policy.
 
@@ -250,13 +264,18 @@ Runtime overrides:
 - `PSI_COLOR=0|1` forces Lua's color rendering policy within compiled support.
 - `PSI_TUI_RAW_ANSI=0|1` forces raw ANSI TUI line drawing within compiled and
   terminal support.
+- `PSI_TUI_ALT_SCREEN=1` restores the old alternate-screen + mouse-capture
+  terminal boundary.
+- `PSI_TUI_FULLSCREEN=1` or `PSI_TUI_INLINE_MAX_ROWS=<n>` controls the inline
+  viewport height policy.
+- `PSI_HARDWARE_CURSOR=0` falls back to the Lua-drawn prompt cursor.
 - `NO_COLOR=1` disables color rendering.
 
 ### TUI availability
 
 The TUI is an optional host capability.
 
-- `TUI=1` compiles the ANSI full-screen frontend and the backing
+- `TUI=1` compiles the ANSI inline TUI frontend and the backing
   `psi.tui_*` primitives
 - `TUI=0` keeps the rest of the runtime buildable without terminal raw-mode support; `--tui`
   exits with a clear error
@@ -305,7 +324,7 @@ or terminal dependency.
 
 Current gates:
 
-- `TUI`: full-screen ANSI frontend and `psi.tui_*` host primitives
+- `TUI`: inline ANSI frontend and `psi.tui_*` host primitives
 - `ANSI`: ANSI SGR emission and parsing
 - `COLOR`: color SGR emission
 - `REPL_EDITLINE`: libedit-backed REPL input/history; falls back to plain

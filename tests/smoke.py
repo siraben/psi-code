@@ -535,6 +535,86 @@ def t_markdown_inline_code_no_backticks(psi: Psi):
     assert_contains(out, "\x1b[", "inline code should still be highlighted")
 
 
+@test("markdown/unmatched_asterisk_literal")
+def t_markdown_unmatched_asterisk_literal(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local ansi = require("psi.ansi")\n'
+        + 'ansi.color_enabled = true\n'
+        + 'return require("psi.markdown").render_inline("Use * for globbing")',
+    ).stdout.rstrip("\n")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_equals(plain, "Use * for globbing", "unmatched emphasis markers should stay literal")
+
+
+@test("markdown/component_multiline_emphasis")
+def t_markdown_component_multiline_emphasis(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local ansi = require("psi.ansi")\n'
+        + 'ansi.color_enabled = true\n'
+        + 'local c = require("psi.tui_components.markdown").new({ text = "**bold\\ncontinued** and tail" })\n'
+        + 'return tostring((psi.runtime_info() or {}).ansi ~= false) .. "\\n" .. table.concat(c:render(80), "\\n")',
+    ).stdout.rstrip("\n")
+    ansi_enabled, rendered = out.split("\n", 1)
+    out = rendered
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_equals(plain, "bold continued and tail", "paragraph inline spans should cross soft line breaks")
+    if ansi_enabled == "true":
+        assert_contains(out, "\x1b[1m", "multiline bold should still emit bold styling")
+
+
+@test("tui_text/grapheme_display_width")
+def t_tui_text_grapheme_display_width(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local t = require("psi.tui_text")\n'
+        + 'return tostring(t.visible_width("á")) .. "," .. tostring(t.visible_width("界")) .. "," .. tostring(t.visible_width("👨‍👩‍👧‍👦"))',
+    ).stdout.rstrip("\n")
+    assert_equals(out, "1,2,2", "display width should handle combining marks, CJK, and ZWJ emoji")
+
+
+@test("tui_text/unicode17_cell_widths")
+def t_tui_text_unicode17_cell_widths(psi: Psi):
+    out = psi.eval(
+        'local t = require("psi.tui_text")\n'
+        + 'return table.concat({\n'
+        + '  psi.cell_width(0x41),\n'
+        + '  psi.cell_width(0x4E2D),\n'
+        + '  psi.cell_width(0x1F600),\n'
+        + '  psi.cell_width(0x0301),\n'
+        + '  psi.cell_width(0x200D),\n'
+        + '  psi.cell_width(0x17000),\n'
+        + '  t.visible_width("𗀀"),\n'
+        + '}, ",")'
+    )
+    assert_equals(out, "1,2,2,0,0,2,2", "Unicode 17 cell widths should match host table")
+
+
+@test("tui_text/c_primitives_match_lua_contract")
+def t_tui_text_c_primitives_match_lua_contract(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local t = require("psi.tui_text")\n'
+        + 'local ansi = string.char(27) .. "[1mwide 界 family 👨‍👩‍👧‍👦" .. string.char(27) .. "[0m"\n'
+        + 'local wrapped = t.wrap_ansi(ansi .. " tail words", 8)\n'
+        + 'return table.concat({\n'
+        + '  t.strip_ansi(ansi),\n'
+        + '  tostring(t.visible_width(ansi)),\n'
+        + '  tostring(t.byte_index_for_width("á界x", 3)),\n'
+        + '  tostring(#wrapped),\n'
+        + '  t.strip_ansi(table.concat(wrapped, "|")),\n'
+        + '}, "\\n")',
+    ).stdout.rstrip("\n")
+    lines = out.split("\n")
+    assert_equals(lines[0], "wide 界 family 👨‍👩‍👧‍👦", "C strip should remove SGR")
+    assert_equals(lines[1], "17", "C width should match terminal cell contract")
+    assert_equals(lines[2], "6", "C byte index should stop on cluster boundaries")
+    assert_equals(lines[3], "4", "C ANSI wrap should emit expected row count")
+    assert_contains(lines[4], "wide 界", "wrapped output should preserve text content")
+    assert_contains(lines[4], "tail", "wrapped output should include trailing words")
+
+
 @test("markdown/component_table_rendering")
 def t_markdown_component_table_rendering(psi: Psi):
     out = psi.run(
@@ -931,10 +1011,11 @@ return table.concat({
   tostring(d.refreshes),
   tostring(d.renderer_full),
   tostring(d.renderer_diff >= 1),
-  tostring(d.renderer_last_mode)
+  tostring(d.renderer_last_mode),
+  tostring(d.first_line_width)
 }, "|")
 """)
-    assert_equals(out, "1|0|1|false|0|true|1|0|0|0|0|1|true|diff",
+    assert_equals(out, "1|0|1|false|0|true|1|0|0|0|0|1|true|diff|80",
                   "stable-size redraw uses changed-row diff output")
 
 
@@ -1042,6 +1123,27 @@ return table.concat({
 """)
     assert_equals(out, "diff|2|1|1|3|3|true|true|true",
                   "renderer should emit discrete dirty row ranges")
+
+
+@test("tui/renderer_offsets_viewport_top")
+def t_tui_renderer_offsets_viewport_top(psi: Psi):
+    out = psi.eval(r"""
+local r = require("psi.tui_renderer")
+local old_frame = psi.tui_render_frame
+local old_write = psi.stdout_write
+local frame, row, col
+psi.tui_render_frame = function(f, r0, c0) frame, row, col = f, r0, c0 end
+psi.stdout_write = function() end
+r.new():render({lines={"abc"}, width=10, height=1, top=9, cursor={row=1, col=2, visible=true}})
+psi.tui_render_frame = old_frame
+psi.stdout_write = old_write
+return table.concat({
+  tostring((frame or ""):find("\27[9;1H", 1, true) ~= nil),
+  tostring(row),
+  tostring(col)
+}, "|")
+""")
+    assert_equals(out, "true|9|2", "renderer should offset local frame rows by viewport top")
 
 
 @test("tui/hardware_cursor_uses_input_marker")
@@ -1338,10 +1440,16 @@ def t_tui_input_box_background(psi: Psi):
     raw.assert_clean_exit()
     assert_true(b"\x1b[0;7m" not in raw and b"\x1b[7m" not in raw,
                 "input box should not use reverse-video")
-    assert_bytes_contains(raw, b"\x1b[?25l", "redraw should keep the hardware cursor hidden")
+    assert_bytes_not_contains(raw, b"\x1b[?1049h",
+                              "default TUI should not enter alternate screen")
+    assert_bytes_not_contains(raw, b"\x1b[?1000h",
+                              "default TUI should not enable mouse capture")
+    assert_bytes_not_contains(raw, b"\x1b[?1006h",
+                              "default TUI should not enable SGR mouse capture")
     assert_true(b"\x1b[?2026h" in raw and b"\x1b[?2026l" in raw,
                 "redraw should use synchronized terminal output")
-    assert_bytes_contains(raw, b"\x1b[4m", "input box should render a Lua-owned cursor cell")
+    assert_bytes_contains(raw, b"\x1b[?25h", "input box should show the hardware cursor")
+    assert_bytes_not_contains(raw, b"\x1b[4m", "input box should not render a Lua-owned cursor cell")
     assert_bytes_not_contains(raw, b"\x1b[48;5;238m",
                               "input box should not paint a filled background")
     assert_bytes_contains(raw, b"\x1b[38;5;245m",

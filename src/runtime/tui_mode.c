@@ -25,11 +25,25 @@
 
 static struct termios psi_tui_original_termios;
 static int psi_tui_has_original_termios = 0;
+static int psi_tui_alt_screen_active = 0;
 
 #define PSI_TUI_ENABLE_MOUSE "\033[?1000h\033[?1006h"
 #define PSI_TUI_DISABLE_MOUSE "\033[?1006l\033[?1000l"
-#define PSI_TUI_ENTER_SEQ "\033[?1049h" PSI_TUI_ENABLE_MOUSE "\033[?25h\033[2J\033[H"
-#define PSI_TUI_LEAVE_SEQ PSI_TUI_DISABLE_MOUSE "\033[?2026l\033[0m\033[?25h\033[?1049l"
+#define PSI_TUI_ENTER_ALT_SEQ "\033[?1049h" PSI_TUI_ENABLE_MOUSE "\033[?25h\033[2J\033[H"
+#define PSI_TUI_LEAVE_ALT_SEQ PSI_TUI_DISABLE_MOUSE "\033[?2026l\033[0m\033[?25h\033[?1049l"
+#define PSI_TUI_ENTER_INLINE_SEQ "\033[?25h"
+#define PSI_TUI_LEAVE_INLINE_SEQ PSI_TUI_DISABLE_MOUSE "\033[?2026l\033[0m\033[?25h"
+
+static int psi_tui_env_enabled(const char *name) {
+    const char *value;
+
+    value = getenv(name);
+    if (value == NULL || value[0] == '\0') {
+        return 0;
+    }
+    return strcmp(value, "0") != 0 && strcmp(value, "false") != 0 && strcmp(value, "off") != 0 &&
+        strcmp(value, "no") != 0;
+}
 
 static void psi_tui_apply_raw_mode(struct termios *attrs) {
     attrs->c_iflag &= (tcflag_t) ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
@@ -87,24 +101,26 @@ static int psi_tui_enter_terminal(void) {
         perror("tcsetattr");
         return PSI_STATUS_ERROR;
     }
-    fputs(PSI_TUI_ENTER_SEQ, stdout);
+    psi_tui_alt_screen_active = psi_tui_env_enabled("PSI_TUI_ALT_SCREEN");
+    fputs(psi_tui_alt_screen_active ? PSI_TUI_ENTER_ALT_SEQ : PSI_TUI_ENTER_INLINE_SEQ, stdout);
     fflush(stdout);
     return PSI_STATUS_OK;
 }
 
 static void psi_tui_leave_terminal(void) {
-    fputs(PSI_TUI_LEAVE_SEQ, stdout);
+    fputs(psi_tui_alt_screen_active ? PSI_TUI_LEAVE_ALT_SEQ : PSI_TUI_LEAVE_INLINE_SEQ, stdout);
     fflush(stdout);
     if (psi_tui_has_original_termios) {
         tcsetattr(STDIN_FILENO, TCSAFLUSH, &psi_tui_original_termios);
     }
+    psi_tui_alt_screen_active = 0;
 }
 
 void psi_tui_suspend_terminal(void) {
     if (psi_tui_has_original_termios) {
         tcsetattr(STDIN_FILENO, TCSAFLUSH, &psi_tui_original_termios);
     }
-    fputs(PSI_TUI_LEAVE_SEQ, stdout);
+    fputs(psi_tui_alt_screen_active ? PSI_TUI_LEAVE_ALT_SEQ : PSI_TUI_LEAVE_INLINE_SEQ, stdout);
     fflush(stdout);
 }
 
@@ -117,7 +133,7 @@ void psi_tui_resume_terminal(void) {
     raw_attrs = psi_tui_original_termios;
     psi_tui_apply_raw_mode(&raw_attrs);
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_attrs);
-    fputs(PSI_TUI_ENTER_SEQ, stdout);
+    fputs(psi_tui_alt_screen_active ? PSI_TUI_ENTER_ALT_SEQ : PSI_TUI_ENTER_INLINE_SEQ, stdout);
     fflush(stdout);
 }
 

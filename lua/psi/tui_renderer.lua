@@ -63,10 +63,11 @@ local function apply_line_resets(lines)
   return out
 end
 
-local function absolute_frame(lines)
+local function absolute_frame(lines, top)
   local frame = {}
+  top = math.max(1, tonumber(top) or 1)
   for row, line in ipairs(lines) do
-    frame[#frame + 1] = CSI .. tostring(row) .. ";1H" .. CSI .. "2K" .. line
+    frame[#frame + 1] = CSI .. tostring(top + row - 1) .. ";1H" .. CSI .. "2K" .. line
   end
   return table.concat(frame)
 end
@@ -100,6 +101,7 @@ local function normalize_frame(frame)
   local raw_lines = type(frame.lines) == "table" and frame.lines or {}
   local width = math.max(1, tonumber(frame.width) or 1)
   local height = math.max(1, tonumber(frame.height) or #raw_lines or 1)
+  local top = math.max(1, tonumber(frame.top) or tonumber(frame.viewport_top) or 1)
   local lines, marker_cursor = M.extract_cursor(normalize_lines(raw_lines, height))
   local cursor = cursor_from_frame(frame, height)
 
@@ -111,6 +113,7 @@ local function normalize_frame(frame)
   return {
     width = width,
     height = height,
+    top = top,
     lines = apply_line_resets(lines),
     cursor = cursor,
     force_full = not not frame.force_full,
@@ -118,31 +121,45 @@ local function normalize_frame(frame)
 end
 
 function Backend:can_diff()
-  return type(psi.stdout_write) == "function"
+  return (self.use_line_primitive and type(psi.tui_render_lines) == "function")
+    or type(psi.stdout_write) == "function"
 end
 
 function Backend:render_full(frame)
   local cursor = frame.cursor
 
-  if type(psi.tui_render_frame) == "function" then
-    psi.tui_render_frame(absolute_frame(frame.lines), cursor.row, cursor.col, cursor.visible)
+  if self.use_line_primitive and type(psi.tui_render_lines) == "function" then
+    psi.tui_render_lines(frame.lines, cursor.row, cursor.col, cursor.visible, true, frame.top)
+  elseif type(psi.tui_render_frame) == "function" then
+    psi.tui_render_frame(
+      absolute_frame(frame.lines, frame.top),
+      frame.top + cursor.row - 1,
+      cursor.col,
+      cursor.visible
+    )
   elseif type(psi.tui_draw_raw_line) == "function" then
-    psi.tui_set_cursor(1, 1, false)
+    psi.tui_set_cursor(frame.top, 1, false)
     for row, line in ipairs(frame.lines) do
-      psi.tui_draw_raw_line(row, line)
+      psi.tui_draw_raw_line(frame.top + row - 1, line)
     end
-    psi.tui_set_cursor(cursor.row, cursor.col, cursor.visible)
+    psi.tui_set_cursor(frame.top + cursor.row - 1, cursor.col, cursor.visible)
     psi.tui_refresh()
   end
 end
 
 function Backend:render_diff(frame, ranges)
   local cursor = frame.cursor
+
+  if self.use_line_primitive and type(psi.tui_render_lines) == "function" then
+    psi.tui_render_lines(frame.lines, cursor.row, cursor.col, cursor.visible, false, frame.top)
+    return
+  end
+
   local out = { SYNC_BEGIN, HIDE_CURSOR }
 
   for _, range in ipairs(ranges) do
     for row = range.first, range.last do
-      out[#out + 1] = CSI .. tostring(row) .. ";1H"
+      out[#out + 1] = CSI .. tostring(frame.top + row - 1) .. ";1H"
       out[#out + 1] = CSI .. "2K"
       out[#out + 1] = frame.lines[row] or ""
       out[#out + 1] = RESET
@@ -150,7 +167,11 @@ function Backend:render_diff(frame, ranges)
   end
 
   if cursor.visible then
-    out[#out + 1] = CSI .. tostring(cursor.row) .. ";" .. tostring(cursor.col) .. "H"
+    out[#out + 1] = CSI
+      .. tostring(frame.top + cursor.row - 1)
+      .. ";"
+      .. tostring(cursor.col)
+      .. "H"
     out[#out + 1] = SHOW_CURSOR
   else
     out[#out + 1] = HIDE_CURSOR
@@ -159,8 +180,11 @@ function Backend:render_diff(frame, ranges)
   psi.stdout_write(table.concat(out))
 end
 
-local function terminal_backend()
-  return setmetatable({}, Backend)
+local function terminal_backend(opts)
+  opts = type(opts) == "table" and opts or {}
+  return setmetatable({
+    use_line_primitive = not not opts.line_primitive,
+  }, Backend)
 end
 
 local function cursor_changed(renderer, cursor)
@@ -173,6 +197,7 @@ function Renderer:reset(reason)
   self.previous_lines = {}
   self.previous_width = nil
   self.previous_height = nil
+  self.previous_top = nil
   self.previous_cursor_row = nil
   self.previous_cursor_col = nil
   self.previous_cursor_visible = nil
@@ -195,6 +220,8 @@ function Renderer:render(frame)
     reason = "width"
   elseif self.previous_height ~= next_frame.height then
     reason = "height"
+  elseif self.previous_top ~= next_frame.top then
+    reason = "top"
   elseif #self.previous_lines == 0 then
     reason = "first"
   elseif not self.backend:can_diff() then
@@ -227,6 +254,7 @@ function Renderer:render(frame)
   self.previous_lines = next_frame.lines
   self.previous_width = next_frame.width
   self.previous_height = next_frame.height
+  self.previous_top = next_frame.top
   self.previous_cursor_row = next_frame.cursor.row
   self.previous_cursor_col = next_frame.cursor.col
   self.previous_cursor_visible = next_frame.cursor.visible
@@ -236,10 +264,11 @@ end
 function M.new(opts)
   opts = type(opts) == "table" and opts or {}
   return setmetatable({
-    backend = opts.backend or terminal_backend(),
+    backend = opts.backend or terminal_backend(opts),
     previous_lines = {},
     previous_width = nil,
     previous_height = nil,
+    previous_top = nil,
     previous_cursor_row = nil,
     previous_cursor_col = nil,
     previous_cursor_visible = nil,
@@ -266,6 +295,7 @@ function M.render(renderer, lines, opts)
   return renderer:render({
     width = opts.width,
     height = opts.height,
+    top = opts.top or opts.viewport_top,
     lines = lines,
     cursor = {
       row = opts.cursor_row,

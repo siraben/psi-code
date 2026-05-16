@@ -13,10 +13,6 @@ local tui_text = require("psi.tui_text")
 
 local M = {}
 local BAR_SPLIT = string.char(31)
-local NON_PRINTABLE_ASCII_PATTERN = "[^\32-\126]"
-local BYTE_ESC = 27
-local UTF8_CONTINUATION_MASK = 0xC0
-local UTF8_CONTINUATION_TAG = 0x80
 local busy_rng_seeded = false
 local enabled_setting
 M._visible_width_cache = { entries = 0 }
@@ -529,7 +525,7 @@ function M.compose_bar(text, width)
   local total_width = math.max(1, tonumber(width) or 80)
   local left_width = tui_text.visible_width(left)
   local right_width = tui_text.visible_width(right)
-  local gap = total_width - left_width - right_width - 1
+  local gap = total_width - left_width - right_width
   if right == "" then
     return left
   end

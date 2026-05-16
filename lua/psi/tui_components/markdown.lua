@@ -70,24 +70,6 @@ local function find_break(text, width)
   return math.max(1, limit)
 end
 
-local function wrap_plain(text, width)
-  text = normalize_tabs(text)
-  width = math.max(MIN_WIDTH, tonumber(width) or MIN_WIDTH)
-  local out = {}
-  local remaining = text
-  repeat
-    local break_index = find_break(remaining, width)
-    local raw = remaining:sub(1, break_index)
-    out[#out + 1] = raw:gsub("%s+$", "")
-    local next_start = break_index + 1
-    while next_start <= #remaining and is_space_byte(remaining:byte(next_start)) do
-      next_start = next_start + 1
-    end
-    remaining = remaining:sub(next_start)
-  until remaining == ""
-  return out
-end
-
 local function parse_cells(line)
   line = tostring(line or "")
   local cells = {}
@@ -360,12 +342,7 @@ local function wrap_cell(text, width)
   if tui_text.visible_width(styled) <= width then
     return { styled }
   end
-  local wrapped = wrap_plain(text, width)
-  local out = {}
-  for i, line in ipairs(wrapped) do
-    out[i] = markdown.render_inline(line)
-  end
-  return out
+  return tui_text.wrap_ansi(styled, width)
 end
 
 local function pad_cell(text, width)
@@ -434,6 +411,38 @@ local function is_fence_line(text)
   return text:match("^%s*```") ~= nil or text:match("^%s*~~~") ~= nil
 end
 
+local function is_blank_line(text)
+  return tostring(text or ""):match("^%s*$") ~= nil
+end
+
+local function is_horizontal_rule(text)
+  return text:match("^%s*%-%-%-+%s*$") ~= nil
+    or text:match("^%s*%*%*%*+%s*$") ~= nil
+    or text:match("^%s*___+%s*$") ~= nil
+end
+
+local function is_structural_line(text)
+  text = tostring(text or "")
+  return is_fence_line(text)
+    or is_blank_line(text)
+    or is_horizontal_rule(text)
+    or text:match("^%s*#+%s+") ~= nil
+    or text:match("^%s*[%-%*%+]%s+") ~= nil
+    or text:match("^%s*%d+%.%s+") ~= nil
+    or text:match("^%s*>%s?") ~= nil
+end
+
+local function render_wrapped_styled(out, styled, prefix, rest_prefix, width)
+  local first_width = wrap_width(width, prefix)
+  local rest_width = wrap_width(width, rest_prefix or "")
+  local line_width = math.max(MIN_WIDTH, math.min(first_width, rest_width))
+  local wrapped = tui_text.wrap_ansi(styled, line_width)
+  for _, line in ipairs(wrapped) do
+    out[#out + 1] = (prefix or "") .. line
+    prefix = rest_prefix or ""
+  end
+end
+
 local function render_wrapped_line(out, source_line, prefix, rest_prefix, width, in_code_fence)
   local remaining = normalize_tabs(source_line)
   repeat
@@ -447,6 +456,20 @@ local function render_wrapped_line(out, source_line, prefix, rest_prefix, width,
     remaining = remaining:sub(next_start)
     prefix = rest_prefix or ""
   until remaining == ""
+end
+
+local function collect_paragraph(lines, start_index)
+  local parts = {}
+  local i = start_index
+  while i <= #lines do
+    local line = lines[i]
+    if is_structural_line(line) or parse_gfm_table_block(lines, i) ~= nil then
+      break
+    end
+    parts[#parts + 1] = trim(normalize_tabs(line))
+    i = i + 1
+  end
+  return table.concat(parts, " "), i
 end
 
 local function render_text(self, width)
@@ -475,6 +498,17 @@ local function render_text(self, width)
           prefix = rest_prefix
         end
       end
+    elseif not fence_state and not is_structural_line(line) then
+      local paragraph, next_index = collect_paragraph(source_lines, i)
+      render_wrapped_styled(
+        out,
+        markdown.render_inline(paragraph),
+        prefix or "",
+        rest_prefix,
+        width
+      )
+      prefix = rest_prefix
+      i = next_index
     else
       local fence_line = is_fence_line(line)
       local line_fence_flag

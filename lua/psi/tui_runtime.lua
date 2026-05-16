@@ -196,18 +196,8 @@ local function fit_text(text, width)
   if target <= 0 then
     return ""
   end
-  local cells = 0
-  local n = #text
-  for i = 1, n do
-    local ch = text:byte(i)
-    if (ch & UTF8_CONTINUATION_MASK) ~= UTF8_CONTINUATION_TAG then
-      if cells == target then
-        return width <= 3 and text:sub(1, i - 1) or (text:sub(1, i - 1) .. "...")
-      end
-      cells = cells + 1
-    end
-  end
-  return text
+  local byte_index = tui_text.byte_index_for_width(text, target)
+  return width <= 3 and text:sub(1, byte_index) or (text:sub(1, byte_index) .. "...")
 end
 
 local function current_size()
@@ -230,6 +220,23 @@ local function env_bool(name)
     return true
   end
   return nil
+end
+
+local function env_integer(name)
+  local value = os.getenv(name)
+  if value == nil or value == "" then
+    return nil
+  end
+  return tonumber(value)
+end
+
+local function inline_viewport_height(terminal_height)
+  terminal_height = math.max(MIN_HEIGHT, tonumber(terminal_height) or DEFAULT_HEIGHT)
+  if env_bool("PSI_TUI_ALT_SCREEN") == true or env_bool("PSI_TUI_FULLSCREEN") == true then
+    return terminal_height
+  end
+  local max_rows = env_integer("PSI_TUI_INLINE_MAX_ROWS") or terminal_height
+  return clamp(max_rows, MIN_HEIGHT, terminal_height)
 end
 
 local function detect_tui_capabilities()
@@ -481,6 +488,7 @@ local set_status
 
 local function new_state(opts)
   local width, height = current_size()
+  local viewport_height = inline_viewport_height(height)
   local caps = detect_tui_capabilities()
   ansi.enabled = caps.ansi
   ansi.color_enabled = caps.color
@@ -509,11 +517,12 @@ local function new_state(opts)
     status_text = nil,
     status_is_error = false,
     show_thinking = tui.show_thinking() == "1",
-    show_hardware_cursor = env_bool("PSI_HARDWARE_CURSOR") == true,
+    show_hardware_cursor = env_bool("PSI_HARDWARE_CURSOR") ~= false,
     width = width,
-    height = height,
-    renderer = tui_renderer.new(),
-    input_layout = default_input_layout(height),
+    height = viewport_height,
+    terminal_height = height,
+    renderer = tui_renderer.new({ line_primitive = true }),
+    input_layout = default_input_layout(viewport_height),
     tui_caps = caps,
     streaming_assistant_index = nil,
     streaming_thinking_index = nil,
@@ -957,7 +966,7 @@ local function entry_render_lines(state, entry)
 
   if entry.kind == "assistant" then
     local first_prefix, rest_prefix = entry_prefixes(entry)
-    local trimmed = sanitize_terminal_text(trim_trailing_newlines(entry.text or ""), true)
+    local trimmed = sanitize_terminal_text(trim_trailing_newlines(entry_text(entry)), true)
     entry.markdown_component = entry.markdown_component or tui_markdown.new()
     entry.markdown_component:set_text(trimmed)
     entry.markdown_component:set_prefixes(first_prefix, rest_prefix)
@@ -1355,7 +1364,10 @@ local render_input_text_with_cursor
 local input_line_selected
 
 local function redraw(state)
-  state.width, state.height = current_size()
+  local terminal_width, terminal_height = current_size()
+  state.width = terminal_width
+  state.terminal_height = terminal_height
+  state.height = inline_viewport_height(terminal_height)
   local rows = layout_rows(state)
   local total_lines = total_rendered_lines(state)
   local max_scroll = math.max(0, total_lines - rows.transcript_height)
@@ -1371,7 +1383,7 @@ local function redraw(state)
     psi.tui_clear(true)
     tui_renderer.reset(state.renderer)
   end
-  frame_width = math.max(1, state.width - 1)
+  frame_width = math.max(1, state.width)
   cwd = psi.cwd() or "."
   components[#components + 1] = tui_chrome.line(function(width)
     return tui.compose_bar(tui.workspace_bar(cwd), width)
@@ -1395,8 +1407,10 @@ local function redraw(state)
       local item_index = (rows.command_completion_first or 1) + i - 1
       local item = rows.command_completions[item_index]
       local selected = item_index == (state.command_completion_index or 1)
-      completion_lines[#completion_lines + 1] =
-        padded_frame_text(item and format_command_completion(item, selected, frame_width) or "", frame_width)
+      completion_lines[#completion_lines + 1] = tui_text.pad_line(
+        item and format_command_completion(item, selected, frame_width) or "",
+        frame_width
+      )
     end
     components[#components + 1] = tui_component.fixed(completion_lines)
   end
@@ -1471,13 +1485,17 @@ local function redraw(state)
   local cursor_row = rows.input_start_row + visible_cursor_line
   local cursor_col = display_width(cursor_prefix) + rows.cursor_col + 1
   cursor_row = clamp(cursor_row, rows.input_start_row + 1, rows.input_start_row + rows.input_rows)
-  cursor_col = clamp(cursor_col, 1, math.max(1, state.width - 1))
+  cursor_col = clamp(cursor_col, 1, math.max(1, state.width))
 
   local root = tui_component.stack(components)
+  local frame_lines = root:render(frame_width)
+  local frame_height = #frame_lines
+  local viewport_top = math.max(1, (state.terminal_height or state.height) - frame_height + 1)
   state.renderer = state.renderer:render({
     width = frame_width,
-    height = state.height,
-    lines = root:render(frame_width),
+    height = frame_height,
+    top = viewport_top,
+    lines = frame_lines,
     cursor = {
       row = cursor_row,
       col = cursor_col,
@@ -1882,6 +1900,11 @@ function render_input_text_with_cursor(state, line, draw_cursor)
   else
     cell = " "
     after = ""
+  end
+  if state.show_hardware_cursor then
+    return style_input_text(before)
+      .. tui_renderer.cursor_marker()
+      .. style_input_text(cell .. after)
   end
   return style_input_text(before)
     .. tui_renderer.cursor_marker()
@@ -2306,6 +2329,14 @@ local function after_turn_payload(reply, assistant_streamed)
   }
 end
 
+local function add_nonstreamed_assistant_reply(state, reply, assistant_streamed)
+  if assistant_streamed or type(reply) ~= "string" or reply == "" then
+    return false
+  end
+  add_entry(state, "assistant", reply)
+  return true
+end
+
 local function run_turn(state, line)
   local assistant_streamed = false
   local observer = {
@@ -2360,6 +2391,9 @@ local function run_turn(state, line)
     return false
   end
 
+  if ok then
+    add_nonstreamed_assistant_reply(state, reply, assistant_streamed)
+  end
   fire_turn_event(state, "after-turn", after_turn_payload(reply, assistant_streamed))
 
   if not ok then
@@ -3276,6 +3310,54 @@ function M._debug_after_turn_payload(reply, assistant_streamed)
   return after_turn_payload(reply, assistant_streamed)
 end
 
+function M._debug_nonstreamed_assistant_reply(reply, assistant_streamed)
+  local state = {
+    entries = {},
+    dirty = false,
+    entries_version = 0,
+    total_cache_width = nil,
+    total_cache_version = nil,
+    total_cache_lines = nil,
+    flat_cache_width = nil,
+    flat_cache_version = nil,
+    flat_cache_lines = nil,
+  }
+  local added = add_nonstreamed_assistant_reply(state, reply, assistant_streamed)
+  local entry = state.entries[1] or {}
+  return table.concat({
+    tostring(added),
+    tostring(#state.entries),
+    tostring(entry.kind or ""),
+    tostring(entry.text or ""),
+  }, "|")
+end
+
+function M._debug_streaming_assistant_rendered(deltas)
+  local state = {
+    width = 80,
+    entries = {},
+    dirty = false,
+    entries_version = 0,
+    total_cache_width = nil,
+    total_cache_version = nil,
+    total_cache_lines = nil,
+    flat_cache_width = nil,
+    flat_cache_version = nil,
+    flat_cache_lines = nil,
+    streaming_assistant_index = nil,
+    streaming_thinking_index = nil,
+    scroll_offset = 0,
+  }
+  for _, delta in ipairs(type(deltas) == "table" and deltas or { deltas }) do
+    observer_text_delta(state, delta)
+  end
+  local out = {}
+  for _, line in ipairs(flattened_render_lines(state)) do
+    out[#out + 1] = strip_ansi(line.text or "")
+  end
+  return table.concat(out, "\n")
+end
+
 function M._debug_tool_call_text_after_assistant()
   render.handle_event("before-turn", {})
   render.handle_event("assistant-text", { text = "assistant text" })
@@ -3288,6 +3370,7 @@ function M._debug_busy_animation_frames(times)
     "tui_poll_key",
     "tui_size",
     "tui_render_frame",
+    "tui_render_lines",
     "stdout_write",
     "tui_clear",
     "cwd",
@@ -3310,6 +3393,7 @@ function M._debug_busy_animation_frames(times)
     return { width = 80, height = 24 }
   end
   psi.tui_render_frame = function() end
+  psi.tui_render_lines = function() end
   psi.stdout_write = function() end
   psi.tui_clear = function() end
   psi.cwd = function()
@@ -3350,6 +3434,7 @@ function M._debug_busy_animation_frames(times)
       show_hardware_cursor = false,
       width = 80,
       height = 24,
+      renderer = tui_renderer.new({ line_primitive = true }),
       input_layout = default_input_layout(24),
       tui_caps = { raw_ansi = false },
       streaming_assistant_index = nil,
@@ -3596,6 +3681,7 @@ function M._debug_redraw_counts(input, debug_options)
     "tui_draw_line",
     "tui_draw_raw_line",
     "tui_render_frame",
+    "tui_render_lines",
     "tui_set_cursor",
     "tui_refresh",
     "stdout_write",
@@ -3611,6 +3697,7 @@ function M._debug_redraw_counts(input, debug_options)
     draw_rows = {},
     raw_rows = {},
     frames = {},
+    line_frames = {},
     writes = {},
     clears = 0,
     cursor_sets = 0,
@@ -3620,6 +3707,7 @@ function M._debug_redraw_counts(input, debug_options)
     calls.draw_rows = {}
     calls.raw_rows = {}
     calls.frames = {}
+    calls.line_frames = {}
     calls.writes = {}
     calls.clears = 0
     calls.cursor_sets = 0
@@ -3646,6 +3734,58 @@ function M._debug_redraw_counts(input, debug_options)
       col = col,
       visible = visible,
     }
+  end
+  local previous_line_frame = nil
+  local previous_line_top = nil
+  local function line_frame_output(lines, force_full, top)
+    local out = {}
+    lines = type(lines) == "table" and lines or {}
+    top = math.max(1, tonumber(top) or 1)
+    if
+      force_full
+      or previous_line_frame == nil
+      or #previous_line_frame ~= #lines
+      or previous_line_top ~= top
+    then
+      for row, line in ipairs(lines) do
+        out[#out + 1] = "\27[" .. tostring(top + row - 1) .. ";1H\27[2K" .. tostring(line or "")
+      end
+    else
+      for row, line in ipairs(lines) do
+        if tostring(previous_line_frame[row] or "") ~= tostring(line or "") then
+          out[#out + 1] = "\27[" .. tostring(top + row - 1) .. ";1H\27[2K" .. tostring(line or "")
+        end
+      end
+    end
+    previous_line_frame = {}
+    previous_line_top = top
+    for row, line in ipairs(lines) do
+      previous_line_frame[row] = tostring(line or "")
+    end
+    return table.concat(out)
+  end
+  psi.tui_render_lines = function(lines, row, col, visible, force_full, top)
+    local output = line_frame_output(lines, force_full, top)
+    calls.line_frames[#calls.line_frames + 1] = {
+      lines = lines,
+      output = output,
+      row = row,
+      col = col,
+      visible = visible,
+      force_full = force_full,
+      top = top,
+    }
+    if force_full then
+      calls.frames[#calls.frames + 1] = {
+        frame = output,
+        row = row,
+        col = col,
+        visible = visible,
+        top = top,
+      }
+    elseif output ~= "" then
+      calls.writes[#calls.writes + 1] = output
+    end
   end
   psi.stdout_write = function(text)
     calls.writes[#calls.writes + 1] = text or ""
@@ -3693,9 +3833,10 @@ function M._debug_redraw_counts(input, debug_options)
       show_thinking = false,
       show_hardware_cursor = not not debug_options.show_hardware_cursor,
       width = 80,
-      height = 24,
-      renderer = tui_renderer.new(),
-      input_layout = default_input_layout(24),
+      height = inline_viewport_height(24),
+      terminal_height = 24,
+      renderer = tui_renderer.new({ line_primitive = true }),
+      input_layout = default_input_layout(inline_viewport_height(24)),
       tui_caps = { raw_ansi = false },
       streaming_assistant_index = nil,
       streaming_thinking_index = nil,
@@ -3709,10 +3850,14 @@ function M._debug_redraw_counts(input, debug_options)
       dirty = true,
     }
     refresh_input_layout(state)
-    local rows = layout_rows(state)
     redraw(state)
+    local rows = layout_rows(state)
     local first_frames = #calls.frames
     local first_frame = calls.frames[1] and calls.frames[1].frame or ""
+    local first_line_width = 0
+    if calls.line_frames[1] and calls.line_frames[1].lines then
+      first_line_width = tui_text.visible_width(calls.line_frames[1].lines[1] or "")
+    end
     local first_visible = calls.frames[1] and calls.frames[1].visible or false
     local first_col = calls.frames[1] and calls.frames[1].col or nil
     reset_calls()
@@ -3723,9 +3868,11 @@ function M._debug_redraw_counts(input, debug_options)
     local second_frame = calls.frames[1] and calls.frames[1].frame or ""
     local second_write = calls.writes[1] or ""
     local second_output = second_frame ~= "" and second_frame or second_write
+    local second_top = calls.line_frames[1] and tonumber(calls.line_frames[1].top) or 1
     local second_input_draws = 0
     for row = rows.input_start_row, rows.input_start_row + rows.input_rows + 1 do
-      if second_output:find("\27%[" .. tostring(row) .. ";1H", 1, false) ~= nil then
+      local physical_row = second_top + row - 1
+      if second_output:find("\27%[" .. tostring(physical_row) .. ";1H", 1, false) ~= nil then
         second_input_draws = second_input_draws + 1
       end
     end
@@ -3739,14 +3886,20 @@ function M._debug_redraw_counts(input, debug_options)
     local stale_frame = calls.frames[1] and calls.frames[1].frame or ""
     local stale_write = calls.writes[1] or ""
     local stale_output = stale_frame ~= "" and stale_frame or stale_write
+    local stale_top = calls.line_frames[1] and tonumber(calls.line_frames[1].top) or 1
     local line_clears = stale_output:find("\27%[2K", 1, false) ~= nil and 1 or 0
     for row = rows.transcript_start, rows.input_start_row - 1 do
+      local physical_row = stale_top + row - 1
       stale_clears = stale_clears
-        + (stale_output:find("\27%[" .. tostring(row) .. ";1H", 1, false) ~= nil and 1 or 0)
+        + (
+          stale_output:find("\27%[" .. tostring(physical_row) .. ";1H", 1, false) ~= nil and 1
+          or 0
+        )
     end
     return {
       first_frames = first_frames,
       first_frame = first_frame,
+      first_line_width = first_line_width,
       first_visible = first_visible,
       first_col = first_col,
       second_frames = second_frames,

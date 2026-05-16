@@ -60,7 +60,7 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
 
     args->help = arg_lit0("h", "help", "show help");
     args->version = arg_lit0(NULL, "version", "show version");
-    args->tui = arg_lit0(NULL, "tui", "run the full-screen interactive TUI");
+    args->tui = arg_lit0(NULL, "tui", "run the inline interactive TUI");
     args->repl = arg_lit0(NULL, "repl", "run the interactive line editor shell");
     args->print = arg_str0(NULL, "print", "TEXT", "run the bootstrap print-mode handler");
     args->eval = arg_str0(NULL, "eval", "EXPR", "evaluate a Lua expression and print the result");

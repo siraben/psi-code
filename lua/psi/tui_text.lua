@@ -1,44 +1,276 @@
 -- Shared terminal text helpers for Lua-owned TUI rendering.
+--
+-- This module is intentionally dependency-free. It is not a complete
+-- Unicode line-breaking implementation, but it handles the cases that make a
+-- terminal renderer visibly wrong: ANSI/OSC escapes, host-provided cell
+-- widths, zero-width-joiner emoji clusters, and regional indicator flags.
 
 local M = {}
+local host = type(psi) == "table" and psi or {}
+local host_strip_ansi = type(host.tui_text_strip_ansi) == "function" and host.tui_text_strip_ansi
+  or nil
+local host_visible_width = type(host.tui_text_visible_width) == "function"
+    and host.tui_text_visible_width
+  or nil
+local host_byte_index_for_width = type(host.tui_text_byte_index_for_width) == "function"
+    and host.tui_text_byte_index_for_width
+  or nil
+local host_pad_line = type(host.tui_text_pad_line) == "function" and host.tui_text_pad_line or nil
+local host_wrap_ansi = type(host.tui_text_wrap_ansi) == "function" and host.tui_text_wrap_ansi
+  or nil
+local host_cell_width = type(host.cell_width) == "function" and host.cell_width or nil
 
 local EMPTY = ""
-local ANSI_PATTERN_CSI = "\27%[[%d;?]*[A-Za-z]"
-local ANSI_PATTERN_KEYPAD = "\27[=>]"
-local ANSI_PATTERN_APC = "\27_[^\7]*\7"
-local ANSI_PATTERN_OSC = "\27%][^\7]*\7"
+local ESC = string.char(27)
+local BEL = string.char(7)
+local BYTE_SPACE = 32
+local BYTE_TAB = 9
+local BYTE_NEWLINE = 10
+local BYTE_CR = 13
+local BYTE_ESC = 27
+
+local function read_escape(text, i)
+  if text:byte(i) ~= BYTE_ESC then
+    return nil
+  end
+  local n = #text
+  local next_byte = text:byte(i + 1)
+  if next_byte == nil then
+    return text:sub(i, i), i + 1
+  end
+  if next_byte == string.byte("[") then
+    local j = i + 2
+    while j <= n do
+      local byte = text:byte(j)
+      if byte >= 0x40 and byte <= 0x7e then
+        return text:sub(i, j), j + 1
+      end
+      j = j + 1
+    end
+    return text:sub(i), n + 1
+  end
+  if next_byte == string.byte("]") or next_byte == string.byte("_") then
+    local j = i + 2
+    while j <= n do
+      local byte = text:byte(j)
+      if byte == string.byte(BEL) then
+        return text:sub(i, j), j + 1
+      end
+      if byte == BYTE_ESC and text:sub(j + 1, j + 1) == "\\" then
+        return text:sub(i, j + 1), j + 2
+      end
+      j = j + 1
+    end
+    return text:sub(i), n + 1
+  end
+  if next_byte == string.byte("=") or next_byte == string.byte(">") then
+    return text:sub(i, i + 1), i + 2
+  end
+  return text:sub(i, i + 1), i + 2
+end
+
+local function strip_ansi(text)
+  text = tostring(text or EMPTY)
+  local out = {}
+  local i = 1
+  while i <= #text do
+    local seq, next_i = read_escape(text, i)
+    if seq then
+      i = next_i
+    else
+      out[#out + 1] = text:sub(i, i)
+      i = i + 1
+    end
+  end
+  return table.concat(out)
+end
 
 function M.strip_ansi(text)
-  text = tostring(text or EMPTY)
-  text = text:gsub(ANSI_PATTERN_CSI, EMPTY)
-  text = text:gsub(ANSI_PATTERN_KEYPAD, EMPTY)
-  text = text:gsub(ANSI_PATTERN_APC, EMPTY)
-  text = text:gsub(ANSI_PATTERN_OSC, EMPTY)
-  return text
+  if host_strip_ansi then
+    return host_strip_ansi(text)
+  end
+  return strip_ansi(text)
+end
+
+local function decode_utf8(text, i)
+  local b1 = text:byte(i)
+  if b1 == nil then
+    return nil, i, EMPTY
+  end
+  if b1 < 0x80 then
+    return b1, i + 1, text:sub(i, i)
+  end
+  local b2 = text:byte(i + 1)
+  local b3 = text:byte(i + 2)
+  local b4 = text:byte(i + 3)
+  if b1 >= 0xc2 and b1 <= 0xdf and b2 ~= nil and b2 >= 0x80 and b2 <= 0xbf then
+    return ((b1 - 0xc0) * 0x40) + (b2 - 0x80), i + 2, text:sub(i, i + 1)
+  end
+  if
+    b1 >= 0xe0
+    and b1 <= 0xef
+    and b2 ~= nil
+    and b3 ~= nil
+    and b2 >= 0x80
+    and b2 <= 0xbf
+    and b3 >= 0x80
+    and b3 <= 0xbf
+  then
+    return ((b1 - 0xe0) * 0x1000) + ((b2 - 0x80) * 0x40) + (b3 - 0x80), i + 3, text:sub(i, i + 2)
+  end
+  if
+    b1 >= 0xf0
+    and b1 <= 0xf4
+    and b2 ~= nil
+    and b3 ~= nil
+    and b4 ~= nil
+    and b2 >= 0x80
+    and b2 <= 0xbf
+    and b3 >= 0x80
+    and b3 <= 0xbf
+    and b4 >= 0x80
+    and b4 <= 0xbf
+  then
+    return ((b1 - 0xf0) * 0x40000) + ((b2 - 0x80) * 0x1000) + ((b3 - 0x80) * 0x40) + (b4 - 0x80),
+      i + 4,
+      text:sub(i, i + 3)
+  end
+  return b1, i + 1, text:sub(i, i)
+end
+
+local function in_range(cp, first, last)
+  return cp >= first and cp <= last
+end
+
+local function is_combining(cp)
+  return in_range(cp, 0x0300, 0x036f)
+    or in_range(cp, 0x1ab0, 0x1aff)
+    or in_range(cp, 0x1dc0, 0x1dff)
+    or in_range(cp, 0x20d0, 0x20ff)
+    or in_range(cp, 0xfe20, 0xfe2f)
+end
+
+local function is_variation_selector(cp)
+  return in_range(cp, 0xfe00, 0xfe0f) or in_range(cp, 0xe0100, 0xe01ef)
+end
+
+local function is_regional_indicator(cp)
+  return in_range(cp, 0x1f1e6, 0x1f1ff)
+end
+
+local function is_wide(cp)
+  return in_range(cp, 0x1100, 0x115f)
+    or in_range(cp, 0x2329, 0x232a)
+    or in_range(cp, 0x2e80, 0xa4cf)
+    or in_range(cp, 0xac00, 0xd7a3)
+    or in_range(cp, 0xf900, 0xfaff)
+    or in_range(cp, 0xfe10, 0xfe19)
+    or in_range(cp, 0xfe30, 0xfe6f)
+    or in_range(cp, 0xff00, 0xff60)
+    or in_range(cp, 0xffe0, 0xffe6)
+    or in_range(cp, 0x1f000, 0x1faff)
+    or in_range(cp, 0x20000, 0x3fffd)
+end
+
+local function is_control(cp)
+  return cp == BYTE_NEWLINE or cp == BYTE_CR or cp < 0x20 or in_range(cp, 0x7f, 0x9f)
+end
+
+local function codepoint_width(cp)
+  if cp == nil then
+    return 0
+  end
+  if cp == BYTE_TAB then
+    return 3
+  end
+  if host_cell_width then
+    return host_cell_width(cp)
+  end
+  if is_control(cp) then
+    return 0
+  end
+  if cp == 0x200d or is_combining(cp) or is_variation_selector(cp) then
+    return 0
+  end
+  if is_wide(cp) then
+    return 2
+  end
+  return 1
+end
+
+local function is_zero_width_cluster_modifier(cp)
+  return cp ~= 0x200d and not is_control(cp) and codepoint_width(cp) == 0
+end
+
+local function next_cluster(text, i)
+  local start = i
+  local cp, next_i = decode_utf8(text, i)
+  local width = codepoint_width(cp)
+  local saw_zwj = false
+
+  if is_regional_indicator(cp) then
+    local cp2, next2 = decode_utf8(text, next_i)
+    if is_regional_indicator(cp2) then
+      return text:sub(start, next2 - 1), 2, next2, cp
+    end
+  end
+
+  i = next_i
+  while i <= #text do
+    local next_cp, after = decode_utf8(text, i)
+    if next_cp == nil then
+      break
+    end
+    if is_zero_width_cluster_modifier(next_cp) then
+      i = after
+    elseif next_cp == 0x200d then
+      saw_zwj = true
+      i = after
+    elseif saw_zwj then
+      width = math.max(width, codepoint_width(next_cp), 2)
+      saw_zwj = false
+      i = after
+    else
+      break
+    end
+  end
+  return text:sub(start, i - 1), width, i, cp
 end
 
 function M.visible_width(text)
-  text = M.strip_ansi(text)
+  if host_visible_width then
+    return host_visible_width(text)
+  end
   local width = 0
+  text = tostring(text or EMPTY)
   local i = 1
   while i <= #text do
-    local byte = text:byte(i)
-    if byte < 0x80 or byte >= 0xC0 then
-      width = width + 1
+    local seq, next_i = read_escape(text, i)
+    if seq then
+      i = next_i
+    else
+      local _, cluster_width, after = next_cluster(text, i)
+      width = width + cluster_width
+      i = after
     end
-    i = i + 1
   end
   return width
 end
 
 function M.pad_line(text, width)
+  if host_pad_line then
+    return host_pad_line(text, width)
+  end
   text = tostring(text or EMPTY)
   width = math.max(1, tonumber(width) or 1)
   return text .. string.rep(" ", math.max(0, width - M.visible_width(text)))
 end
 
 function M.byte_index_for_width(text, width)
-  text = M.strip_ansi(text)
+  if host_byte_index_for_width then
+    return host_byte_index_for_width(text, width)
+  end
+  text = tostring(text or EMPTY)
   width = math.max(0, tonumber(width) or 0)
   if width <= 0 then
     return 0
@@ -46,16 +278,162 @@ function M.byte_index_for_width(text, width)
   local seen = 0
   local i = 1
   while i <= #text do
-    local byte = text:byte(i)
-    if byte < 0x80 or byte >= 0xC0 then
-      seen = seen + 1
-      if seen > width then
+    local seq, next_i = read_escape(text, i)
+    if seq then
+      i = next_i
+    else
+      local _, cluster_width, after = next_cluster(text, i)
+      if seen + cluster_width > width then
         return i - 1
       end
+      seen = seen + cluster_width
+      i = after
     end
-    i = i + 1
   end
   return #text
+end
+
+local function is_space_cluster(cluster)
+  local byte = cluster ~= nil and cluster:byte(1) or nil
+  return byte == BYTE_SPACE or byte == BYTE_TAB
+end
+
+local function ansi_active_prefix(active)
+  local out = {}
+  for _, seq in ipairs(active) do
+    out[#out + 1] = seq
+  end
+  return table.concat(out)
+end
+
+local function update_active_sgr(active, seq)
+  local body = seq:match("^\27%[([%d;]*)m$")
+  if body == nil then
+    return
+  end
+  if body == "" or body == "0" or body:match("^0;") or body:match(";0;") or body:match(";0$") then
+    for i = #active, 1, -1 do
+      active[i] = nil
+    end
+    return
+  end
+  active[#active + 1] = seq
+end
+
+local function update_active_from_text(active, text)
+  local i = 1
+  while i <= #text do
+    local seq, next_i = read_escape(text, i)
+    if seq then
+      update_active_sgr(active, seq)
+      i = next_i
+    else
+      i = i + 1
+    end
+  end
+end
+
+function M.wrap_ansi(text, width)
+  if host_wrap_ansi then
+    return host_wrap_ansi(text, width)
+  end
+  text = tostring(text or EMPTY)
+  width = math.max(1, tonumber(width) or 1)
+  local lines = {}
+  local active = {}
+  local line = {}
+  local line_width = 0
+  local word = {}
+  local word_width = 0
+  local pending_space = nil
+
+  local function emit_line()
+    local rendered = table.concat(line)
+    if rendered ~= "" then
+      rendered = rendered .. ESC .. "[0m"
+    end
+    lines[#lines + 1] = rendered
+    line = {}
+    line_width = 0
+    local prefix = ansi_active_prefix(active)
+    if prefix ~= "" then
+      line[#line + 1] = prefix
+    end
+  end
+
+  local function append_piece(piece, piece_width)
+    if piece_width == 0 then
+      line[#line + 1] = piece
+      return
+    end
+    if line_width > 0 and line_width + piece_width > width then
+      emit_line()
+    end
+    line[#line + 1] = piece
+    line_width = line_width + piece_width
+  end
+
+  local function flush_word()
+    if #word == 0 then
+      return
+    end
+    local word_text = table.concat(word)
+    if pending_space ~= nil and line_width > 0 and line_width + 1 + word_width <= width then
+      line[#line + 1] = pending_space
+      line_width = line_width + 1
+    elseif pending_space ~= nil and line_width > 0 then
+      emit_line()
+    end
+    pending_space = nil
+    if word_width <= width then
+      append_piece(word_text, word_width)
+      update_active_from_text(active, word_text)
+    else
+      local j = 1
+      while j <= #word_text do
+        local seq, next_j = read_escape(word_text, j)
+        if seq then
+          line[#line + 1] = seq
+          update_active_sgr(active, seq)
+          j = next_j
+        else
+          local cluster, cluster_width, after = next_cluster(word_text, j)
+          append_piece(cluster, cluster_width)
+          j = after
+        end
+      end
+    end
+    word = {}
+    word_width = 0
+  end
+
+  local i = 1
+  while i <= #text do
+    local seq, next_i = read_escape(text, i)
+    if seq then
+      word[#word + 1] = seq
+      i = next_i
+    else
+      local cluster, cluster_width, after = next_cluster(text, i)
+      if is_space_cluster(cluster) then
+        flush_word()
+        pending_space = " "
+      else
+        word[#word + 1] = cluster
+        word_width = word_width + cluster_width
+      end
+      i = after
+    end
+  end
+  flush_word()
+  if #line > 0 or #lines == 0 then
+    lines[#lines + 1] = table.concat(line)
+  end
+  return lines
+end
+
+function M.wrap_plain(text, width)
+  return M.wrap_ansi(M.strip_ansi(text), width)
 end
 
 return M
