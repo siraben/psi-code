@@ -369,6 +369,55 @@ function M.text(value, padding_x, padding_y, bg_fn, opts)
   }, Text)
 end
 
+local Border = {}
+Border.__index = Border
+
+function Border:set_color_fn(color_fn)
+  self.color_fn = color_fn
+  self:invalidate()
+end
+
+function Border:render(width)
+  width = math.max(1, tonumber(width) or 1)
+  if
+    self.cache_lines ~= nil
+    and self.cache_width == width
+    and self.cache_generation == self.generation
+  then
+    return self.cache_lines
+  end
+  local line = string.rep(self.char or "─", width)
+  if type(self.color_fn) == "function" then
+    line = self.color_fn(line)
+  end
+  self.cache_width = width
+  self.cache_generation = self.generation
+  self.cache_lines = { line }
+  return self.cache_lines
+end
+
+function Border:invalidate()
+  self.generation = (self.generation or 0) + 1
+  self.cache_width = nil
+  self.cache_generation = nil
+  self.cache_lines = nil
+end
+
+function Border:generation_key()
+  return tostring(self.generation or 0)
+end
+
+function M.border(color_fn, char)
+  return setmetatable({
+    color_fn = color_fn,
+    char = char or "─",
+    generation = 0,
+    cache_width = nil,
+    cache_generation = nil,
+    cache_lines = nil,
+  }, Border)
+end
+
 local Box = {}
 Box.__index = Box
 

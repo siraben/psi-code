@@ -226,6 +226,8 @@ C owns only the terminal boundary:
   without entering the alternate screen by default
 - `src/lua/vm.c` exposes the `psi.tui_*` host primitives
 - `lua/psi/tui_runtime.lua` owns the runtime state machine for `--tui`
+- `lua/psi/tui_app.lua` owns the pi-style TUI controller layer: root
+  children, focus, render requests, overlay layout, and overlay compositing
 - `lua/psi/tui_renderer.lua` owns logical frame normalization, cursor extraction,
   and the choice between full and differential frame rendering
 - `lua/psi/tui_component.lua` and `lua/psi/tui_components/*` own composable
@@ -249,6 +251,9 @@ variables.
 
 Rendering policy:
 
+- The runtime mutates persistent components and asks `tui_app` for one final
+  composed frame. Overlays are rendered separately, positioned by anchor or
+  row/column options, and spliced into the base frame by terminal columns.
 - Use raw ANSI line drawing when ANSI is compiled in, the terminal is not
   `dumb`, and `psi.tui_draw_raw_line` is available. Logical frames may carry a
   viewport top row; C maps local rows and cursor positions onto physical

@@ -14,7 +14,7 @@ architecture it is porting.
 | Project context discovery | `packages/coding-agent/src/core/resource-loader.ts` | Ported for global/project `AGENTS.md` / `CLAUDE.md` discovery. Prompt templates and Lua-native theme loading are ported; skills are still not ported. |
 | System prompt assembly | `packages/coding-agent/src/core/system-prompt.ts` | Ported via `psi.prompt`. Assembled from tool metadata, guidelines, cwd, date, and project context files; prompt caching applied per `pi`. |
 | Interactive shell | `packages/coding-agent/src/modes/interactive/` | Ported. `libedit`-backed coding-agent shell over the streamed loop. The full slash-command set is documented in `docs/extensions.md`; canonical source is `BUILTIN_COMMANDS` in `lua/psi/slash_commands.lua`. |
-| Inline TUI | `packages/tui/` | Ported core. `--tui` runs the streamed agent loop in raw terminal mode with Lua-owned ANSI rendering on a single thread, but defaults to the normal terminal screen buffer instead of alt screen so terminal scrollback and tmux selection behave more naturally. The agent turn is a Lua coroutine driven by `psi.sched`, yielding cooperatively on HTTP / process poll so the redraw loop keeps up. The TUI now has pi-style persistent component primitives (`Container`, `Block`, `Spacer`, `Text`, `Box`) with generation-based render caches, a persistent root frame, componentized markdown/table rendering, componentized tool execution boxes, and line-frame differential rendering at the terminal boundary. Rich status line (cwd / model / session / token usage), unicode tool-call borders, live markdown, readline editing (Alt-B/F/D/Backspace, Ctrl-W/K/U), hardware-cursor prompt editing by default, optional bundled Vim modal editing via settings or `/vim`, Ctrl-G abort, Ctrl-Z suspend, and a Lua-driven theme registry with a bundled dark default. Smaller than `pi`'s TUI: no focus/overlay stack, modals, interactive theme picker, or visual session-tree surface. |
+| Inline TUI | `packages/tui/` | Ported core. `--tui` runs the streamed agent loop in raw terminal mode with Lua-owned ANSI rendering on a single thread, but defaults to the normal terminal screen buffer instead of alt screen so terminal scrollback and tmux selection behave more naturally. The agent turn is a Lua coroutine driven by `psi.sched`, yielding cooperatively on HTTP / process poll so the redraw loop keeps up. The TUI now has pi-style persistent component primitives (`Container`, `Block`, `Spacer`, `Text`, `Box`, `Border`) with generation-based render caches, a persistent root frame, componentized markdown/table rendering, componentized tool execution boxes, a `tui_app` controller for dynamic child mounting, focus routing, render requests, anchored overlays, and line-frame differential rendering at the terminal boundary. Rich status line (cwd / model / session / token usage), unicode tool-call borders, live markdown, readline editing (Alt-B/F/D/Backspace, Ctrl-W/K/U), hardware-cursor prompt editing by default, optional bundled Vim modal editing via settings or `/vim`, Ctrl-G abort, Ctrl-Z suspend, and a Lua-driven theme registry with a bundled dark default. Smaller than `pi`'s TUI: no session tree view, modals, or interactive theme picker. |
 | RPC mode | `packages/coding-agent/src/modes/rpc/` | Not started. |
 | Compaction and summaries | `packages/coding-agent/src/core/compaction/` | Ported. Manual and dynamic token-aware auto-compaction; file-op provenance from `psi.session` feeds the compaction prompt. Not yet branch-aware. |
 | Hooks and extensions | `packages/coding-agent/src/core/skills.ts`, `src/core/extensions/` | Early-to-partial. `psi.tool_registry` exposes before/after tool-call hooks; `psi.events` is a neutral pub/sub bus; `psi.commands.register` opens slash commands to extensions; boot loads Lua files from `$PSI_EXTENSIONS_DIR`, `~/.config/psi/extensions/`, and `./.psi/extensions/`. No npm/git package manager, no TS transpile, no sandboxing. |
@@ -50,26 +50,23 @@ architecture it is porting.
 
 The biggest remaining user-visible gaps are around session management,
 extension richness, and higher-level TUI interaction surfaces. The TUI has
-the pi-mono-style persistent component and differential rendering base needed
-for larger interactive surfaces; the next TUI parity layer is focus,
-overlays, and reusable selector/editor components rather than more terminal
-redraw plumbing.
+the pi-mono-style persistent component, overlay/focus, and differential
+rendering base needed for larger interactive surfaces; the next TUI parity
+layer is reusable picker/editor components rather than more terminal redraw
+plumbing.
 
-1. **Focus and overlays.** Port pi's focusable component contract and
-   anchored overlay stack so selectors, modals, pickers, and extension UI can
-   be composed instead of hard-coded into `tui_runtime.lua`.
-2. **Reusable editor and selectors.** Move the prompt editor and command
+1. **Reusable editor and selectors.** Move the prompt editor and command
    autocomplete into component objects, then add `SelectList` /
    `SettingsList`-style components for model/theme/thinking/session pickers.
-3. **Session tree UI.** `/branch` and `/branches` can render the
+2. **Session tree UI.** `/branch` and `/branches` can render the
    JSONL entry tree and switch the active leaf, but there is no
    dedicated TUI tree surface yet.
-4. **Branch-aware compaction.** Let compaction know about siblings
+3. **Branch-aware compaction.** Let compaction know about siblings
    instead of treating the transcript as linear.
-5. **Extension provider registration.** The Lua provider registry exists,
+4. **Extension provider registration.** The Lua provider registry exists,
    but public registration/unregistration contracts need to be frozen before
    extensions can add providers safely.
-6. **RPC mode.** JSONL over stdin/stdout reusing the same runtime
+5. **RPC mode.** JSONL over stdin/stdout reusing the same runtime
    and observer.
 
 `psi` can now produce the coding-agent prompt, stream model output

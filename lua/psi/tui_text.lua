@@ -427,6 +427,67 @@ update_active_from_text = function(active, text)
   end
 end
 
+local function append_active_prefix(out, active)
+  if #out == 0 and #active > 0 then
+    out[#out + 1] = ansi_active_prefix(active)
+  end
+end
+
+function M.slice_by_columns(text, start_col, width, strict)
+  text = tostring(text or EMPTY)
+  start_col = math.max(0, tonumber(start_col) or 0)
+  width = math.max(0, tonumber(width) or 0)
+  if width <= 0 then
+    return ""
+  end
+  local finish_col = start_col + width
+  local active = {}
+  local out = {}
+  local col = 0
+  local i = 1
+
+  while i <= #text do
+    local seq, next_i = read_escape(text, i)
+    if seq then
+      update_active_sgr(active, seq)
+      if col >= start_col and col < finish_col then
+        out[#out + 1] = seq
+      end
+      i = next_i
+    else
+      local cluster, cluster_width, after = next_cluster(text, i)
+      local cluster_end = col + cluster_width
+      local include = cluster_width == 0 and col >= start_col and col < finish_col
+      if cluster_width > 0 then
+        if strict then
+          include = col >= start_col and cluster_end <= finish_col
+        else
+          include = cluster_end > start_col and col < finish_col
+        end
+      end
+      if include then
+        append_active_prefix(out, active)
+        out[#out + 1] = cluster
+      end
+      col = cluster_end
+      if col >= finish_col and cluster_width > 0 then
+        break
+      end
+      i = after
+    end
+  end
+
+  local rendered = table.concat(out)
+  if rendered ~= "" and #active > 0 then
+    rendered = rendered .. ESC .. "[0m"
+  end
+  return rendered
+end
+
+function M.truncate_columns(text, width, strict)
+  return M.slice_by_columns(text, 0, width, strict ~= false)
+end
+
 function M.wrap_ansi(text, width, opts)
   opts = type(opts) == "table" and opts or {}
   if host_wrap_ansi then

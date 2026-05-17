@@ -12,6 +12,7 @@ local settings = require("psi.settings_manager")
 local tui = require("psi.tui_status")
 local tui_markdown = require("psi.tui_components.markdown")
 local tool_execution = require("psi.tui_components.tool_execution")
+local tui_app = require("psi.tui_app")
 local tui_component = require("psi.tui_component")
 local tui_layout = require("psi.tui_layout")
 local tui_renderer = require("psi.tui_renderer")
@@ -770,6 +771,7 @@ local function new_state(opts)
     width = width,
     height = viewport_height,
     terminal_height = height,
+    ui = tui_app.new(),
     renderer = tui_renderer.new({ line_primitive = true }),
     input_layout = default_input_layout(viewport_height),
     tui_caps = caps,
@@ -1759,6 +1761,7 @@ local function ensure_frame_components(state)
   if state.frame_components ~= nil then
     return state.frame_components
   end
+  state.ui = state.ui or tui_app.new()
   local frame = {
     workspace = tui_component.block({}, { pad = true }),
     transcript = tui_component.block({}, { pad = true }),
@@ -1775,6 +1778,7 @@ local function ensure_frame_components(state)
     frame.input,
     frame.footer,
   })
+  state.ui:add_child(frame.root)
   state.frame_components = frame
   return frame
 end
@@ -1801,6 +1805,9 @@ local function redraw(state)
   if state.force_physical_clear then
     psi.tui_clear(true)
     tui_renderer.reset(state.renderer)
+    if state.ui and type(state.ui.request_render) == "function" then
+      state.ui:request_render(true)
+    end
   end
   frame_width = math.max(1, state.width)
   cwd = psi.cwd() or "."
@@ -1906,9 +1913,13 @@ local function redraw(state)
   cursor_row = clamp(cursor_row, rows.input_start_row + 1, rows.input_start_row + rows.input_rows)
   cursor_col = clamp(cursor_col, 1, math.max(1, state.width))
 
-  local frame_lines = frame.root:render(frame_width)
+  local frame_lines = state.ui:render(frame_width, math.max(1, state.height or 1))
   local frame_height = #frame_lines
   local viewport_top = math.max(1, (state.terminal_height or state.height) - frame_height + 1)
+  local force_full = state.force_physical_clear
+  if state.ui and type(state.ui.consume_force_full) == "function" then
+    force_full = force_full or state.ui:consume_force_full()
+  end
   state.renderer = state.renderer:render({
     width = frame_width,
     height = frame_height,
@@ -1919,9 +1930,12 @@ local function redraw(state)
       col = cursor_col,
       visible = state.show_hardware_cursor,
     },
-    force_full = state.force_physical_clear,
+    force_full = force_full,
   })
   state.force_physical_clear = false
+  if state.ui and type(state.ui.consume_dirty) == "function" then
+    state.ui:consume_dirty()
+  end
   state.dirty = false
 end
 
@@ -3694,6 +3708,10 @@ local function handle_key_event(state, event)
     state.dirty = true
     return
   end
+  if state.ui and type(state.ui.dispatch_key) == "function" and state.ui:dispatch_key(event) then
+    state.dirty = true
+    return
+  end
   if state.history_search_active then
     if event.key == "ctrl-r" then
       history_reverse_search(state, true)
@@ -3780,7 +3798,7 @@ local function tick(state)
       state.dirty = true
     end
   end
-  if state.dirty then
+  if state.dirty or (state.ui and state.ui.dirty) then
     redraw(state)
   end
 end
@@ -3984,7 +4002,7 @@ function M.run(opts)
       if event ~= nil then
         handle_key_event(state, event)
       end
-      if state.dirty then
+      if state.dirty or (state.ui and state.ui.dirty) then
         redraw(state)
       end
     end
