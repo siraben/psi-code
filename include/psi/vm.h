@@ -15,8 +15,8 @@ struct psi_vm {
     int tui_tool_progress_callback_ref;
 };
 
-int psi_vm_init(
-    struct psi_vm *vm, const char *boot_file, FILE *input, FILE *output, FILE *error_output);
+int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *output,
+    FILE *error_output, int load_extensions);
 void psi_vm_destroy(struct psi_vm *vm);
 void psi_vm_bind_session(struct psi_vm *vm, struct psi_session *session);
 void psi_vm_set_tui_active(struct psi_vm *vm, int active);

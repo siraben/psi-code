@@ -206,6 +206,9 @@ Drop a Lua file in any of:
 It runs at boot with the `psi` global available. Register tools,
 subscribe to events, add slash commands or themes. The full API
 surface is documented in [docs/extensions.md](docs/extensions.md).
+Extensions run as local Lua code with the same filesystem and process
+access as psi itself; review third-party and project-local extensions
+before starting psi, or pass `--no-extensions` in untrusted checkouts.
 
 ## Status
 

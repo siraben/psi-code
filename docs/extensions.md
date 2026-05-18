@@ -24,6 +24,12 @@ Every `*.lua` file in each directory is `dofile`'d. If it returns a
 function, psi invokes it with the `psi` global. Extension load failures
 are logged to stderr and don't abort psi.
 
+Security model: extensions are trusted local code, not a sandbox. They run
+with the same filesystem, process, network, and credential access as psi
+itself, and project-local `./.psi/extensions/` files are discovered on
+startup. Review third-party or repository-provided extensions before running
+them, and use `--no-extensions` when opening an untrusted checkout.
+
 `/reload` reloads keybinding/settings/prompt-template state, resets bundled
 TUI extension state, clears TUI key, status, and clipboard hooks, reloads user
 extensions, and then runs TUI startup hooks so settings-gated extensions

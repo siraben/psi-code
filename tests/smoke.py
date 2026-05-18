@@ -394,6 +394,46 @@ def t_commands_help_templates(psi: Psi):
     assert_contains(out, "Review staged changes", "template description")
 
 
+@test("extensions/no_extensions_disables_user_extension_discovery")
+def t_no_extensions_disables_user_extension_discovery(psi: Psi):
+    project = psi.tmp / "no-extensions-project"
+    ext_dir = project / ".psi" / "extensions"
+    ext_dir.mkdir(parents=True, exist_ok=True)
+    (ext_dir / "marker.lua").write_text(
+        "return function()\n"
+        "  local path = os.getenv('PSI_EXTENSION_MARKER')\n"
+        "  if path and path ~= '' then\n"
+        "    local f = io.open(path, 'w')\n"
+        "    if f then f:write('loaded'); f:close() end\n"
+        "  end\n"
+        "end\n"
+    )
+
+    enabled_marker = psi.tmp / "extension-enabled-marker"
+    disabled_marker = psi.tmp / "extension-disabled-marker"
+    reload_marker = psi.tmp / "extension-disabled-reload-marker"
+    psi.run("--eval", "return 'ok'", cwd=project, env_extra={"PSI_EXTENSION_MARKER": enabled_marker})
+    assert_true(enabled_marker.exists(), "project extension did not load in the default mode")
+
+    psi.run(
+        "--no-extensions",
+        "--eval",
+        "return 'ok'",
+        cwd=project,
+        env_extra={"PSI_EXTENSION_MARKER": disabled_marker},
+    )
+    assert_true(not disabled_marker.exists(), "--no-extensions still loaded a project extension")
+
+    psi.run(
+        "--no-extensions",
+        "--eval",
+        'require("psi.slash_commands").handle("/reload"); return "ok"',
+        cwd=project,
+        env_extra={"PSI_EXTENSION_MARKER": reload_marker},
+    )
+    assert_true(not reload_marker.exists(), "--no-extensions allowed /reload to load a project extension")
+
+
 @test("commands/slash_command_suggestions")
 def t_commands_slash_command_suggestions(psi: Psi):
     tmpdir = psi.tmp / "suggest-prompts"

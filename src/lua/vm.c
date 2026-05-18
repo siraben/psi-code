@@ -3952,8 +3952,8 @@ static const struct psi_embedded_data *psi_vm_embedded_find(const char *name) {
     return NULL;
 }
 
-int psi_vm_init(
-    struct psi_vm *vm, const char *boot_file, FILE *input, FILE *output, FILE *error_output) {
+int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *output,
+    FILE *error_output, int load_extensions) {
     PSI_UNUSED(input);
     PSI_UNUSED(output);
     PSI_UNUSED(error_output);
@@ -3982,6 +3982,10 @@ int psi_vm_init(
     psi_vm_register_embedded(vm->L);
 
     psi_vm_register_psi(vm->L);
+    lua_getglobal(vm->L, "psi");
+    lua_pushboolean(vm->L, load_extensions ? 1 : 0);
+    lua_setfield(vm->L, -2, "load_user_extensions");
+    lua_pop(vm->L, 1);
 
     /* Bootstrap: use the file at boot_file if it exists (source-tree
      * dev runs, or installs that ship lua/ alongside the binary);
@@ -4346,6 +4350,8 @@ int psi_vm_run_lua_mode(
         lua_pushboolean(vm->L, 1);
         lua_setfield(vm->L, -2, "resume");
     }
+    lua_pushboolean(vm->L, options->load_extensions ? 1 : 0);
+    lua_setfield(vm->L, -2, "load_extensions");
     if (options->model != NULL) {
         lua_pushstring(vm->L, options->model);
         lua_setfield(vm->L, -2, "model");

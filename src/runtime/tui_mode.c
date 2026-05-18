@@ -172,7 +172,7 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
     }
 
     psi_session_init(&session);
-    status = psi_vm_init(&vm, options->boot_file, stdin, stdout, stderr);
+    status = psi_vm_init(&vm, options->boot_file, stdin, stdout, stderr, options->load_extensions);
     if (status != PSI_STATUS_OK) {
         psi_session_free(&session);
         return status;

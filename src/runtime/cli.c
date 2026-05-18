@@ -13,7 +13,7 @@
 #endif
 
 enum {
-    PSI_CLI_ARGTABLE_MAX = 18
+    PSI_CLI_ARGTABLE_MAX = 20
 };
 
 struct psi_cli_argtable {
@@ -33,6 +33,7 @@ struct psi_cli_argtable {
     struct arg_str *session;
     struct arg_lit *resume;
     struct arg_lit *chat;
+    struct arg_lit *no_extensions;
     struct arg_end *end;
     void *table[PSI_CLI_ARGTABLE_MAX];
     size_t table_count;
@@ -80,6 +81,7 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
     args->resume = arg_lit0("r", "resume", "resume a session for the current directory");
     args->chat = arg_lit0(
         NULL, "chat", "use the chat-style TUI (transcript flows into terminal scrollback)");
+    args->no_extensions = arg_lit0(NULL, "no-extensions", "disable user extension discovery");
     args->end = arg_end(20);
 
     status = psi_cli_argtable_add(args, args->help);
@@ -98,6 +100,7 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
     status |= psi_cli_argtable_add(args, args->session);
     status |= psi_cli_argtable_add(args, args->resume);
     status |= psi_cli_argtable_add(args, args->chat);
+    status |= psi_cli_argtable_add(args, args->no_extensions);
     status |= psi_cli_argtable_add(args, args->end);
 
     if (status != PSI_STATUS_OK) {
@@ -172,6 +175,7 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     options->max_tokens = 16384l;
     options->keep_recent = 12l;
     options->resume = 0;
+    options->load_extensions = 1;
 
     status = PSI_STATUS_ERROR;
     if (psi_cli_build_argtable(&args) != PSI_STATUS_OK) {
@@ -239,6 +243,9 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     }
     if (args.chat->count > 0) {
         options->layout_mode = "chat";
+    }
+    if (args.no_extensions->count > 0) {
+        options->load_extensions = 0;
     }
     if (args.model->count > 0) {
         options->model = args.model->sval[0];

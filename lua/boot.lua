@@ -250,6 +250,8 @@ function psi.load_extensions()
   load_extensions_from("./.psi/extensions")
 end
 
-psi.load_extensions()
+if psi.load_user_extensions ~= false then
+  psi.load_extensions()
+end
 psi.theme.apply_configured({ preserve_current = true })
 psi.prompt_templates.load()

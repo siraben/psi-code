@@ -26,6 +26,7 @@ struct psi_cli_options {
     long max_tokens;
     long keep_recent;
     int resume;
+    int load_extensions;
 };
 
 int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv);

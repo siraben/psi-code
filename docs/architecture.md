@@ -70,6 +70,7 @@ they're useful before the binary is on the system. Regenerated from
 | `-h`, `--help` | — | show help |
 | `--max-tokens` | `N` | max output tokens for --agent |
 | `--model` | `MODEL` | model to use with --agent |
+| `--no-extensions` | — | disable user extension discovery |
 | `--print` | `TEXT` | run the bootstrap print-mode handler |
 | `--repl` | — | run the interactive line editor shell |
 | `-r`, `--resume` | — | resume a session for the current directory |

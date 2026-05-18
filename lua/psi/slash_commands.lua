@@ -355,7 +355,7 @@ local function cmd_reload()
   if type(psi.install_builtin_extensions) == "function" then
     pcall(psi.install_builtin_extensions)
   end
-  if type(psi.load_extensions) == "function" then
+  if psi.load_user_extensions ~= false and type(psi.load_extensions) == "function" then
     local ok, err = pcall(psi.load_extensions)
     if not ok then
       return records.new_command_action("print", "reload failed: " .. tostring(err))
