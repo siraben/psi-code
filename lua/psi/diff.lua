@@ -329,112 +329,136 @@ local function simple_ops(old_lines, new_lines)
   return ops
 end
 
-local function grouped_parts(ops)
-  local parts = {}
+local function annotate_ops(ops)
+  local annotated = {}
+  local old_line_num = 1
+  local new_line_num = 1
+  local first_changed_line = nil
+
   for _, op in ipairs(ops) do
-    local part = parts[#parts]
-    if not part or part.tag ~= op.tag then
-      part = { tag = op.tag, lines = {} }
-      parts[#parts + 1] = part
+    local item = { tag = op.tag, line = op.line }
+    if op.tag == "+" then
+      item.old_line_num = old_line_num
+      item.new_line_num = new_line_num
+      if first_changed_line == nil then
+        first_changed_line = new_line_num
+      end
+      new_line_num = new_line_num + 1
+    elseif op.tag == "-" then
+      item.old_line_num = old_line_num
+      item.new_line_num = new_line_num
+      if first_changed_line == nil then
+        first_changed_line = new_line_num
+      end
+      old_line_num = old_line_num + 1
+    else
+      item.old_line_num = old_line_num
+      item.new_line_num = new_line_num
+      old_line_num = old_line_num + 1
+      new_line_num = new_line_num + 1
     end
-    part.lines[#part.lines + 1] = op.line
+    annotated[#annotated + 1] = item
   end
-  return parts
+
+  return annotated, first_changed_line
 end
 
-local function line_number(num, width)
-  local text = tostring(num)
-  return string.rep(" ", math.max(0, width - #text)) .. text
+local function hunk_range(start_line, count)
+  if count == 1 then
+    return tostring(start_line)
+  end
+  return tostring(start_line) .. "," .. tostring(count)
+end
+
+local function hunk_bounds(ops, start_idx, end_idx)
+  local old_count = 0
+  local new_count = 0
+  local old_start = nil
+  local new_start = nil
+
+  for i = start_idx, end_idx do
+    local op = ops[i]
+    if op.tag ~= "+" then
+      old_count = old_count + 1
+      if old_start == nil then
+        old_start = op.old_line_num
+      end
+    end
+    if op.tag ~= "-" then
+      new_count = new_count + 1
+      if new_start == nil then
+        new_start = op.new_line_num
+      end
+    end
+  end
+
+  if old_start == nil then
+    old_start = math.max(0, ops[start_idx].old_line_num - 1)
+  end
+  if new_start == nil then
+    new_start = math.max(0, ops[start_idx].new_line_num - 1)
+  end
+
+  return old_start, old_count, new_start, new_count
+end
+
+local function collect_change_indices(ops)
+  local changes = {}
+  for i, op in ipairs(ops) do
+    if op.tag ~= "=" then
+      changes[#changes + 1] = i
+    end
+  end
+  return changes
+end
+
+local function emit_hunk(output, ops, start_idx, end_idx)
+  local old_start, old_count, new_start, new_count = hunk_bounds(ops, start_idx, end_idx)
+  output[#output + 1] = "@@ -"
+    .. hunk_range(old_start, old_count)
+    .. " +"
+    .. hunk_range(new_start, new_count)
+    .. " @@"
+
+  for i = start_idx, end_idx do
+    local op = ops[i]
+    if op.tag == "+" then
+      output[#output + 1] = "+" .. op.line
+    elseif op.tag == "-" then
+      output[#output + 1] = "-" .. op.line
+    else
+      output[#output + 1] = " " .. op.line
+    end
+  end
 end
 
 function M.generate_diff_string(old_content, new_content, context_lines)
   context_lines = tonumber(context_lines) or DEFAULT_CONTEXT_LINES
   local old_lines = split_lines(old_content or "")
   local new_lines = split_lines(new_content or "")
-  local parts = grouped_parts(lcs_ops(old_lines, new_lines) or simple_ops(old_lines, new_lines))
+  local raw_ops = lcs_ops(old_lines, new_lines) or simple_ops(old_lines, new_lines)
+  local ops, first_changed_line = annotate_ops(raw_ops)
+  local changes = collect_change_indices(ops)
   local output = {}
-  local width = #tostring(math.max(#old_lines, #new_lines))
-  local old_line_num = 1
-  local new_line_num = 1
-  local last_was_change = false
-  local first_changed_line = nil
 
-  for i, part in ipairs(parts) do
-    if part.tag == "+" or part.tag == "-" then
-      if first_changed_line == nil then
-        first_changed_line = new_line_num
-      end
-      for _, line in ipairs(part.lines) do
-        if part.tag == "+" then
-          output[#output + 1] = "+" .. line_number(new_line_num, width) .. " " .. line
-          new_line_num = new_line_num + 1
-        else
-          output[#output + 1] = "-" .. line_number(old_line_num, width) .. " " .. line
-          old_line_num = old_line_num + 1
-        end
-      end
-      last_was_change = true
-    else
-      local raw = part.lines
-      local next_part = parts[i + 1]
-      local next_is_change = next_part and next_part.tag ~= "="
-      local leading_change = last_was_change
-      local trailing_change = next_is_change
-
-      if leading_change and trailing_change then
-        if #raw <= context_lines * 2 then
-          for _, line in ipairs(raw) do
-            output[#output + 1] = " " .. line_number(old_line_num, width) .. " " .. line
-            old_line_num = old_line_num + 1
-            new_line_num = new_line_num + 1
-          end
-        else
-          for n = 1, context_lines do
-            output[#output + 1] = " " .. line_number(old_line_num, width) .. " " .. raw[n]
-            old_line_num = old_line_num + 1
-            new_line_num = new_line_num + 1
-          end
-          local skipped = #raw - context_lines * 2
-          output[#output + 1] = " " .. string.rep(" ", width) .. " ..."
-          old_line_num = old_line_num + skipped
-          new_line_num = new_line_num + skipped
-          for n = #raw - context_lines + 1, #raw do
-            output[#output + 1] = " " .. line_number(old_line_num, width) .. " " .. raw[n]
-            old_line_num = old_line_num + 1
-            new_line_num = new_line_num + 1
-          end
-        end
-      elseif leading_change then
-        local shown = math.min(context_lines, #raw)
-        for n = 1, shown do
-          output[#output + 1] = " " .. line_number(old_line_num, width) .. " " .. raw[n]
-          old_line_num = old_line_num + 1
-          new_line_num = new_line_num + 1
-        end
-        local skipped = #raw - shown
-        if skipped > 0 then
-          output[#output + 1] = " " .. string.rep(" ", width) .. " ..."
-          old_line_num = old_line_num + skipped
-          new_line_num = new_line_num + skipped
-        end
-      elseif trailing_change then
-        local skipped = math.max(0, #raw - context_lines)
-        if skipped > 0 then
-          output[#output + 1] = " " .. string.rep(" ", width) .. " ..."
-          old_line_num = old_line_num + skipped
-          new_line_num = new_line_num + skipped
-        end
-        for n = skipped + 1, #raw do
-          output[#output + 1] = " " .. line_number(old_line_num, width) .. " " .. raw[n]
-          old_line_num = old_line_num + 1
-          new_line_num = new_line_num + 1
-        end
-      else
-        old_line_num = old_line_num + #raw
-        new_line_num = new_line_num + #raw
-      end
-      last_was_change = false
+  local change_index = 1
+  local previous_hunk_end = 0
+  while change_index <= #changes do
+    local first_change = changes[change_index]
+    local last_change = first_change
+    while
+      change_index < #changes
+      and changes[change_index + 1] - last_change <= (context_lines * 2 + 1)
+    do
+      change_index = change_index + 1
+      last_change = changes[change_index]
     end
+
+    local hunk_start = math.max(previous_hunk_end + 1, first_change - context_lines)
+    local hunk_end = math.min(#ops, last_change + context_lines)
+    emit_hunk(output, ops, hunk_start, hunk_end)
+    previous_hunk_end = hunk_end
+    change_index = change_index + 1
   end
 
   return {

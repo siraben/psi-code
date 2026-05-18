@@ -1,5 +1,5 @@
 --[==[psi-test
-expect = "true|true|true|true|alpha delta\nomega"
+expect = "true|true|true|true|true|alpha delta\nomega"
 files = [
   { path = "edit.txt", text = "alpha beta\nomega" },
 ]
@@ -15,8 +15,9 @@ local result = tools.dispatch("edit", {
 
 return table.concat({
   tostring(result.ok),
-  tostring(result:get("diff"):find("-1 alpha beta", 1, true) ~= nil),
-  tostring(result:get("diff"):find("+1 alpha delta", 1, true) ~= nil),
+  tostring(result:get("diff"):find("@@ -1,2 +1,2 @@", 1, true) ~= nil),
+  tostring(result:get("diff"):find("-alpha beta", 1, true) ~= nil),
+  tostring(result:get("diff"):find("+alpha delta", 1, true) ~= nil),
   tostring(result:get("firstChangedLine") == 1),
   psi.read_file(path),
 }, "|")

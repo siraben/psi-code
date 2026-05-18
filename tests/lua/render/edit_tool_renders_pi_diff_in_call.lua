@@ -25,8 +25,8 @@ local result_text =
 
 return table.concat({
   tostring(call:find("\27[48;2;40;50;40m", 1, true) ~= nil),
-  tostring(call:find("-1 alpha ", 1, true) ~= nil),
-  tostring(call:find("+1 alpha ", 1, true) ~= nil),
+  tostring(call:find("-alpha ", 1, true) ~= nil),
+  tostring(call:find("+alpha ", 1, true) ~= nil),
   tostring(call:find("\27[7m", 1, true) ~= nil),
   tostring(result_text:find("edit completed", 1, true) ~= nil),
 }, "|")
