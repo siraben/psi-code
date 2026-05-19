@@ -562,6 +562,43 @@ def t_render_thinking(psi: Psi):
                     "after-turn resets the one-shot label")
 
 
+@test("diff/generate_numbered_tool_diff")
+def t_diff_generate_numbered_tool_diff(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local d = require("psi.diff")\n'
+        + 'local before = table.concat({"one","two","three","four","five","six","seven","eight","nine","ten"}, "\\n")\n'
+        + 'local after = before:gsub("five", "FIVE"):gsub("nine", "NINE")\n'
+        + 'return d.generate_diff_string(before, after, 1).diff',
+    ).stdout.rstrip("\n")
+    assert_not_contains(out, "@@", "tool diff should not render unified hunk headers")
+    assert_contains(out, "  4 four", "tool diff should include leading numbered context")
+    assert_contains(out, "- 5 five", "tool diff should include numbered removed line")
+    assert_contains(out, "+ 5 FIVE", "tool diff should include numbered added line")
+    assert_contains(out, "   ...", "tool diff should collapse distant unchanged context")
+    assert_contains(out, "- 9 nine", "tool diff should include later numbered removed line")
+    assert_contains(out, "+ 9 NINE", "tool diff should include later numbered added line")
+
+
+@test("diff/render_numbered_tool_diff")
+def t_diff_render_numbered_tool_diff(psi: Psi):
+    out = psi.run(
+        "--eval",
+        'local ansi = require("psi.ansi")\n'
+        + 'ansi.color_enabled = true\n'
+        + 'local rendered = require("psi.tui_components.diff").render_diff("-12 old word\\n+12 new word\\n 13 same\\n   ...")\n'
+        + 'return tostring((psi.runtime_info() or {}).ansi ~= false) .. "\\n" .. rendered',
+    ).stdout.rstrip("\n")
+    ansi_enabled, out = out.split("\n", 1)
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert_contains(plain, "-12 old word", "renderer should preserve removed line number")
+    assert_contains(plain, "+12 new word", "renderer should preserve added line number")
+    assert_contains(plain, " 13 same", "renderer should preserve context line number")
+    assert_contains(plain, "   ...", "renderer should preserve collapsed context marker")
+    if ansi_enabled == "true":
+        assert_contains(out, "\x1b[", "numbered diff should still be styled")
+
+
 @test("markdown/inline_code_no_backticks")
 def t_markdown_inline_code_no_backticks(psi: Psi):
     out = psi.run(

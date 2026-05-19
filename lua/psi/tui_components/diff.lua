@@ -25,11 +25,26 @@ local function parse_diff_line(line)
   if prefix ~= "+" and prefix ~= "-" and prefix ~= " " then
     return nil
   end
-  local content = line:sub(2)
+  local rest = line:sub(2)
+  local line_num, content = rest:match("^(%s*%d+)%s(.*)$")
+  if not line_num and prefix == " " then
+    line_num = rest:match("^(%s*)%.%.%.$")
+    if line_num then
+      content = "..."
+    end
+  end
   return {
     prefix = prefix,
-    content = content,
+    line_num = line_num,
+    content = content or rest,
   }
+end
+
+local function diff_line(parsed, content)
+  if parsed.line_num then
+    return parsed.prefix .. parsed.line_num .. " " .. content
+  end
+  return parsed.prefix .. content
 end
 
 local function utf8_units(value)
@@ -134,7 +149,7 @@ function M.render_diff(diff_text)
         if not p or p.prefix ~= "-" then
           break
         end
-        removed[#removed + 1] = { content = p.content }
+        removed[#removed + 1] = p
         i = i + 1
       end
 
@@ -144,28 +159,28 @@ function M.render_diff(diff_text)
         if not p or p.prefix ~= "+" then
           break
         end
-        added[#added + 1] = { content = p.content }
+        added[#added + 1] = p
         i = i + 1
       end
 
       if #removed == 1 and #added == 1 then
         local removed_line, added_line =
           render_intra_line_diff(replace_tabs(removed[1].content), replace_tabs(added[1].content))
-        result[#result + 1] = fg(FG_REMOVED, "-" .. removed_line)
-        result[#result + 1] = fg(FG_ADDED, "+" .. added_line)
+        result[#result + 1] = fg(FG_REMOVED, diff_line(removed[1], removed_line))
+        result[#result + 1] = fg(FG_ADDED, diff_line(added[1], added_line))
       else
         for _, line in ipairs(removed) do
-          result[#result + 1] = fg(FG_REMOVED, "-" .. replace_tabs(line.content))
+          result[#result + 1] = fg(FG_REMOVED, diff_line(line, replace_tabs(line.content)))
         end
         for _, line in ipairs(added) do
-          result[#result + 1] = fg(FG_ADDED, "+" .. replace_tabs(line.content))
+          result[#result + 1] = fg(FG_ADDED, diff_line(line, replace_tabs(line.content)))
         end
       end
     elseif parsed.prefix == "+" then
-      result[#result + 1] = fg(FG_ADDED, "+" .. replace_tabs(parsed.content))
+      result[#result + 1] = fg(FG_ADDED, diff_line(parsed, replace_tabs(parsed.content)))
       i = i + 1
     else
-      result[#result + 1] = fg(FG_CONTEXT, " " .. replace_tabs(parsed.content))
+      result[#result + 1] = fg(FG_CONTEXT, diff_line(parsed, replace_tabs(parsed.content)))
       i = i + 1
     end
   end

@@ -363,45 +363,6 @@ local function annotate_ops(ops)
   return annotated, first_changed_line
 end
 
-local function hunk_range(start_line, count)
-  if count == 1 then
-    return tostring(start_line)
-  end
-  return tostring(start_line) .. "," .. tostring(count)
-end
-
-local function hunk_bounds(ops, start_idx, end_idx)
-  local old_count = 0
-  local new_count = 0
-  local old_start = nil
-  local new_start = nil
-
-  for i = start_idx, end_idx do
-    local op = ops[i]
-    if op.tag ~= "+" then
-      old_count = old_count + 1
-      if old_start == nil then
-        old_start = op.old_line_num
-      end
-    end
-    if op.tag ~= "-" then
-      new_count = new_count + 1
-      if new_start == nil then
-        new_start = op.new_line_num
-      end
-    end
-  end
-
-  if old_start == nil then
-    old_start = math.max(0, ops[start_idx].old_line_num - 1)
-  end
-  if new_start == nil then
-    new_start = math.max(0, ops[start_idx].new_line_num - 1)
-  end
-
-  return old_start, old_count, new_start, new_count
-end
-
 local function collect_change_indices(ops)
   local changes = {}
   for i, op in ipairs(ops) do
@@ -412,53 +373,117 @@ local function collect_change_indices(ops)
   return changes
 end
 
-local function emit_hunk(output, ops, start_idx, end_idx)
-  local old_start, old_count, new_start, new_count = hunk_bounds(ops, start_idx, end_idx)
-  output[#output + 1] = "@@ -"
-    .. hunk_range(old_start, old_count)
-    .. " +"
-    .. hunk_range(new_start, new_count)
-    .. " @@"
+local function pad_line_number(n, width)
+  local value = tostring(n or "")
+  if #value >= width then
+    return value
+  end
+  return string.rep(" ", width - #value) .. value
+end
 
-  for i = start_idx, end_idx do
-    local op = ops[i]
-    if op.tag == "+" then
-      output[#output + 1] = "+" .. op.line
-    elseif op.tag == "-" then
-      output[#output + 1] = "-" .. op.line
+local function emit_numbered_op(output, op, width)
+  if op.tag == "+" then
+    output[#output + 1] = "+" .. pad_line_number(op.new_line_num, width) .. " " .. op.line
+  elseif op.tag == "-" then
+    output[#output + 1] = "-" .. pad_line_number(op.old_line_num, width) .. " " .. op.line
+  else
+    output[#output + 1] = " " .. pad_line_number(op.old_line_num, width) .. " " .. op.line
+  end
+end
+
+local function emit_skip(output, width)
+  output[#output + 1] = " " .. string.rep(" ", width) .. " ..."
+end
+
+local function op_runs(ops)
+  local runs = {}
+  local current = nil
+  for _, op in ipairs(ops) do
+    if not current or current.tag ~= op.tag then
+      current = { tag = op.tag, changed = op.tag ~= "=", ops = {} }
+      runs[#runs + 1] = current
+    end
+    current.ops[#current.ops + 1] = op
+  end
+  return runs
+end
+
+local function emit_context_run(
+  output,
+  run,
+  has_leading_change,
+  has_trailing_change,
+  context_lines,
+  width
+)
+  local ops = run.ops
+  if has_leading_change and has_trailing_change then
+    if #ops <= context_lines * 2 then
+      for _, op in ipairs(ops) do
+        emit_numbered_op(output, op, width)
+      end
+      return
+    end
+
+    for i = 1, context_lines do
+      emit_numbered_op(output, ops[i], width)
+    end
+    emit_skip(output, width)
+    for i = #ops - context_lines + 1, #ops do
+      emit_numbered_op(output, ops[i], width)
+    end
+  elseif has_leading_change then
+    local shown = math.min(#ops, context_lines)
+    for i = 1, shown do
+      emit_numbered_op(output, ops[i], width)
+    end
+    if #ops > shown then
+      emit_skip(output, width)
+    end
+  elseif has_trailing_change then
+    local skipped = math.max(0, #ops - context_lines)
+    if skipped > 0 then
+      emit_skip(output, width)
+    end
+    for i = skipped + 1, #ops do
+      emit_numbered_op(output, ops[i], width)
+    end
+  end
+end
+
+local function emit_numbered_diff(output, ops, context_lines, width)
+  local runs = op_runs(ops)
+  for i, run in ipairs(runs) do
+    if run.changed then
+      for _, op in ipairs(run.ops) do
+        emit_numbered_op(output, op, width)
+      end
     else
-      output[#output + 1] = " " .. op.line
+      emit_context_run(
+        output,
+        run,
+        i > 1 and runs[i - 1].changed,
+        i < #runs and runs[i + 1].changed,
+        context_lines,
+        width
+      )
     end
   end
 end
 
 function M.generate_diff_string(old_content, new_content, context_lines)
-  context_lines = tonumber(context_lines) or DEFAULT_CONTEXT_LINES
+  context_lines = math.max(0, math.floor(tonumber(context_lines) or DEFAULT_CONTEXT_LINES))
   local old_lines = split_lines(old_content or "")
   local new_lines = split_lines(new_content or "")
   local raw_ops = lcs_ops(old_lines, new_lines) or simple_ops(old_lines, new_lines)
   local ops, first_changed_line = annotate_ops(raw_ops)
   local changes = collect_change_indices(ops)
   local output = {}
+  local max_line_num = math.max(#old_lines, #new_lines)
+  local line_num_width = #tostring(max_line_num)
 
-  local change_index = 1
-  local previous_hunk_end = 0
-  while change_index <= #changes do
-    local first_change = changes[change_index]
-    local last_change = first_change
-    while
-      change_index < #changes
-      and changes[change_index + 1] - last_change <= (context_lines * 2 + 1)
-    do
-      change_index = change_index + 1
-      last_change = changes[change_index]
-    end
-
-    local hunk_start = math.max(previous_hunk_end + 1, first_change - context_lines)
-    local hunk_end = math.min(#ops, last_change + context_lines)
-    emit_hunk(output, ops, hunk_start, hunk_end)
-    previous_hunk_end = hunk_end
-    change_index = change_index + 1
+  if #changes > 0 then
+    emit_numbered_diff(output, ops, context_lines, line_num_width)
   end
 
   return {
