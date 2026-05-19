@@ -167,6 +167,10 @@ end
 
 function M.run_all(fns, opts)
   opts = opts or {}
+  local abort_check = opts.abort_check
+  if abort_check == nil and psi.is_aborted ~= nil then
+    abort_check = psi.is_aborted
+  end
   local tasks = prelude.array(#fns)
   for i, fn in ipairs(fns) do
     tasks[i] = {
@@ -181,7 +185,14 @@ function M.run_all(fns, opts)
   end
 
   local remaining = #tasks
+  local saw_abort = false
+  local function refresh_abort()
+    if abort_check ~= nil and abort_check() then
+      saw_abort = true
+    end
+  end
   while remaining > 0 do
+    refresh_abort()
     for i, t in ipairs(tasks) do
       if not t.done then
         local res = table.pack(coroutine.resume(t.co, table.unpack(t.next_args, 1, t.next_n)))
@@ -214,7 +225,11 @@ function M.run_all(fns, opts)
           if type(req) ~= "table" or type(req.kind) ~= "string" then
             req = { kind = "tick" }
           end
+          refresh_abort()
           local wait_ms = short_wait(remaining)
+          if saw_abort then
+            wait_ms = 0
+          end
           local short_req = req
           if req.kind == "http" or req.kind == "proc" then
             short_req = { kind = req.kind, h = req.h, ms = wait_ms }

@@ -187,7 +187,15 @@ local function stream(handle, tool_call_id, opts, poll_fn)
     end
   end
 
+  local aborted = false
   while true do
+    if psi.is_aborted ~= nil and psi.is_aborted() then
+      -- Force-terminate the child. The next poll observes EOF and exits.
+      if psi.process_terminate ~= nil then
+        psi.process_terminate(handle)
+      end
+      aborted = true
+    end
     local chunk, done = poll_fn(handle, 50)
     if chunk ~= nil and #chunk > 0 then
       total_bytes = total_bytes + #chunk
@@ -231,6 +239,7 @@ local function stream(handle, tool_call_id, opts, poll_fn)
     total_bytes = total_bytes,
     status = tail.status,
     temp_file_path = temp_path,
+    aborted = aborted,
   }
 end
 
@@ -253,6 +262,11 @@ function M.process_result(command, tool_call_id)
   end
 
   while true do
+    if psi.is_aborted ~= nil and psi.is_aborted() then
+      if psi.process_terminate ~= nil then
+        psi.process_terminate(handle)
+      end
+    end
     local chunk, done = sched.proc_poll(handle, 50)
     if chunk ~= nil and #chunk > 0 and psi.tool_progress ~= nil then
       psi.tool_progress(tool_call_id, chunk)
@@ -280,6 +294,11 @@ function M.process_result_argv(argv, tool_call_id)
   end
 
   while true do
+    if psi.is_aborted ~= nil and psi.is_aborted() then
+      if psi.process_terminate ~= nil then
+        psi.process_terminate(handle)
+      end
+    end
     local chunk, done = sched.proc_poll(handle, 50)
     if chunk ~= nil and #chunk > 0 and psi.tool_progress ~= nil then
       psi.tool_progress(tool_call_id, chunk)

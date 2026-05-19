@@ -128,6 +128,9 @@ local function dispatch_tools(tool_calls, observer, abort_check, cfg, model)
 
   local cursor = 1
   while cursor <= #tool_calls do
+    if abort_check() then
+      return nil, "aborted"
+    end
     if tool_execution_mode(tool_calls[cursor].name) == "sequential" then
       local tc = tool_calls[cursor]
       local ok, value = pcall(function()
@@ -167,9 +170,15 @@ local function dispatch_tools(tool_calls, observer, abort_check, cfg, model)
         on_done = function(batch_index, r)
           observe_done(start + batch_index - 1, r)
         end,
+        abort_check = abort_check,
       })
       for j, r in ipairs(batch) do
         results[start + j - 1] = r
+      end
+      if abort_check() then
+        -- Don't append results to the session or send them to the
+        -- LLM. The caller (run_turn) sees "aborted" on the next pass.
+        return nil, "aborted"
       end
     end
   end

@@ -233,9 +233,8 @@ function M._live_progress.clip_line(line)
   if #line <= 1000 then
     return line
   end
-  local prefix = "[earlier output truncated] "
-  local keep = math.max(0, 1000 - #prefix)
-  return prefix .. line:sub(#line - keep + 1)
+  -- Keep just the tail; no "[earlier output truncated]" marker.
+  return line:sub(#line - 1000 + 1)
 end
 
 function M._live_progress.push_line(entry, line)
@@ -265,11 +264,7 @@ function M._live_progress.display(entry)
   local body = table.concat(lines, NEWLINE)
   if omitted > 0 then
     local shown = #lines
-    local header = "[Showing last "
-      .. tostring(shown)
-      .. " of "
-      .. tostring(total)
-      .. " lines; earlier output truncated]"
+    local header = "[Showing last " .. tostring(shown) .. " of " .. tostring(total) .. " lines]"
     return body ~= EMPTY and (header .. NEWLINE .. NEWLINE .. body) or header
   end
   return body
