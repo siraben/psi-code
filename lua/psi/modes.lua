@@ -80,6 +80,18 @@ local function bootstrap_session(opts)
     end
     return session.load(opts.session_file)
   end
+  if opts.continue_recent then
+    local most_recent = session.most_recent_session(psi.cwd())
+    if most_recent then
+      opts.session_file = most_recent
+      return session.load(most_recent)
+    end
+    -- No prior session in this cwd: fall through to creating a fresh
+    -- one, matching pi-mono's --continue semantics.
+    io.stderr:write(
+      "--continue: no prior session for " .. tostring(psi.cwd()) .. ", starting a new one\n"
+    )
+  end
   if opts.resume then
     local selected, err = session.resolve_resume_path(psi.cwd(), choose_session_cli)
     if not selected then
@@ -238,6 +250,14 @@ end
 
 function M.run_compact(opts)
   agent.configure(opts)
+  if opts.continue_recent and (not opts.session_file or opts.session_file == "") then
+    local most_recent = session.most_recent_session(psi.cwd())
+    if not most_recent then
+      io.stderr:write("--compact --continue: no prior session for " .. tostring(psi.cwd()) .. "\n")
+      return false
+    end
+    opts.session_file = most_recent
+  end
   if opts.resume and (not opts.session_file or opts.session_file == "") then
     local selected, err = session.resolve_resume_path(psi.cwd(), choose_session_cli)
     if not selected then
@@ -247,7 +267,7 @@ function M.run_compact(opts)
     opts.session_file = selected
   end
   if not opts.session_file or opts.session_file == "" then
-    io.stderr:write("--compact requires --session FILE or --resume\n")
+    io.stderr:write("--compact requires --session FILE, --resume, or --continue\n")
     return false
   end
   local resolved_ok, resolved_err = resolve_session_file_arg(opts)

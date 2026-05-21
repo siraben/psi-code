@@ -4792,6 +4792,10 @@ int psi_vm_run_lua_mode(
         lua_pushboolean(vm->L, 1);
         lua_setfield(vm->L, -2, "resume");
     }
+    if (options->continue_recent) {
+        lua_pushboolean(vm->L, 1);
+        lua_setfield(vm->L, -2, "continue_recent");
+    }
     lua_pushboolean(vm->L, options->load_extensions ? 1 : 0);
     lua_setfield(vm->L, -2, "load_extensions");
     if (options->model != NULL) {

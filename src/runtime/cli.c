@@ -32,6 +32,7 @@ struct psi_cli_argtable {
     struct arg_int *compact;
     struct arg_str *session;
     struct arg_lit *resume;
+    struct arg_lit *continue_recent;
     struct arg_lit *chat;
     struct arg_lit *no_extensions;
     struct arg_end *end;
@@ -78,7 +79,9 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
     args->compact = arg_int0(
         NULL, "compact", "N", "compact the current session, keeping the most recent N messages");
     args->session = arg_str0(NULL, "session", "FILE", "load and save a JSONL session file");
-    args->resume = arg_lit0("r", "resume", "resume a session for the current directory");
+    args->resume = arg_lit0("r", "resume", "pick a session to resume (TUI picker)");
+    args->continue_recent =
+        arg_lit0("c", "continue", "continue the most recent session for the current directory");
     args->chat = arg_lit0(
         NULL, "chat", "use the chat-style TUI (transcript flows into terminal scrollback)");
     args->no_extensions = arg_lit0(NULL, "no-extensions", "disable user extension discovery");
@@ -99,6 +102,7 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
     status |= psi_cli_argtable_add(args, args->compact);
     status |= psi_cli_argtable_add(args, args->session);
     status |= psi_cli_argtable_add(args, args->resume);
+    status |= psi_cli_argtable_add(args, args->continue_recent);
     status |= psi_cli_argtable_add(args, args->chat);
     status |= psi_cli_argtable_add(args, args->no_extensions);
     status |= psi_cli_argtable_add(args, args->end);
@@ -175,6 +179,7 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     options->max_tokens = 16384l;
     options->keep_recent = 12l;
     options->resume = 0;
+    options->continue_recent = 0;
     options->load_extensions = 1;
 
     status = PSI_STATUS_ERROR;
@@ -240,6 +245,13 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     }
     if (args.resume->count > 0) {
         options->resume = 1;
+    }
+    if (args.continue_recent->count > 0) {
+        options->continue_recent = 1;
+    }
+    if (options->resume && options->continue_recent) {
+        fprintf(stderr, "--resume and --continue are mutually exclusive\n");
+        goto out;
     }
     if (args.chat->count > 0) {
         options->layout_mode = "chat";

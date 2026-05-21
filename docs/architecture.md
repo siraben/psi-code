@@ -66,6 +66,7 @@ they're useful before the binary is on the system. Regenerated from
 | `--boot` | `FILE` | override the Lua bootstrap file |
 | `--chat` | — | use the chat-style TUI (transcript flows into terminal scrollback) |
 | `--compact` | `N` | compact the current session, keeping the most recent N messages |
+| `-c`, `--continue` | — | continue the most recent session for the current directory |
 | `--eval` | `EXPR` | evaluate a Lua expression and print the result |
 | `-h`, `--help` | — | show help |
 | `--max-tokens` | `N` | max output tokens for --agent |
@@ -73,7 +74,7 @@ they're useful before the binary is on the system. Regenerated from
 | `--no-extensions` | — | disable user extension discovery |
 | `--print` | `TEXT` | run the bootstrap print-mode handler |
 | `--repl` | — | run the interactive line editor shell |
-| `-r`, `--resume` | — | resume a session for the current directory |
+| `-r`, `--resume` | — | pick a session to resume (TUI picker) |
 | `--session` | `FILE` | load and save a JSONL session file |
 | `--system-prompt` | — | print the default coding-agent system prompt |
 | `--thinking` | `LEVEL` | thinking level: off, minimal, low, medium, high, xhigh |

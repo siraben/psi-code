@@ -26,6 +26,7 @@ struct psi_cli_options {
     long max_tokens;
     long keep_recent;
     int resume;
+    int continue_recent;
     int load_extensions;
 };
 

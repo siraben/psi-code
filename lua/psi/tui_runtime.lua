@@ -3841,7 +3841,7 @@ local function resume_preview_line(info, row, width)
   return ""
 end
 
-local function draw_resume_picker(infos, selected, offset)
+local function draw_resume_picker(infos, selected, offset, scope)
   local width, height = current_size()
   local list_start = 3
   local list_rows = math.max(1, height - 4)
@@ -3850,9 +3850,31 @@ local function draw_resume_picker(infos, selected, offset)
   local right_width = split and math.max(1, width - left_width - 3) or 0
   local selected_info = infos[selected]
 
+  local scope_label
+  if scope == "all" then
+    scope_label = ansi.dim("○ Current Folder | ") .. ansi.bold(ansi.cyan("◉ All"))
+  else
+    scope_label = ansi.bold(ansi.cyan("◉ Current Folder")) .. ansi.dim(" | ○ All")
+  end
+
   psi.tui_clear()
-  psi.tui_draw_line(1, ansi.bold(ansi.cyan("Resume session")))
-  psi.tui_draw_line(2, ansi.dim("Enter selects  Esc cancels  Up/Down or Ctrl-P/Ctrl-N moves"))
+  psi.tui_draw_line(1, ansi.bold(ansi.cyan("Resume session")) .. "  " .. scope_label)
+  psi.tui_draw_line(
+    2,
+    ansi.dim("Enter selects  Esc cancels  Up/Down or Ctrl-P/Ctrl-N moves  Tab toggles scope")
+  )
+  if #infos == 0 then
+    local hint
+    if scope == "all" then
+      hint = "  No sessions found."
+    else
+      hint = "  No sessions in current folder. Press Tab to view all."
+    end
+    psi.tui_draw_line(list_start, ansi.dim(hint))
+    psi.tui_set_cursor(math.min(height, list_start), 1, false)
+    psi.tui_refresh()
+    return
+  end
   for row = 0, list_rows - 1 do
     local info = infos[offset + row]
     local text = ""
@@ -3872,25 +3894,57 @@ local function draw_resume_picker(infos, selected, offset)
   psi.tui_refresh()
 end
 
-local function choose_session_tui(infos)
-  local selected = 1
+-- Open the resume picker. `current_infos` is the cwd-scoped list (may
+-- be empty). The picker fetches the "all" list lazily on first Tab
+-- toggle. Returns the absolute file path to load, or nil on cancel.
+local function choose_session_tui(current_infos)
+  local scopes = {
+    current = current_infos or {},
+    all = nil, -- lazy
+  }
+  local scope = "current"
+  local selected = #scopes.current > 0 and 1 or 0
   local offset = 1
   while true do
+    local infos = scopes[scope] or {}
     local _, height = current_size()
     local list_rows = math.max(1, height - 4)
-    if selected < offset then
-      offset = selected
-    elseif selected >= offset + list_rows then
-      offset = selected - list_rows + 1
+    if #infos == 0 then
+      selected = 0
+      offset = 1
+    else
+      if selected < 1 then
+        selected = 1
+      elseif selected > #infos then
+        selected = #infos
+      end
+      if selected < offset then
+        offset = selected
+      elseif selected >= offset + list_rows then
+        offset = selected - list_rows + 1
+      end
     end
-    draw_resume_picker(infos, selected, offset)
+    draw_resume_picker(infos, selected, offset, scope)
 
     local event = psi.tui_poll_key(-1)
     local key = event and event.key or nil
     if key == "enter" then
-      return selected
+      if infos[selected] then
+        return infos[selected].path
+      end
     elseif key == "escape" or key == "ctrl-d" then
       return nil
+    elseif key == "tab" then
+      if scope == "current" then
+        if scopes.all == nil then
+          scopes.all = session.list_all_sessions() or {}
+        end
+        scope = "all"
+      else
+        scope = "current"
+      end
+      selected = #(scopes[scope] or {}) > 0 and 1 or 0
+      offset = 1
     elseif (key == "up" or key == "ctrl-p") and selected > 1 then
       selected = selected - 1
     elseif (key == "down" or key == "ctrl-n") and selected < #infos then
@@ -3937,10 +3991,27 @@ local function bootstrap_session(opts)
     return true
   end
 
+  if opts.continue_recent then
+    local most_recent = session.most_recent_session(psi.cwd())
+    if most_recent then
+      opts.session_file = most_recent
+      local ok, load_err = session.load(most_recent)
+      if not ok then
+        return false, load_err
+      end
+      return true
+    end
+    -- Fall through to creating a fresh session in this cwd, matching
+    -- pi-mono's --continue semantics.
+  end
+
   if opts.resume then
-    local selected, err = session.resolve_resume_path(psi.cwd(), choose_session_tui)
+    -- Open the picker unconditionally (even with zero sessions in
+    -- this cwd) so the user can Tab to the "all sessions" scope.
+    local infos = session.list_sessions(psi.cwd())
+    local selected = choose_session_tui(infos)
     if not selected then
-      return false, err
+      return false, "no session selected"
     end
     opts.session_file = selected
     local ok, load_err = session.load(selected)
@@ -3962,7 +4033,9 @@ function M.run(opts)
   agent.configure(opts)
 
   local layout_mode = chat.resolve_mode(opts)
-  local alt_screen_active = layout_mode == chat.CHAT or not not opts.resume
+  local alt_screen_active = layout_mode == chat.CHAT
+    or not not opts.resume
+    or not not opts.continue_recent
 
   -- The resume picker and chat bootstrap use absolute positioning; keep that
   -- contained in alt-screen without making inline TUI the default.

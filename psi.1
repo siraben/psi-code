@@ -24,6 +24,9 @@ use the chat\-style TUI (transcript flows into terminal scrollback)
 \fB\-\-compact\fR \fIN\fR
 compact the current session, keeping the most recent N messages
 .TP
+\fB-c\fR, \fB\-\-continue\fR
+continue the most recent session for the current directory
+.TP
 \fB\-\-eval\fR \fIEXPR\fR
 evaluate a Lua expression and print the result
 .TP
@@ -46,7 +49,7 @@ run the bootstrap print\-mode handler
 run the interactive line editor shell
 .TP
 \fB-r\fR, \fB\-\-resume\fR
-resume a session for the current directory
+pick a session to resume (TUI picker)
 .TP
 \fB\-\-session\fR \fIFILE\fR
 load and save a JSONL session file

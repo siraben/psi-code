@@ -705,6 +705,42 @@ local function sort_infos(infos)
   return infos
 end
 
+-- Walk every session JSONL under $STATE/psi/sessions, regardless of
+-- which cwd they were recorded under. Used by --resume's "all
+-- sessions" scope toggle and for cross-project session discovery.
+function M.list_all_sessions()
+  local root = M.sessions_root()
+  if not root then
+    return {}
+  end
+  local files = {}
+  collect_jsonl_files(root, files)
+  local entries = psi.list_dir(root)
+  if type(entries) == "table" then
+    for _, entry in ipairs(entries) do
+      local name = type(entry) == "table" and entry.name or entry
+      if type(name) == "string" then
+        local full = prelude.path_join(root, name)
+        if psi.file_type(full) == "directory" then
+          collect_jsonl_files(full, files)
+        end
+      end
+    end
+  end
+  local infos = {}
+  local seen = {}
+  for _, file in ipairs(files) do
+    if not seen[file] then
+      seen[file] = true
+      local info = build_session_info(file)
+      if info then
+        infos[#infos + 1] = info
+      end
+    end
+  end
+  return sort_infos(infos)
+end
+
 function M.list_sessions(cwd)
   cwd = path_util.resolve(cwd or current_cwd()) or cwd or current_cwd()
   local files = {}
