@@ -1,5 +1,9 @@
 --[==[psi-test
-expect = "true|true|true|true|true"
+# Pre-flight tool-call render for an edit shows the unified-diff
+# preview (with `--- a/`, `@@ ... @@`, and `-/+` body lines). The
+# success background is the green tool-success bg; intra-line changes
+# are highlighted with ANSI inverse.
+expect = "true|true|true|true|true|true"
 files = [
   { path = "edit.txt", text = "alpha beta\nomega" },
 ]
@@ -25,8 +29,9 @@ local result_text =
 
 return table.concat({
   tostring(call:find("\27[48;2;40;50;40m", 1, true) ~= nil),
-  tostring(call:find("-1 alpha ", 1, true) ~= nil),
-  tostring(call:find("+1 alpha ", 1, true) ~= nil),
+  tostring(call:find("@@", 1, true) ~= nil),
+  tostring(call:find("-alpha ", 1, true) ~= nil),
+  tostring(call:find("+alpha ", 1, true) ~= nil),
   tostring(call:find("\27[7m", 1, true) ~= nil),
   tostring(result_text:find("edit completed", 1, true) ~= nil),
 }, "|")

@@ -1,5 +1,8 @@
 --[==[psi-test
-expect = "true|true|true|true|true|alpha delta\nomega"
+# Edit tool emits a unified-diff `diff` field with `@@` hunk header,
+# `-`/`+` body lines, and `--- a/...` / `+++ b/...` file headers so the
+# payload round-trips through `patch -p1`.
+expect = "true|true|true|true|true|true|true|alpha delta\nomega"
 files = [
   { path = "edit.txt", text = "alpha beta\nomega" },
 ]
@@ -13,11 +16,14 @@ local result = tools.dispatch("edit", {
   newText = "alpha delta",
 })
 
+local d = result:get("diff")
 return table.concat({
   tostring(result.ok),
-  tostring(result:get("diff"):find("@@", 1, true) == nil),
-  tostring(result:get("diff"):find("-1 alpha beta", 1, true) ~= nil),
-  tostring(result:get("diff"):find("+1 alpha delta", 1, true) ~= nil),
+  tostring(d:find("@@ %-1,%d+ %+1,%d+ @@") ~= nil),
+  tostring(d:find("-alpha beta", 1, true) ~= nil),
+  tostring(d:find("+alpha delta", 1, true) ~= nil),
+  tostring(d:find("--- a/", 1, true) ~= nil),
+  tostring(d:find("+++ b/", 1, true) ~= nil),
   tostring(result:get("firstChangedLine") == 1),
   psi.read_file(path),
 }, "|")

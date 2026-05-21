@@ -1,4 +1,11 @@
--- Pi-style diff renderer for tool execution components.
+-- Unified-diff renderer for tool execution components.
+--
+-- Consumes the output of psi.diff.generate_diff_string (unified diff
+-- format: optional `--- a/` / `+++ b/` file headers, one or more
+-- `@@ -X,Y +A,B @@` hunk headers, then body lines prefixed with
+-- ' ' / '-' / '+'). Colours each line according to its role and
+-- pairs single removed + single added lines for intra-line inverse
+-- highlighting on the changed substring.
 
 local ansi = require("psi.ansi")
 
@@ -7,6 +14,8 @@ local M = {}
 local FG_CONTEXT = "38;5;242"
 local FG_ADDED = "32"
 local FG_REMOVED = "31"
+local FG_HUNK = "36" -- cyan, like `git diff`
+local FG_FILE_HEADER = "1;36" -- bold cyan
 
 local function fg(code, text)
   return ansi.color(code, text or "")
@@ -16,35 +25,35 @@ local function replace_tabs(text)
   return (text or ""):gsub("\t", "   ")
 end
 
-local function parse_diff_line(line)
+-- Classify a single diff line. Returns one of:
+--   { kind = "hunk",   text = "@@ ... @@" }
+--   { kind = "file",   text = "--- a/..." or "+++ b/..." }
+--   { kind = "added",  content = "..." }
+--   { kind = "removed", content = "..." }
+--   { kind = "context", content = "..." }
+--   { kind = "raw",    text = original line (unrecognised) }
+local function classify_line(line)
   line = tostring(line or "")
-  if line:sub(1, 2) == "@@" or line:sub(1, 3) == "---" or line:sub(1, 3) == "+++" then
-    return nil
+  if line:sub(1, 2) == "@@" then
+    return { kind = "hunk", text = line }
+  end
+  if line:sub(1, 4) == "--- " or line:sub(1, 4) == "+++ " then
+    return { kind = "file", text = line }
   end
   local prefix = line:sub(1, 1)
-  if prefix ~= "+" and prefix ~= "-" and prefix ~= " " then
-    return nil
+  if prefix == "+" then
+    return { kind = "added", content = line:sub(2) }
+  elseif prefix == "-" then
+    return { kind = "removed", content = line:sub(2) }
+  elseif prefix == " " then
+    return { kind = "context", content = line:sub(2) }
   end
-  local rest = line:sub(2)
-  local line_num, content = rest:match("^(%s*%d+)%s(.*)$")
-  if not line_num and prefix == " " then
-    line_num = rest:match("^(%s*)%.%.%.$")
-    if line_num then
-      content = "..."
-    end
+  -- Empty line inside a hunk body counts as an empty context line;
+  -- unified diff guarantees a sign byte, but be lenient.
+  if line == "" then
+    return { kind = "context", content = "" }
   end
-  return {
-    prefix = prefix,
-    line_num = line_num,
-    content = content or rest,
-  }
-end
-
-local function diff_line(parsed, content)
-  if parsed.line_num then
-    return parsed.prefix .. parsed.line_num .. " " .. content
-  end
-  return parsed.prefix .. content
+  return { kind = "raw", text = line }
 end
 
 local function utf8_units(value)
@@ -99,6 +108,9 @@ local function common_suffix_units(a, b, prefix_len)
   return count
 end
 
+-- Highlight the changed substring of a single removed/added pair via
+-- ANSI inverse. Leading whitespace stays unhighlighted so indentation
+-- doesn't get noisy.
 local function render_intra_line_diff(old_content, new_content)
   local old_leading = old_content:match("^%s*") or ""
   local new_leading = new_content:match("^%s*") or ""
@@ -126,11 +138,12 @@ local function render_intra_line_diff(old_content, new_content)
 end
 
 function M.render_diff(diff_text)
-  local lines = {}
   local text = tostring(diff_text or "")
   if text == "" then
     return ""
   end
+
+  local lines = {}
   for line in (text .. "\n"):gmatch("(.-)\n") do
     lines[#lines + 1] = line
   end
@@ -138,49 +151,60 @@ function M.render_diff(diff_text)
   local result = {}
   local i = 1
   while i <= #lines do
-    local parsed = parse_diff_line(lines[i])
-    if not parsed then
-      result[#result + 1] = fg(FG_CONTEXT, lines[i])
+    local entry = classify_line(lines[i])
+
+    if entry.kind == "file" then
+      result[#result + 1] = fg(FG_FILE_HEADER, entry.text)
       i = i + 1
-    elseif parsed.prefix == "-" then
+    elseif entry.kind == "hunk" then
+      result[#result + 1] = fg(FG_HUNK, entry.text)
+      i = i + 1
+    elseif entry.kind == "removed" then
+      -- Collect a run of consecutive removed lines, then a run of
+      -- consecutive added lines. If exactly one of each, render with
+      -- intra-line inverse highlights; otherwise render them as-is.
       local removed = {}
       while i <= #lines do
-        local p = parse_diff_line(lines[i])
-        if not p or p.prefix ~= "-" then
+        local e = classify_line(lines[i])
+        if e.kind ~= "removed" then
           break
         end
-        removed[#removed + 1] = p
+        removed[#removed + 1] = e
         i = i + 1
       end
-
       local added = {}
       while i <= #lines do
-        local p = parse_diff_line(lines[i])
-        if not p or p.prefix ~= "+" then
+        local e = classify_line(lines[i])
+        if e.kind ~= "added" then
           break
         end
-        added[#added + 1] = p
+        added[#added + 1] = e
         i = i + 1
       end
 
       if #removed == 1 and #added == 1 then
-        local removed_line, added_line =
-          render_intra_line_diff(replace_tabs(removed[1].content), replace_tabs(added[1].content))
-        result[#result + 1] = fg(FG_REMOVED, diff_line(removed[1], removed_line))
-        result[#result + 1] = fg(FG_ADDED, diff_line(added[1], added_line))
+        local removed_line, added_line = render_intra_line_diff(
+          replace_tabs(removed[1].content),
+          replace_tabs(added[1].content)
+        )
+        result[#result + 1] = fg(FG_REMOVED, "-" .. removed_line)
+        result[#result + 1] = fg(FG_ADDED, "+" .. added_line)
       else
-        for _, line in ipairs(removed) do
-          result[#result + 1] = fg(FG_REMOVED, diff_line(line, replace_tabs(line.content)))
+        for _, e in ipairs(removed) do
+          result[#result + 1] = fg(FG_REMOVED, "-" .. replace_tabs(e.content))
         end
-        for _, line in ipairs(added) do
-          result[#result + 1] = fg(FG_ADDED, diff_line(line, replace_tabs(line.content)))
+        for _, e in ipairs(added) do
+          result[#result + 1] = fg(FG_ADDED, "+" .. replace_tabs(e.content))
         end
       end
-    elseif parsed.prefix == "+" then
-      result[#result + 1] = fg(FG_ADDED, diff_line(parsed, replace_tabs(parsed.content)))
+    elseif entry.kind == "added" then
+      result[#result + 1] = fg(FG_ADDED, "+" .. replace_tabs(entry.content))
+      i = i + 1
+    elseif entry.kind == "context" then
+      result[#result + 1] = fg(FG_CONTEXT, " " .. replace_tabs(entry.content))
       i = i + 1
     else
-      result[#result + 1] = fg(FG_CONTEXT, diff_line(parsed, replace_tabs(parsed.content)))
+      result[#result + 1] = fg(FG_CONTEXT, entry.text or "")
       i = i + 1
     end
   end

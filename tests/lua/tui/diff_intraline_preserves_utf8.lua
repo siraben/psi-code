@@ -1,4 +1,8 @@
 --[==[psi-test
+# Unified-diff body lines preserve UTF-8 content verbatim. The diff is
+# fed in with a single-byte signed prefix (`-` / `+`) and a multi-byte
+# code point payload; the rendered output must still contain those
+# code points so terminals can display them correctly.
 expect = "true|true"
 ]==]
 local ansi = require("psi.ansi")

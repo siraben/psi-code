@@ -363,127 +363,156 @@ local function annotate_ops(ops)
   return annotated, first_changed_line
 end
 
-local function collect_change_indices(ops)
-  local changes = {}
+-- ---------- Unified-diff hunk emission ----------
+--
+-- Body lines use the standard unified-diff format: a single-character
+-- prefix (' ' / '-' / '+') followed by the verbatim file content.
+-- Hunks are introduced by `@@ -old_start,old_count +new_start,new_count @@`.
+-- A new hunk starts whenever the gap between two change runs exceeds
+-- 2 * context_lines unchanged lines, matching `diff -u` behaviour.
+
+local function op_prefix(tag)
+  if tag == "+" then
+    return "+"
+  elseif tag == "-" then
+    return "-"
+  end
+  return " "
+end
+
+local function emit_op(output, op)
+  output[#output + 1] = op_prefix(op.tag) .. op.line
+end
+
+-- Build the list of hunks. A hunk is a contiguous slice of ops with
+-- context_lines of unchanged ops on either side; consecutive change
+-- runs that sit within 2 * context_lines of unchanged ops of each
+-- other are merged into the same hunk.
+local function build_hunks(ops, context_lines)
+  local hunks = {}
+  local changed_indices = {}
   for i, op in ipairs(ops) do
     if op.tag ~= "=" then
-      changes[#changes + 1] = i
+      changed_indices[#changed_indices + 1] = i
     end
   end
-  return changes
-end
-
-local function pad_line_number(n, width)
-  local value = tostring(n or "")
-  if #value >= width then
-    return value
+  if #changed_indices == 0 then
+    return hunks
   end
-  return string.rep(" ", width - #value) .. value
-end
 
-local function emit_numbered_op(output, op, width)
-  if op.tag == "+" then
-    output[#output + 1] = "+" .. pad_line_number(op.new_line_num, width) .. " " .. op.line
-  elseif op.tag == "-" then
-    output[#output + 1] = "-" .. pad_line_number(op.old_line_num, width) .. " " .. op.line
-  else
-    output[#output + 1] = " " .. pad_line_number(op.old_line_num, width) .. " " .. op.line
-  end
-end
-
-local function emit_skip(output, width)
-  output[#output + 1] = " " .. string.rep(" ", width) .. " ..."
-end
-
-local function op_runs(ops)
-  local runs = {}
-  local current = nil
-  for _, op in ipairs(ops) do
-    if not current or current.tag ~= op.tag then
-      current = { tag = op.tag, changed = op.tag ~= "=", ops = {} }
-      runs[#runs + 1] = current
+  local group_start = changed_indices[1]
+  local group_end = changed_indices[1]
+  for i = 2, #changed_indices do
+    local idx = changed_indices[i]
+    -- Gap = number of unchanged ops between the previous change and this one.
+    if idx - group_end - 1 > context_lines * 2 then
+      hunks[#hunks + 1] = { first_change = group_start, last_change = group_end }
+      group_start = idx
     end
-    current.ops[#current.ops + 1] = op
+    group_end = idx
   end
-  return runs
+  hunks[#hunks + 1] = { first_change = group_start, last_change = group_end }
+
+  for _, hunk in ipairs(hunks) do
+    hunk.start_index = math.max(1, hunk.first_change - context_lines)
+    hunk.end_index = math.min(#ops, hunk.last_change + context_lines)
+  end
+  return hunks
 end
 
-local function emit_context_run(
-  output,
-  run,
-  has_leading_change,
-  has_trailing_change,
-  context_lines,
-  width
-)
-  local ops = run.ops
-  if has_leading_change and has_trailing_change then
-    if #ops <= context_lines * 2 then
-      for _, op in ipairs(ops) do
-        emit_numbered_op(output, op, width)
+-- Walk hunk ops to compute the (old_start, old_count, new_start,
+-- new_count) tuple for the `@@` header. Counts are how many old/new
+-- lines this hunk covers; starts are 1-based line numbers in each
+-- side. Following `diff -u`, an empty side gets start=0.
+local function hunk_header_range(ops, hunk)
+  local old_count, new_count = 0, 0
+  local old_start, new_start
+  for i = hunk.start_index, hunk.end_index do
+    local op = ops[i]
+    if op.tag == "-" or op.tag == "=" then
+      if not old_start then
+        old_start = op.old_line_num
       end
-      return
+      old_count = old_count + 1
     end
-
-    for i = 1, context_lines do
-      emit_numbered_op(output, ops[i], width)
-    end
-    emit_skip(output, width)
-    for i = #ops - context_lines + 1, #ops do
-      emit_numbered_op(output, ops[i], width)
-    end
-  elseif has_leading_change then
-    local shown = math.min(#ops, context_lines)
-    for i = 1, shown do
-      emit_numbered_op(output, ops[i], width)
-    end
-    if #ops > shown then
-      emit_skip(output, width)
-    end
-  elseif has_trailing_change then
-    local skipped = math.max(0, #ops - context_lines)
-    if skipped > 0 then
-      emit_skip(output, width)
-    end
-    for i = skipped + 1, #ops do
-      emit_numbered_op(output, ops[i], width)
-    end
-  end
-end
-
-local function emit_numbered_diff(output, ops, context_lines, width)
-  local runs = op_runs(ops)
-  for i, run in ipairs(runs) do
-    if run.changed then
-      for _, op in ipairs(run.ops) do
-        emit_numbered_op(output, op, width)
+    if op.tag == "+" or op.tag == "=" then
+      if not new_start then
+        new_start = op.new_line_num
       end
-    else
-      emit_context_run(
-        output,
-        run,
-        i > 1 and runs[i - 1].changed,
-        i < #runs and runs[i + 1].changed,
-        context_lines,
-        width
-      )
+      new_count = new_count + 1
+    end
+  end
+  return old_start or 0, old_count, new_start or 0, new_count
+end
+
+local function emit_unified_diff(output, ops, context_lines)
+  local hunks = build_hunks(ops, context_lines)
+  for _, hunk in ipairs(hunks) do
+    local old_start, old_count, new_start, new_count = hunk_header_range(ops, hunk)
+    output[#output + 1] = string.format(
+      "@@ -%d,%d +%d,%d @@",
+      old_start, old_count, new_start, new_count
+    )
+    for i = hunk.start_index, hunk.end_index do
+      emit_op(output, ops[i])
     end
   end
 end
 
-function M.generate_diff_string(old_content, new_content, context_lines)
+-- Generate a unified diff for `old_content` vs `new_content`. Returns
+-- a table with `diff` (the patch text) and `firstChangedLine` (the
+-- line number in the new file where the first change appears, or nil).
+--
+-- `opts.path` (optional) emits `--- a/<path>` / `+++ b/<path>` file
+-- headers, making the output a self-contained patch parseable by
+-- `patch -p1` and `git apply`.
+function M.generate_diff_string(old_content, new_content, context_lines, opts)
+  if type(context_lines) == "table" and opts == nil then
+    opts = context_lines
+    context_lines = opts.context_lines
+  end
   context_lines = math.max(0, math.floor(tonumber(context_lines) or DEFAULT_CONTEXT_LINES))
+  opts = type(opts) == "table" and opts or {}
+
   local old_lines = split_lines(old_content or "")
   local new_lines = split_lines(new_content or "")
+  -- Drop the trailing empty entry produced by split() when the file
+  -- ends in a newline. This matches `diff -u`'s notion of how many
+  -- "lines" a file has, so hunk counts agree with GNU diff and the
+  -- output round-trips through `patch -p1` cleanly. If exactly one
+  -- side lacks a trailing newline we preserve that asymmetry so the
+  -- resulting hunk surfaces the missing-newline change.
+  local old_has_trailing = #old_lines > 0 and old_lines[#old_lines] == ""
+  local new_has_trailing = #new_lines > 0 and new_lines[#new_lines] == ""
+  if old_has_trailing and new_has_trailing then
+    old_lines[#old_lines] = nil
+    new_lines[#new_lines] = nil
+  end
   local raw_ops = lcs_ops(old_lines, new_lines) or simple_ops(old_lines, new_lines)
   local ops, first_changed_line = annotate_ops(raw_ops)
-  local changes = collect_change_indices(ops)
   local output = {}
-  local max_line_num = math.max(#old_lines, #new_lines)
-  local line_num_width = #tostring(max_line_num)
 
-  if #changes > 0 then
-    emit_numbered_diff(output, ops, context_lines, line_num_width)
+  local has_change = false
+  for _, op in ipairs(ops) do
+    if op.tag ~= "=" then
+      has_change = true
+      break
+    end
+  end
+
+  if has_change then
+    if type(opts.path) == "string" and opts.path ~= "" then
+      -- `git diff` strips the leading slash from absolute paths so the
+      -- a/ and b/ prefixes still produce one slash. Match that so the
+      -- output is round-trippable through `git apply -p1` or `patch -p1`.
+      local header_path = opts.path
+      if header_path:sub(1, 1) == "/" then
+        header_path = header_path:sub(2)
+      end
+      output[#output + 1] = "--- a/" .. header_path
+      output[#output + 1] = "+++ b/" .. header_path
+    end
+    emit_unified_diff(output, ops, context_lines)
   end
 
   return {
@@ -497,7 +526,12 @@ function M.preview_edits(raw_content, edits, path)
   if not applied then
     return nil, err
   end
-  local generated = M.generate_diff_string(applied.baseContent, applied.newContent)
+  local generated = M.generate_diff_string(
+    applied.baseContent,
+    applied.newContent,
+    nil,
+    { path = path }
+  )
   generated.baseContent = applied.baseContent
   generated.newContent = applied.newContent
   generated.output = applied.output

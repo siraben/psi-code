@@ -562,8 +562,12 @@ def t_render_thinking(psi: Psi):
                     "after-turn resets the one-shot label")
 
 
-@test("diff/generate_numbered_tool_diff")
-def t_diff_generate_numbered_tool_diff(psi: Psi):
+@test("diff/generate_unified_tool_diff")
+def t_diff_generate_unified_tool_diff(psi: Psi):
+    # The edit tool emits unified-diff format: `@@ -X,Y +A,B @@` hunk
+    # headers with bare ` `/`-`/`+`-prefixed body lines, no inline line
+    # numbers. Distant changes split into separate hunks rather than
+    # being elided with `...`.
     out = psi.run(
         "--eval",
         'local d = require("psi.diff")\n'
@@ -571,32 +575,41 @@ def t_diff_generate_numbered_tool_diff(psi: Psi):
         + 'local after = before:gsub("five", "FIVE"):gsub("nine", "NINE")\n'
         + 'return d.generate_diff_string(before, after, 1).diff',
     ).stdout.rstrip("\n")
-    assert_not_contains(out, "@@", "tool diff should not render unified hunk headers")
-    assert_contains(out, "  4 four", "tool diff should include leading numbered context")
-    assert_contains(out, "- 5 five", "tool diff should include numbered removed line")
-    assert_contains(out, "+ 5 FIVE", "tool diff should include numbered added line")
-    assert_contains(out, "   ...", "tool diff should collapse distant unchanged context")
-    assert_contains(out, "- 9 nine", "tool diff should include later numbered removed line")
-    assert_contains(out, "+ 9 NINE", "tool diff should include later numbered added line")
+    assert_regex(out, r"@@ -\d+,\d+ \+\d+,\d+ @@",
+                 "tool diff should include unified hunk headers")
+    assert_contains(out, " four", "tool diff should include leading context")
+    assert_contains(out, "-five", "tool diff should include bare removed line")
+    assert_contains(out, "+FIVE", "tool diff should include bare added line")
+    assert_not_contains(out, "...", "tool diff should not collapse with ellipsis")
+    assert_contains(out, "-nine", "tool diff should include later removed line")
+    assert_contains(out, "+NINE", "tool diff should include later added line")
+    # Far-apart changes (context=1) should produce two distinct hunks.
+    assert_true(out.count("@@") >= 2, "distant changes should split into hunks")
 
 
-@test("diff/render_numbered_tool_diff")
-def t_diff_render_numbered_tool_diff(psi: Psi):
+@test("diff/render_unified_tool_diff")
+def t_diff_render_unified_tool_diff(psi: Psi):
+    # Renderer takes a unified diff and colours each line: bold cyan
+    # file headers, cyan hunk headers, red/green body lines, intra-line
+    # inverse on single-removed-single-added pairs.
     out = psi.run(
         "--eval",
         'local ansi = require("psi.ansi")\n'
         + 'ansi.color_enabled = true\n'
-        + 'local rendered = require("psi.tui_components.diff").render_diff("-12 old word\\n+12 new word\\n 13 same\\n   ...")\n'
+        + 'local d = "--- a/foo\\n+++ b/foo\\n@@ -12,3 +12,3 @@\\n-old word\\n+new word\\n same\\n"\n'
+        + 'local rendered = require("psi.tui_components.diff").render_diff(d)\n'
         + 'return tostring((psi.runtime_info() or {}).ansi ~= false) .. "\\n" .. rendered',
     ).stdout.rstrip("\n")
     ansi_enabled, out = out.split("\n", 1)
     plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
-    assert_contains(plain, "-12 old word", "renderer should preserve removed line number")
-    assert_contains(plain, "+12 new word", "renderer should preserve added line number")
-    assert_contains(plain, " 13 same", "renderer should preserve context line number")
-    assert_contains(plain, "   ...", "renderer should preserve collapsed context marker")
+    assert_contains(plain, "--- a/foo", "renderer should preserve file header (old)")
+    assert_contains(plain, "+++ b/foo", "renderer should preserve file header (new)")
+    assert_contains(plain, "@@ -12,3 +12,3 @@", "renderer should preserve hunk header")
+    assert_contains(plain, "-old word", "renderer should preserve bare removed line")
+    assert_contains(plain, "+new word", "renderer should preserve bare added line")
+    assert_contains(plain, " same", "renderer should preserve context line")
     if ansi_enabled == "true":
-        assert_contains(out, "\x1b[", "numbered diff should still be styled")
+        assert_contains(out, "\x1b[", "unified diff should still be styled")
 
 
 @test("markdown/inline_code_no_backticks")
