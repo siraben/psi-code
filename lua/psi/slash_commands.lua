@@ -711,7 +711,7 @@ local BUILTIN_COMMANDS = {
   {
     name = "apropos",
     argument_hint = "<pattern>",
-    description = "Search docstrings for a substring (Emacs-style)",
+    description = "Search docstrings for a substring",
   },
   {
     name = "find-source",
