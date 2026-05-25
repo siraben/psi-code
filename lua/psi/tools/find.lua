@@ -17,7 +17,18 @@ local function impl(input, meta)
   local raw_path = registry.optional_string(input, "path", ".")
   local path = path_util.resolve(raw_path) or raw_path
   local limit = registry.optional_number(input, "limit", 1000)
-  local argv = { "fd", "--hidden", "--max-results", tostring(limit), "--glob", "--", pattern, path }
+  local argv = {
+    "fd",
+    "--hidden",
+    "--threads",
+    "1",
+    "--max-results",
+    tostring(limit),
+    "--glob",
+    "--",
+    pattern,
+    path,
+  }
 
   local tool_call_id = meta and meta.tool_call_id or nil
   local stream = shell.run_streaming_argv(argv, tool_call_id, {

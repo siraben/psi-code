@@ -1,8 +1,7 @@
 name: Set up CI environment
 description: >
-  Export HOME and XDG_CACHE_HOME under the workspace so nix can write to them.
-  If build-dir-suffix is set, also export a fresh per-run CI_BUILD_DIR and
-  symlink ./build to it.
+  Export writable HOME and XDG_CACHE_HOME for Nix. If build-dir-suffix is set,
+  also export a fresh per-run CI_BUILD_DIR and symlink ./build to it.
 
 inputs:
   build-dir-suffix:
@@ -17,11 +16,15 @@ runs:
       env:
         SUFFIX: ${{ inputs.build-dir-suffix }}
       run: |
-        echo "HOME=$PWD/.home" >> "$GITHUB_ENV"
-        echo "XDG_CACHE_HOME=$PWD/.cache" >> "$GITHUB_ENV"
-        mkdir -p "$PWD/.home" "$PWD/.cache"
+        tag="/tmp/psi-ci-${GITHUB_RUN_ID}-${GITHUB_JOB}-${GITHUB_RUN_ATTEMPT}"
+        home_dir="${tag}-home"
+        cache_dir="${tag}-cache"
+        rm -rf "$home_dir" "$cache_dir"
+        mkdir -p "$home_dir" "$cache_dir"
+        echo "HOME=$home_dir" >> "$GITHUB_ENV"
+        echo "XDG_CACHE_HOME=$cache_dir" >> "$GITHUB_ENV"
         if [ -n "$SUFFIX" ]; then
-          build_dir="/tmp/psi-ci-${GITHUB_RUN_ID}-${GITHUB_JOB}-${GITHUB_RUN_ATTEMPT}-${SUFFIX}"
+          build_dir="${tag}-${SUFFIX}"
           rm -rf build "$build_dir"
           mkdir -p "$build_dir"
           ln -s "$build_dir" build
