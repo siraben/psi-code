@@ -519,8 +519,10 @@ static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx) {
 #define PSI_VM_TUI_FIRST_TERMINAL_CELL 1
 #define PSI_VM_TUI_POLL_INFINITE_MS (-1)
 #define PSI_VM_TUI_POLL_MAX_MS 3600000
-#define PSI_VM_TUI_ESCAPE_INITIAL_TIMEOUT_MS 25
-#define PSI_VM_TUI_ESCAPE_CONTINUE_TIMEOUT_MS 5
+/* SSH/tmux links can split CSI arrow keys across packets. Keep both waits long
+ * enough that ESC [ A/B stays one key event instead of leaking A/B into input. */
+#define PSI_VM_TUI_ESCAPE_INITIAL_TIMEOUT_MS 100
+#define PSI_VM_TUI_ESCAPE_CONTINUE_TIMEOUT_MS 100
 #define PSI_VM_TUI_ESCAPE_BYTE 27
 #define PSI_VM_TUI_BACKSPACE_DELETE 127
 #define PSI_VM_TUI_BACKSPACE_ASCII 8
