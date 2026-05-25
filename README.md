@@ -1,6 +1,6 @@
 # psi
 
-A coding agent that builds with `cc *.c -o psi`.
+A small C/Lua coding agent with a plain Makefile build.
 
 ---
 
@@ -12,9 +12,11 @@ to compile and weighs more than the operating systems it targets.
 psi is a C89 host with a Lua 5.5 brain, written so the whole thing
 compiles on machines that no longer get release notes.
 
-It runs on Linux. It also runs on Haiku and 9front, and there are
-ports to AmigaOS and ReactOS in flight. Not as a stunt — as the
-single test that catches every assumption an agent might quietly make
+The maintained build target is Linux, with Nix packages covering
+dynamic, static musl, i686, RISC-V, and Cosmopolitan-style binaries.
+Other operating systems remain portability targets, but they are not
+currently represented by checked-in platform directories. Portability
+is the test that catches every assumption an agent might quietly make
 about its host.
 
 ## Why
@@ -28,10 +30,10 @@ for itself. Together they argue against being able to build the thing
 from source.
 
 psi takes the opposite bet. The agent loop, prompts, session schema,
-TUI, providers, and tools are ~17k lines of pure Lua. The host —
-process spawning, HTTP, terminal raw mode, Lua VM glue — is ~5k
-lines of strict C89. Both halves fit in your head. There are no
-build artifacts you didn't compile yourself.
+TUI, providers, and tools are ~23k lines of pure Lua. The host —
+process spawning, HTTP, terminal raw mode, Lua VM glue — is ~9k
+lines of strict C89, including headers. There are no build artifacts
+you didn't compile yourself.
 
 ## What's different
 
@@ -47,9 +49,9 @@ handles, never through Lua. See [docs/architecture.md](docs/architecture.md).
 docs are deflate-compressed into the binary at build time. A
 `packages.psi-static` musl build is a single self-contained file that
 runs without Lua, without Node, without an interpreter on `$PATH`.
-There's an i686 variant for the same reason there's a 9front port:
-because nothing in the design ought to require a 64-bit POSIX 2017
-host, and that's worth proving.
+There are i686 and RISC-V static variants for the same reason:
+nothing in the design ought to require a 64-bit POSIX 2017 host, and
+that's worth proving.
 
 **Pi's philosophy, less the JavaScript.** psi is a port of [Mario
 Zechner's pi-mono](https://github.com/badlogic/pi-mono) coding agent.
@@ -78,10 +80,10 @@ agent. See [docs/extensions.md](docs/extensions.md).
 
 ## What it isn't
 
-- A pi-mono replacement. Several pi features (session tree
-  navigation, RPC mode, branch-aware compaction, the broad
-  pi-managed model catalog) are tracked in [docs/port-status.md](docs/port-status.md)
-  but not yet here.
+- A pi-mono replacement. Several pi features (RPC mode,
+  branch-aware compaction, higher-level TUI overlays/selectors, and
+  the broad pi-managed model catalog) are tracked in
+  [docs/port-status.md](docs/port-status.md) but not yet here.
 - A platform. There is no plugin marketplace, no auto-update, no
   telemetry, no hosted backend. psi is a binary you build.
 - An MCP host. Build a CLI and tell the model how to use it, or
@@ -99,7 +101,7 @@ nix build
 ANTHROPIC_API_KEY=... ./result/bin/psi
 ```
 
-That opens the full-screen TUI. The other entry points are flags on
+That opens the inline TUI. The other entry points are flags on
 the same binary:
 
 ```bash
@@ -125,9 +127,10 @@ Optional Make flags (each defaults to `1`, set to `0` to disable):
 
 | Flag             | Effect                                                     |
 |------------------|------------------------------------------------------------|
-| `TUI`            | Full-screen frontend and `psi.tui_*` host primitives       |
+| `TUI`            | Inline terminal frontend and `psi.tui_*` host primitives   |
 | `ANSI`           | ANSI SGR emission and parsing (TUI implies this)           |
 | `COLOR`          | Color SGR emission (non-color styles still allowed)        |
+| `MCP`            | Stdio process primitives for protocol clients; no bridge   |
 | `REPL_EDITLINE`  | libedit-backed REPL with history; `fgets` fallback if off  |
 
 `make check-build-configs` builds the full toggle matrix into
@@ -182,7 +185,6 @@ docs/port-status.md     audit against pi-mono
 docs/extensions.md      extension API surface and event catalog
 docs/providers.md       provider catalogue and configuration
 
-haiku/  9front/  amigaos/  reactos/   per-platform port artifacts
 tests/                                  Python harnesses (smoke, bench, valgrind)
 ```
 
@@ -220,5 +222,5 @@ cooperative abort, dynamic token-aware compaction, OAuth flows
 
 What's missing relative to pi-mono is tracked in
 [docs/port-status.md](docs/port-status.md). The largest gaps are
-session-tree navigation, branch-aware compaction, RPC mode, and a
-frozen extension-level provider registration API.
+branch-aware compaction, RPC mode, higher-level TUI overlays/selectors,
+and a frozen extension-level provider registration API.

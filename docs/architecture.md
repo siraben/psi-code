@@ -329,6 +329,9 @@ Current gates:
 - `TUI`: inline ANSI frontend and `psi.tui_*` host primitives
 - `ANSI`: ANSI SGR emission and parsing
 - `COLOR`: color SGR emission
+- `MCP`: low-level stdio process primitives used by protocol clients
+  (`psi.process_begin_stdio_argv`, `psi.process_try_write`, and related
+  helpers). This is not a bundled MCP bridge.
 - `REPL_EDITLINE`: libedit-backed REPL input/history; falls back to plain
   `fgets` input when disabled
 

@@ -207,8 +207,14 @@ Source of truth: `DEFINITIONS` in `lua/psi/keybindings.lua`.
 
 **CommandAction** (from `psi.records.new_command_action(kind, payload)`):
 ```lua
-{ kind = "print" | "compact", payload = "..." | 12 }
+{ kind = "print", payload = "..." }
 ```
+
+Built-in dispatchers also understand actions such as `ansi-print`,
+`btw`, `compact`, `expand`, `quit`, `set-model`, `set-thinking`,
+`set-reasoning-effort`, `resume`, and `name`. Extension commands should
+return `print` unless they coordinate with a frontend that explicitly
+handles another action kind.
 
 ### Themes — `psi.theme`
 
@@ -279,8 +285,8 @@ tool-result payload fed back into its context), use a
 
 `psi.render.events()` returns the list of event names the render
 bridge dispatches (currently `before-turn`, `assistant-text`,
-`tool-call`, `tool-result`, `after-turn`). Extensions can inspect this
-rather than hard-coding names.
+`thinking-delta`, `tool-call`, `tool-result`, `after-turn`).
+Extensions can inspect this rather than hard-coding names.
 
 Most extensions should use `psi.events.on` instead. Use render hooks
 only when you need to mutate the on-screen output.
@@ -314,6 +320,7 @@ These are part of the stable surface:
 | `psi.path_join(base, name)` / `psi.path_expand(path)` / `psi.path_resolve(path)` / `psi.parent_directory(path)` | Portable path helpers. `path_expand` handles `~` and leading `@`; `path_resolve` anchors relative paths at the current working directory. |
 | `psi.mkdir_p(path)` / `psi.mkdir_parent(path)` | Recursive directory creation. |
 | `psi.current_date()` | `"YYYY-MM-DD"`. |
+| `psi.runtime_info()` | Build/runtime capability table including `ansi`, `color`, `mcp`, `repl_editline`, `tui`, `git-commit`, and `version`. |
 | `psi.is_aborted()` | `true` when Ctrl-C / Esc requested. Poll during long work. |
 | `psi.json_encode(v)` / `psi.json_decode(s)` | JSON. |
 | `psi.session_message_count()` / `psi.session_messages()` | Read current in-memory session. |
@@ -322,7 +329,7 @@ These are part of the stable surface:
 | `psi.tool_call(name, input)` | Dispatch a tool through the full before/after hook chain. **Prefer this over calling `tool.impl` directly** — `impl` skips hook processing (permissions, redaction, extension transforms). |
 | `psi.tools.cancel(reason)` | Shorthand for a failure `ToolResult` used in before-hooks to short-circuit dispatch. Example: `tools.add_before_hook(function(n, i) if n == "bash" and i.command:find("rm %-rf") then return tools.cancel("refused") end end)`. |
 | `psi.prompt.register_transformer(fn)` | Append a system-prompt rewriter. Receives the assembled prompt, returns a replacement (or `nil` to leave it). Runs after built-in assembly; transformers stack in registration order. |
-| `psi.agent.set_model(name)` / `psi.agent.current_model(fallback)` | Switch the default model at runtime (any prefix psi understands: `anthropic/`, `ollama/`, `openrouter/`). Picked up on the *next* turn; the TUI status line reflects it immediately. Pass `nil` to clear. |
+| `psi.agent.set_model(name)` / `psi.agent.current_model(fallback)` | Switch the default model at runtime (any prefix psi understands: `anthropic/`, `ollama/`, `openrouter/`, `openai-codex/`). Picked up on the *next* turn; the TUI status line reflects it immediately. Pass `nil` to clear. |
 | `psi.agent.queue_follow_up(text)` / `queue_steering(text)` | Queue user text for the active run loop. Follow-ups run after the current task would otherwise stop; steering is injected before the next provider request. |
 | `psi.agent.pending_messages()` / `pending_message(i)` / `replace_pending(i, text)` / `remove_pending(i)` / `clear_queues()` | Inspect and edit queued messages. TUI busy-submit uses the follow-up queue. |
 | `psi.agent.side_question(question, opts)` | Ask an ephemeral `/btw`-style side question using the current transcript excerpt. Uses the currently configured model, including local providers, and does not append to the session. |
@@ -420,7 +427,7 @@ them to pi-style underscore names (`turn_end`, `tool_execution_start`,
 | `after-provider-response` | Right after the assistant message is saved, before tool dispatch or auto-compaction. | `{ usage, stop_reason, response_id, model }` |
 | `assistant-text-delta` | Every streamed text chunk. High frequency. | `{ text = "<chunk>" }` |
 | `tool-call-delta` | Every streamed chunk of a tool_use block's input JSON. | `{ id, partial_json }` |
-| `thinking-delta` | Every streamed thinking-block chunk. **Anthropic provider only** — the Ollama loop doesn't emit thinking today. | `{ text }` |
+| `thinking-delta` | Every streamed thinking/reasoning chunk from providers that expose one, including Anthropic, Ollama reasoning models, and OpenAI Codex reasoning summaries. | `{ text }` |
 | `tool-call` | Before a tool is dispatched. | `{ id, tool, input }` |
 | `tool-result` | After a tool returns. | `{ id, tool, result }` |
 | `assistant-text` | Per aggregated assistant text block (render-level). | `{ text }` |
@@ -452,8 +459,8 @@ What we **intentionally** do not support yet — open tickets, not bugs:
 
 - No `psi install` / package manager. Extensions are single-file drops.
 - No TypeScript. Lua only.
-- No stable provider registration API yet. Built-in Anthropic, Ollama, and
-  OpenRouter providers are available through the provider registry, but
+- No stable provider registration API yet. Built-in Anthropic, Ollama,
+  OpenRouter, and OpenAI Codex providers are available through the provider registry, but
   extension authors should treat registration internals as unstable.
 - No sandboxing. Extensions run with full Lua and `psi` access — trust
   the files you install.
@@ -462,7 +469,7 @@ What we **intentionally** do not support yet — open tickets, not bugs:
 - No MCP bridge.
 - No dedicated system-prompt event. Use `psi.prompt.register_transformer(fn)`
   for extension-controlled prompt rewrites.
-- pi ships ~27 events; psi starts with the 10 above. New ones will be
+- psi keeps the event catalog intentionally compact. New events will be
   added on demand.
 
 ## Packaged extensions

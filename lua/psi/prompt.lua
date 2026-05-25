@@ -111,7 +111,7 @@ function M.system_prompt()
     "- docs/architecture.md      — architecture overview\n",
     "- docs/port-status.md       — port audit against pi\n",
     "- docs/extensions.md        — extension / event / slash-command API\n",
-    "- docs/providers.md         — Anthropic + Ollama provider routing\n",
+    "- docs/providers.md         — provider routing and configuration\n",
     "- Read only when the user asks about psi itself, its architecture, ",
     "Lua modules, or host layer. Always read the target .md file ",
     "completely and follow links to related docs.",

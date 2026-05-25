@@ -141,7 +141,7 @@ function M.man_page()
   emit(".SH DESCRIPTION")
   emit("psi is a small terminal coding agent. The host runtime is C89;")
   emit("the agent loop, providers, and TUI are pure Lua. With no flags,")
-  emit("psi opens the full-screen TUI over the same runtime that")
+  emit("psi opens the inline TUI over the same runtime that")
   emit("\\fB--print\\fR, \\fB--agent\\fR, and \\fB--repl\\fR drive.")
   emit(".SH OPTIONS")
   local cli = parse_cli_options(read_file("src/runtime/cli.c"))
@@ -178,12 +178,14 @@ function M.man_page()
   emit(".SH PROVIDERS")
   local providers = api_registry.all_providers()
   local pnames = {}
-  for n in pairs(providers) do
-    pnames[#pnames + 1] = n
+  for _, entry in ipairs(providers) do
+    if type(entry) == "table" and type(entry.name) == "string" then
+      pnames[#pnames + 1] = entry.name
+    end
   end
   table.sort(pnames)
   for _, name in ipairs(pnames) do
-    local spec = providers[name]
+    local spec = api_registry.provider(name) or {}
     emit(".TP")
     emit("\\fB%s\\fR", name)
     emit(

@@ -8,7 +8,7 @@ psi \- terminal coding agent
 .SH DESCRIPTION
 psi is a small terminal coding agent. The host runtime is C89;
 the agent loop, providers, and TUI are pure Lua. With no flags,
-psi opens the full-screen TUI over the same runtime that
+psi opens the inline TUI over the same runtime that
 \fB--print\fR, \fB--agent\fR, and \fB--repl\fR drive.
 .SH OPTIONS
 .TP
@@ -142,27 +142,27 @@ Print the current coding\-agent system prompt
 Show the docstring for a slash command, tool, primitive, key, or provider
 .TP
 \fB/apropos <pattern>\fR
-Search docstrings for a substring (Emacs\-style)
+Search docstrings for a substring
 .TP
 \fB/find-source <symbol>\fR
 Print the file path that defines a documented symbol
 .SH PROVIDERS
 .TP
-\fB1\fR
-default model claude-opus-4-7, override via —
+\fBanthropic\fR
+default model claude-opus-4-7, override via PSI_ANTHROPIC_MODEL
 .TP
-\fB2\fR
-default model llama3.1:latest, override via —
+\fBollama\fR
+default model llama3.1:latest, override via PSI_OLLAMA_MODEL
 .TP
-\fB3\fR
-default model gpt-5.5, override via —
+\fBopenai-codex\fR
+default model gpt-5.5, override via PSI_OPENAI_CODEX_MODEL
 .TP
-\fB4\fR
-default model google/gemini-3-flash-preview, override via —
+\fBopenrouter\fR
+default model google/gemini-3-flash-preview, override via PSI_OPENROUTER_MODEL
 .SH ENVIRONMENT
 .TP
 \fBPSI_PROVIDER\fR
-Override default provider: 1, 2, 3, 4.
+Override default provider: anthropic, ollama, openai-codex, openrouter.
 .TP
 \fBPSI_EXTENSIONS_DIR\fR
 Colon-separated list of extension directories scanned at boot.

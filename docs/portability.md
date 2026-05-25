@@ -1,12 +1,12 @@
 # psi portability
 
 Aspirations: build cleanly on every platform that has a C compiler
-and a Lua interpreter, with as little ceremony as Nils Holm's
-*Scheme 9 from Empty Space* (S9fES) — `cc *.c -o psi` and go. We
-don't quite get there because psi has more dependencies than S9fES
-(it has none beyond `<stdio.h>`/`<stdlib.h>`/`<string.h>`), but the
-shape of the code is deliberately set up so an adventurous porter
-can replace any one bit and keep the rest.
+and a Lua interpreter, with the same spirit as Nils Holm's
+*Scheme 9 from Empty Space* (S9fES). psi is not a literal
+`cc *.c -o psi` project: it embeds Lua/docs at build time and links
+Lua 5.5, cJSON, argtable3, libcurl, zlib, and optionally libedit.
+The shape of the code is deliberately set up so an adventurous porter
+can replace any one host-facing bit and keep the rest.
 
 ## Principles applied (S9fES-derived)
 
@@ -29,15 +29,15 @@ can replace any one bit and keep the rest.
    CreateProcess-based implementation. No `#include <unistd.h>` in a
    header that callers might not need POSIX for.
 
-4. **Platform-specific code lives in dedicated files.** Linux/Haiku
-   uses `src/core/http_buffered.c` (libcurl) and `src/core/http_async.c`
-   (pthread). Any new platform adds its own `<plat>/src/*.c` and the
+4. **Platform-specific code should live in dedicated files.** The
+   current tree ships the portable core plus Linux-oriented build
+   packaging. Any new platform should add its own `<plat>/src/*.c` and the
    upstream sources stay untouched. This mirrors S9fES's `s9core` +
    `s9-unix.c` / `s9-win32.c` split.
 
-5. **Lua brain, C scaffolding.** ~5 KLoC of Lua in `lua/psi/*.lua`
+5. **Lua brain, C scaffolding.** ~23 KLoC of Lua in `lua/psi/*.lua`
    contains the agent loop, session persistence, render, command
-   parsing — fully OS-agnostic. The C layer is glue (~3 KLoC). To
+   parsing — fully OS-agnostic. The C layer is glue (~9 KLoC including headers). To
    port, you replace C glue, not Lua logic.
 
 6. **Detect features, not platforms** *(when feasible)*. Prefer
@@ -64,7 +64,7 @@ can replace any one bit and keep the rest.
 | Signal-handler-written flag type      | ✅ `volatile sig_atomic_t` (the only type C89 guarantees safe under signal handlers) |
 | `LC_NUMERIC` poisoning                | ✅ TUI mode adopts `LC_CTYPE` only, not `LC_ALL` — keeps `printf("%f")` and cJSON locale-neutral so JSON request bodies stay valid |
 | Public-header dependency footprint    | ✅ `include/psi/*.h` only pulls `<stddef.h>`, `<signal.h>`, `<stdio.h>`, `<lua.h>`; no `<curl/curl.h>`, `<pthread.h>`, `<unistd.h>`, or other platform/library headers leak through |
-| Vendored vs system deps               | Lua 5.5, cJSON, argtable3, libedit, libcurl, zlib are system-supplied via pkg-config on Linux/Haiku. Hosts without pkg-config can vendor or override per-dep — see "untested-OS predictions" below. |
+| Vendored vs system deps               | Lua 5.5, cJSON, argtable3, libedit, libcurl, zlib are system-supplied via pkg-config in the maintained Linux build. Hosts without pkg-config can vendor or override per-dep — see "untested-OS predictions" below. |
 
 ## Untested-OS predictions
 
@@ -74,7 +74,7 @@ can replace any one bit and keep the rest.
 | **macOS**                  | should build with Homebrew deps | Homebrew installs Lua and libcjson under `/opt/homebrew`; user must set `PKG_CONFIG_PATH` for a Lua 5.5 package or override `LUA_PKG_CONFIG`. Apple Clang's `-Wno-unknown-warning-option` may eat newer flags silently. `-Wl,-static` is partly broken on macOS, so static builds fail — that's documented. |
 | **illumos / Solaris**      | needs minor work | `gettimeofday` still present but Solaris `pthread_cond_timedwait` semantics differ subtly around CLOCK choice. More importantly, Solaris `getopt_long` is in `libgetopt`; argtable3 vendors getopt so this is fine. |
 | **Cygwin / MSYS2**         | should build, slowly | fork is emulated and slow; agent feels sluggish but works. libcurl and pthread present via packages. PE-format static linking has gotchas. |
-| **Haiku**                  | already works | port committed under `haiku/`. |
+| **Haiku**                  | plausible, not currently checked in | The repo no longer carries `haiku/` port artifacts. Expect pkg-config/package-name fixes and termios/libedit details before claiming support. |
 | **Windows (MSVC native)**  | does not build | `process.c`'s `_WIN32` arm is empty. Need CreateProcess-based replacement plus a libcurl-or-WinHTTP HTTP backend. ~500 LoC of C. |
 | **plain MS-DOS / DJGPP**   | unsupported | no fork, no pthread, no full POSIX. Out of scope. |
 | **Embedded (no fork/exec)**| unsupported | tool-call path requires process spawning. Could in theory build a `--no-tools` mode — not a stated goal. |
@@ -82,7 +82,7 @@ can replace any one bit and keep the rest.
 
 ## How to port to a new OS
 
-The pattern from `haiku/`:
+Suggested pattern:
 
 1. Read `docs/architecture.md` to identify the C↔Lua boundary.
 2. Identify the platform shims you need to replace:
