@@ -158,6 +158,28 @@ psi> /apropos tool:
 psi> /describe tool:bash
 ```
 
+`bash`, `grep`, `find`, and `ls` run through a small host process layer in
+`src/core/process.c` that captures output and exit status using `fork`/`exec`
+on POSIX and `CreateProcess` + anonymous pipes on Windows.
+
+### Windows (mingw-w64 cross)
+
+Cross-build a `psi.exe` and run it under wine for end-to-end testing:
+
+```bash
+nix build .#psi-mingw
+WINEPREFIX=$HOME/.wine64-psi wine64 result/bin/psi.exe --version
+ANTHROPIC_API_KEY=… WINEPREFIX=$HOME/.wine64-psi \
+  wine64 result/bin/psi.exe --agent 'run cmd /c ver and report it'
+```
+
+The mingw build cuts the TUI and libedit (POSIX-only); HTTPS goes
+through libcurl + OpenSSL with an embedded CA bundle. See
+[docs/portability.md](docs/portability.md#building-for-windows-mingw-w64)
+for the full story (what's stubbed, why OpenSSL over schannel, etc.).
+A `nix develop .#mingw` shell is also available for iterating compile
+errors interactively.
+
 ## Layout
 
 ```

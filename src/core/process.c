@@ -14,6 +14,8 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#else
+#include <windows.h>
 #endif
 #include "psi/abort.h"
 #include "psi/common.h"
@@ -30,10 +32,12 @@ static const size_t PSI_PROCESS_OUTPUT_MAX_BYTES = 262144u;
  * #define so it's usable as an array dimension in C89. */
 #define PSI_PROCESS_READ_CHUNK 4096
 
+#ifndef _WIN32
 /* Fallback poll interval used by psi_process_poll when the caller
  * passes a longer timeout — we wake up at most every 20 ms so the
  * abort signal stays responsive. */
 static const long PSI_PROCESS_POLL_DELAY_NS = 20L * 1000000L; /* 20 ms */
+#endif
 
 static int psi_process_append_bytes(
     char **buffer, size_t *length, size_t *capacity, const char *data, size_t bytes) {
@@ -620,25 +624,282 @@ int psi_process_finish(
 #else /* _WIN32 */
 
 struct psi_process_handle {
-    int placeholder;
+    HANDLE proc;
+    HANDLE pipe_read;
+    int aborted;
+    int eof_seen;
+    int reaped;
+    DWORD exit_code;
+
+    char *output_buffer;
+    size_t output_length;
+    size_t output_capacity;
+    int truncated;
+
+    const struct psi_abort_signal *abort_signal;
 };
+
+/* Hand the caller a fresh copy of `data[0..len)` (when `chunk` is
+ * non-NULL), append into the bounded internal buffer up to the
+ * 256 KiB ceiling, and set `*truncated` on overflow. */
+static int psi_process_record_chunk(char **buffer, size_t *length, size_t *capacity, int *truncated,
+    const char *data, size_t len, char **chunk, size_t *chunk_len) {
+    if (chunk != NULL) {
+        char *copy = (char *)malloc(len + 1u);
+        if (copy == NULL)
+            return -1;
+        memcpy(copy, data, len);
+        copy[len] = '\0';
+        *chunk = copy;
+    }
+    if (chunk_len != NULL)
+        *chunk_len = len;
+
+    if (*length < PSI_PROCESS_OUTPUT_MAX_BYTES) {
+        size_t to_copy = len;
+        if (*length + to_copy > PSI_PROCESS_OUTPUT_MAX_BYTES) {
+            *truncated = 1;
+            to_copy = PSI_PROCESS_OUTPUT_MAX_BYTES - *length;
+        }
+        /* Caller's copy already has the bytes; ignore append failures. */
+        (void)psi_process_append_bytes(buffer, length, capacity, data, to_copy);
+    } else {
+        *truncated = 1;
+    }
+    return 1;
+}
+
+static int psi_process_arg_needs_quoting(const char *arg) {
+    const char *p;
+    if (arg == NULL || arg[0] == '\0')
+        return 1;
+    for (p = arg; *p != '\0'; p++) {
+        if (*p == ' ' || *p == '\t' || *p == '"' || *p == '\\')
+            return 1;
+    }
+    return 0;
+}
+
+/* Microsoft's CommandLineToArgvW parsing rules: backslashes only
+ * special before a `"`; runs of N backslashes followed by `"` need
+ * 2N+1 backslashes + `"` to encode a literal `"`, runs at end of
+ * arg need 2N to avoid escaping the closing quote.
+ * See https://learn.microsoft.com/en-us/cpp/c-language/parsing-c-command-line-arguments. */
+static int psi_process_append_quoted(
+    char **buffer, size_t *length, size_t *capacity, const char *arg) {
+    size_t backslashes;
+    const char *p;
+    char quote = '"';
+    char bs = '\\';
+
+    if (!psi_process_arg_needs_quoting(arg)) {
+        return psi_process_append_bytes(buffer, length, capacity, arg, strlen(arg));
+    }
+
+    if (psi_process_append_bytes(buffer, length, capacity, &quote, 1u) != PSI_STATUS_OK)
+        return PSI_STATUS_ERROR;
+
+    p = arg;
+    backslashes = 0u;
+    while (*p != '\0') {
+        if (*p == '\\') {
+            backslashes++;
+            p++;
+            continue;
+        }
+        if (*p == '"') {
+            size_t i;
+            for (i = 0u; i < backslashes * 2u + 1u; i++) {
+                if (psi_process_append_bytes(buffer, length, capacity, &bs, 1u) != PSI_STATUS_OK)
+                    return PSI_STATUS_ERROR;
+            }
+            if (psi_process_append_bytes(buffer, length, capacity, &quote, 1u) != PSI_STATUS_OK)
+                return PSI_STATUS_ERROR;
+            backslashes = 0u;
+            p++;
+            continue;
+        }
+        {
+            size_t i;
+            for (i = 0u; i < backslashes; i++) {
+                if (psi_process_append_bytes(buffer, length, capacity, &bs, 1u) != PSI_STATUS_OK)
+                    return PSI_STATUS_ERROR;
+            }
+        }
+        backslashes = 0u;
+        if (psi_process_append_bytes(buffer, length, capacity, p, 1u) != PSI_STATUS_OK)
+            return PSI_STATUS_ERROR;
+        p++;
+    }
+    {
+        size_t i;
+        for (i = 0u; i < backslashes * 2u; i++) {
+            if (psi_process_append_bytes(buffer, length, capacity, &bs, 1u) != PSI_STATUS_OK)
+                return PSI_STATUS_ERROR;
+        }
+    }
+    if (psi_process_append_bytes(buffer, length, capacity, &quote, 1u) != PSI_STATUS_OK)
+        return PSI_STATUS_ERROR;
+    return PSI_STATUS_OK;
+}
+
+static char *psi_process_argv_to_cmdline(char *const argv[]) {
+    char *buffer = NULL;
+    size_t length = 0u, capacity = 0u;
+    char space = ' ';
+    int i;
+
+    if (argv == NULL || argv[0] == NULL)
+        return NULL;
+    for (i = 0; argv[i] != NULL; i++) {
+        if (i > 0) {
+            if (psi_process_append_bytes(&buffer, &length, &capacity, &space, 1u) !=
+                PSI_STATUS_OK) {
+                free(buffer);
+                return NULL;
+            }
+        }
+        if (psi_process_append_quoted(&buffer, &length, &capacity, argv[i]) != PSI_STATUS_OK) {
+            free(buffer);
+            return NULL;
+        }
+    }
+    if (buffer == NULL)
+        buffer = psi_strdup("");
+    return buffer;
+}
+
+static int psi_process_begin_cmdline(const char *cmdline,
+    const struct psi_abort_signal *abort_signal, struct psi_process_handle **out) {
+    HANDLE pipe_read = NULL;
+    HANDLE pipe_write = NULL;
+    HANDLE devnull = INVALID_HANDLE_VALUE;
+    SECURITY_ATTRIBUTES sa;
+    PROCESS_INFORMATION pi;
+    STARTUPINFOA si;
+    char *cmd_copy = NULL;
+    struct psi_process_handle *h;
+
+    if (out == NULL)
+        return PSI_STATUS_ERROR;
+    *out = NULL;
+    if (cmdline == NULL || cmdline[0] == '\0')
+        return PSI_STATUS_ERROR;
+
+    sa.nLength = (DWORD)sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    sa.lpSecurityDescriptor = NULL;
+
+    if (!CreatePipe(&pipe_read, &pipe_write, &sa, 0))
+        return PSI_STATUS_ERROR;
+    /* Read end is parent-only; child must not inherit it. */
+    if (!SetHandleInformation(pipe_read, HANDLE_FLAG_INHERIT, 0))
+        goto fail;
+
+    devnull = CreateFileA("NUL", GENERIC_READ, (DWORD)(FILE_SHARE_READ | FILE_SHARE_WRITE), &sa,
+        OPEN_EXISTING, (DWORD)FILE_ATTRIBUTE_NORMAL, NULL);
+    if (devnull == INVALID_HANDLE_VALUE)
+        goto fail;
+
+    cmd_copy = psi_strdup(cmdline);
+    if (cmd_copy == NULL)
+        goto fail;
+
+    memset(&si, 0, sizeof(si));
+    si.cb = (DWORD)sizeof(si);
+    si.dwFlags = (DWORD)STARTF_USESTDHANDLES;
+    si.hStdInput = devnull;
+    si.hStdOutput = pipe_write;
+    si.hStdError = pipe_write;
+    memset(&pi, 0, sizeof(pi));
+
+    /* CREATE_NO_WINDOW prevents a console flash for GUI hosts. */
+    if (!CreateProcessA(
+            NULL, cmd_copy, NULL, NULL, TRUE, (DWORD)CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        goto fail;
+    }
+    free(cmd_copy);
+    cmd_copy = NULL;
+    CloseHandle(pi.hThread);
+    /* Parent must close its copy of the write end so EOF propagates
+     * after the child exits. */
+    CloseHandle(pipe_write);
+    pipe_write = NULL;
+    CloseHandle(devnull);
+    devnull = INVALID_HANDLE_VALUE;
+
+    h = (struct psi_process_handle *)calloc(1u, sizeof(*h));
+    if (h == NULL) {
+        TerminateProcess(pi.hProcess, 1u);
+        WaitForSingleObject(pi.hProcess, 1000);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pipe_read);
+        return PSI_STATUS_ERROR;
+    }
+    h->proc = pi.hProcess;
+    h->pipe_read = pipe_read;
+    h->abort_signal = abort_signal;
+    *out = h;
+    return PSI_STATUS_OK;
+
+fail:
+    free(cmd_copy);
+    if (devnull != INVALID_HANDLE_VALUE)
+        CloseHandle(devnull);
+    if (pipe_write != NULL)
+        CloseHandle(pipe_write);
+    if (pipe_read != NULL)
+        CloseHandle(pipe_read);
+    return PSI_STATUS_ERROR;
+}
 
 int psi_process_begin(const char *command, const struct psi_abort_signal *abort_signal,
     struct psi_process_handle **out) {
-    PSI_UNUSED(command);
-    PSI_UNUSED(abort_signal);
-    if (out != NULL)
-        *out = NULL;
-    return PSI_STATUS_ERROR;
+    /* /S strips exactly one outer pair of quotes if present, matching
+     * how POSIX `sh -c` treats its argument. */
+    char *wrapped = NULL;
+    size_t length = 0u;
+    size_t capacity = 0u;
+    int rc;
+
+    if (out == NULL)
+        return PSI_STATUS_ERROR;
+    *out = NULL;
+    if (command == NULL)
+        return PSI_STATUS_ERROR;
+
+    if (psi_process_append_bytes(&wrapped, &length, &capacity, "cmd.exe /S /C \"", 15u) !=
+            PSI_STATUS_OK ||
+        psi_process_append_bytes(&wrapped, &length, &capacity, command, strlen(command)) !=
+            PSI_STATUS_OK ||
+        psi_process_append_bytes(&wrapped, &length, &capacity, "\"", 1u) != PSI_STATUS_OK) {
+        free(wrapped);
+        return PSI_STATUS_ERROR;
+    }
+    rc = psi_process_begin_cmdline(wrapped, abort_signal, out);
+    free(wrapped);
+    return rc;
 }
+
 int psi_process_begin_argv(char *const argv[], const struct psi_abort_signal *abort_signal,
     struct psi_process_handle **out) {
-    PSI_UNUSED(argv);
-    PSI_UNUSED(abort_signal);
-    if (out != NULL)
-        *out = NULL;
-    return PSI_STATUS_ERROR;
+    char *cmdline;
+    int rc;
+
+    if (out == NULL)
+        return PSI_STATUS_ERROR;
+    *out = NULL;
+    if (argv == NULL || argv[0] == NULL)
+        return PSI_STATUS_ERROR;
+
+    cmdline = psi_process_argv_to_cmdline(argv);
+    if (cmdline == NULL)
+        return PSI_STATUS_ERROR;
+    rc = psi_process_begin_cmdline(cmdline, abort_signal, out);
+    free(cmdline);
+    return rc;
 }
+
 int psi_process_begin_stdio_argv(char *const argv[], const char *const *env_pairs, int env_count,
     const struct psi_abort_signal *abort_signal, struct psi_process_handle **out) {
     PSI_UNUSED(argv);
@@ -672,25 +933,156 @@ int psi_process_terminate(struct psi_process_handle *h) {
     PSI_UNUSED(h);
     return PSI_STATUS_ERROR;
 }
+
 int psi_process_poll(
     struct psi_process_handle *h, int timeout_ms, char **chunk, size_t *chunk_len) {
-    PSI_UNUSED(h);
-    PSI_UNUSED(timeout_ms);
-    if (chunk)
+    char read_buffer[PSI_PROCESS_READ_CHUNK];
+    long total_waited_ms;
+    long max_wait_ms;
+
+    if (chunk != NULL)
         *chunk = NULL;
-    if (chunk_len)
+    if (chunk_len != NULL)
         *chunk_len = 0u;
-    return 2;
+    if (h == NULL)
+        return 2;
+
+    if (psi_abort_signal_is_triggered(h->abort_signal) && !h->aborted) {
+        h->aborted = 1;
+        TerminateProcess(h->proc, 1u);
+    }
+
+    total_waited_ms = 0L;
+    max_wait_ms = (timeout_ms > 0) ? (long)timeout_ms : 0L;
+
+    for (;;) {
+        DWORD avail = 0u;
+        DWORD read_count = 0u;
+        DWORD wait_result;
+
+        if (!PeekNamedPipe(h->pipe_read, NULL, 0u, NULL, &avail, NULL)) {
+            /* Pipe broke — child closed the write end. */
+            h->eof_seen = 1;
+            return 2;
+        }
+
+        if (avail > 0u) {
+            DWORD to_read =
+                (avail > (DWORD)sizeof(read_buffer)) ? (DWORD)sizeof(read_buffer) : avail;
+            if (!ReadFile(h->pipe_read, read_buffer, to_read, &read_count, NULL) ||
+                read_count == 0u) {
+                h->eof_seen = 1;
+                return 2;
+            }
+            return psi_process_record_chunk(&h->output_buffer, &h->output_length,
+                &h->output_capacity, &h->truncated, read_buffer, (size_t)read_count, chunk,
+                chunk_len);
+        }
+
+        wait_result = WaitForSingleObject(h->proc, 0u);
+        if (wait_result == WAIT_OBJECT_0) {
+            /* Child exited; one final pipe drain happens in finish. */
+            h->eof_seen = 1;
+            return 2;
+        }
+
+        if (h->aborted) {
+            h->eof_seen = 1;
+            return 2;
+        }
+
+        if (timeout_ms <= 0)
+            return 0;
+
+        {
+            long step = 20L;
+            if (max_wait_ms - total_waited_ms < step)
+                step = max_wait_ms - total_waited_ms;
+            if (step <= 0L)
+                return 0;
+            /* Wait on the process handle (not Sleep) so child exit
+             * cuts the latency from up to `step`ms to ~0. */
+            WaitForSingleObject(h->proc, (DWORD)step);
+            total_waited_ms += step;
+        }
+
+        if (psi_abort_signal_is_triggered(h->abort_signal) && !h->aborted) {
+            h->aborted = 1;
+            TerminateProcess(h->proc, 1u);
+        }
+    }
 }
+
 int psi_process_finish(
     struct psi_process_handle *h, char **output_text, int *exit_status, int *truncated) {
-    PSI_UNUSED(h);
-    if (output_text)
-        *output_text = psi_strdup("");
-    if (exit_status)
-        *exit_status = -1;
-    if (truncated)
-        *truncated = 0;
+    if (h == NULL)
+        return PSI_STATUS_ERROR;
+
+    if (!h->reaped) {
+        /* Drain any residual bytes the caller didn't consume. */
+        if (h->pipe_read != NULL) {
+            for (;;) {
+                char read_buffer[PSI_PROCESS_READ_CHUNK];
+                DWORD avail = 0u;
+                DWORD read_count = 0u;
+
+                if (!PeekNamedPipe(h->pipe_read, NULL, 0u, NULL, &avail, NULL))
+                    break;
+                if (avail == 0u)
+                    break;
+                if (!ReadFile(h->pipe_read, read_buffer,
+                        avail > (DWORD)sizeof(read_buffer) ? (DWORD)sizeof(read_buffer) : avail,
+                        &read_count, NULL) ||
+                    read_count == 0u) {
+                    break;
+                }
+                (void)psi_process_record_chunk(&h->output_buffer, &h->output_length,
+                    &h->output_capacity, &h->truncated, read_buffer, (size_t)read_count, NULL,
+                    NULL);
+            }
+            CloseHandle(h->pipe_read);
+            h->pipe_read = NULL;
+        }
+
+        /* Cap abort latency at 1.5s to match the POSIX arm's
+         * SIGTERM→SIGKILL ladder; Windows has no separate "force"
+         * signal so the bound is purely a timeout, not an escalation. */
+        WaitForSingleObject(h->proc, h->aborted ? 1500u : INFINITE);
+
+        if (!GetExitCodeProcess(h->proc, &h->exit_code))
+            h->exit_code = (DWORD)-1;
+        h->reaped = 1;
+    }
+
+    if (h->proc != NULL) {
+        CloseHandle(h->proc);
+        h->proc = NULL;
+    }
+
+    if (exit_status != NULL) {
+        if (h->aborted) {
+            *exit_status = 130;
+        } else {
+            *exit_status = (int)h->exit_code;
+        }
+    }
+    if (truncated != NULL)
+        *truncated = h->truncated;
+    if (output_text != NULL) {
+        if (h->output_buffer == NULL) {
+            *output_text = psi_strdup("");
+            if (*output_text == NULL) {
+                free(h);
+                return PSI_STATUS_ERROR;
+            }
+        } else {
+            *output_text = h->output_buffer;
+            h->output_buffer = NULL;
+        }
+    } else {
+        free(h->output_buffer);
+    }
+    free(h);
     return PSI_STATUS_OK;
 }
 
@@ -703,7 +1095,6 @@ int psi_process_finish(
 
 int psi_process_run_shell(const char *command, char **output_text, int *exit_status, int *truncated,
     psi_process_progress_cb on_chunk, void *userdata, const struct psi_abort_signal *abort_signal) {
-#ifndef _WIN32
     struct psi_process_handle *h;
 
     if (command == NULL || output_text == NULL || exit_status == NULL || truncated == NULL) {
@@ -732,30 +1123,10 @@ int psi_process_run_shell(const char *command, char **output_text, int *exit_sta
     }
 
     return psi_process_finish(h, output_text, exit_status, truncated);
-#else
-    int status;
-
-    PSI_UNUSED(on_chunk);
-    PSI_UNUSED(userdata);
-    PSI_UNUSED(abort_signal);
-    if (command == NULL || output_text == NULL || exit_status == NULL || truncated == NULL) {
-        return PSI_STATUS_ERROR;
-    }
-
-    status = system(command);
-    *output_text = psi_strdup("");
-    if (*output_text == NULL) {
-        return PSI_STATUS_ERROR;
-    }
-    *exit_status = status;
-    *truncated = 0;
-    return PSI_STATUS_OK;
-#endif
 }
 
 int psi_process_run_argv(char *const argv[], char **output_text, int *exit_status, int *truncated,
     const struct psi_abort_signal *abort_signal) {
-#ifndef _WIN32
     struct psi_process_handle *h;
 
     if (argv == NULL || argv[0] == NULL || output_text == NULL || exit_status == NULL ||
@@ -781,17 +1152,4 @@ int psi_process_run_argv(char *const argv[], char **output_text, int *exit_statu
     }
 
     return psi_process_finish(h, output_text, exit_status, truncated);
-#else
-    PSI_UNUSED(argv);
-    PSI_UNUSED(abort_signal);
-    if (output_text == NULL || exit_status == NULL || truncated == NULL) {
-        return PSI_STATUS_ERROR;
-    }
-    *output_text = psi_strdup("");
-    if (*output_text == NULL)
-        return PSI_STATUS_ERROR;
-    *exit_status = -1;
-    *truncated = 0;
-    return PSI_STATUS_OK;
-#endif
 }

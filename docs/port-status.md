@@ -42,9 +42,10 @@ architecture it is porting.
   that runs `curl_easy_perform` behind a chunk queue. The TUI no
   longer has a worker thread; the agent turn runs as a Lua
   coroutine on the same thread that owns `lua_State` and terminal rendering.
-- process execution: the safer process layer uses POSIX `fork`/`exec` on Unix
-  and falls back to `system()` elsewhere. That is practical, but not strict
-  portable C89.
+- process execution: the safer process layer uses POSIX `fork`/`exec`
+  on Unix and `CreateProcess` + anonymous pipes on Windows
+  (`src/core/process.c`'s `_WIN32` arm). Both branches drive the same
+  begin/poll/finish state machine.
 
 ## Next porting priority
 

@@ -57,7 +57,10 @@ DEPFLAGS ?= -MMD -MP
 
 # ---- Build outputs ----
 BUILD_DIR      = build
-TARGET         = $(BUILD_DIR)/psi
+# Executable suffix: empty on POSIX, ".exe" for mingw / Windows builds.
+# Cross builds set this via `make EXE=.exe`.
+EXE           ?=
+TARGET         = $(BUILD_DIR)/psi$(EXE)
 LUA_BOOT_FILE ?= $(abspath lua/boot.lua)
 CA_BUNDLE_FILE ?= $(CURL_CA_BUNDLE)
 

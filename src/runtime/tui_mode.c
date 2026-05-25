@@ -3,12 +3,9 @@
  * loop to lua/psi/tui_runtime.lua. C only owns the terminal boundary;
  * Lua decides what gets drawn. */
 
-#include <locale.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <termios.h>
-#include <unistd.h>
 #include "psi/abort.h"
 #include "psi/runtime.h"
 #include "psi/session.h"
@@ -22,6 +19,10 @@
 #endif
 
 #if PSI_ENABLE_TUI
+
+#include <locale.h>
+#include <termios.h>
+#include <unistd.h>
 
 static struct termios psi_tui_original_termios;
 static int psi_tui_has_original_termios = 0;

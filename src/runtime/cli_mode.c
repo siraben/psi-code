@@ -19,6 +19,8 @@
  * TUI mode runs its own UI-thread/worker split and never routes Ctrl-C
  * through these hooks; only CLI modes install them. */
 static struct psi_abort_signal *g_print_abort = NULL;
+
+#ifndef _WIN32
 static struct sigaction g_prev_sigint_sa;
 static int g_sigint_installed = 0;
 
@@ -49,6 +51,41 @@ static void psi_restore_sigint(void) {
     }
     g_print_abort = NULL;
 }
+#else /* _WIN32 */
+
+/* SetConsoleCtrlHandler also catches Ctrl-Break and console-close,
+ * which signal(SIGINT) would miss. */
+
+#include <windows.h>
+
+static BOOL WINAPI psi_print_console_handler(DWORD ctrl) {
+    switch (ctrl) {
+    case CTRL_C_EVENT:
+    case CTRL_BREAK_EVENT:
+        psi_abort_signal_trigger(g_print_abort);
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static int g_console_handler_installed = 0;
+
+static void psi_install_sigint(struct psi_abort_signal *sig) {
+    g_print_abort = sig;
+    if (SetConsoleCtrlHandler(psi_print_console_handler, TRUE)) {
+        g_console_handler_installed = 1;
+    }
+}
+
+static void psi_restore_sigint(void) {
+    if (g_console_handler_installed) {
+        SetConsoleCtrlHandler(psi_print_console_handler, FALSE);
+        g_console_handler_installed = 0;
+    }
+    g_print_abort = NULL;
+}
+#endif
 
 static const char *psi_mode_name(enum psi_cli_mode mode) {
     switch (mode) {

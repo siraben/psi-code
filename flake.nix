@@ -46,6 +46,51 @@
           nativeCheckInputs = p.lib.remove p.openssl (old.nativeCheckInputs or []);
         });
 
+        # mingw curl override: nixpkgs' default pulls in nghttp3 and
+        # libssh2 paths that don't build for the mingw cross. We pick
+        # one TLS backend explicitly. `mw` is the cross package set
+        # (mingwW64 for x86_64, mingw32 for i686).
+        # `mbedtls`: when tls == "mbedtls", the (overridden) mbedtls
+        # package built for `mw`.
+        mkCurlMingw = { mw, tls, mbedtls ? null }:
+          let
+            tlsFlag =
+              if tls == "schannel" then "--with-schannel"
+              else if tls == "mbedtls" then "--with-mbedtls=${lib.getDev mbedtls}"
+              else "--with-${tls}";
+          in (mw.curl.override {
+            opensslSupport = tls == "openssl";
+            http3Support = false;
+            scpSupport = false;
+            gssSupport = false;
+          }).overrideAttrs (old: {
+            configureFlags = lib.remove "--without-ssl" (old.configureFlags or [])
+              ++ [ tlsFlag ];
+            propagatedBuildInputs = (old.propagatedBuildInputs or [])
+              ++ lib.optional (tls == "mbedtls") mbedtls;
+          });
+
+        # mingw mbedtls: nixpkgs' build needs winpthreads + the
+        # broken postConfigure dropped + -Wno-error.
+        mkMbedtlsMingw = mw: mw.mbedtls.overrideAttrs (old: {
+          buildInputs = (old.buildInputs or []) ++ [ mw.windows.pthreads ];
+          hardeningDisable = (old.hardeningDisable or []) ++ [ "all" ];
+          env = (old.env or {}) // {
+            NIX_CFLAGS_COMPILE = (old.env.NIX_CFLAGS_COMPILE or "") + " -Wno-error";
+          };
+          cmakeFlags = (old.cmakeFlags or []) ++ [
+            "-DCMAKE_C_FLAGS=-Wno-error"
+            "-DENABLE_TESTING=OFF"
+            "-DENABLE_PROGRAMS=OFF"
+            # Shared mbedTLS so curl's AC_CHECK_LIB(mbedtls) finds
+            # symbols via the import lib without the static-link
+            # x509/crypto resolution dance.
+            "-DUSE_SHARED_MBEDTLS_LIBRARY=ON"
+            "-DUSE_STATIC_MBEDTLS_LIBRARY=OFF"
+          ];
+          postConfigure = "";
+        });
+
         luaFor = p: p.lua5_5;
         staticLuaFor = p: p.lua5_5.override { staticOnly = true; };
 
@@ -338,6 +383,53 @@
             buildZlib = pkgs.zlib;
           };
 
+        # Cross-compiled Windows build via mingw-w64. Produces psi.exe
+        # that runs natively on Windows or under wine. See
+        # `nix/psi-mingw.nix` for what's stubbed (TUI/libedit).
+        #
+        # TLS: curl uses OpenSSL with the CA bundle embedded by the
+        # `embed` helper (compressed, decompressed at runtime), the
+        # same plumbing the cosmocc target uses. wine's schannel is
+        # too incomplete for HTTPS round-trips, and mbedTLS on the
+        # mingw cross needs static-link symbol-resolution plumbing —
+        # OpenSSL is the path of least friction.
+        packages.psi-mingw = let
+          mw = pkgs.pkgsCross.mingwW64;
+        in mw.callPackage ./nix/psi-mingw.nix {
+          curl = mkCurlMingw { inherit mw; tls = "openssl"; };
+          openssl = mw.openssl;
+          mbedtls = null;
+          cacert = pkgs.cacert;
+          mcfgthreads = mw.windows.mcfgthreads;
+          winpthreads = mw.windows.pthreads;
+          buildCC = pkgs.stdenv.cc;
+          buildZlib = pkgs.zlib;
+        };
+
+        # i686 sibling — same recipe, different arch. ReactOS's only
+        # currently-distributed release LiveCD is x86, so this is the
+        # variant that actually runs on a stock ReactOS image.
+        # Uses mbedTLS (not OpenSSL) because OpenSSL's headers pull
+        # in the `_s` family of CRT functions, which ReactOS's
+        # msvcrt.dll doesn't ship.
+        packages.psi-mingw32 = let
+          mw = pkgs.pkgsCross.mingw32;
+          mbedtlsMingw = mkMbedtlsMingw mw;
+        in mw.callPackage ./nix/psi-mingw.nix {
+          curl = mkCurlMingw {
+            inherit mw;
+            tls = "mbedtls";
+            mbedtls = mbedtlsMingw;
+          };
+          openssl = null;
+          mbedtls = mbedtlsMingw;
+          cacert = pkgs.cacert;
+          mcfgthreads = mw.windows.mcfgthreads;
+          winpthreads = mw.windows.pthreads;
+          buildCC = pkgs.stdenv.cc;
+          buildZlib = pkgs.zlib;
+        };
+
         # Memory-safe build via Fil-C (https://github.com/mbrock/filnix).
         # Fil-C compiles C to memory-safe code by treating it as a
         # cross-compilation target (x86_64-unknown-linux-gnufilc0).
@@ -558,6 +650,39 @@
             pkgs.gcc
           ];
           shellHook = devShellHook;
+        };
+
+        # `nix develop .#mingw` — interactive cross-build shell.
+        # Provides the mingw-w64 toolchain plus prebuilt cross-libs
+        # (curl, zlib, argtable, mcfgthread) and host-side wine64 for
+        # running psi.exe end-to-end. Lua 5.5 + cJSON aren't packaged
+        # for mingw upstream; the `psi-mingw` package vendors them.
+        # In this shell, run:
+        #   nix build .#psi-mingw
+        # then:
+        #   wine64 result/bin/psi.exe --version
+        devShells.mingw = let
+          mw = pkgs.pkgsCross.mingwW64;
+        in mw.mkShell {
+          packages = [
+            mw.argtable
+            (mkCurlMingw { tls = "schannel"; })
+            mw.zlib
+            mw.windows.mcfgthreads
+            pkgs.gnumake
+            pkgs.pkg-config
+            pkgs.wine64
+            pkgs.gcc
+            pkgs.zlib
+          ];
+          shellHook = ''
+            export PSI_LUA_BOOT_FILE="$PWD/lua/boot.lua"
+            export HOST_CFLAGS_ZLIB="-I${pkgs.zlib.dev}/include"
+            export HOST_LIBS_ZLIB="-L${pkgs.zlib.out}/lib -lz"
+            echo "psi-mingw cross shell ready (x86_64-w64-mingw32)."
+            echo "Build: nix build .#psi-mingw"
+            echo "Run:   WINEPREFIX=$HOME/.wine64-psi wine64 result/bin/psi.exe --version"
+          '';
         };
 
         devShells.default = pkgs.mkShell {

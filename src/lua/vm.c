@@ -5,6 +5,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include <zlib.h>
 #include <cjson/cJSON.h>
 #if PSI_ENABLE_REPL_EDITLINE
@@ -229,8 +232,13 @@ static int psi_vm_mkdir_one(const char *path) {
     if (stat(path, &st) == 0) {
         return S_ISDIR(st.st_mode) ? PSI_STATUS_OK : PSI_STATUS_ERROR;
     }
+#ifdef _WIN32
+    if (mkdir(path) == 0)
+        return PSI_STATUS_OK;
+#else
     if (mkdir(path, 0777) == 0)
         return PSI_STATUS_OK;
+#endif
     if (errno == EEXIST && stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
         return PSI_STATUS_OK;
     }
@@ -3673,14 +3681,20 @@ static int lfn_host_tick(lua_State *L) {
  * buggy callers don't peg a UI thread indefinitely. */
 static int lfn_sleep_ms(lua_State *L) {
     lua_Integer ms = luaL_optinteger(L, 1, 0);
-    struct timespec ts;
     if (ms <= 0)
         return 0;
     if (ms > 3600000l)
         ms = 3600000l;
-    ts.tv_sec = (time_t)(ms / 1000l);
-    ts.tv_nsec = (long)((ms % 1000l) * 1000000l);
-    nanosleep(&ts, NULL);
+#ifdef _WIN32
+    Sleep((DWORD)ms);
+#else
+    {
+        struct timespec ts;
+        ts.tv_sec = (time_t)(ms / 1000l);
+        ts.tv_nsec = (long)((ms % 1000l) * 1000000l);
+        nanosleep(&ts, NULL);
+    }
+#endif
     return 0;
 }
 

@@ -75,10 +75,47 @@ can replace any one bit and keep the rest.
 | **illumos / Solaris**      | needs minor work | `gettimeofday` still present but Solaris `pthread_cond_timedwait` semantics differ subtly around CLOCK choice. More importantly, Solaris `getopt_long` is in `libgetopt`; argtable3 vendors getopt so this is fine. |
 | **Cygwin / MSYS2**         | should build, slowly | fork is emulated and slow; agent feels sluggish but works. libcurl and pthread present via packages. PE-format static linking has gotchas. |
 | **Haiku**                  | already works | port committed under `haiku/`. |
-| **Windows (MSVC native)**  | does not build | `process.c`'s `_WIN32` arm is empty. Need CreateProcess-based replacement plus a libcurl-or-WinHTTP HTTP backend. ~500 LoC of C. |
+| **Windows (mingw-w64 cross)** | builds, e2e tested under wine64 | `process.c`'s `_WIN32` arm uses CreateProcess + anonymous pipes; `cli_mode.c` uses `SetConsoleCtrlHandler` for Ctrl-C; HTTP via libcurl + OpenSSL with an embedded CA bundle (mbedTLS would also work — wine's schannel is too incomplete for round-trips). TUI and libedit are stubbed (`TUI=0 ANSI=0 REPL_EDITLINE=0`). Cross-build via `nix build .#psi-mingw`; see "Building" below. |
+| **Windows (MSVC native)**  | does not build | the mingw port covers what MSVC would need on the C side; only the build system would have to change. Use mingw-w64 cross or MSYS2 instead. |
 | **plain MS-DOS / DJGPP**   | unsupported | no fork, no pthread, no full POSIX. Out of scope. |
 | **Embedded (no fork/exec)**| unsupported | tool-call path requires process spawning. Could in theory build a `--no-tools` mode — not a stated goal. |
 | **Plain ANSI C (no POSIX)**| only `lua/` runs   | the `lua/psi/*` agent runtime itself only depends on Lua 5.5. You could embed psi's brain into a C++ host that supplies HTTP and shell-exec via its own primitives. Outside scope of `psi` proper. |
+
+## Building for Windows (mingw-w64)
+
+```sh
+nix build .#psi-mingw
+# result/bin/psi.exe + colocated DLL symlinks (libcurl, libssl,
+# zlib, libargtable3, libwinpthread, …)
+```
+
+To run end-to-end under wine:
+
+```sh
+WINEPREFIX=$HOME/.wine64-psi wine64 result/bin/psi.exe --version
+ANTHROPIC_API_KEY=… wine64 result/bin/psi.exe \
+  --agent 'run cmd /c ver and report the version'
+```
+
+What's stubbed in the mingw build:
+
+- **TUI** — termios + ANSI raw mode is POSIX-only. Compiled out
+  (`PSI_ENABLE_TUI=0 PSI_ENABLE_ANSI=0`); the default mode for `psi`
+  with no args becomes the line-oriented REPL.
+- **libedit** — not packaged for the mingw cross. Compiled out
+  (`PSI_ENABLE_REPL_EDITLINE=0`). `psi.readline` falls back to
+  `fgets` when the editline binding is absent (already the case in
+  `vm.c`).
+- **Process groups / SIGTERM** — Windows has no process group; abort
+  uses `TerminateProcess` directly. SIGINT is caught via
+  `SetConsoleCtrlHandler`, not `sigaction`.
+
+The `psi-mingw` derivation vendors Lua 5.5 and cJSON because nixpkgs
+doesn't ship them for the mingw cross target. Curl and zlib come
+from `pkgsCross.mingwW64`. OpenSSL is the TLS backend; the CA bundle
+is embedded at link time (compressed, decompressed at runtime), the
+same plumbing the cosmocc target uses. wine's schannel
+implementation was too incomplete to be a viable backend.
 
 ## How to port to a new OS
 
