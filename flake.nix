@@ -56,10 +56,15 @@
         curlWithMbedtls = p: let
           mbedtls = mbedtlsLibOnly p;
         in (p.curl.override {
+          brotliSupport = false;
+          http2Support = false;
           opensslSupport = false;
+          idnSupport = false;
           http3Support = false; # mbedTLS does not support curl's QUIC backend.
+          pslSupport = false;
           scpSupport = false;   # libssh2 pulls OpenSSL back into the closure.
           gssSupport = false;   # Kerberos pulls OpenSSL back into the closure.
+          zstdSupport = false;
         }).overrideAttrs (old: {
           configureFlags = p.lib.remove "--without-ssl" old.configureFlags
             ++ [
@@ -71,7 +76,13 @@
         });
 
         luaFor = p: p.lua5_5;
-        staticLuaFor = p: p.lua5_5.override { staticOnly = true; };
+        staticLuaFor = p: (p.lua5_5.override { staticOnly = true; }).overrideAttrs (old: {
+          postPatch = (old.postPatch or "") + ''
+            substituteInPlace src/luaconf.h \
+              --replace-fail "#define LUA_ROOT  \"$out/\"" \
+                             "#define LUA_ROOT  \"./\""
+          '';
+        });
 
         # ---- Shared dependency sets -------------------------------------
 
@@ -157,6 +168,11 @@
               '';
             };
 
+          postFixup = lib.optionalString static ''
+            rm -f "$out/nix-support/propagated-build-inputs"
+            rmdir --ignore-fail-on-non-empty "$out/nix-support" 2>/dev/null || true
+          '';
+
           meta = psiMeta // extraMeta;
         });
 
@@ -183,10 +199,15 @@
             });
 
             curlMbedtls = (pkgsCosmo.curl.override {
+              brotliSupport = false;
+              http2Support = false;
               opensslSupport = false;
+              idnSupport = false;
               http3Support = false;
+              pslSupport = false;
               scpSupport = false;
               gssSupport = false;
+              zstdSupport = false;
             }).overrideAttrs (old: {
               configureFlags = pkgsCosmo.lib.remove "--without-ssl" old.configureFlags
                 ++ [ "--with-mbedtls=${pkgsCosmo.lib.getDev mbedtlsPatched}" ];
@@ -222,17 +243,22 @@
         # ---- Optional Linux-only variants -----------------------------
 
         linuxOnlyPackages = lib.optionalAttrs isLinux {
-          psi-static = mkPsi {
-            p = pkgs.pkgsStatic;
-            static = true;
-            extraMeta = { platforms = [ "x86_64-linux" "aarch64-linux" ]; };
-          };
+          psi-static = let p = pkgs.pkgsStatic; in
+            mkPsi {
+              inherit p;
+              static = true;
+              deps = buildDeps { inherit p; luaPkg = staticLuaFor p; };
+              extraMeta = { platforms = [ "x86_64-linux" "aarch64-linux" ]; };
+            };
 
-          psi-static-riscv64 = mkPsi {
-            p = pkgs.pkgsCross.riscv64-musl.pkgsStatic;
-            static = true;
-            extraMeta = { platforms = [ "riscv64-linux" ]; };
-          };
+          psi-static-riscv64 =
+            let p = pkgs.pkgsCross.riscv64-musl.pkgsStatic; in
+            mkPsi {
+              inherit p;
+              static = true;
+              deps = buildDeps { inherit p; luaPkg = staticLuaFor p; };
+              extraMeta = { platforms = [ "riscv64-linux" ]; };
+            };
 
           psi-cosmocc = mkCosmoVariant cosmoBase.pkgsCosmo;
           psi-cosmocc-fat = mkCosmoVariant cosmoBase.pkgsCosmoFat;
@@ -246,11 +272,14 @@
             extraMeta = { platforms = [ "i686-linux" "x86_64-linux" ]; };
           };
 
-          psi-static-i686 = mkPsi {
-            p = pkgs.pkgsi686Linux.pkgsStatic;
-            static = true;
-            extraMeta = { platforms = [ "i686-linux" "x86_64-linux" ]; };
-          };
+          psi-static-i686 =
+            let p = pkgs.pkgsi686Linux.pkgsStatic; in
+            mkPsi {
+              inherit p;
+              static = true;
+              deps = buildDeps { inherit p; luaPkg = staticLuaFor p; };
+              extraMeta = { platforms = [ "i686-linux" "x86_64-linux" ]; };
+            };
 
           psi-tcc = mkPsi {
             p = pkgs;
