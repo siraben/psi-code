@@ -1035,6 +1035,7 @@ static int lfn_log(lua_State *L) {
 #define PSI_VM_TEXT_UTF8_THREE_BYTE_LEAD_MULTIPLIER 0x1000u
 #define PSI_VM_TEXT_UTF8_FOUR_BYTE_LEAD_MULTIPLIER 0x40000u
 #define PSI_VM_TEXT_CODEPOINT_NUL 0u
+#define PSI_VM_TEXT_CODEPOINT_NEWLINE 0x0au
 #define PSI_VM_TEXT_CODEPOINT_TAB 0x09u
 #define PSI_VM_TEXT_CODEPOINT_C0_CONTROL_MAX 0x20u
 #define PSI_VM_TEXT_CODEPOINT_DELETE 0x7fu
@@ -1046,7 +1047,9 @@ static int lfn_log(lua_State *L) {
 #define PSI_VM_TEXT_WIDTH_WIDE 2
 #define PSI_VM_TEXT_WIDTH_TAB 3
 
-static const char PSI_VM_TEXT_SGR_RESET[] = "\033[0m";
+static const char PSI_VM_TEXT_UNDERLINE_OFF[] = "\033[24m";
+static const char PSI_VM_TEXT_OSC8_CLOSE_BEL[] = "\033]8;;\a";
+static const char PSI_VM_TEXT_OSC8_CLOSE_ST[] = "\033]8;;\033\\";
 
 struct psi_vm_text_builder {
     char *data;
@@ -1064,9 +1067,12 @@ struct psi_vm_text_wrap_context {
     int word_width;
     int pending_space;
     int width;
+    int active_underline;
+    int active_hyperlink_terminator;
     struct psi_vm_text_builder line;
     struct psi_vm_text_builder word;
-    struct psi_vm_text_builder active;
+    struct psi_vm_text_builder active_sgr;
+    struct psi_vm_text_builder active_hyperlink;
 };
 
 static void psi_vm_text_builder_init(struct psi_vm_text_builder *b, lua_State *L) {
@@ -1393,28 +1399,147 @@ static int psi_vm_text_sgr_resets(const char *seq, size_t len) {
     return saw_digit && value == 0;
 }
 
+static int psi_vm_text_parse_sgr_value(const char *seq, size_t len, size_t *i, int *value) {
+    int saw_digit;
+    int parsed;
+
+    saw_digit = 0;
+    parsed = 0;
+    while (*i + 1u < len) {
+        unsigned char ch;
+        ch = (unsigned char)seq[*i];
+        if (ch < (unsigned char)'0' || ch > (unsigned char)'9') {
+            break;
+        }
+        parsed = parsed * 10 + (int)(ch - (unsigned char)'0');
+        saw_digit = 1;
+        (*i)++;
+    }
+    *value = saw_digit ? parsed : 0;
+    return saw_digit;
+}
+
+static void psi_vm_text_update_sgr_flags(
+    struct psi_vm_text_wrap_context *ctx, const char *seq, size_t len) {
+    size_t i;
+
+    if (len < 3u || (unsigned char)seq[0] != PSI_VM_TEXT_ESC_BYTE || seq[1] != '[' ||
+        seq[len - 1u] != 'm') {
+        return;
+    }
+    if (psi_vm_text_sgr_resets(seq, len)) {
+        ctx->active_underline = 0;
+        return;
+    }
+    i = 2u;
+    while (i + 1u < len) {
+        int code;
+        if (seq[i] == ';') {
+            i++;
+            continue;
+        }
+        if (!psi_vm_text_parse_sgr_value(seq, len, &i, &code)) {
+            i++;
+            continue;
+        }
+        if (code == 0) {
+            ctx->active_underline = 0;
+        } else if (code == 4) {
+            ctx->active_underline = 1;
+        } else if (code == 24) {
+            ctx->active_underline = 0;
+        } else if (code == 38 || code == 48) {
+            int mode;
+            if (i + 1u < len && seq[i] == ';') {
+                i++;
+            }
+            if (psi_vm_text_parse_sgr_value(seq, len, &i, &mode)) {
+                int remaining;
+                remaining = mode == 5 ? 1 : mode == 2 ? 3 : 0;
+                while (remaining > 0 && i + 1u < len) {
+                    int ignored;
+                    if (seq[i] == ';') {
+                        i++;
+                    }
+                    if (!psi_vm_text_parse_sgr_value(seq, len, &i, &ignored)) {
+                        break;
+                    }
+                    remaining--;
+                }
+            }
+        }
+    }
+}
+
+static int psi_vm_text_update_active_osc8(
+    struct psi_vm_text_wrap_context *ctx, const char *seq, size_t len) {
+    size_t payload_start;
+    size_t payload_end;
+
+    if (len < 5u || (unsigned char)seq[0] != PSI_VM_TEXT_ESC_BYTE || seq[1] != ']' ||
+        seq[2] != '8' || seq[3] != ';') {
+        return 1;
+    }
+    payload_start = 4u;
+    while (payload_start < len && seq[payload_start] != ';') {
+        payload_start++;
+    }
+    if (payload_start >= len) {
+        return 1;
+    }
+    payload_start++;
+    if ((unsigned char)seq[len - 1u] == PSI_VM_TEXT_BEL_BYTE) {
+        payload_end = len - 1u;
+        ctx->active_hyperlink_terminator = PSI_VM_TEXT_BEL_BYTE;
+    } else if ((unsigned char)seq[len - 2u] == PSI_VM_TEXT_ESC_BYTE && seq[len - 1u] == '\\') {
+        payload_end = len - 2u;
+        ctx->active_hyperlink_terminator = '\\';
+    } else {
+        return 1;
+    }
+    if (payload_end <= payload_start) {
+        psi_vm_text_builder_clear(&ctx->active_hyperlink);
+        ctx->active_hyperlink_terminator = 0;
+        return 1;
+    }
+    psi_vm_text_builder_clear(&ctx->active_hyperlink);
+    return psi_vm_text_builder_append(&ctx->active_hyperlink, seq, len);
+}
+
 static int psi_vm_text_update_active_sgr(
-    struct psi_vm_text_builder *active, const char *seq, size_t len) {
+    struct psi_vm_text_wrap_context *ctx, const char *seq, size_t len) {
     if (len < 3u || (unsigned char)seq[0] != PSI_VM_TEXT_ESC_BYTE || seq[1] != '[' ||
         seq[len - 1u] != 'm') {
         return 1;
     }
+    psi_vm_text_update_sgr_flags(ctx, seq, len);
     if (psi_vm_text_sgr_resets(seq, len)) {
-        psi_vm_text_builder_clear(active);
+        psi_vm_text_builder_clear(&ctx->active_sgr);
         return 1;
     }
-    return psi_vm_text_builder_append(active, seq, len);
+    return psi_vm_text_builder_append(&ctx->active_sgr, seq, len);
+}
+
+static int psi_vm_text_update_active_escape(
+    struct psi_vm_text_wrap_context *ctx, const char *seq, size_t len) {
+    if (len >= 2u && (unsigned char)seq[0] == PSI_VM_TEXT_ESC_BYTE && seq[1] == '[') {
+        return psi_vm_text_update_active_sgr(ctx, seq, len);
+    }
+    if (len >= 2u && (unsigned char)seq[0] == PSI_VM_TEXT_ESC_BYTE && seq[1] == ']') {
+        return psi_vm_text_update_active_osc8(ctx, seq, len);
+    }
+    return 1;
 }
 
 static int psi_vm_text_update_active_from_text(
-    struct psi_vm_text_builder *active, const char *text, size_t len) {
+    struct psi_vm_text_wrap_context *ctx, const char *text, size_t len) {
     size_t i;
 
     i = 0u;
     while (i < len) {
         size_t next_i = i;
         if (psi_vm_text_read_escape(text, len, i, &next_i)) {
-            if (!psi_vm_text_update_active_sgr(active, text + i, next_i - i)) {
+            if (!psi_vm_text_update_active_escape(ctx, text + i, next_i - i)) {
                 return 0;
             }
         } else {
@@ -1434,21 +1559,38 @@ static void psi_vm_text_wrap_context_init(
     ctx->word_width = 0;
     ctx->pending_space = 0;
     ctx->width = width;
+    ctx->active_underline = 0;
+    ctx->active_hyperlink_terminator = 0;
     psi_vm_text_builder_init(&ctx->line, L);
     psi_vm_text_builder_init(&ctx->word, L);
-    psi_vm_text_builder_init(&ctx->active, L);
+    psi_vm_text_builder_init(&ctx->active_sgr, L);
+    psi_vm_text_builder_init(&ctx->active_hyperlink, L);
 }
 
 static void psi_vm_text_wrap_context_free(struct psi_vm_text_wrap_context *ctx) {
     psi_vm_text_builder_free(&ctx->line);
     psi_vm_text_builder_free(&ctx->word);
-    psi_vm_text_builder_free(&ctx->active);
+    psi_vm_text_builder_free(&ctx->active_sgr);
+    psi_vm_text_builder_free(&ctx->active_hyperlink);
 }
 
 static int psi_vm_text_wrap_push_line(struct psi_vm_text_wrap_context *ctx, int final_line) {
-    if (!final_line && ctx->line.len > 0u && ctx->active.len > 0u) {
+    if (!final_line && ctx->line.len > 0u && ctx->active_underline) {
         if (!psi_vm_text_builder_append(
-                &ctx->line, PSI_VM_TEXT_SGR_RESET, sizeof(PSI_VM_TEXT_SGR_RESET) - 1u)) {
+                &ctx->line, PSI_VM_TEXT_UNDERLINE_OFF, sizeof(PSI_VM_TEXT_UNDERLINE_OFF) - 1u)) {
+            return 0;
+        }
+    }
+    if (!final_line && ctx->line.len > 0u && ctx->active_hyperlink.len > 0u) {
+        const char *close;
+        size_t close_len;
+        close = ctx->active_hyperlink_terminator == PSI_VM_TEXT_BEL_BYTE ?
+            PSI_VM_TEXT_OSC8_CLOSE_BEL :
+            PSI_VM_TEXT_OSC8_CLOSE_ST;
+        close_len = ctx->active_hyperlink_terminator == PSI_VM_TEXT_BEL_BYTE ?
+            sizeof(PSI_VM_TEXT_OSC8_CLOSE_BEL) - 1u :
+            sizeof(PSI_VM_TEXT_OSC8_CLOSE_ST) - 1u;
+        if (!psi_vm_text_builder_append(&ctx->line, close, close_len)) {
             return 0;
         }
     }
@@ -1456,8 +1598,14 @@ static int psi_vm_text_wrap_push_line(struct psi_vm_text_wrap_context *ctx, int 
     lua_pushlstring(ctx->L, ctx->line.data != NULL ? ctx->line.data : "", ctx->line.len);
     lua_rawseti(ctx->L, ctx->table_index, (lua_Integer)ctx->line_count);
     psi_vm_text_builder_clear(&ctx->line);
-    if (!final_line && ctx->active.len > 0u) {
-        if (!psi_vm_text_builder_append(&ctx->line, ctx->active.data, ctx->active.len)) {
+    if (!final_line && ctx->active_sgr.len > 0u) {
+        if (!psi_vm_text_builder_append(&ctx->line, ctx->active_sgr.data, ctx->active_sgr.len)) {
+            return 0;
+        }
+    }
+    if (!final_line && ctx->active_hyperlink.len > 0u) {
+        if (!psi_vm_text_builder_append(
+                &ctx->line, ctx->active_hyperlink.data, ctx->active_hyperlink.len)) {
             return 0;
         }
     }
@@ -1504,7 +1652,7 @@ static int psi_vm_text_wrap_flush_word(struct psi_vm_text_wrap_context *ctx) {
         if (!psi_vm_text_wrap_append_piece(ctx, ctx->word.data, ctx->word.len, ctx->word_width)) {
             return 0;
         }
-        if (!psi_vm_text_update_active_from_text(&ctx->active, ctx->word.data, ctx->word.len)) {
+        if (!psi_vm_text_update_active_from_text(ctx, ctx->word.data, ctx->word.len)) {
             return 0;
         }
     } else {
@@ -1516,7 +1664,7 @@ static int psi_vm_text_wrap_flush_word(struct psi_vm_text_wrap_context *ctx) {
                 if (!psi_vm_text_builder_append(&ctx->line, ctx->word.data + j, next_j - j)) {
                     return 0;
                 }
-                if (!psi_vm_text_update_active_sgr(&ctx->active, ctx->word.data + j, next_j - j)) {
+                if (!psi_vm_text_update_active_escape(ctx, ctx->word.data + j, next_j - j)) {
                     return 0;
                 }
             } else {
@@ -1550,7 +1698,7 @@ static int psi_vm_text_wrap_preserve(
             if (!psi_vm_text_builder_append(&ctx->line, text + i, next_i - i)) {
                 return 0;
             }
-            if (!psi_vm_text_update_active_sgr(&ctx->active, text + i, next_i - i)) {
+            if (!psi_vm_text_update_active_escape(ctx, text + i, next_i - i)) {
                 return 0;
             }
         } else {
@@ -1707,12 +1855,18 @@ static int lfn_tui_text_wrap_ansi(lua_State *L) {
                 ok = psi_vm_text_builder_append(&wrap.word, text + i, next_i - i);
             } else {
                 int cluster_width;
-                psi_vm_text_next_cluster(text, len, i, &next_i, &cluster_width);
-                if ((unsigned char)text[i] == PSI_VM_TEXT_SPACE_BYTE ||
+                if ((unsigned char)text[i] == PSI_VM_TEXT_CODEPOINT_NEWLINE) {
+                    next_i = i + 1u;
+                    ok = psi_vm_text_wrap_flush_word(&wrap) && psi_vm_text_wrap_push_line(&wrap, 0);
+                    wrap.line_width = 0;
+                    wrap.pending_space = 0;
+                } else if ((unsigned char)text[i] == PSI_VM_TEXT_SPACE_BYTE ||
                     (unsigned char)text[i] == PSI_VM_TEXT_TAB_BYTE) {
+                    psi_vm_text_next_cluster(text, len, i, &next_i, &cluster_width);
                     ok = psi_vm_text_wrap_flush_word(&wrap);
                     wrap.pending_space = 1;
                 } else {
+                    psi_vm_text_next_cluster(text, len, i, &next_i, &cluster_width);
                     ok = psi_vm_text_builder_append(&wrap.word, text + i, next_i - i);
                     wrap.word_width += cluster_width;
                 }

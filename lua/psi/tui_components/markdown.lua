@@ -443,7 +443,84 @@ local function render_wrapped_styled(out, styled, prefix, rest_prefix, width)
   end
 end
 
+local function styled_structural_prefix(raw_prefix)
+  local rendered = markdown.render_line(raw_prefix, false)
+  if tui_text.visible_width(rendered) == tui_text.visible_width(raw_prefix) then
+    return rendered
+  end
+  return raw_prefix
+end
+
+local function render_prefixed_inline(out, body, first_prefix, continuation_prefix, width)
+  local body_width = math.max(
+    MIN_WIDTH,
+    math.min(
+      width - FRAME_WIDTH_MARGIN - tui_text.visible_width(first_prefix),
+      width - FRAME_WIDTH_MARGIN - tui_text.visible_width(continuation_prefix)
+    )
+  )
+  local wrapped = tui_text.wrap_ansi(markdown.render_inline(body), body_width)
+  for _, line in ipairs(wrapped) do
+    out[#out + 1] = first_prefix .. line
+    first_prefix = continuation_prefix
+  end
+end
+
+local function render_structural_wrapped_line(out, source_line, prefix, rest_prefix, width)
+  local line = normalize_tabs(source_line)
+  prefix = prefix or ""
+  rest_prefix = rest_prefix or ""
+  local indent, bullet, bullet_body = line:match("^(%s*)([%-%*%+])%s+(.*)$")
+  if indent ~= nil then
+    local raw_first = indent .. bullet .. " "
+    local raw_rest = indent .. string.rep(" ", tui_text.visible_width(bullet .. " "))
+    render_prefixed_inline(
+      out,
+      bullet_body,
+      prefix .. styled_structural_prefix(raw_first),
+      rest_prefix .. raw_rest,
+      width
+    )
+    return true
+  end
+
+  local num_indent, num, num_body = line:match("^(%s*)(%d+%.)%s+(.*)$")
+  if num_indent ~= nil then
+    local raw_first = num_indent .. num .. " "
+    local raw_rest = num_indent .. string.rep(" ", tui_text.visible_width(num .. " "))
+    render_prefixed_inline(
+      out,
+      num_body,
+      prefix .. styled_structural_prefix(raw_first),
+      rest_prefix .. raw_rest,
+      width
+    )
+    return true
+  end
+
+  local quote_indent, quote_body = line:match("^(%s*)>%s?(.*)$")
+  if quote_indent ~= nil then
+    local quote_prefix = quote_indent .. styled_structural_prefix("> ")
+    render_prefixed_inline(
+      out,
+      quote_body,
+      prefix .. quote_prefix,
+      rest_prefix .. quote_prefix,
+      width
+    )
+    return true
+  end
+
+  return false
+end
+
 local function render_wrapped_line(out, source_line, prefix, rest_prefix, width, in_code_fence)
+  if
+    not in_code_fence
+    and render_structural_wrapped_line(out, source_line, prefix, rest_prefix, width)
+  then
+    return
+  end
   local remaining = normalize_tabs(source_line)
   repeat
     local break_index = find_break(remaining, wrap_width(width, prefix))

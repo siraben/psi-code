@@ -305,7 +305,7 @@ function M.clip_ansi(text, width)
   local clipped = text:sub(1, byte_index)
   local active = {}
   update_active_from_text(active, clipped)
-  if #active > 0 then
+  if #active > 0 or active.hyperlink ~= nil then
     clipped = clipped .. ESC .. "[0m"
   end
   return clipped
@@ -321,6 +321,20 @@ local function ansi_active_prefix(active)
   for _, seq in ipairs(active) do
     out[#out + 1] = seq
   end
+  if active.hyperlink ~= nil then
+    out[#out + 1] = active.hyperlink
+  end
+  return table.concat(out)
+end
+
+local function line_end_reset(active)
+  local out = {}
+  if active.underline then
+    out[#out + 1] = ESC .. "[24m"
+  end
+  if active.hyperlink ~= nil then
+    out[#out + 1] = ESC .. "]8;;" .. (active.hyperlink_terminator or BEL)
+  end
   return table.concat(out)
 end
 
@@ -333,9 +347,53 @@ local function update_active_sgr(active, seq)
     for i = #active, 1, -1 do
       active[i] = nil
     end
+    active.underline = false
     return
   end
+  for code in body:gmatch("%d+") do
+    local value = tonumber(code)
+    if value == 0 then
+      active.underline = false
+    elseif value == 4 then
+      active.underline = true
+    elseif value == 24 then
+      active.underline = false
+    end
+  end
   active[#active + 1] = seq
+end
+
+local function update_active_osc8(active, seq)
+  if not seq:match("^\27%]8;") then
+    return
+  end
+  local terminator
+  local payload
+  if seq:sub(-1) == BEL then
+    terminator = BEL
+    payload = seq:sub(1, -2)
+  elseif seq:sub(-2) == ESC .. "\\" then
+    terminator = ESC .. "\\"
+    payload = seq:sub(1, -3)
+  else
+    return
+  end
+  local target = payload:match("^\27%]8;[^;]*;(.*)$")
+  if target == nil then
+    return
+  end
+  if target == "" then
+    active.hyperlink = nil
+    active.hyperlink_terminator = nil
+  else
+    active.hyperlink = seq
+    active.hyperlink_terminator = terminator
+  end
+end
+
+local function update_active_escape(active, seq)
+  update_active_sgr(active, seq)
+  update_active_osc8(active, seq)
 end
 
 update_active_from_text = function(active, text)
@@ -343,7 +401,7 @@ update_active_from_text = function(active, text)
   while i <= #text do
     local seq, next_i = read_escape(text, i)
     if seq then
-      update_active_sgr(active, seq)
+      update_active_escape(active, seq)
       i = next_i
     else
       i = i + 1
@@ -368,8 +426,9 @@ function M.wrap_ansi(text, width, opts)
 
   local function emit_line()
     local rendered = table.concat(line)
-    if rendered ~= "" and #active > 0 then
-      rendered = rendered .. ESC .. "[0m"
+    local reset = line_end_reset(active)
+    if rendered ~= "" and reset ~= "" then
+      rendered = rendered .. reset
     end
     lines[#lines + 1] = rendered
     line = {}
@@ -433,7 +492,7 @@ function M.wrap_ansi(text, width, opts)
         local seq, next_j = read_escape(word_text, j)
         if seq then
           line[#line + 1] = seq
-          update_active_sgr(active, seq)
+          update_active_escape(active, seq)
           j = next_j
         else
           local cluster, cluster_width, after = next_cluster(word_text, j)
@@ -454,7 +513,11 @@ function M.wrap_ansi(text, width, opts)
       i = next_i
     else
       local cluster, cluster_width, after = next_cluster(text, i)
-      if is_space_cluster(cluster) then
+      if cluster == "\n" then
+        flush_word()
+        emit_line()
+        pending_space = nil
+      elseif is_space_cluster(cluster) then
         flush_word()
         pending_space = " "
       else
