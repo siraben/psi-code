@@ -46,7 +46,24 @@ end
 
 local function sanitize_output(value)
   local raw = text.strip_ansi(tostring(value or ""))
-  raw = raw:gsub("\r\n", "\n"):gsub("\r", "\n")
+  raw = raw:gsub("\r\n", "\n")
+  if raw:find("\r", 1, true) then
+    local out = {}
+    local line = {}
+    for i = 1, #raw do
+      local ch = raw:sub(i, i)
+      if ch == "\r" then
+        line = {}
+      elseif ch == "\n" then
+        out[#out + 1] = table.concat(line)
+        line = {}
+      else
+        line[#line + 1] = ch
+      end
+    end
+    out[#out + 1] = table.concat(line)
+    raw = table.concat(out, "\n")
+  end
   raw = raw:gsub("[%z\001-\008\011\012\014-\031\127]", "")
   return raw:gsub("\t", "   ")
 end
