@@ -351,9 +351,10 @@ update_active_from_text = function(active, text)
   end
 end
 
-function M.wrap_ansi(text, width)
+function M.wrap_ansi(text, width, opts)
+  opts = type(opts) == "table" and opts or {}
   if host_wrap_ansi then
-    return host_wrap_ansi(text, width)
+    return host_wrap_ansi(text, width, opts)
   end
   text = tostring(text or EMPTY)
   width = math.max(1, tonumber(width) or 1)
@@ -389,6 +390,26 @@ function M.wrap_ansi(text, width)
     end
     line[#line + 1] = piece
     line_width = line_width + piece_width
+  end
+
+  if opts.preserve_whitespace then
+    local i = 1
+    while i <= #text do
+      local seq, next_i = read_escape(text, i)
+      if seq then
+        line[#line + 1] = seq
+        update_active_sgr(active, seq)
+        i = next_i
+      else
+        local cluster, cluster_width, after = next_cluster(text, i)
+        append_piece(cluster, cluster_width)
+        i = after
+      end
+    end
+    if #line > 0 or #lines == 0 then
+      lines[#lines + 1] = table.concat(line)
+    end
+    return lines
   end
 
   local function flush_word()

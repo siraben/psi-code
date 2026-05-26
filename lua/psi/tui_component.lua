@@ -284,6 +284,14 @@ function Text:set_bg_fn(bg_fn)
   self:invalidate()
 end
 
+function Text:set_wrap_opts(opts)
+  opts = type(opts) == "table" and opts or {}
+  self.wrap_opts = {
+    preserve_whitespace = not not opts.preserve_whitespace,
+  }
+  self:invalidate()
+end
+
 local function apply_bg(line, width, bg_fn)
   line = tui_text.pad_line(line or "", width)
   if type(bg_fn) == "function" then
@@ -317,7 +325,7 @@ function Text:render(width)
     if source == "" then
       lines[#lines + 1] = apply_bg(left .. right, width, self.bg_fn)
     else
-      local wrapped = tui_text.wrap_ansi(source, content_width)
+      local wrapped = tui_text.wrap_ansi(source, content_width, self.wrap_opts)
       for _, line in ipairs(wrapped) do
         lines[#lines + 1] = apply_bg(left .. line .. right, width, self.bg_fn)
       end
@@ -344,12 +352,16 @@ function Text:generation_key()
   return tostring(self.generation or 0)
 end
 
-function M.text(value, padding_x, padding_y, bg_fn)
+function M.text(value, padding_x, padding_y, bg_fn, opts)
+  opts = type(opts) == "table" and opts or {}
   return setmetatable({
     text = tostring(value or ""),
     padding_x = math.max(0, tonumber(padding_x) or 0),
     padding_y = math.max(0, tonumber(padding_y) or 0),
     bg_fn = bg_fn,
+    wrap_opts = {
+      preserve_whitespace = not not opts.preserve_whitespace,
+    },
     generation = 0,
     cache_width = nil,
     cache_generation = nil,

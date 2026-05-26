@@ -1537,6 +1537,35 @@ static int psi_vm_text_wrap_flush_word(struct psi_vm_text_wrap_context *ctx) {
     return 1;
 }
 
+static int psi_vm_text_wrap_preserve(
+    struct psi_vm_text_wrap_context *ctx, const char *text, size_t len) {
+    size_t i;
+
+    i = 0u;
+    while (i < len) {
+        size_t next_i;
+
+        next_i = i;
+        if (psi_vm_text_read_escape(text, len, i, &next_i)) {
+            if (!psi_vm_text_builder_append(&ctx->line, text + i, next_i - i)) {
+                return 0;
+            }
+            if (!psi_vm_text_update_active_sgr(&ctx->active, text + i, next_i - i)) {
+                return 0;
+            }
+        } else {
+            int cluster_width;
+
+            psi_vm_text_next_cluster(text, len, i, &next_i, &cluster_width);
+            if (!psi_vm_text_wrap_append_piece(ctx, text + i, next_i - i, cluster_width)) {
+                return 0;
+            }
+        }
+        i = next_i;
+    }
+    return 1;
+}
+
 static int lfn_cell_width(lua_State *L) {
     lua_Integer cp;
     int width;
@@ -1644,43 +1673,55 @@ static int lfn_tui_text_pad_line(lua_State *L) {
 
 static int lfn_tui_text_wrap_ansi(lua_State *L) {
     size_t len;
-    size_t i;
     const char *text;
     lua_Integer width_arg;
     int width;
     int ok;
     int table_index;
+    int preserve_whitespace;
     struct psi_vm_text_wrap_context wrap;
 
     text = luaL_optlstring(L, 1, "", &len);
     width_arg = luaL_optinteger(L, 2, 1);
     width = width_arg < 1 ? 1 : (int)width_arg;
+    preserve_whitespace = 0;
+    if (lua_istable(L, 3)) {
+        lua_getfield(L, 3, "preserve_whitespace");
+        preserve_whitespace = lua_toboolean(L, -1);
+        lua_pop(L, 1);
+    }
     lua_newtable(L);
     table_index = lua_gettop(L);
     psi_vm_text_wrap_context_init(&wrap, L, table_index, width);
     ok = 1;
 
-    i = 0u;
-    while (ok && i < len) {
-        size_t next_i = i;
-        if (psi_vm_text_read_escape(text, len, i, &next_i)) {
-            ok = psi_vm_text_builder_append(&wrap.word, text + i, next_i - i);
-        } else {
-            int cluster_width;
-            psi_vm_text_next_cluster(text, len, i, &next_i, &cluster_width);
-            if ((unsigned char)text[i] == PSI_VM_TEXT_SPACE_BYTE ||
-                (unsigned char)text[i] == PSI_VM_TEXT_TAB_BYTE) {
-                ok = psi_vm_text_wrap_flush_word(&wrap);
-                wrap.pending_space = 1;
-            } else {
+    if (preserve_whitespace) {
+        ok = psi_vm_text_wrap_preserve(&wrap, text, len);
+    } else {
+        size_t i;
+
+        i = 0u;
+        while (ok && i < len) {
+            size_t next_i = i;
+            if (psi_vm_text_read_escape(text, len, i, &next_i)) {
                 ok = psi_vm_text_builder_append(&wrap.word, text + i, next_i - i);
-                wrap.word_width += cluster_width;
+            } else {
+                int cluster_width;
+                psi_vm_text_next_cluster(text, len, i, &next_i, &cluster_width);
+                if ((unsigned char)text[i] == PSI_VM_TEXT_SPACE_BYTE ||
+                    (unsigned char)text[i] == PSI_VM_TEXT_TAB_BYTE) {
+                    ok = psi_vm_text_wrap_flush_word(&wrap);
+                    wrap.pending_space = 1;
+                } else {
+                    ok = psi_vm_text_builder_append(&wrap.word, text + i, next_i - i);
+                    wrap.word_width += cluster_width;
+                }
             }
+            i = next_i;
         }
-        i = next_i;
-    }
-    if (ok) {
-        ok = psi_vm_text_wrap_flush_word(&wrap);
+        if (ok) {
+            ok = psi_vm_text_wrap_flush_word(&wrap);
+        }
     }
     if (ok && (wrap.line.len > 0u || wrap.line_count == 0)) {
         ok = psi_vm_text_wrap_push_line(&wrap, 1);

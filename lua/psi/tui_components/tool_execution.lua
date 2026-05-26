@@ -517,7 +517,10 @@ end
 
 local function update_display(self)
   local call_text, call_bg = format_call(self.tool, self.input, self.frame)
+  local preserve_whitespace = self.tool == "edit"
   self.box:set_bg_fn(bg_fn(component_bg_code(self, call_bg)))
+  self.call_text:set_wrap_opts({ preserve_whitespace = preserve_whitespace })
+  self.result_text:set_wrap_opts({ preserve_whitespace = preserve_whitespace })
   self.call_text:set_text(call_text or "")
   if self.result ~= nil then
     local result_text = format_result(self.tool, self.result, self.frame)
