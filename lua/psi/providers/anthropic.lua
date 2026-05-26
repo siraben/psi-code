@@ -25,6 +25,7 @@ local provider_loop = require("psi.provider_loop")
 local sched = require("psi.sched")
 local stream_parser = require("psi.stream_parser")
 local transform = require("psi.transform_messages")
+local image_policy = require("psi.image_policy")
 local tools = require("psi.tools")
 local session_mod = require("psi.session_manager")
 
@@ -93,17 +94,37 @@ local safe_decode = prelude.safe_json_decode
 --     coherent if thinking is enabled; if the signature is missing
 --     (older session or feature-off) fall back to a text block so the
 --     reasoning content is not lost.
-local function pi_content_to_anthropic(blocks)
+local function append_text_block(out, text)
+  text = prelude.sanitize_surrogates(text or "")
+  if prelude.trim(text) ~= "" then
+    out[#out + 1] = { type = "text", text = text }
+  end
+end
+
+local function pi_content_to_anthropic(blocks, images_enabled)
+  if images_enabled == nil then
+    images_enabled = true
+  end
   local out = prelude.as_array({})
   for _, b in ipairs(blocks or {}) do
     if type(b) == "table" then
       if b.type == "text" then
-        local t = prelude.sanitize_surrogates(b.text or "")
-        if prelude.trim(t) ~= "" then
-          out[#out + 1] = { type = "text", text = t }
-        end
+        append_text_block(out, b.text)
       elseif b.type == "toolCall" then
         out[#out + 1] = { type = "tool_use", id = b.id, name = b.name, input = b.arguments or {} }
+      elseif b.type == "image" and type(b.data) == "string" then
+        if images_enabled then
+          out[#out + 1] = {
+            type = "image",
+            source = {
+              type = "base64",
+              media_type = b.mimeType or "application/octet-stream",
+              data = b.data,
+            },
+          }
+        else
+          append_text_block(out, image_policy.DISABLED_TEXT)
+        end
       elseif b.type == "thinking" then
         if type(b.thinkingSignature) == "string" and b.thinkingSignature ~= "" then
           out[#out + 1] = {
@@ -123,25 +144,61 @@ local function pi_content_to_anthropic(blocks)
   return out
 end
 
-local function tool_result_block(msg)
+local function tool_result_content_blocks(content, images_enabled)
+  if images_enabled == false and transform.has_images(content) then
+    return transform.text_from_content_with_image_placeholder(content, image_policy.DISABLED_TEXT)
+  end
+  local has_images = transform.has_images(content)
+  local parts = prelude.array(#(content or {}))
+  if not has_images then
+    if type(content) == "table" then
+      for _, b in ipairs(content) do
+        if type(b) == "table" and b.type == "text" and type(b.text) == "string" then
+          parts[#parts + 1] = b.text
+        end
+      end
+    end
+    return prelude.sanitize_surrogates(table.concat(parts, "\n"))
+  end
+
+  local out = prelude.as_array({})
+  local has_text = false
+  for _, b in ipairs(content or {}) do
+    if type(b) == "table" then
+      if b.type == "text" then
+        local text = prelude.sanitize_surrogates(b.text or "")
+        if prelude.trim(text) ~= "" then
+          out[#out + 1] = { type = "text", text = text }
+          has_text = true
+        end
+      elseif b.type == "image" and type(b.data) == "string" then
+        out[#out + 1] = {
+          type = "image",
+          source = {
+            type = "base64",
+            media_type = b.mimeType or "application/octet-stream",
+            data = b.data,
+          },
+        }
+      end
+    end
+  end
+  if not has_text then
+    table.insert(out, 1, { type = "text", text = "(see attached image)" })
+  end
+  return out
+end
+
+local function tool_result_block(msg, images_enabled)
   -- pi stores toolResult.content as an array of content blocks; Anthropic
   -- accepts either a string or an array. Concatenate text blocks with
   -- "\n" (matches pi) and run the result through sanitize_surrogates,
   -- which strips any byte that isn't part of a valid UTF-8 scalar
   -- value so the on-wire body always validates.
-  local parts = prelude.array(#(msg.content or {}))
-  if type(msg.content) == "table" then
-    for _, b in ipairs(msg.content) do
-      if type(b) == "table" and b.type == "text" and type(b.text) == "string" then
-        parts[#parts + 1] = b.text
-      end
-    end
-  end
-  local text = prelude.sanitize_surrogates(table.concat(parts, "\n"))
   return {
     type = "tool_result",
     tool_use_id = msg.toolCallId or "",
-    content = text,
+    content = tool_result_content_blocks(msg.content, images_enabled),
     is_error = msg.isError and true or false,
   }
 end
@@ -156,17 +213,23 @@ end
 --     synthetic tool_result containing "No result provided", isError=true,
 --     inserted right before the next user message.
 --   * Consecutive tool-result entries are coalesced into one user message.
-local function build_api_messages(session)
+local function build_api_messages(session, images_enabled)
+  if images_enabled == nil then
+    images_enabled = true
+  end
   local out = prelude.array(#session)
   transform.replay_session(session, {
     user = function(message)
-      out[#out + 1] = { role = "user", content = pi_content_to_anthropic(message.content) }
+      out[#out + 1] = {
+        role = "user",
+        content = pi_content_to_anthropic(message.content, images_enabled),
+      }
     end,
     assistant = function(message)
       local pending = prelude.array(#(message.content or {}))
       out[#out + 1] = {
         role = "assistant",
-        content = pi_content_to_anthropic(message.content),
+        content = pi_content_to_anthropic(message.content, images_enabled),
       }
       for _, block in ipairs(message.content or {}) do
         if type(block) == "table" and block.type == "toolCall" then
@@ -176,7 +239,7 @@ local function build_api_messages(session)
       return pending
     end,
     tool_result = function(message)
-      local block = tool_result_block(message)
+      local block = tool_result_block(message, images_enabled)
       return block.tool_use_id, block
     end,
     tool_results = function(blocks)
@@ -200,7 +263,7 @@ local function build_api_messages(session)
     custom_message = function(message)
       out[#out + 1] = {
         role = message.role == "assistant" and "assistant" or "user",
-        content = pi_content_to_anthropic(message.content),
+        content = pi_content_to_anthropic(message.content, images_enabled),
       }
     end,
   })
@@ -651,7 +714,7 @@ function M.run_turn(opts)
     headers = anthropic_headers(api_key),
     tool_specs = api_tool_specs,
     build_messages = function(session)
-      return build_api_messages(session)
+      return build_api_messages(session, not image_policy.blocked())
     end,
     request_body = function(args)
       return {

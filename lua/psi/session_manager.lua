@@ -446,12 +446,16 @@ function M.append_assistant(text, blocks, opts)
   append_body("assistant", text, body)
 end
 
-function M.append_tool_result(tool_use_id, tool_name, content_text, is_error)
+function M.append_tool_result(tool_use_id, tool_name, content_text, is_error, content_blocks)
+  local content = prelude.as_array({ text_block(content_text) })
+  if type(content_blocks) == "table" and #content_blocks > 0 then
+    content = prelude.as_array(content_blocks)
+  end
   local msg = {
     role = "toolResult",
     toolCallId = tool_use_id,
     toolName = tool_name,
-    content = prelude.as_array({ text_block(content_text) }),
+    content = content,
     timestamp = unix_ms(),
   }
   if is_error then

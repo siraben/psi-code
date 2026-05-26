@@ -41,6 +41,7 @@ local prelude = require("psi.prelude")
 local provider_loop = require("psi.provider_loop")
 local sched = require("psi.sched")
 local transform = require("psi.transform_messages")
+local image_policy = require("psi.image_policy")
 local tools = require("psi.tools")
 local session_mod = require("psi.session_manager")
 
@@ -150,13 +151,24 @@ end
 function M.build_api_messages(session, system_prompt, cfg)
   local tool_result_message = cfg.tool_result_message
   local assistant_tool_call = cfg.assistant_tool_call
+  local images_blocked = image_policy.blocked()
+  local supports_images = cfg.supports_images and not images_blocked
+  local user_image_placeholder = images_blocked and image_policy.DISABLED_TEXT
+    or transform.USER_IMAGE_PLACEHOLDER
+  local tool_image_placeholder = images_blocked and image_policy.DISABLED_TEXT
+    or transform.TOOL_IMAGE_PLACEHOLDER
   local out = prelude.array(#session + 1)
   if system_prompt and system_prompt ~= "" then
     out[#out + 1] = { role = "system", content = system_prompt }
   end
   transform.replay_session(session, {
     user = function(message)
-      out[#out + 1] = { role = "user", content = transform.text_from_content(message.content) }
+      local content = supports_images and transform.openai_chat_content(message.content)
+        or transform.text_from_content_with_image_placeholder(
+          message.content,
+          user_image_placeholder
+        )
+      out[#out + 1] = { role = "user", content = content }
     end,
     assistant = function(message)
       local tool_calls = nil
@@ -182,12 +194,54 @@ function M.build_api_messages(session, system_prompt, cfg)
     end,
     tool_result = function(message)
       local id = message.toolCallId or ""
+      local has_images = supports_images and transform.has_images(message.content)
+      local text = supports_images and transform.tool_result_text(message)
+        or transform.text_from_content_with_image_placeholder(
+          message.content,
+          tool_image_placeholder
+        )
+      if text == "" and transform.has_images(message.content) then
+        text = "(see attached image)"
+      end
       return id,
-        tool_result_message(id, message.toolName or "", transform.tool_result_text(message))
+        {
+          message = tool_result_message(id, message.toolName or "", text),
+          content = message.content,
+          has_images = has_images,
+        }
     end,
-    tool_results = function(messages)
-      for _, message in ipairs(messages) do
-        out[#out + 1] = message
+    tool_results = function(items)
+      local image_blocks = prelude.as_array({})
+      for _, item in ipairs(items) do
+        out[#out + 1] = item.message
+        if item.has_images then
+          for _, block in ipairs(item.content or {}) do
+            if
+              type(block) == "table"
+              and block.type == "image"
+              and type(block.data) == "string"
+            then
+              image_blocks[#image_blocks + 1] = {
+                type = "image_url",
+                image_url = {
+                  url = "data:"
+                    .. tostring(block.mimeType or "application/octet-stream")
+                    .. ";base64,"
+                    .. block.data,
+                },
+              }
+            end
+          end
+        end
+      end
+      if #image_blocks > 0 then
+        local content = prelude.as_array({
+          { type = "text", text = "Attached image(s) from tool result:" },
+        })
+        for _, block in ipairs(image_blocks) do
+          content[#content + 1] = block
+        end
+        out[#out + 1] = { role = "user", content = content }
       end
     end,
     synthetic_tool_results = function(calls)
@@ -199,9 +253,14 @@ function M.build_api_messages(session, system_prompt, cfg)
       out[#out + 1] = { role = "user", content = summary }
     end,
     custom_message = function(message)
+      local content = supports_images and transform.openai_chat_content(message.content)
+        or transform.text_from_content_with_image_placeholder(
+          message.content,
+          user_image_placeholder
+        )
       out[#out + 1] = {
         role = message.role == "assistant" and "assistant" or "user",
-        content = transform.text_from_content(message.content),
+        content = content,
       }
     end,
   })

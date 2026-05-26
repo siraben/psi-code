@@ -314,7 +314,7 @@ These are part of the stable surface:
 | API | Notes |
 |---|---|
 | `psi.cwd()` | Current working directory string. |
-| `psi.read_file(path)` / `psi.read_file_slice(path, offset, limit, max_bytes)` / `psi.file_write(path, content)` / `psi.file_append(path, content)` | File I/O. `read_file_slice` returns text plus line/truncation metadata without slurping the whole file into Lua. `file_append` opens the path in `"ab"` mode — used by the bash tool to spill long output to a temp file. |
+| `psi.read_file(path)` / `psi.read_file_prefix(path, max_bytes)` / `psi.read_file_limited(path, max_bytes)` / `psi.read_file_slice(path, offset, limit, max_bytes)` / `psi.file_write(path, content)` / `psi.file_append(path, content)` | File I/O. `read_file_prefix` sniffs bounded binary prefixes, `read_file_limited` reads only files under an explicit byte cap, and `read_file_slice` returns text plus line/truncation metadata without slurping the whole file into Lua. `file_append` opens the path in `"ab"` mode — used by the bash tool to spill long output to a temp file. |
 | `psi.tempfile_path([prefix])` | Returns a unique path under `$TMPDIR` (or `/tmp`) without creating the file. The bash tool uses this for spillover when output exceeds the in-memory truncation cap. |
 | `psi.file_exists(path)` / `psi.file_type(path)` / `psi.list_dir(path)` | Filesystem inspection. `file_type` returns `file`, `directory`, `other`, or `nil`; `list_dir` returns names without `.` or `..`. |
 | `psi.path_join(base, name)` / `psi.path_expand(path)` / `psi.path_resolve(path)` / `psi.parent_directory(path)` | Portable path helpers. `path_expand` handles `~` and leading `@`; `path_resolve` anchors relative paths at the current working directory. |
@@ -366,6 +366,11 @@ The built-in OSC 52 clipboard layer
 It is enabled by default so yanks update terminal clipboards, including tmux
 via DCS passthrough. Disable it with
 `"extensions": { "osc52_clipboard": { "enabled": false } }`.
+
+Image attachments can be disabled globally with
+`"images": { "block_images": true }` in settings. When disabled, image blocks
+are replaced with `Image reading is disabled.` before provider requests, and
+the read tool omits image payloads instead of storing them in the session.
 
 ### Prompt templates
 

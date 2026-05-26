@@ -89,7 +89,7 @@ local function tool_execution_mode(name)
   return "parallel"
 end
 
-local function dispatch_tools(tool_calls, observer, abort_check)
+local function dispatch_tools(tool_calls, observer, abort_check, cfg, model)
   local sched = require("psi.sched")
   if abort_check() then
     return nil, "aborted"
@@ -134,7 +134,7 @@ local function dispatch_tools(tool_calls, observer, abort_check)
         return psi.tools.dispatch_alist(
           tc.name,
           tc.arguments or tc.input or {},
-          { tool_call_id = tc.id }
+          { tool_call_id = tc.id, provider = cfg.provider_name, model = model }
         )
       end)
       local r
@@ -158,7 +158,7 @@ local function dispatch_tools(tool_calls, observer, abort_check)
           return psi.tools.dispatch_alist(
             tc.name,
             tc.arguments or tc.input or {},
-            { tool_call_id = tc.id }
+            { tool_call_id = tc.id, provider = cfg.provider_name, model = model }
           )
         end
         cursor = cursor + 1
@@ -184,7 +184,13 @@ local function dispatch_tools(tool_calls, observer, abort_check)
     if (not observed[i]) and psi.events then
       psi.events.emit("tool-result", { id = tc.id, tool = tc.name, result = result_alist })
     end
-    session_mod.append_tool_result(tc.id, tc.name, result_json, not result_alist.ok)
+    session_mod.append_tool_result(
+      tc.id,
+      tc.name,
+      result_json,
+      not result_alist.ok,
+      result_alist.content
+    )
   end
   session_mod.save()
   return results
@@ -206,7 +212,7 @@ function M.run_turn(opts, cfg)
     end
     control.append_steering(queued_user_observer(observer, "steering"))
 
-    local api_messages = cfg.build_messages(transform.plain_session(), system_prompt, cfg)
+    local api_messages = cfg.build_messages(transform.plain_session(), system_prompt, cfg, model)
     emit_context(cfg, model, system_prompt, api_messages)
 
     local request = cfg.request_body({
@@ -304,7 +310,7 @@ function M.run_turn(opts, cfg)
         return true, text
       end
     else
-      local results, err = dispatch_tools(tool_calls, observer, abort_check)
+      local results, err = dispatch_tools(tool_calls, observer, abort_check, cfg, model)
       if not results then
         return false, err
       end

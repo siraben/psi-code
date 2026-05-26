@@ -49,6 +49,11 @@ In priority order:
   `claude-opus-4-7`).
 - `PSI_ANTHROPIC_BASE_URL` — override the API host (for proxies).
 - `PSI_PROMPT_CACHE=0` disables ephemeral prompt caching.
+- Image attachments are enabled by default for image-capable providers and
+  models. Set `"images": { "block_images": true }` in
+  `~/.config/psi/settings.json` or `./.psi/settings.json` to omit image
+  blocks before provider requests. Psi does not auto-resize oversized images;
+  the read tool omits images that exceed its inline payload limit.
 
 ## Ollama
 

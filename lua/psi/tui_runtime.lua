@@ -1265,12 +1265,16 @@ local function persisted_tool_result_payload(message, content_text)
   message = type(message) == "table" and message or {}
   local payload = safe_decode(content_text, nil)
   if type(payload) ~= "table" then
-    return {
+    payload = {
       ok = not message.isError,
       error = message.isError and content_text or nil,
       output = content_text,
       result = content_text,
     }
+    if message.toolName == "read" then
+      payload.text = content_text
+    end
+    return payload
   end
   -- Stored Codex tool results are often JSON strings inside text blocks.
   -- Decode them so replay renders the actual output instead of raw JSON.

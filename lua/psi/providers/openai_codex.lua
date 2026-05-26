@@ -6,6 +6,7 @@ local openai_compat = require("psi.providers.openai_compat")
 local prelude = require("psi.prelude")
 local provider_loop = require("psi.provider_loop")
 local sched = require("psi.sched")
+local image_policy = require("psi.image_policy")
 local settings = require("psi.settings_manager")
 local session_mod = require("psi.session_manager")
 local stream_parser = require("psi.stream_parser")
@@ -88,9 +89,39 @@ local function split_tool_id(id)
   return tostring(id or ""), nil
 end
 
-local function response_input_from_session(session, _system_prompt)
+local function codex_registry_id(model)
+  local id = tostring(model or "")
+  if id == "" or id:match("^openai%-codex/") then
+    return id
+  end
+  -- The provider loop passes bare Codex model slugs; the registry keys are provider-qualified.
+  return "openai-codex/" .. id
+end
+
+local function model_supports_images(model)
+  local ok, registry = pcall(require, "psi.api_registry")
+  local id = codex_registry_id(model)
+  local meta = ok and registry and registry.model and registry.model(id) or nil
+  local input = type(meta) == "table" and meta.input or nil
+  if type(input) == "table" then
+    for _, modality in ipairs(input) do
+      if modality == "image" then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+local function response_input_from_session(session, _system_prompt, _cfg, model)
   local out = prelude.array(#session)
   local msg_index = 0
+  local images_blocked = image_policy.blocked()
+  local supports_images = model_supports_images(model) and not images_blocked
+  local user_image_placeholder = images_blocked and image_policy.DISABLED_TEXT
+    or transform.USER_IMAGE_PLACEHOLDER
+  local tool_image_placeholder = images_blocked and image_policy.DISABLED_TEXT
+    or transform.TOOL_IMAGE_PLACEHOLDER
 
   local function user_input(text)
     return {
@@ -98,6 +129,18 @@ local function response_input_from_session(session, _system_prompt)
       content = prelude.as_array({
         { type = "input_text", text = clean_text(text) },
       }),
+    }
+  end
+
+  local function user_content(content)
+    if not supports_images then
+      return user_input(
+        transform.text_from_content_with_image_placeholder(content, user_image_placeholder)
+      )
+    end
+    return {
+      role = "user",
+      content = transform.openai_response_content(content),
     }
   end
 
@@ -127,9 +170,20 @@ local function response_input_from_session(session, _system_prompt)
     }
   end
 
+  local function tool_output_from_message(call_id, message)
+    local content = message.content or {}
+    if supports_images and transform.has_images(content) then
+      return tool_output(call_id, transform.openai_response_content(content))
+    end
+    return tool_output(
+      call_id,
+      transform.text_from_content_with_image_placeholder(content, tool_image_placeholder)
+    )
+  end
+
   transform.replay_session(session, {
     user = function(message)
-      out[#out + 1] = user_input(transform.text_from_content(message.content))
+      out[#out + 1] = user_content(message.content)
     end,
     assistant = function(message)
       local pending = prelude.array(#(message.content or {}))
@@ -159,7 +213,7 @@ local function response_input_from_session(session, _system_prompt)
     end,
     tool_result = function(message)
       local call_id = split_tool_id(message.toolCallId)
-      return call_id, tool_output(call_id, transform.tool_result_text(message))
+      return call_id, tool_output_from_message(call_id, message)
     end,
     tool_results = function(messages)
       for _, message in ipairs(messages) do
@@ -175,15 +229,19 @@ local function response_input_from_session(session, _system_prompt)
       out[#out + 1] = user_input(summary)
     end,
     custom_message = function(message)
-      local text = transform.text_from_content(message.content)
       if message.role == "assistant" then
+        local text = transform.text_from_content(message.content)
         out[#out + 1] = assistant_text(text)
       else
-        out[#out + 1] = user_input(text)
+        out[#out + 1] = user_content(message.content)
       end
     end,
   })
   return out
+end
+
+local function build_messages(session, system_prompt, cfg, model)
+  return response_input_from_session(session, system_prompt, cfg, model)
 end
 
 local function request_body(args)
@@ -508,9 +566,7 @@ function M.run_turn(opts)
     url = api_url(),
     headers = headers(creds),
     tool_specs = api_tool_specs,
-    build_messages = function(session, system_prompt)
-      return response_input_from_session(session, system_prompt)
-    end,
+    build_messages = build_messages,
     request_body = request_body,
     parser_new = stream_parser.sse_parser,
     parser_push = parser_push,
@@ -594,6 +650,7 @@ end
 
 M._debug = {
   response_input_from_session = response_input_from_session,
+  build_messages = build_messages,
   request_body = request_body,
   handle_event = handle_event,
   new_state = new_state,

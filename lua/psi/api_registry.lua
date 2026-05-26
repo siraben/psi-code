@@ -223,6 +223,7 @@ M.register_model("anthropic/claude-opus-4-7", {
   context_window = 1000000,
   max_output_tokens = 128000,
   reasoning = true,
+  input = { "text", "image" },
 })
 
 M.register_model("ollama/llama3.1:latest", {
@@ -238,6 +239,7 @@ M.register_model("openrouter/google/gemini-3-flash-preview", {
   max_output_tokens = 65536,
   reasoning = true,
   supports_tool_use = true,
+  input = { "text", "image" },
 })
 
 M.register_model("openai-codex/gpt-5.5", {
@@ -247,6 +249,7 @@ M.register_model("openai-codex/gpt-5.5", {
   max_output_tokens = 128000,
   reasoning = true,
   supports_tool_use = true,
+  input = { "text", "image" },
 })
 
 M.register_model("openai-codex/gpt-5.4", {
@@ -256,6 +259,7 @@ M.register_model("openai-codex/gpt-5.4", {
   max_output_tokens = 128000,
   reasoning = true,
   supports_tool_use = true,
+  input = { "text", "image" },
 })
 
 M.register_model("openai-codex/gpt-5.4-mini", {
@@ -265,6 +269,7 @@ M.register_model("openai-codex/gpt-5.4-mini", {
   max_output_tokens = 128000,
   reasoning = true,
   supports_tool_use = true,
+  input = { "text", "image" },
 })
 
 M.register_model("openai-codex/gpt-5.3-codex", {
@@ -274,6 +279,7 @@ M.register_model("openai-codex/gpt-5.3-codex", {
   max_output_tokens = 128000,
   reasoning = true,
   supports_tool_use = true,
+  input = { "text", "image" },
 })
 
 M.register_model("openai-codex/gpt-5.3-codex-spark", {
@@ -283,6 +289,7 @@ M.register_model("openai-codex/gpt-5.3-codex-spark", {
   max_output_tokens = 128000,
   reasoning = true,
   supports_tool_use = true,
+  input = { "text" },
 })
 
 function M.resolve_model(provider_name, requested)

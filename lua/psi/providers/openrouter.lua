@@ -37,6 +37,24 @@ local function resolve_model(m)
   return prelude.resolve_env(m, MODEL_ENV, MODEL_DEFAULT)
 end
 
+local function model_supports_images(model)
+  local ok, registry = pcall(require, "psi.api_registry")
+  local meta = ok
+      and registry
+      and registry.model
+      and registry.model("openrouter/" .. tostring(model or ""))
+    or nil
+  local input = type(meta) == "table" and meta.input or nil
+  if type(input) == "table" then
+    for _, modality in ipairs(input) do
+      if modality == "image" then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 local function headers()
   local key = os.getenv(API_KEY_ENV) or ""
   local hdrs = {
@@ -210,6 +228,7 @@ local function make_config(model)
     url = api_url("chat/completions"),
     headers = headers(),
     include_response_id = true,
+    supports_images = model_supports_images(model),
 
     request_body = function(args)
       local body = {

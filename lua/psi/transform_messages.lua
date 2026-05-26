@@ -12,6 +12,15 @@ local M = {}
 
 local safe_decode = prelude.safe_json_decode
 
+local function clean_text(text)
+  return prelude.sanitize_surrogates(text or "")
+end
+
+local USER_IMAGE_PLACEHOLDER = "(image omitted: model does not support images)"
+local TOOL_IMAGE_PLACEHOLDER = "(tool image omitted: model does not support images)"
+M.USER_IMAGE_PLACEHOLDER = USER_IMAGE_PLACEHOLDER
+M.TOOL_IMAGE_PLACEHOLDER = TOOL_IMAGE_PLACEHOLDER
+
 function M.plain_session()
   local session_messages = session_mod.messages()
   local plain = prelude.array(#session_messages)
@@ -38,10 +47,93 @@ function M.text_from_content(content)
   local text = ""
   for _, block in ipairs(content or {}) do
     if type(block) == "table" and block.type == "text" and type(block.text) == "string" then
-      text = (text == "" and block.text) or (text .. block.text)
+      local block_text = clean_text(block.text)
+      text = (text == "" and block_text) or (text .. block_text)
     end
   end
   return text
+end
+
+function M.text_from_content_with_image_placeholder(content, placeholder)
+  placeholder = placeholder or TOOL_IMAGE_PLACEHOLDER
+  local parts = prelude.array(#(content or {}))
+  local previous_placeholder = false
+  for _, block in ipairs(content or {}) do
+    if type(block) == "table" then
+      if block.type == "image" then
+        if not previous_placeholder then
+          parts[#parts + 1] = placeholder
+        end
+        previous_placeholder = true
+      elseif block.type == "text" and type(block.text) == "string" then
+        local block_text = clean_text(block.text)
+        parts[#parts + 1] = block_text
+        previous_placeholder = block_text == placeholder
+      end
+    end
+  end
+  return table.concat(parts, "\n")
+end
+
+function M.has_images(content)
+  if type(content) ~= "table" then
+    return false
+  end
+  for _, block in ipairs(content) do
+    if type(block) == "table" and block.type == "image" then
+      return true
+    end
+  end
+  return false
+end
+
+function M.openai_chat_content(content)
+  if not M.has_images(content) then
+    return M.text_from_content(content)
+  end
+  local out = prelude.as_array({})
+  for _, block in ipairs(content or {}) do
+    if type(block) == "table" then
+      if block.type == "text" then
+        out[#out + 1] = { type = "text", text = clean_text(block.text) }
+      elseif block.type == "image" and type(block.data) == "string" then
+        out[#out + 1] = {
+          type = "image_url",
+          image_url = {
+            url = "data:"
+              .. tostring(block.mimeType or "application/octet-stream")
+              .. ";base64,"
+              .. block.data,
+          },
+        }
+      end
+    end
+  end
+  return out
+end
+
+function M.openai_response_content(content)
+  local out = prelude.as_array({})
+  for _, block in ipairs(content or {}) do
+    if type(block) == "table" then
+      if block.type == "text" then
+        out[#out + 1] = { type = "input_text", text = clean_text(block.text) }
+      elseif block.type == "image" and type(block.data) == "string" then
+        out[#out + 1] = {
+          type = "input_image",
+          detail = "auto",
+          image_url = "data:"
+            .. tostring(block.mimeType or "application/octet-stream")
+            .. ";base64,"
+            .. block.data,
+        }
+      end
+    end
+  end
+  if #out == 0 then
+    out[#out + 1] = { type = "input_text", text = "" }
+  end
+  return out
 end
 
 function M.tool_result_text(message)

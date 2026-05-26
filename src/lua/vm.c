@@ -1941,6 +1941,95 @@ static int lfn_read_file(lua_State *L) {
     return 1;
 }
 
+static int lfn_read_file_prefix(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    lua_Integer requested = luaL_optinteger(L, 2, 32);
+    FILE *f;
+    size_t limit;
+    size_t read_n;
+    char *buffer;
+
+    if (requested < 0)
+        requested = 0;
+    if (requested > PSI_VM_READ_FILE_MAX_BYTES)
+        requested = PSI_VM_READ_FILE_MAX_BYTES;
+    limit = (size_t)requested;
+
+    f = fopen(path, "rb");
+    if (!f) {
+        lua_pushnil(L);
+        return 1;
+    }
+    buffer = (char *)malloc(limit + 1u);
+    if (!buffer) {
+        fclose(f);
+        return luaL_error(L, "out of memory");
+    }
+    read_n = limit > 0u ? fread(buffer, 1u, limit, f) : 0u;
+    fclose(f);
+    buffer[read_n] = '\0';
+    lua_pushlstring(L, buffer, read_n);
+    free(buffer);
+    return 1;
+}
+
+static int lfn_read_file_limited(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    lua_Integer max_requested = luaL_optinteger(L, 2, PSI_VM_READ_FILE_MAX_BYTES);
+    FILE *f;
+    long size;
+    long max_bytes;
+    size_t size_n;
+    size_t read_n;
+    char *buffer;
+
+    if (max_requested <= 0)
+        max_requested = PSI_VM_READ_FILE_MAX_BYTES;
+    if (max_requested > PSI_VM_FILE_WRITE_MAX_BYTES)
+        max_requested = PSI_VM_FILE_WRITE_MAX_BYTES;
+    max_bytes = (long)max_requested;
+
+    f = fopen(path, "rb");
+    if (!f) {
+        lua_pushnil(L);
+        return 1;
+    }
+    if (fseek(f, 0l, SEEK_END) != 0) {
+        fclose(f);
+        lua_pushnil(L);
+        return 1;
+    }
+    size = ftell(f);
+    if (size < 0l || size > max_bytes) {
+        fclose(f);
+        lua_pushnil(L);
+        return 1;
+    }
+    size_n = (size_t)size;
+    if (fseek(f, 0l, SEEK_SET) != 0) {
+        fclose(f);
+        lua_pushnil(L);
+        return 1;
+    }
+    buffer = (char *)malloc(size_n + 1u);
+    if (!buffer) {
+        fclose(f);
+        lua_pushnil(L);
+        return 1;
+    }
+    read_n = fread(buffer, 1u, size_n, f);
+    fclose(f);
+    if (read_n != size_n) {
+        free(buffer);
+        lua_pushnil(L);
+        return 1;
+    }
+    buffer[size_n] = '\0';
+    lua_pushlstring(L, buffer, size_n);
+    free(buffer);
+    return 1;
+}
+
 static int lfn_read_file_slice(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
     long offset = (long)luaL_optinteger(L, 2, 0);
@@ -3972,6 +4061,10 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("session_message_count", lfn_session_message_count);
     PSI_REG_DOC("read_file", lfn_read_file,
         "Read a file off disk. Returns text on success, nil + error string on failure.");
+    PSI_REG_DOC("read_file_prefix", lfn_read_file_prefix,
+        "Read at most N bytes from the beginning of a file. Returns a binary string or nil.");
+    PSI_REG_DOC("read_file_limited", lfn_read_file_limited,
+        "Read a file only if it is at most N bytes. Returns a binary string or nil.");
     PSI_REG_DOC("read_file_slice", lfn_read_file_slice,
         "Read a [offset, offset+limit) line range from a file without slurping the whole "
         "file. Returns text plus line/truncation metadata.");
