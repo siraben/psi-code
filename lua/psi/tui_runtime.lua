@@ -554,26 +554,16 @@ local function build_input_lines(state)
           then
             local previous = lines[#lines]
             cursor_line = #lines
-            cursor_col = display_width(
-              input:sub(previous.start + 1, previous.start + previous.len)
-            )
+            cursor_col = display_width(input:sub(previous.start + 1, previous.start + previous.len))
             cursor_found = true
           end
         end
         local prefix = (#lines == 0) and state.input_layout.prefix_first
           or state.input_layout.prefix_rest
-        local chunk_end = input_next_chunk_end(
-          input,
-          chunk_start,
-          line_end,
-          input_wrap_width(state.width, prefix)
-        )
+        local chunk_end =
+          input_next_chunk_end(input, chunk_start, line_end, input_wrap_width(state.width, prefix))
         lines[#lines + 1] = { start = chunk_start, len = chunk_end - chunk_start }
-        if
-          not cursor_found
-          and state.cursor >= chunk_start
-          and state.cursor <= chunk_end
-        then
+        if not cursor_found and state.cursor >= chunk_start and state.cursor <= chunk_end then
           cursor_line = #lines
           cursor_col = display_width(input:sub(chunk_start + 1, state.cursor))
           cursor_found = true
