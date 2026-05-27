@@ -1125,7 +1125,7 @@ end
 
 -- Last-save state for append-only optimisation. Invalidated to
 -- force a full rewrite when: the path changes, the file is gone,
--- or the message count shrinks (compaction / clear).
+-- or the message count shrinks (/new cleared the in-memory session).
 local last_saved_path = nil
 local last_saved_count = 0
 -- Number of active C-session messages known to be mirrored in file_entries.
@@ -1189,8 +1189,8 @@ end
 -- file. Conditions that force a full rewrite:
 --   * path changed (`/resume`, fork to new file)
 --   * file is missing on disk
---   * message count shrunk (compaction or /new cleared the
---     in-memory session — the on-disk earlier entries are stale
+--   * message count shrunk (/new cleared the in-memory session — the
+--     on-disk earlier entries are stale
 --     and must be replaced)
 --   * first ever save for this path
 function M.save(path)
@@ -1732,7 +1732,10 @@ end
 
 require("psi.tool_registry").add_after_hook(record_file_op)
 
--- Replace session with [compaction-summary] + last keep_recent messages.
+-- Replace the active in-memory path with [compaction-summary] + the last
+-- keep_recent messages. The durable JSONL tree is append-only: sibling
+-- branches remain in file_entries, and the compacted active path is appended
+-- as a new branch rather than rewriting the whole file.
 --
 -- Fires `compaction-start` before the rewrite and `compaction-end`
 -- after, so extensions (autosave, exporters, observers) can flush or
@@ -1788,9 +1791,17 @@ function M.do_compact(keep_recent, summary_text)
       first_kept_id = body.id
     end
   end
+  local summary_parent_id = nil
+  if compacted_count > 0 and messages[1] then
+    local first_body = prelude.safe_json_decode(messages[1].data, nil)
+    if type(first_body) == "table" then
+      summary_parent_id = first_body.parentId
+    end
+  end
 
   psi.session_clear()
-  M.reset_entry_chain()
+  last_entry_id = summary_parent_id
+  leaf_id = summary_parent_id
   M.append_compaction(summary_text, {
     readFiles = prelude.as_array(read_files),
     modifiedFiles = prelude.as_array(modified_files),
@@ -1800,10 +1811,13 @@ function M.do_compact(keep_recent, summary_text)
   for _, m in ipairs(tail) do
     local body = prelude.safe_json_decode(m.data, nil)
     if type(body) == "table" then
+      body.id = nil
+      body.timestamp = nil
       body.parentId = last_entry_id
-      m.data = psi.json_encode(body)
+      append_body(m.role, m.text, stamp_entry(body))
+    else
+      append_raw(m.role, m.text, m.data)
     end
-    M.append_message(m)
   end
   M.reset_file_ops()
 
