@@ -22,10 +22,10 @@ le_split:write("\255\254" .. "x\0\n\0" .. "\76\117")
 le_split:close()
 
 local tools = require("psi.tools")
-local first = tools.dispatch("read", { path = path, offset = 0, limit = 10 })
-local second = tools.dispatch("read", { path = path, offset = 1, limit = 10 })
-local big_endian = tools.dispatch("read", { path = be_path, offset = 0, limit = 10 })
-local le_aligned = tools.dispatch("read", { path = le_split_path, offset = 1, limit = 10 })
+local first = tools.dispatch("read", { path = path, offset = 1, limit = 10 })
+local second = tools.dispatch("read", { path = path, offset = 2, limit = 10 })
+local big_endian = tools.dispatch("read", { path = be_path, offset = 1, limit = 10 })
+local le_aligned = tools.dispatch("read", { path = le_split_path, offset = 2, limit = 10 })
 return table.concat({
   tostring(first.ok),
   first.extras.text or "",
