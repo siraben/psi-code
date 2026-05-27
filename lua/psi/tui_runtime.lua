@@ -3439,6 +3439,8 @@ local function run_btw(state, question)
   return true
 end
 
+local choose_session_tui
+
 local function handle_command(state, line)
   if line == "/quit" or line == "/q" or line == ":quit" or line == ":q" then
     state.running = false
@@ -3551,6 +3553,33 @@ local function handle_command(state, line)
       "info",
       "resumed "
         .. tostring(action.payload)
+        .. " ("
+        .. tostring(psi.session_message_count())
+        .. " messages)"
+    )
+    set_status(state, "", false)
+    return true
+  end
+
+  if action.kind == "resume-picker" then
+    local selected = choose_session_tui(session.list_sessions(psi.cwd()))
+    if not selected then
+      set_status(state, "no session selected", true)
+      return true
+    end
+    local ok, err = session.load(selected)
+    if not ok then
+      set_status(state, "resume failed: " .. tostring(err), true)
+      return true
+    end
+    state.opts.session_file = selected
+    context.reset_usage()
+    rebuild_from_session(state)
+    add_entry(
+      state,
+      "info",
+      "resumed "
+        .. tostring(selected)
         .. " ("
         .. tostring(psi.session_message_count())
         .. " messages)"
@@ -4095,7 +4124,7 @@ end
 -- Open the resume picker. `current_infos` is the cwd-scoped list (may
 -- be empty). The picker fetches the "all" list lazily on first Tab
 -- toggle. Returns the absolute file path to load, or nil on cancel.
-local function choose_session_tui(current_infos)
+choose_session_tui = function(current_infos)
   local scopes = {
     current = current_infos or {},
     all = nil, -- lazy

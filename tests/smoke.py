@@ -1474,6 +1474,24 @@ def t_tui_resume_picker_previews_session(psi: Psi):
     assert_contains(text, "Preview", "resume picker preview heading")
     assert_contains(text, "preview prompt", "resume picker conversation preview")
 
+@test("mode/tui_slash_resume_opens_picker")
+def t_tui_slash_resume_opens_picker(psi: Psi):
+    project = psi.tmp / "slash-resume-picker"
+    project.mkdir()
+    state = psi.tmp / "state-slash-resume-picker"
+    env = {"XDG_STATE_HOME": str(state)}
+    psi.run("--print", "slash resume preview prompt", cwd=project, env_extra=env)
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [(b"", 0.5), (b"/resume\r", 0.8), (b"\x1b", 0.2), (b"/quit\r", 0.7)],
+        env_extra=env,
+        cwd=project,
+    )
+    raw.assert_clean_exit()
+    text = strip_ansi(raw)
+    assert_contains(text, "Resume session", "/resume picker")
+    assert_contains(text, "slash resume preview prompt", "/resume picker preview")
+
 @test("mode/tui_repeated_arrows_do_not_insert_text")
 def t_tui_repeated_arrows_do_not_insert_text(psi: Psi):
     # Application-cursor arrows are ESC O A/B. If the decoder leaks the final

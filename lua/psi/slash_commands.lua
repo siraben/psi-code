@@ -791,8 +791,8 @@ local BUILTIN_COMMANDS = {
   },
   {
     name = "resume",
-    argument_hint = "<path>",
-    description = "Load a session file from disk",
+    argument_hint = "[path]",
+    description = "Open the session picker or load a session file from disk",
   },
   {
     name = "import",
@@ -1232,7 +1232,7 @@ function M.handle(line)
   if starts_word(line, "/resume") then
     local path = arg_after(line, "/resume")
     if path == "" then
-      return records.new_command_action("print", "usage: /resume <path>")
+      return records.new_command_action("resume-picker", nil)
     end
     return records.new_command_action("resume", path)
   end
