@@ -5,6 +5,7 @@ local registry = require("psi.tool_registry")
 local shell = require("psi.tool_shell")
 local helpers = require("psi.tool_helpers")
 local truncate = require("psi.truncate")
+local platform = require("psi.platform")
 
 local DEFAULT_LINES = truncate.DEFAULT_MAX_LINES
 local DEFAULT_BYTES = truncate.DEFAULT_MAX_BYTES
@@ -61,8 +62,30 @@ local function impl(input, meta)
 end
 
 return function()
-  helpers.register(registry, records, {
-    name = "bash",
+  local is_windows = platform.is_windows()
+  local description
+  local prompt_snippet
+  local guidelines
+  if is_windows then
+    description = string.format(
+      "Execute a Windows shell command through cmd.exe /d /c in the current working directory "
+        .. "and return its output. Output is tail-truncated to the last %d lines or %dKB "
+        .. "(whichever is hit first). When truncated, the full output is also saved to a temp "
+        .. "file whose path is returned in the result; use the read tool with that path to "
+        .. "inspect more.",
+      DEFAULT_LINES,
+      math.floor(DEFAULT_BYTES / 1024)
+    )
+    prompt_snippet =
+      "Execute short inline Windows shell commands through cmd.exe /d /c (dir, where, type, git, tests)"
+    guidelines = {
+      "On Windows, this tool runs cmd.exe /d /c, not a Unix shell.",
+      "Use Windows commands and paths: dir, where, type, cd /d C:\\path, copy, move, del.",
+      "Do not use Unix-only commands such as pwd, ls, mkdir -p, head, sed, or /c/Users paths unless you have first confirmed an MSYS/Cygwin/Git-Bash tool is installed.",
+      "Prefer short inline cmd.exe commands. Use PowerShell only when cmd cannot express the task compactly.",
+      "If command output has mojibake, prefer prefixing cmd commands with chcp 65001 >nul &; if already using PowerShell, set OutputEncoding inline.",
+    }
+  else
     description = string.format(
       "Execute a shell command in the current working directory and return its output. "
         .. "Output is tail-truncated to the last %d lines or %dKB (whichever is hit first). "
@@ -70,9 +93,16 @@ return function()
         .. "returned in the result; use the read tool with that path to inspect more.",
       DEFAULT_LINES,
       math.floor(DEFAULT_BYTES / 1024)
-    ),
-    prompt_snippet = "Execute bash commands (ls, rg, find, tests, git, build commands)",
-    guidelines = { "Use bash for commands such as ls, rg, find, git, and tests." },
+    )
+    prompt_snippet = "Execute shell commands (ls, rg, find, tests, git, build commands)"
+    guidelines = { "Use bash for commands such as ls, rg, find, git, and tests." }
+  end
+
+  helpers.register(registry, records, {
+    name = "bash",
+    description = description,
+    prompt_snippet = prompt_snippet,
+    guidelines = guidelines,
     input_schema = helpers.schema_object({
       command = helpers.schema_type("string"),
       timeout = helpers.schema_type("number"),

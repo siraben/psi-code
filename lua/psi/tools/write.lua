@@ -25,7 +25,8 @@ local function impl(input)
     end
     return records.new_tool_result(true, "write", nil, {
       path = raw_path,
-      resolved_path = path,
+      resolved_path = path_util.to_host(path),
+      internal_path = path,
       bytes_written = #content,
     })
   end)

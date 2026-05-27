@@ -1,6 +1,7 @@
 -- psi.path: portable path helpers backed by C primitives.
 
 local M = {}
+local platform = require("psi.platform")
 
 local function normalize_spaces(text)
   return (text:gsub("[\194\160]", " "))
@@ -32,6 +33,14 @@ function M.parent(path)
     return nil
   end
   return psi.parent_directory(path)
+end
+
+function M.to_host(path)
+  return platform.to_host_path(path)
+end
+
+function M.from_host(path)
+  return platform.from_host_path(path)
 end
 
 return M

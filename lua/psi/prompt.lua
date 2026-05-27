@@ -4,6 +4,7 @@ local prelude = require("psi.prelude")
 local session = require("psi.session_manager")
 local tools = require("psi.tools")
 local resources = require("psi.resource_loader")
+local platform = require("psi.platform")
 
 local M = {}
 
@@ -37,10 +38,13 @@ end
 
 local function exploration_guideline(have)
   if have.bash and not have.grep and not have.find and not have.ls then
+    if platform.is_windows() then
+      return "Use bash for short inline Windows shell operations; it runs cmd.exe /d /c on this host"
+    end
     return "Use bash for file operations like ls, rg, find"
   end
   if have.bash and (have.grep or have.find or have.ls) then
-    return "Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)"
+    return "Prefer grep/find/ls tools over bash for file exploration (faster, bounded, avoids common ignored directories)"
   end
   return nil
 end
@@ -103,6 +107,14 @@ function M.system_prompt()
     add_guideline(g)
   end
 
+  local host_lines = platform.host_context_lines()
+  if #host_lines > 0 then
+    buf[#buf + 1] = "\nHost context:\n"
+    for _, line in ipairs(host_lines) do
+      write_line(buf, "- ", line)
+    end
+  end
+
   buf[#buf + 1] = table.concat({
     "\nPsi documentation (embedded in the binary; the read tool serves ",
     "the bundled copy when the file is not on disk, so these paths ",
@@ -125,7 +137,7 @@ function M.system_prompt()
     end
   end
   buf[#buf + 1] = "\nCurrent date: " .. psi.current_date()
-  buf[#buf + 1] = "\nCurrent working directory: " .. psi.cwd()
+  buf[#buf + 1] = "\nCurrent working directory: " .. platform.native_cwd()
   local out = table.concat(buf)
   for _, fn in ipairs(transformers) do
     local transformed = fn(out)
@@ -216,12 +228,18 @@ function M.runtime_summary()
     info["current-date"],
     "\n",
     "current-working-directory: ",
-    info["current-working-directory"],
+    platform.to_host_path(info["current-working-directory"]),
+    "\n",
+    "session-path: ",
+    psi.session_path and (psi.session_path() or "<none>") or "<unavailable>",
+    "\n",
+    "platform-windows: ",
+    tostring(psi.platform and psi.platform.is_windows and psi.platform.is_windows() or false),
     "\n",
     "session-message-count: ",
     tostring(info["session-message-count"]),
     "\n",
-    "host-primitives:\n",
+    "host-primitives (available as psi.<name>, not globals):\n",
   }
   for _, name in ipairs(info.primitives) do
     buf[#buf + 1] = "- " .. name .. "\n"

@@ -48,7 +48,8 @@ local function impl(input)
     end
     return records.new_tool_result(true, "edit", nil, {
       path = raw_path,
-      resolved_path = path,
+      resolved_path = path_util.to_host(path),
+      internal_path = path,
       replacements = replacements,
       diff = preview.diff,
       firstChangedLine = preview.firstChangedLine,

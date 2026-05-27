@@ -10,12 +10,15 @@ can replace any one host-facing bit and keep the rest.
 
 ## Principles applied (S9fES-derived)
 
-1. **ANSI C89, period.** The build line is
+1. **ANSI C89 baseline.** The normal build line is
    `-std=c89 -pedantic -Wall -Wextra -Werror`.
    No `bool`, no `//` comments, no `<stdint.h>`, no VLAs, no
    designated initializers, no compound literals, no anonymous
-   structs. C89 because that's the floor every C compiler since 1989
-   has agreed on. Verified by `git grep` and the build.
+   structs in the portable core. C89 because that's the floor every C
+   compiler since 1989 has agreed on. The Cosmopolitan APE Windows path
+   is gated by `PSI_HAVE_COSMO_DCE` and uses Cosmopolitan's NT ABI
+   declarations, including fixed-width integer types, only inside that
+   port-specific block.
 
 2. **No assumptions about integer width or endianness.** No
    `sizeof(long) == 8` baked in, no `htonl`/`ntohl`, no byte-order
@@ -49,8 +52,8 @@ can replace any one host-facing bit and keep the rest.
 
 | What we checked                       | Status |
 |---------------------------------------|--------|
-| C89 strict                            | ✅      |
-| `bool`/`stdint.h`/VLA                 | ✅ none|
+| C89 strict                            | ✅ portable core; Cosmopolitan DCE has a gated NT ABI block |
+| `bool`/`stdint.h`/VLA                 | ✅ no `bool`/VLA; `<stdint.h>` only in the gated Cosmopolitan Windows process backend |
 | `//` comments                         | ✅ none|
 | Endianness assumptions                | ✅ none — verified by treewide audit: no byte-order primitives (`htonl`/`bswap`/`__builtin_bswap`), no shift-assemble of multi-byte ints from byte streams, no integer-over-byte unions, no `*(uint32_t*)buf` type punning, no raw-int `fwrite`/`fread`. Embedded blobs (Lua bytecode + docs + CA bundle) are zlib-compressed byte streams, byte-order independent. |
 | `sizeof(long)` assumptions            | ✅ none|
@@ -76,6 +79,7 @@ can replace any one host-facing bit and keep the rest.
 | **illumos / Solaris**      | needs minor work | `gettimeofday` still present but Solaris `pthread_cond_timedwait` semantics differ subtly around CLOCK choice. More importantly, Solaris `getopt_long` is in `libgetopt`; argtable3 vendors getopt so this is fine. |
 | **Cygwin / MSYS2**         | should build, slowly | fork is emulated and slow; agent feels sluggish but works. libcurl and pthread present via packages. PE-format static linking has gotchas. |
 | **Haiku**                  | plausible, not currently checked in | The repo no longer carries `haiku/` port artifacts. Expect pkg-config/package-name fixes and termios/libedit details before claiming support. |
+| **Windows (Cosmopolitan APE)** | runs via `packages.psi-cosmocc-fat` | This is the supported Windows path today: a fat APE executable built by the flake. The Lua runtime uses feature/env detection to route shell-string commands through `cmd.exe` when it observes a Windows host, while keeping POSIX behavior unchanged elsewhere. |
 | **Windows (MSVC native)**  | does not build | `process.c`'s `_WIN32` arm is empty. Need CreateProcess-based replacement plus a libcurl-or-WinHTTP HTTP backend. ~500 LoC of C. |
 | **plain MS-DOS / DJGPP**   | unsupported | no fork, no pthread, no full POSIX. Out of scope. |
 | **Embedded (no fork/exec)**| unsupported | tool-call path requires process spawning. Could in theory build a `--no-tools` mode — not a stated goal. |
@@ -91,8 +95,9 @@ Suggested pattern:
      WinHTTP on Windows, etc.).
    - `src/core/http_async.c` — async streaming transport (pthread
      on POSIX, IO completion ports on Win, etc.).
-   - `src/core/process.c` — process spawning (fork/exec on POSIX,
-     stubbed for Win, would need CreateProcess).
+   - `src/core/process.c` — process spawning (fork/exec on POSIX and
+     Cosmopolitan APE; stubbed for native `_WIN32`, which would need
+     CreateProcess).
    - `src/core/random.c` — secure random bytes (`/dev/urandom` on Unix,
      platform RNG on other hosts).
    - `src/lua/vm.c`'s `psi.readline` binding — line editor (libedit

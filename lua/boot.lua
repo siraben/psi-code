@@ -27,6 +27,7 @@ do
 end
 
 psi.prelude = require("psi.prelude")
+psi.platform = require("psi.platform")
 psi.path = require("psi.path_utils")
 psi.sched = require("psi.sched")
 psi.events = require("psi.event_bus")

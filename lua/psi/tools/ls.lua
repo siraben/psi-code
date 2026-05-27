@@ -72,7 +72,8 @@ local function impl(input)
 
   return records.new_tool_result(true, "ls", nil, {
     path = raw_path,
-    resolved_path = path,
+    resolved_path = path_util.to_host(path),
+    internal_path = path,
     output = text,
     entry_limit_reached = entry_truncated and limit or nil,
     truncated = entry_truncated or result.truncated,
