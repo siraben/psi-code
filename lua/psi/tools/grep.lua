@@ -1,8 +1,9 @@
--- psi.tools.grep: Search file contents for a pattern (rg backend); returns matching lines with line numbers.
+-- psi.tools.grep: Search file contents for a pattern. Uses rg.
 
 local records = require("psi.records")
 local registry = require("psi.tool_registry")
 local path_util = require("psi.path_utils")
+local platform = require("psi.platform")
 local helpers = require("psi.tool_helpers")
 local shell = require("psi.tool_shell")
 local truncate = require("psi.truncate")
@@ -10,6 +11,25 @@ local truncate = require("psi.truncate")
 local DEFAULT_LINES = truncate.DEFAULT_MAX_LINES
 local DEFAULT_BYTES = truncate.DEFAULT_MAX_BYTES
 local LINE_LIMIT = truncate.GREP_MAX_LINE_LENGTH
+
+local function command_not_found(status)
+  return status == 127 or (platform.is_windows() and status == 9009)
+end
+
+local function missing_rg_error()
+  if platform.is_windows() then
+    return "ripgrep (rg) was not found. On vanilla Windows, use the bash tool "
+      .. "with a PowerShell one-liner for content search, for example: "
+      .. 'powershell -NoProfile -Command "Get-ChildItem -Recurse -File | '
+      .. "Select-String -Pattern 'needle'\". Install rg to use the grep tool."
+  end
+  return "ripgrep (rg) was not found. Install rg to use the grep tool, "
+    .. "or use bash with an available search command."
+end
+
+local function grep_guidelines()
+  return { "Prefer grep over bash when searching file contents." }
+end
 
 local function build_argv(pattern, path, glob, limit, context, ignore_case, literal)
   local argv = {
@@ -88,6 +108,16 @@ local function impl(input, meta)
   })
 
   local raw = stream.output or ""
+  if command_not_found(stream.status) then
+    local err = missing_rg_error()
+    return records.new_tool_result(false, "grep", err, {
+      path = raw_path,
+      argv = argv,
+      backend = "rg",
+      status = stream.status,
+      output = err,
+    })
+  end
   local clipped, lines_clipped = clip_lines(raw)
   local result = truncate.truncate_head(clipped, {
     max_bytes = DEFAULT_BYTES,
@@ -97,6 +127,7 @@ local function impl(input, meta)
   local extras = {
     path = raw_path,
     argv = argv,
+    backend = "rg",
     status = stream.status,
     total_bytes = stream.total_bytes,
   }
@@ -146,7 +177,7 @@ return function()
       LINE_LIMIT
     ),
     prompt_snippet = "Search file contents for patterns (prefer this over broad shell grep)",
-    guidelines = { "Prefer grep over bash when searching file contents." },
+    guidelines = grep_guidelines(),
     input_schema = helpers.schema_object({
       pattern = helpers.schema_type("string"),
       path = helpers.schema_type("string"),

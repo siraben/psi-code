@@ -2091,6 +2091,86 @@ static int lfn_random_bytes(lua_State *L) {
     return 1;
 }
 
+static int lfn_read_file_bytes(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    long offset = (long)luaL_optinteger(L, 2, 0);
+    long limit = (long)luaL_optinteger(L, 3, 4096);
+    FILE *f;
+    long size;
+    size_t limit_n;
+    size_t read_n;
+    char *buffer;
+
+    if (offset < 0)
+        offset = 0;
+    if (limit <= 0)
+        limit = 1;
+    if (limit > PSI_VM_READ_FILE_MAX_BYTES)
+        limit = PSI_VM_READ_FILE_MAX_BYTES;
+
+    f = fopen(path, "rb");
+    if (!f) {
+        lua_pushnil(L);
+        return 1;
+    }
+    if (fseek(f, 0l, SEEK_END) != 0) {
+        fclose(f);
+        lua_pushnil(L);
+        return 1;
+    }
+    size = ftell(f);
+    if (size < 0l) {
+        fclose(f);
+        lua_pushnil(L);
+        return 1;
+    }
+    if (offset > size)
+        offset = size;
+    if (fseek(f, offset, SEEK_SET) != 0) {
+        fclose(f);
+        lua_pushnil(L);
+        return 1;
+    }
+    if (limit > size - offset)
+        limit = size - offset;
+    limit_n = (size_t)limit;
+    buffer = (char *)malloc(limit_n + 1u);
+    if (!buffer) {
+        fclose(f);
+        return luaL_error(L, "out of memory");
+    }
+    read_n = fread(buffer, 1u, limit_n, f);
+    fclose(f);
+    if (read_n != limit_n) {
+        free(buffer);
+        lua_pushnil(L);
+        return 1;
+    }
+    buffer[limit_n] = '\0';
+
+    lua_newtable(L);
+    lua_pushlstring(L, buffer, limit_n);
+    lua_setfield(L, -2, "bytes");
+    lua_pushinteger(L, offset);
+    lua_setfield(L, -2, "offset");
+    lua_pushinteger(L, limit_n);
+    lua_setfield(L, -2, "limit");
+    lua_pushinteger(L, size);
+    lua_setfield(L, -2, "total_bytes");
+    if (offset + limit < size) {
+        lua_pushinteger(L, offset + limit);
+        lua_setfield(L, -2, "next_offset");
+        lua_pushboolean(L, 1);
+    } else {
+        lua_pushnil(L);
+        lua_setfield(L, -2, "next_offset");
+        lua_pushboolean(L, 0);
+    }
+    lua_setfield(L, -2, "truncated");
+    free(buffer);
+    return 1;
+}
+
 static int lfn_read_file_slice(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
     long offset = (long)luaL_optinteger(L, 2, 0);
@@ -2439,14 +2519,23 @@ static int lfn_tempfile_path(lua_State *L) {
     const char *prefix = luaL_optstring(L, 1, "psi-bash-");
     const char *tmpdir;
     char safe_prefix[64];
-    char tmpl[1024];
     size_t i;
     size_t j;
 #ifndef _WIN32
+    char tmpl[1024];
     int fd;
+#else
+    static unsigned long counter = 0u;
+    char buffer[1024];
+    long pid = 0;
+    long ts;
 #endif
 
     tmpdir = getenv("TMPDIR");
+    if (tmpdir == NULL || *tmpdir == '\0')
+        tmpdir = getenv("TEMP");
+    if (tmpdir == NULL || *tmpdir == '\0')
+        tmpdir = getenv("TMP");
     if (tmpdir == NULL || *tmpdir == '\0')
         tmpdir = "/tmp";
     j = 0u;
@@ -2461,13 +2550,11 @@ static int lfn_tempfile_path(lua_State *L) {
         j = 4u;
     }
     safe_prefix[j] = '\0';
+#ifndef _WIN32
     if ((size_t)snprintf(tmpl, sizeof(tmpl), "%s/%sXXXXXX", tmpdir, safe_prefix) >= sizeof(tmpl)) {
         lua_pushnil(L);
         return 1;
     }
-#ifdef _WIN32
-    lua_pushnil(L);
-#else
     fd = mkstemp(tmpl);
     if (fd < 0) {
         lua_pushnil(L);
@@ -2480,6 +2567,20 @@ static int lfn_tempfile_path(lua_State *L) {
         return 1;
     }
     lua_pushstring(L, tmpl);
+#else
+    ts = (long)time(NULL);
+    counter++;
+    {
+        const char *sep = "/";
+        size_t tlen = strlen(tmpdir);
+        if (strchr(tmpdir, '\\') != NULL || strchr(tmpdir, ':') != NULL)
+            sep = "\\";
+        if (tlen > 0u && (tmpdir[tlen - 1u] == '/' || tmpdir[tlen - 1u] == '\\'))
+            sep = "";
+        snprintf(buffer, sizeof(buffer), "%s%s%s%ld-%ld-%lu", tmpdir, sep, safe_prefix, pid, ts,
+            counter);
+    }
+    lua_pushstring(L, buffer);
 #endif
     return 1;
 }
@@ -4274,6 +4375,8 @@ static void psi_vm_register_psi(lua_State *L) {
         "Read at most N bytes from the beginning of a file. Returns a binary string or nil.");
     PSI_REG_DOC("read_file_limited", lfn_read_file_limited,
         "Read a file only if it is at most N bytes. Returns a binary string or nil.");
+    PSI_REG_DOC("read_file_bytes", lfn_read_file_bytes,
+        "Read a byte range from a file. Returns bytes plus offset/size metadata.");
     PSI_REG_DOC("read_file_slice", lfn_read_file_slice,
         "Read a [offset, offset+limit) line range from a file without slurping the whole "
         "file. Returns text plus line/truncation metadata.");
@@ -4284,7 +4387,7 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG_DOC("file_append", lfn_file_append,
         "Append text to a file in 'ab' mode. Optional mode sets file permissions.");
     PSI_REG_DOC("tempfile_path", lfn_tempfile_path,
-        "Create a temp file under $TMPDIR (or /tmp) and return its path.");
+        "Return a temp path under $TMPDIR, $TEMP, $TMP, or /tmp; POSIX creates it 0600.");
     PSI_REG_DOC("random_bytes", lfn_random_bytes,
         "Return N bytes from the host secure random source, or nil plus an error.");
     PSI_REG_DOC("current_date", lfn_current_date,

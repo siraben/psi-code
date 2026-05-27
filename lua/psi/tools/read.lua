@@ -35,7 +35,6 @@ local function base64_encode(text)
     local triple = (first << 16) | (second << 8) | third
     local remaining = #text - index + 1
 
-    -- Split the 24-bit group into four base64 sextets; pad missing tail bytes.
     out_index = out_index + 1
     out[out_index] = base64_char((triple >> 18) & 0x3f)
     out_index = out_index + 1
@@ -46,6 +45,21 @@ local function base64_encode(text)
     out[out_index] = remaining >= 3 and base64_char(triple & 0x3f) or "="
   end
   return table.concat(out)
+end
+
+local function byte_preview(bytes)
+  local hex = {}
+  local ascii = {}
+  for i = 1, #bytes do
+    local b = bytes:byte(i)
+    hex[#hex + 1] = string.format("%02X", b)
+    if b >= 32 and b < 127 then
+      ascii[#ascii + 1] = string.char(b)
+    else
+      ascii[#ascii + 1] = "."
+    end
+  end
+  return table.concat(hex, " ") .. "\n" .. table.concat(ascii)
 end
 
 local function model_supports_images(meta)
@@ -110,18 +124,49 @@ local function impl(input, meta)
   local resolved = path_util.resolve(raw_path) or raw_path
   local offset = registry.optional_number(input, "offset", 0)
   local limit = registry.optional_number(input, "limit", 2000)
+  local mode = registry.optional_string(input, "mode", "text")
   local source = nil
   local slice = nil
 
   local kind = psi.file_type and psi.file_type(resolved) or nil
   if kind == "file" then
+    if mode == "bytes" or mode == "binary" then
+      local byte_slice = psi.read_file_bytes(resolved, offset, limit)
+      if type(byte_slice) == "table" and type(byte_slice.bytes) == "string" then
+        local text = byte_preview(byte_slice.bytes)
+        if byte_slice.truncated then
+          text = string.format(
+            "[Showing bytes %d-%d of %d. Use offset=%d to continue.]\n%s",
+            byte_slice.offset,
+            byte_slice.offset + byte_slice.limit - 1,
+            byte_slice.total_bytes,
+            byte_slice.next_offset or (byte_slice.offset + byte_slice.limit),
+            text
+          )
+        end
+        return records.new_tool_result(true, "read", nil, {
+          path = raw_path,
+          resolved_path = path_util.to_host(resolved),
+          internal_path = resolved,
+          mode = "bytes",
+          text = text,
+          offset = byte_slice.offset,
+          limit = byte_slice.limit,
+          total_bytes = byte_slice.total_bytes,
+          next_offset = byte_slice.next_offset,
+          truncated = byte_slice.truncated,
+        })
+      end
+    end
+
     local mime_type = mime.detect_supported_image_mime_from_file(resolved)
     if mime_type then
       if image_policy.blocked() then
         local text = "Read image file [" .. mime_type .. "]\n[" .. image_policy.DISABLED_TEXT .. "]"
         return records.new_tool_result(true, "read", nil, {
           path = raw_path,
-          resolved_path = resolved,
+          resolved_path = path_util.to_host(resolved),
+          internal_path = resolved,
           text = text,
           content = { { type = "text", text = text } },
           image = false,
@@ -151,7 +196,8 @@ local function impl(input, meta)
       end
       return records.new_tool_result(true, "read", nil, {
         path = raw_path,
-        resolved_path = resolved,
+        resolved_path = path_util.to_host(resolved),
+        internal_path = resolved,
         text = text,
         content = content,
         image = omitted == nil,
@@ -161,9 +207,9 @@ local function impl(input, meta)
         offset = offset,
         limit = limit,
       })
-    else
-      slice = psi.read_file_slice(resolved, offset, limit, TEXT_READ_MAX_BYTES)
     end
+
+    slice = psi.read_file_slice(resolved, offset, limit, TEXT_READ_MAX_BYTES)
   elseif kind ~= nil then
     return records.tool_failure("read", "Cannot read file: " .. tostring(raw_path))
   else
@@ -190,11 +236,13 @@ local function impl(input, meta)
     end
     return records.new_tool_result(true, "read", nil, {
       path = raw_path,
-      resolved_path = resolved,
+      resolved_path = path_util.to_host(resolved),
+      internal_path = resolved,
       text = text,
       source = source,
       offset = offset,
       limit = limit,
+      mode = "text",
       total_lines = slice.total_lines,
       next_offset = slice.next_offset,
       truncated = slice.truncated,
@@ -206,13 +254,14 @@ end
 return function()
   helpers.register(registry, records, {
     name = "read",
-    description = "Read the contents of a file. Supports text files and images (jpg, png, gif, webp). Images are sent as attachments when image reading is enabled. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete. Oversized images are omitted because psi does not auto-resize images.",
+    description = "Read the contents of a file. Supports text files, images (jpg, png, gif, webp), and mode='bytes' for binary byte ranges rendered as hex/ascii. Images are sent as attachments when image reading is enabled. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete. Oversized images are omitted because psi does not auto-resize images.",
     prompt_snippet = "Read file contents",
     guidelines = { "Use read to examine files instead of cat or sed." },
     input_schema = helpers.schema_object({
       path = helpers.schema_type("string"),
       offset = helpers.schema_type("number"),
       limit = helpers.schema_type("number"),
+      mode = helpers.schema_type("string"),
     }, { "path" }),
     impl = impl,
   })

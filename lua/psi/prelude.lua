@@ -228,6 +228,8 @@ function M.safe_read(path)
   return nil
 end
 
+local REPLACEMENT = "\239\191\189"
+
 -- Strip any byte sequence from a string that is not well-formed UTF-8.
 --
 -- Anthropic's API rejects request bodies that contain malformed UTF-8
@@ -330,6 +332,64 @@ function M.sanitize_surrogates(text)
     end
   end
   return table.concat(out)
+end
+
+-- Decode arbitrary bytes to model-visible text the way pi-mono's
+-- Buffer.toString/TextDecoder paths do: valid UTF-8 survives and
+-- malformed bytes become U+FFFD instead of remaining raw bytes in the
+-- transcript. Provider-specific request builders still call
+-- sanitize_surrogates as a final wire guard.
+function M.decode_utf8_lossy(text)
+  if type(text) ~= "string" or text == "" then
+    return text or ""
+  end
+  if not text:find("[\x80-\xFF]") then
+    return text
+  end
+  local out = {}
+  local n = #text
+  local i = 1
+  while i <= n do
+    local c = string.byte(text, i)
+    local seq = utf8_seq_len(c)
+    if seq == 1 then
+      out[#out + 1] = string.char(c)
+      i = i + 1
+    elseif seq > 1 and utf8_seq_ok(text, i, c, seq) then
+      out[#out + 1] = text:sub(i, i + seq - 1)
+      i = i + seq
+    else
+      out[#out + 1] = REPLACEMENT
+      i = i + 1
+    end
+  end
+  return table.concat(out)
+end
+
+local function decode_value(value, seen)
+  if type(value) == "string" then
+    return M.decode_utf8_lossy(value)
+  elseif type(value) ~= "table" then
+    return value
+  end
+  seen = seen or {}
+  if seen[value] then
+    return value
+  end
+  seen[value] = true
+  local out = {}
+  for k, v in pairs(value) do
+    out[k] = decode_value(v, seen)
+  end
+  local mt = getmetatable(value)
+  if mt then
+    setmetatable(out, mt)
+  end
+  return out
+end
+
+function M.decode_model_value(value)
+  return decode_value(value, {})
 end
 
 -- ---------- paths ----------

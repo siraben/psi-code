@@ -209,7 +209,7 @@ end
 -- ---------- Append wrappers (pi-shape content builders) ----------
 
 local function text_block(s)
-  return { type = "text", text = s or "" }
+  return { type = "text", text = prelude.decode_utf8_lossy(s or "") }
 end
 
 local function ceil_div(n, d)
@@ -286,9 +286,11 @@ end
 local track_memory_append
 
 local function append_body(in_mem_role, text, body)
+  text = prelude.decode_utf8_lossy(text or "")
+  body = prelude.decode_model_value(body)
   psi.session_append(
     in_mem_role,
-    text or "",
+    text,
     psi.json_encode(body),
     estimate_tokens(in_mem_role, text, body)
   )
@@ -298,9 +300,14 @@ local function append_body(in_mem_role, text, body)
 end
 
 function append_raw(in_mem_role, text, data)
+  text = prelude.decode_utf8_lossy(text or "")
   local body = prelude.safe_json_decode(data, nil)
+  if type(body) == "table" then
+    body = prelude.decode_model_value(body)
+    data = psi.json_encode(body)
+  end
   local estimate = estimate_tokens(in_mem_role, text, body)
-  psi.session_append(in_mem_role, text or "", data, estimate)
+  psi.session_append(in_mem_role, text, data, estimate)
   if type(body) == "table" and body.id then
     last_entry_id = body.id
     leaf_id = body.id
@@ -361,15 +368,20 @@ local function pi_content_from_blocks(blocks)
   local out = prelude.as_array({})
   for _, b in ipairs(blocks or {}) do
     if b.type == "text" then
-      local entry = { type = "text", text = b.text or "" }
+      local entry = { type = "text", text = prelude.decode_utf8_lossy(b.text or "") }
       if type(b.textSignature) == "string" and b.textSignature ~= "" then
         entry.textSignature = b.textSignature
       end
       out[#out + 1] = entry
     elseif b.type == "tool_use" then
-      out[#out + 1] = { type = "toolCall", id = b.id, name = b.name, arguments = b.input or {} }
+      out[#out + 1] = {
+        type = "toolCall",
+        id = prelude.decode_utf8_lossy(b.id or ""),
+        name = prelude.decode_utf8_lossy(b.name or ""),
+        arguments = prelude.decode_model_value(b.input or {}),
+      }
     elseif b.type == "thinking" then
-      local entry = { type = "thinking", thinking = b.thinking or "" }
+      local entry = { type = "thinking", thinking = prelude.decode_utf8_lossy(b.thinking or "") }
       -- Anthropic emits the signature as `signature`; pi's session
       -- schema renames it to `thinkingSignature`. Preserve for replay.
       if type(b.signature) == "string" and b.signature ~= "" then
@@ -382,6 +394,7 @@ local function pi_content_from_blocks(blocks)
 end
 
 function M.append_user(text)
+  text = prelude.decode_utf8_lossy(text or "")
   local body = stamp_entry({
     message = {
       role = "user",
@@ -418,6 +431,7 @@ end
 -- opts: {usage?, stop_reason?, error_message?, model?, provider?, response_id?, api?}
 function M.append_assistant(text, blocks, opts)
   opts = opts or {}
+  text = prelude.decode_utf8_lossy(text or "")
   local msg = { role = "assistant", content = pi_content_from_blocks(blocks) }
   msg.timestamp = unix_ms()
   local usage = normalize_usage(opts.usage)
@@ -448,14 +462,15 @@ function M.append_assistant(text, blocks, opts)
 end
 
 function M.append_tool_result(tool_use_id, tool_name, content_text, is_error, content_blocks)
+  content_text = prelude.decode_utf8_lossy(content_text or "")
   local content = prelude.as_array({ text_block(content_text) })
   if type(content_blocks) == "table" and #content_blocks > 0 then
-    content = prelude.as_array(content_blocks)
+    content = prelude.as_array(prelude.decode_model_value(content_blocks))
   end
   local msg = {
     role = "toolResult",
-    toolCallId = tool_use_id,
-    toolName = tool_name,
+    toolCallId = prelude.decode_utf8_lossy(tool_use_id or ""),
+    toolName = prelude.decode_utf8_lossy(tool_name or ""),
     content = content,
     timestamp = unix_ms(),
   }
@@ -467,10 +482,11 @@ function M.append_tool_result(tool_use_id, tool_name, content_text, is_error, co
 end
 
 function M.append_compaction(summary_text, extra)
+  summary_text = prelude.decode_utf8_lossy(summary_text or "")
   local body = { summary = summary_text or "" }
   if extra then
     for k, v in pairs(extra) do
-      body[k] = v
+      body[k] = prelude.decode_model_value(v)
     end
   end
   body = stamp_entry(body)

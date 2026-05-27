@@ -207,16 +207,7 @@ function M.host_context_lines()
     lines[#lines + 1] = "Host OS: Windows"
     lines[#lines + 1] = "Native cwd: " .. M.native_cwd()
     lines[#lines + 1] = "Shell tool backend: cmd.exe /d /c"
-    lines[#lines + 1] =
-      "Use Windows command syntax in shell commands: dir, where, type, cd /d, copy, move, del."
-    lines[#lines + 1] =
-      "Use cmd separators/operators such as &, &&, ||, 2>nul; do not use Unix-only commands like pwd, ls, mkdir -p, head, or /c/ paths unless an MSYS/Cygwin tool is explicitly installed."
-    lines[#lines + 1] =
-      "Prefer short inline cmd.exe commands. Use PowerShell only when cmd cannot express the task compactly."
-    lines[#lines + 1] =
-      "For paths shown as /C/..., prefer the native Windows spelling C:\\... in shell commands."
-    lines[#lines + 1] =
-      "If UTF-8 text looks garbled, prefer chcp 65001 >nul in that cmd command; if already using PowerShell, set OutputEncoding inline."
+    lines[#lines + 1] = "Use Windows command syntax and native paths in shell commands."
   else
     lines[#lines + 1] = "Host OS: POSIX-like"
     lines[#lines + 1] = "Native cwd: " .. M.native_cwd()

@@ -1,13 +1,33 @@
--- psi.tools.find: Find files matching a glob (fd backend); honors hidden files and a result cap.
+-- psi.tools.find: Find files matching a glob. Uses fd.
 
 local records = require("psi.records")
 local registry = require("psi.tool_registry")
 local shell = require("psi.tool_shell")
 local path_util = require("psi.path_utils")
+local platform = require("psi.platform")
 local helpers = require("psi.tool_helpers")
 local truncate = require("psi.truncate")
 
 local DEFAULT_BYTES = truncate.DEFAULT_MAX_BYTES
+
+local function command_not_found(status)
+  return status == 127 or (platform.is_windows() and status == 9009)
+end
+
+local function missing_fd_error()
+  if platform.is_windows() then
+    return "fd was not found. On vanilla Windows, use the bash tool with a "
+      .. "PowerShell one-liner for file search, for example: powershell "
+      .. "-NoProfile -Command \"Get-ChildItem -Recurse -File -Filter '*.md'\". "
+      .. "Install fd to use the find tool."
+  end
+  return "fd was not found. Install fd to use the find tool, "
+    .. "or use bash with an available file search command."
+end
+
+local function find_guidelines()
+  return { "Prefer find over bash when locating files." }
+end
 
 local function impl(input, meta)
   local pattern = registry.require_string(input, "pattern")
@@ -37,6 +57,16 @@ local function impl(input, meta)
     spill_to_disk = false,
   })
   local raw = stream.output or ""
+  if command_not_found(stream.status) then
+    local err = missing_fd_error()
+    return records.new_tool_result(false, "find", err, {
+      path = raw_path,
+      argv = argv,
+      backend = "fd",
+      status = stream.status,
+      output = err,
+    })
+  end
   -- find tool: head-truncate by bytes only — line cap is enforced by
   -- fd's --max-results.
   local result = truncate.truncate_head(raw, {
@@ -47,6 +77,7 @@ local function impl(input, meta)
   local extras = {
     path = raw_path,
     argv = argv,
+    backend = "fd",
     status = stream.status,
     total_bytes = stream.total_bytes,
   }
@@ -80,7 +111,7 @@ return function()
       math.floor(DEFAULT_BYTES / 1024)
     ),
     prompt_snippet = "Find files by glob pattern",
-    guidelines = { "Prefer find over bash when locating files." },
+    guidelines = find_guidelines(),
     input_schema = helpers.schema_object({
       pattern = helpers.schema_type("string"),
       path = helpers.schema_type("string"),

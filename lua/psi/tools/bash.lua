@@ -79,11 +79,8 @@ return function()
     prompt_snippet =
       "Execute short inline Windows shell commands through cmd.exe /d /c (dir, where, type, git, tests)"
     guidelines = {
-      "On Windows, this tool runs cmd.exe /d /c, not a Unix shell.",
-      "Use Windows commands and paths: dir, where, type, cd /d C:\\path, copy, move, del.",
-      "Do not use Unix-only commands such as pwd, ls, mkdir -p, head, sed, or /c/Users paths unless you have first confirmed an MSYS/Cygwin/Git-Bash tool is installed.",
-      "Prefer short inline cmd.exe commands. Use PowerShell only when cmd cannot express the task compactly.",
-      "If command output has mojibake, prefer prefixing cmd commands with chcp 65001 >nul &; if already using PowerShell, set OutputEncoding inline.",
+      "On Windows, bash runs cmd.exe /d /c; use Windows command syntax and native paths.",
+      "Prefer short inline cmd.exe commands; use PowerShell only when cmd cannot express the task compactly.",
     }
   else
     description = string.format(

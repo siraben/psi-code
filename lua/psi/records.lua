@@ -4,6 +4,8 @@
 -- the type tag. External data (event payloads, tool-call inputs) still
 -- arrives as plain tables with string keys; from_alist converts those.
 
+local prelude = require("psi.prelude")
+
 local M = {}
 
 -- helper: make a record class with given fields.
@@ -74,8 +76,8 @@ function M.new_tool_result(ok, tool, error, extras)
   return setmetatable({
     ok = ok and true or false,
     tool = tool,
-    error = error, -- string or nil
-    extras = extras or {},
+    error = type(error) == "string" and prelude.decode_utf8_lossy(error) or error, -- string or nil
+    extras = prelude.decode_model_value(extras or {}),
   }, ToolResult)
 end
 
@@ -143,7 +145,7 @@ M.ProcessResult = ProcessResult
 
 function M.new_process_result(output, status, truncated)
   return setmetatable({
-    output = output or "",
+    output = prelude.decode_utf8_lossy(output or ""),
     status = status or -1,
     truncated = truncated and true or false,
   }, ProcessResult)

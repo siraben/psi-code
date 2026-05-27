@@ -3,6 +3,8 @@
 local records = require("psi.records")
 local sched = require("psi.sched")
 local truncate = require("psi.truncate")
+local platform = require("psi.platform")
+local prelude = require("psi.prelude")
 
 local M = {}
 
@@ -253,11 +255,20 @@ end
 -- streaming-with-truncation work; it remains backwards-compatible
 -- (output is whatever process.c handed us, capped at 256 KiB).
 function M.process_result(command, tool_call_id)
+  local argv = platform.shell_argv(command)
   if not sched.in_coroutine() then
+    if argv then
+      return records.process_result_from_alist(psi.process_run_argv(argv))
+    end
     return records.process_result_from_alist(psi.process_run(command))
   end
 
-  local handle, err = psi.process_begin(command)
+  local handle, err
+  if argv then
+    handle, err = psi.process_begin_argv(argv)
+  else
+    handle, err = psi.process_begin(command)
+  end
   if handle == nil then
     return records.process_result_from_alist({
       output = tostring(err or "process_begin failed"),
@@ -335,7 +346,7 @@ local function run_streaming_with(handle, err, tool_call_id, opts, kind)
   -- 256 KiB C-side buffer.
   local poll_fn = sched.in_coroutine() and sched.proc_poll or blocking_poll
   local s = stream(handle, tool_call_id, opts, poll_fn)
-  local output = s.rolling
+  local output = prelude.decode_utf8_lossy(s.rolling)
   local truncation = nil
   local truncated = false
   if opts and opts.truncate_final then
@@ -355,7 +366,13 @@ local function run_streaming_with(handle, err, tool_call_id, opts, kind)
 end
 
 function M.run_streaming(command, tool_call_id, opts)
-  local handle, err = psi.process_begin(command)
+  local argv = platform.shell_argv(command)
+  local handle, err
+  if argv then
+    handle, err = psi.process_begin_argv(argv)
+    return run_streaming_with(handle, err, tool_call_id, opts, "process_begin_argv")
+  end
+  handle, err = psi.process_begin(command)
   return run_streaming_with(handle, err, tool_call_id, opts, "process_begin")
 end
 

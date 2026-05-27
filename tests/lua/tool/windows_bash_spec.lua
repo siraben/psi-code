@@ -3,8 +3,8 @@ contains = [
   "cmd.exe /d /c",
   "short inline Windows shell commands",
   "dir, where, type",
-  "Do not use Unix-only commands",
-  "Use PowerShell only when cmd cannot express the task compactly",
+  "use Windows command syntax and native paths",
+  "use PowerShell only when cmd cannot express the task compactly",
 ]
 not_contains = ".ps1/.cmd/.bat helper files"
 env = { OS = "Windows_NT", TERM = "" }

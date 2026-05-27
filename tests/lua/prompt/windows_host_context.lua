@@ -4,7 +4,7 @@ contains = [
   "Host OS: Windows",
   "Shell tool backend: cmd.exe /d /c",
   "Execute short inline Windows shell commands",
-  "Use PowerShell only when cmd cannot express the task compactly",
+  "use PowerShell only when cmd cannot express the task compactly",
 ]
 not_contains = ".ps1/.cmd/.bat helper files"
 env = { OS = "Windows_NT", TERM = "" }

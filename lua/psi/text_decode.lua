@@ -1,5 +1,7 @@
 -- psi.text_decode: Small text decoding helpers for model-visible tool output.
 
+local prelude = require("psi.prelude")
+
 local M = {}
 
 local REPLACEMENT = "\239\191\189"
@@ -139,7 +141,7 @@ function M.utf16_to_utf8(text)
       or dominant_nuls < (other_nuls * 2 + 1)
     )
   then
-    return text, nil
+    return prelude.decode_utf8_lossy(text), nil
   end
 
   local candidates = {}

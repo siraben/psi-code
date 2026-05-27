@@ -2,9 +2,7 @@
 contains = [
   "Host OS: Windows",
   "Shell tool backend: cmd.exe /d /c",
-  "Use Windows command syntax",
-  "Prefer short inline cmd.exe commands",
-  "C:\\",
+  "Use Windows command syntax and native paths",
 ]
 not_contains = ".ps1/.cmd/.bat helper files"
 env = { OS = "Windows_NT", TERM = "" }
