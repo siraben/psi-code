@@ -4,6 +4,7 @@ local records = require("psi.records")
 local registry = require("psi.tool_registry")
 local path_util = require("psi.path_utils")
 local helpers = require("psi.tool_helpers")
+local text_decode = require("psi.text_decode")
 
 local function notice(meta)
   if not meta or not meta.truncated then
@@ -63,7 +64,7 @@ local function impl(input)
   end
 
   if type(slice) == "table" and type(slice.text) == "string" then
-    local text = slice.text
+    local text = text_decode.utf16_to_utf8(slice.text)
     local msg = notice(slice)
     if msg then
       text = msg .. "\n" .. text

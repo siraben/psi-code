@@ -68,6 +68,10 @@ end
 
 local safe_decode = prelude.safe_json_decode
 
+local function clean_text(text)
+  return prelude.sanitize_surrogates(text or "")
+end
+
 local function text_signature(id, phase)
   local sig = { v = 1, id = id }
   if phase then
@@ -92,7 +96,7 @@ local function response_input_from_session(session, _system_prompt)
     return {
       role = "user",
       content = prelude.as_array({
-        { type = "input_text", text = text or "" },
+        { type = "input_text", text = clean_text(text) },
       }),
     }
   end
@@ -106,7 +110,7 @@ local function response_input_from_session(session, _system_prompt)
       content = prelude.as_array({
         {
           type = "output_text",
-          text = text or "",
+          text = clean_text(text),
           annotations = prelude.as_array({}),
         },
       }),
@@ -119,7 +123,7 @@ local function response_input_from_session(session, _system_prompt)
     return {
       type = "function_call_output",
       call_id = call_id,
-      output = output or "",
+      output = clean_text(output),
     }
   end
 
@@ -187,7 +191,7 @@ local function request_body(args)
     model = args.model,
     store = false,
     stream = true,
-    instructions = args.system_prompt or "",
+    instructions = clean_text(args.system_prompt),
     input = args.messages,
     text = { verbosity = os.getenv("PSI_OPENAI_CODEX_VERBOSITY") or "low" },
     include = prelude.as_array({ "reasoning.encrypted_content" }),
