@@ -93,8 +93,8 @@ local function notice(page)
   if not page or not page.truncated then
     return nil
   end
-  local start_line = (page.offset or 0) + 1
-  local end_line = math.min(page.total_lines or 0, (page.offset or 0) + (page.limit or 0))
+  local start_line = page.offset or 1
+  local end_line = math.min(page.total_lines or 0, start_line + (page.limit or 0) - 1)
   local parts = {
     "[Showing lines ",
     tostring(start_line),
@@ -116,13 +116,37 @@ local function notice(page)
   return table.concat(parts)
 end
 
+local function normalize_offset(value)
+  value = tonumber(value)
+  if value == nil then
+    return 1
+  end
+  value = math.floor(value)
+  if value < 1 then
+    return 1
+  end
+  return value
+end
+
+local function to_public_slice(slice, public_offset)
+  if type(slice) ~= "table" then
+    return slice
+  end
+  slice.offset = public_offset
+  if slice.next_offset then
+    slice.next_offset = slice.next_offset + 1
+  end
+  return slice
+end
+
 local function impl(input, meta)
   local raw_path = registry.require_string(input, "path")
   if not raw_path then
     return records.tool_failure("read", "missing string field: path")
   end
   local resolved = path_util.resolve(raw_path) or raw_path
-  local offset = registry.optional_number(input, "offset", 0)
+  local offset = normalize_offset(registry.optional_number(input, "offset", 1))
+  local internal_offset = offset - 1
   local limit = registry.optional_number(input, "limit", 2000)
   local mode = registry.optional_string(input, "mode", "text")
   local source = nil
@@ -207,19 +231,19 @@ local function impl(input, meta)
         offset = offset,
         limit = limit,
       })
+    else
+      slice = to_public_slice(psi.read_file_slice(resolved, internal_offset, limit, TEXT_READ_MAX_BYTES), offset)
     end
-
-    slice = psi.read_file_slice(resolved, offset, limit, TEXT_READ_MAX_BYTES)
   elseif kind ~= nil then
     return records.tool_failure("read", "Cannot read file: " .. tostring(raw_path))
   else
     local embedded = psi.embedded_doc and psi.embedded_doc(raw_path) or nil
     if embedded then
-      local text, embedded_meta = truncate.by_lines(embedded, offset, limit)
+      local text, embedded_meta = truncate.by_lines(embedded, internal_offset, limit)
       slice = {
         text = text,
         total_lines = embedded_meta.total_lines,
-        next_offset = embedded_meta.next_offset,
+        next_offset = embedded_meta.next_offset and (embedded_meta.next_offset + 1) or nil,
         truncated = embedded_meta.truncated,
         offset = offset,
         limit = limit,

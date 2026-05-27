@@ -122,6 +122,13 @@ local function stream(handle, tool_call_id, opts, poll_fn)
   opts = opts or {}
   local max_bytes = opts.max_bytes or truncate.DEFAULT_MAX_BYTES
   local mode = opts.mode or "tail"
+  local timeout_seconds = tonumber(opts.timeout)
+  if timeout_seconds ~= nil and timeout_seconds <= 0 then
+    timeout_seconds = nil
+  end
+  local timeout_ms = timeout_seconds and (timeout_seconds * 1000) or nil
+  local start_ms = timeout_ms and psi.time_ms and psi.time_ms() or nil
+  local timed_out = false
   local rolling_max = max_bytes * 4 -- enough headroom for tail truncation
   local spill_to_disk = opts.spill_to_disk
   if spill_to_disk == nil then
@@ -233,6 +240,15 @@ local function stream(handle, tool_call_id, opts, poll_fn)
     if done then
       break
     end
+    if timeout_ms and start_ms and not timed_out then
+      local now_ms = psi.time_ms and psi.time_ms() or nil
+      if now_ms and (now_ms - start_ms) >= timeout_ms then
+        timed_out = true
+        if psi.process_terminate ~= nil then
+          psi.process_terminate(handle)
+        end
+      end
+    end
   end
 
   -- Drain whatever process.c buffered (it may include the head we
@@ -247,6 +263,8 @@ local function stream(handle, tool_call_id, opts, poll_fn)
     status = tail.status,
     temp_file_path = temp_path,
     aborted = aborted,
+    timed_out = timed_out,
+    timeout_seconds = timeout_seconds,
   }
 end
 
@@ -331,6 +349,7 @@ end
 -- spillover temp-file path (when applicable). Used by tools that
 -- want pi-mono-style truncation.
 local function run_streaming_with(handle, err, tool_call_id, opts, kind)
+  opts = opts or {}
   if handle == nil then
     return {
       output = tostring(err or (kind .. " failed")),
@@ -349,7 +368,7 @@ local function run_streaming_with(handle, err, tool_call_id, opts, kind)
   local output = prelude.decode_utf8_lossy(s.rolling)
   local truncation = nil
   local truncated = false
-  if opts and opts.truncate_final then
+  if opts.truncate_final then
     truncation = truncate_for_mode(output, opts)
     truncated = not not truncation.truncated
     output = append_notice(truncation.content or "", truncation, opts, s.temp_file_path)
@@ -362,6 +381,8 @@ local function run_streaming_with(handle, err, tool_call_id, opts, kind)
     truncated = truncated,
     truncation = truncation,
     truncation_meta = truncation_meta(truncation),
+    timed_out = s.timed_out,
+    timeout_seconds = s.timeout_seconds,
   }
 end
 

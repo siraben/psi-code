@@ -15,6 +15,7 @@ local function impl(input, meta)
   if not command then
     return records.tool_failure("bash", "missing string field: command")
   end
+  local timeout = registry.optional_number(input, "timeout", nil)
 
   local tool_call_id = meta and meta.tool_call_id or nil
   local stream = shell.run_streaming(command, tool_call_id, {
@@ -24,6 +25,7 @@ local function impl(input, meta)
     progress = "truncated",
     truncate_final = true,
     notice = "tail",
+    timeout = timeout,
   })
 
   -- If tail-truncation kicked in (or the underlying C buffer dropped
@@ -34,6 +36,8 @@ local function impl(input, meta)
     command = command,
     status = stream.status,
     total_bytes = stream.total_bytes,
+    timeout = timeout,
+    timed_out = stream.timed_out and true or false,
   }
 
   local output_text = stream.output or ""
@@ -47,8 +51,18 @@ local function impl(input, meta)
 
   extras.output = output_text
 
-  local ok = (stream.status == 0)
-  if not ok and (stream.status ~= nil) then
+  if stream.timed_out then
+    local timeout_text = "Command timed out after " .. tostring(stream.timeout_seconds or timeout) .. " seconds"
+    if #output_text > 0 then
+      output_text = output_text .. "\n\n" .. timeout_text
+    else
+      output_text = timeout_text
+    end
+    extras.output = output_text
+  end
+
+  local ok = (stream.status == 0) and not stream.timed_out
+  if not ok and not stream.timed_out and (stream.status ~= nil) then
     -- Surface the exit code in the output so the model can react.
     if #output_text > 0 then
       output_text = output_text .. "\n\nCommand exited with code " .. tostring(stream.status)

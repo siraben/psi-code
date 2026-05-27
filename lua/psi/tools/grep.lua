@@ -31,7 +31,7 @@ local function grep_guidelines()
   return { "Prefer grep over bash when searching file contents." }
 end
 
-local function build_argv(pattern, path, glob, limit, context, ignore_case, literal)
+local function build_argv(pattern, path, glob, context, ignore_case, literal)
   local argv = {
     "rg",
     "-n",
@@ -39,8 +39,6 @@ local function build_argv(pattern, path, glob, limit, context, ignore_case, lite
     "--color",
     "never",
     "--hidden",
-    "--max-count",
-    tostring(limit),
   }
   if context and context > 0 then
     argv[#argv + 1] = "-C"
@@ -65,13 +63,18 @@ end
 -- Per-line clip every match so a single huge minified-JS line doesn't
 -- blow the byte budget for the whole result. Mirrors pi-mono's
 -- truncateLine pass over rg output.
-local function clip_lines(text)
+local function clip_lines(text, limit)
   if not text or text == "" then
-    return text, false
+    return text, false, false
   end
   local out = {}
   local clipped_any = false
+  local limited = false
   for line in (text .. "\n"):gmatch("([^\n]*)\n") do
+    if limit and #out >= limit then
+      limited = true
+      break
+    end
     local clipped, was = truncate.truncate_line(line, LINE_LIMIT)
     if was then
       clipped_any = true
@@ -82,7 +85,7 @@ local function clip_lines(text)
   if out[#out] == "" then
     out[#out] = nil
   end
-  return table.concat(out, "\n"), clipped_any
+  return table.concat(out, "\n"), clipped_any, limited
 end
 
 local function impl(input, meta)
@@ -97,14 +100,17 @@ local function impl(input, meta)
   local context = registry.optional_number(input, "context", 0)
   local ignore_case = registry.optional_boolean(input, "ignoreCase", false)
   local literal = registry.optional_boolean(input, "literal", false)
-  local argv = build_argv(pattern, path, glob, limit, context, ignore_case, literal)
+  if limit then
+    limit = math.max(1, math.floor(limit))
+  end
+  local argv = build_argv(pattern, path, glob, context, ignore_case, literal)
 
   local tool_call_id = meta and meta.tool_call_id or nil
   local stream = shell.run_streaming_argv(argv, tool_call_id, {
     max_bytes = DEFAULT_BYTES,
     max_lines = DEFAULT_LINES,
     mode = "head",
-    spill_to_disk = false, -- grep results are bounded by --max-count
+    spill_to_disk = false,
   })
 
   local raw = stream.output or ""
@@ -118,7 +124,7 @@ local function impl(input, meta)
       output = err,
     })
   end
-  local clipped, lines_clipped = clip_lines(raw)
+  local clipped, lines_clipped, limit_reached = clip_lines(raw, limit)
   local result = truncate.truncate_head(clipped, {
     max_bytes = DEFAULT_BYTES,
     max_lines = DEFAULT_LINES,
@@ -133,10 +139,17 @@ local function impl(input, meta)
   }
 
   local output_text = result.content
-  if result.truncated or lines_clipped then
-    extras.truncated = result.truncated
+  if result.truncated or lines_clipped or limit_reached then
+    extras.truncated = result.truncated or limit_reached
     extras.lines_clipped = lines_clipped
+    extras.limit_reached = limit_reached
     local notice_parts = {}
+    if limit_reached then
+      notice_parts[#notice_parts + 1] = string.format(
+        "[Showing first %d grep output lines. Narrow the search or raise limit to continue.]",
+        limit
+      )
+    end
     if result.truncated then
       local n = truncate.head_notice(result)
       if n and n ~= "" then
