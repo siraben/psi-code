@@ -468,6 +468,15 @@ local DISPATCH = {
 }
 
 function M.run(opts)
+  opts = opts or {}
+  psi.no_context_files = opts.no_context_files and true or false
+  if psi.prompt_templates then
+    if opts.no_prompt_templates then
+      psi.prompt_templates.set_enabled(false)
+    elseif opts.prompt_template_file then
+      psi.prompt_templates.load_path(opts.prompt_template_file)
+    end
+  end
   local fn = DISPATCH[opts.mode]
   if not fn then
     io.stderr:write("psi.modes.run: unknown mode '" .. tostring(opts.mode) .. "'\n")

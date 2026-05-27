@@ -23,6 +23,14 @@ local PREAMBLE = table.concat({
   "You help users by reading files, executing commands, editing code, and writing new files.",
 })
 
+local function escape_attr(value)
+  value = tostring(value or "")
+  value = value:gsub("&", "&amp;")
+  value = value:gsub('"', "&quot;")
+  value = value:gsub("<", "&lt;")
+  return value
+end
+
 local BASE_GUIDELINES = {
   "Be concise in your responses",
   "Show file paths clearly when working with files",
@@ -73,6 +81,9 @@ function M.clear_transformers()
 end
 
 function M.system_prompt()
+  local custom_path, custom_prompt = resources.system_prompt_file()
+  local append_path, append_prompt = resources.append_system_prompt_file()
+
   -- Honour psi.tools.set_active(...): the "Available tools:" list
   -- must mirror what the model can actually dispatch, and the
   -- guideline inference (grep/find/ls vs bash) must key off the
@@ -81,7 +92,7 @@ function M.system_prompt()
   local all_tools = tools.active()
   local have = tool_set(all_tools)
 
-  local buf = { PREAMBLE, "\n\nAvailable tools:\n" }
+  local buf = { custom_prompt or PREAMBLE, "\n\nAvailable tools:\n" }
   for _, t in ipairs(all_tools) do
     buf[#buf + 1] = "- " .. t.name .. ": " .. t.prompt_snippet .. "\n"
   end
@@ -129,12 +140,25 @@ function M.system_prompt()
     "completely and follow links to related docs.",
   })
 
+  if append_prompt and append_prompt ~= "" then
+    buf[#buf + 1] = "\n\n"
+    buf[#buf + 1] = append_prompt
+    if append_path then
+      buf[#buf + 1] = "\n"
+    end
+  end
+
   local context_files = M.find_context_files()
   if #context_files > 0 then
-    buf[#buf + 1] = "\n\n# Project Context\n\nProject-specific instructions and guidelines:\n\n"
+    buf[#buf + 1] = "\n\n<project_context>\n\nProject-specific instructions and guidelines:\n\n"
     for _, f in ipairs(context_files) do
-      buf[#buf + 1] = "## " .. f.path .. "\n\n" .. f.content .. "\n\n"
+      buf[#buf + 1] = '<project_instructions path="'
+        .. escape_attr(f.path)
+        .. '">\n'
+        .. f.content
+        .. "\n</project_instructions>\n\n"
     end
+    buf[#buf + 1] = "</project_context>\n"
   end
   buf[#buf + 1] = "\nCurrent date: " .. psi.current_date()
   buf[#buf + 1] = "\nCurrent working directory: " .. platform.native_cwd()

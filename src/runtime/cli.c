@@ -13,7 +13,7 @@
 #endif
 
 enum {
-    PSI_CLI_ARGTABLE_MAX = 20
+    PSI_CLI_ARGTABLE_MAX = 24
 };
 
 struct psi_cli_argtable {
@@ -35,6 +35,9 @@ struct psi_cli_argtable {
     struct arg_lit *continue_recent;
     struct arg_lit *chat;
     struct arg_lit *no_extensions;
+    struct arg_lit *no_context_files;
+    struct arg_lit *no_prompt_templates;
+    struct arg_str *prompt_template;
     struct arg_end *end;
     void *table[PSI_CLI_ARGTABLE_MAX];
     size_t table_count;
@@ -85,6 +88,12 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
     args->chat = arg_lit0(
         NULL, "chat", "use the chat-style TUI (transcript flows into terminal scrollback)");
     args->no_extensions = arg_lit0(NULL, "no-extensions", "disable user extension discovery");
+    args->no_context_files =
+        arg_lit0(NULL, "no-context-files", "disable AGENTS.md and CLAUDE.md discovery");
+    args->no_prompt_templates =
+        arg_lit0(NULL, "no-prompt-templates", "disable prompt template discovery");
+    args->prompt_template =
+        arg_str0(NULL, "prompt-template", "FILE", "load an extra prompt template file or directory");
     args->end = arg_end(20);
 
     status = psi_cli_argtable_add(args, args->help);
@@ -105,6 +114,9 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
     status |= psi_cli_argtable_add(args, args->continue_recent);
     status |= psi_cli_argtable_add(args, args->chat);
     status |= psi_cli_argtable_add(args, args->no_extensions);
+    status |= psi_cli_argtable_add(args, args->no_context_files);
+    status |= psi_cli_argtable_add(args, args->no_prompt_templates);
+    status |= psi_cli_argtable_add(args, args->prompt_template);
     status |= psi_cli_argtable_add(args, args->end);
 
     if (status != PSI_STATUS_OK) {
@@ -176,11 +188,14 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     options->model = NULL;
     options->thinking_level = NULL;
     options->layout_mode = NULL;
+    options->prompt_template_file = NULL;
     options->max_tokens = 16384l;
     options->keep_recent = 12l;
     options->resume = 0;
     options->continue_recent = 0;
     options->load_extensions = 1;
+    options->no_context_files = 0;
+    options->no_prompt_templates = 0;
 
     status = PSI_STATUS_ERROR;
     if (psi_cli_build_argtable(&args) != PSI_STATUS_OK) {
@@ -258,6 +273,15 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     }
     if (args.no_extensions->count > 0) {
         options->load_extensions = 0;
+    }
+    if (args.no_context_files->count > 0) {
+        options->no_context_files = 1;
+    }
+    if (args.no_prompt_templates->count > 0) {
+        options->no_prompt_templates = 1;
+    }
+    if (args.prompt_template->count > 0) {
+        options->prompt_template_file = args.prompt_template->sval[0];
     }
     if (args.model->count > 0) {
         options->model = args.model->sval[0];
