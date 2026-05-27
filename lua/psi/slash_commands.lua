@@ -858,6 +858,10 @@ local BUILTIN_COMMANDS = {
     description = "Show the session tree",
   },
   {
+    name = "tree",
+    description = "Show the session tree",
+  },
+  {
     name = "reload",
     description = "Reload extensions, prompt templates, and keybindings",
   },
@@ -1282,7 +1286,7 @@ function M.handle(line)
       "active branch leaf: " .. tostring(result) .. "\n" .. session.branch_tree_text()
     )
   end
-  if line == "/branches" then
+  if line == "/branches" or line == "/tree" then
     return records.new_command_action("print", session.branch_tree_text())
   end
   local registered_action = dispatch_registered(line)
