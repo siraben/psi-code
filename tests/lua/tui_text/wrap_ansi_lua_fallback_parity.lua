@@ -21,9 +21,16 @@ assert_true(#lines == 2, "fallback OSC 8 should wrap")
 assert_true(lines[1]:sub(-#close) == close, "fallback should close OSC 8 before wrap")
 assert_true(lines[2]:sub(1, #open) == open, "fallback should reopen OSC 8")
 
+local clipped = text.clip_ansi(open .. "abcdef" .. close, 3)
+assert_true(clipped:sub(-#close) == close, "fallback clip should close OSC 8")
+assert_true(not clipped:find(ESC .. "%[0m"), "fallback clip should not use SGR reset for OSC 8")
+
 local styled = text.wrap_ansi(ESC .. "[48;5;1m" .. ESC .. "[4mabcdef" .. ESC .. "[0m", 3)
 assert_true(not styled[1]:find(ESC .. "[0m", 1, true), "fallback should avoid full reset")
 assert_true(styled[1]:sub(-#(ESC .. "[24m")) == ESC .. "[24m", "fallback should stop underline")
+
+local rgb = text.wrap_ansi(ESC .. "[38;2;1;4;5mabcdef" .. ESC .. "[0m", 3)
+assert_true(not rgb[1]:find(ESC .. "[24m", 1, true), "fallback RGB payload should not imply underline")
 
 local newline = text.wrap_ansi("alpha\nbeta", 80)
 assert_true(#newline == 2 and newline[1] == "alpha" and newline[2] == "beta", "fallback newlines")

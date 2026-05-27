@@ -30,12 +30,19 @@ assert_true(bel_lines[1]:sub(-#bel_close) == bel_close, "first BEL line should c
 assert_true(bel_lines[2]:sub(1, #bel_open) == bel_open, "second BEL line should reopen link")
 assert_true(not bel_lines[2]:find(ESC .. "\\", 1, true), "BEL link should not reopen with ST")
 
+local clipped_link = text.clip_ansi(bel_open .. "abcdef" .. bel_close, 3)
+assert_true(clipped_link:sub(-#bel_close) == bel_close, "clip should close active BEL OSC 8")
+assert_true(not clipped_link:find(ESC .. "%[0m"), "clip should not use SGR reset for OSC 8")
+
 local styled = text.wrap_ansi(ESC .. "[48;5;1m" .. ESC .. "[4mabcdef" .. ESC .. "[0m", 3)
 assert_true(#styled == 2, "styled text should wrap")
 assert_true(not styled[1]:find(ESC .. "[0m", 1, true), "intermediate line should not full-reset")
 assert_true(styled[1]:sub(-#(ESC .. "[24m")) == ESC .. "[24m", "underline should turn off at wrap")
 assert_true(styled[2]:find(ESC .. "[48;5;1m", 1, true) ~= nil, "background should reopen")
 assert_true(styled[2]:find(ESC .. "[4m", 1, true) ~= nil, "underline should reopen")
+
+local rgb = text.wrap_ansi(ESC .. "[38;2;1;4;5mabcdef" .. ESC .. "[0m", 3)
+assert_true(not rgb[1]:find(ESC .. "[24m", 1, true), "RGB color payload should not imply underline")
 
 local newline = text.wrap_ansi("alpha\nbeta", 80)
 assert_true(#newline == 2, "literal newline should split lines")

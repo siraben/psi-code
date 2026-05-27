@@ -473,6 +473,50 @@ local function input_wrap_width(width, prefix)
   return available
 end
 
+local function skip_wrapped_input_spaces(input, chunk_start, line_end)
+  local next_start = chunk_start
+  while next_start < line_end and input:byte(next_start + 1) == TUI_CONST.byte_space do
+    next_start = next_start + 1
+  end
+  if next_start < line_end then
+    return next_start
+  end
+  return chunk_start
+end
+
+local function input_wrap_break(input, chunk_start, limit, line_end)
+  local break_at = nil
+  local i = chunk_start
+  while i < line_end and i < limit do
+    if input:byte(i + 1) == TUI_CONST.byte_space then
+      local j = i
+      while j < line_end and input:byte(j + 1) == TUI_CONST.byte_space do
+        j = j + 1
+      end
+      if j <= limit and j < line_end then
+        break_at = j
+      end
+      i = j
+    else
+      i = i + 1
+    end
+  end
+  return break_at
+end
+
+local function input_next_chunk_end(input, chunk_start, line_end, width)
+  local remaining = input:sub(chunk_start + 1, line_end)
+  if display_width(remaining) <= width then
+    return line_end
+  end
+  local limit = tui_text.byte_index_for_width(remaining, width)
+  if limit <= 0 then
+    limit = 1
+  end
+  limit = math.min(line_end, chunk_start + limit)
+  return input_wrap_break(input, chunk_start, limit, line_end) or limit
+end
+
 local function build_input_lines(state)
   local input = state.input or EMPTY
   local input_length = #input
@@ -498,20 +542,43 @@ local function build_input_lines(state)
     else
       local chunk_start = pos
       while chunk_start < line_end do
+        local hidden_start = chunk_start
+        if chunk_start > pos then
+          chunk_start = skip_wrapped_input_spaces(input, chunk_start, line_end)
+          if
+            chunk_start > hidden_start
+            and not cursor_found
+            and state.cursor > hidden_start
+            and state.cursor <= chunk_start
+            and #lines > 0
+          then
+            local previous = lines[#lines]
+            cursor_line = #lines
+            cursor_col = display_width(
+              input:sub(previous.start + 1, previous.start + previous.len)
+            )
+            cursor_found = true
+          end
+        end
         local prefix = (#lines == 0) and state.input_layout.prefix_first
           or state.input_layout.prefix_rest
-        local take = math.min(input_wrap_width(state.width, prefix), line_end - chunk_start)
-        lines[#lines + 1] = { start = chunk_start, len = take }
+        local chunk_end = input_next_chunk_end(
+          input,
+          chunk_start,
+          line_end,
+          input_wrap_width(state.width, prefix)
+        )
+        lines[#lines + 1] = { start = chunk_start, len = chunk_end - chunk_start }
         if
           not cursor_found
           and state.cursor >= chunk_start
-          and state.cursor <= chunk_start + take
+          and state.cursor <= chunk_end
         then
           cursor_line = #lines
           cursor_col = display_width(input:sub(chunk_start + 1, state.cursor))
           cursor_found = true
         end
-        chunk_start = chunk_start + take
+        chunk_start = chunk_end
       end
     end
 

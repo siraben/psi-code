@@ -305,7 +305,9 @@ function M.clip_ansi(text, width)
   local clipped = text:sub(1, byte_index)
   local active = {}
   update_active_from_text(active, clipped)
-  if #active > 0 or active.hyperlink ~= nil then
+  if active.hyperlink ~= nil then
+    clipped = clipped .. ESC .. "]8;;" .. (active.hyperlink_terminator or BEL)
+  elseif #active > 0 then
     clipped = clipped .. ESC .. "[0m"
   end
   return clipped
@@ -350,15 +352,28 @@ local function update_active_sgr(active, seq)
     active.underline = false
     return
   end
+  local values = {}
   for code in body:gmatch("%d+") do
-    local value = tonumber(code)
+    values[#values + 1] = tonumber(code)
+  end
+  local i = 1
+  while i <= #values do
+    local value = values[i]
     if value == 0 then
       active.underline = false
     elseif value == 4 then
       active.underline = true
     elseif value == 24 then
       active.underline = false
+    elseif value == 38 or value == 48 then
+      local mode = values[i + 1]
+      if mode == 5 then
+        i = i + 2
+      elseif mode == 2 then
+        i = i + 4
+      end
     end
+    i = i + 1
   end
   active[#active + 1] = seq
 end
