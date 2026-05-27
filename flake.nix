@@ -5,7 +5,7 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     # Cosmopolitan cross-compiler set (siraben/cosmopkgs). Provides:
-    #   - pkgs.cosmocc (4.x)
+    #   - pkgs.cosmocc
     #   - pkgsCosmo       — single-arch cross stdenv (host's native arch)
     #   - pkgsCosmoFat    — fat APE cross stdenv (x86_64 + aarch64)
     #   - pkgsCosmoAarch64

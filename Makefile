@@ -35,7 +35,7 @@ STATIC        ?= 0
 
 # Lua TUI is ANSI-terminal-only; ANSI=0 implies TUI=0.
 ifeq ($(ANSI),0)
-TUI := 0
+override TUI := 0
 endif
 
 # ---- User-facing flags ----

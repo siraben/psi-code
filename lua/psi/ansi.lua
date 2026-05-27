@@ -9,6 +9,7 @@
 -- / M.bold / etc. and get plain text back when ANSI is off.
 
 local M = {}
+local platform = require("psi.platform")
 
 local ESC = string.char(27)
 local code_map = {}
@@ -143,17 +144,24 @@ function M.autodetect()
   if info.color == false then
     M.color_enabled = false
   end
-  if os.getenv("NO_COLOR") ~= nil and os.getenv("NO_COLOR") ~= "" then
+  local no_color = os.getenv("NO_COLOR") ~= nil and os.getenv("NO_COLOR") ~= ""
+  if no_color then
     M.color_enabled = false
-    return
   end
   local force = os.getenv("PSI_ANSI")
   if force == "0" or force == "off" or force == "false" then
     M.enabled = false
+    M.color_enabled = false
     return
   end
   if compiled_ansi and (force == "1" or force == "on" or force == "true") then
     M.enabled = true
+  elseif compiled_ansi and not platform.windows_ansi_supported() then
+    M.enabled = false
+    M.color_enabled = false
+    return
+  end
+  if no_color then
     return
   end
   force = os.getenv("PSI_COLOR")

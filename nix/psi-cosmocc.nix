@@ -65,6 +65,7 @@ stdenv.mkDerivation (finalAttrs: {
       "HOST_CFLAGS_ZLIB=-I${lib.getDev buildZlib}/include"
       "HOST_LIBS_ZLIB=-L${lib.getLib buildZlib}/lib -lz"
       "STATIC=1"
+      "CPPFLAGS=-DPSI_HAVE_COSMO_DCE=1"
       "TUI=1"
       "REPL_EDITLINE=0"
       "CA_BUNDLE_FILE="

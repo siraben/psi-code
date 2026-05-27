@@ -23,6 +23,13 @@ constParameterCallback:src/core/http_async.c
 # Windows fallback handles are intentionally opaque placeholders.
 unusedStructMember:src/core/process.c
 
+# cppcheck's local POSIX lint environment does not have Cosmopolitan's
+# `libc/nt/...` headers; the flake's cosmocc build is the authority there.
+missingInclude:src/core/process.c
+
+# The Cosmopolitan NT backend follows this file's C89 declaration style.
+variableScope:src/core/process.c
+
 # ---- intentionally public C API ----
 # psi_strdup_n, psi_message_init_with_data, psi_message_free are part of
 # the public C headers (common.h, message.h) for future external callers.

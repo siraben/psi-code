@@ -115,16 +115,16 @@ jobs:
             smoke_excludes: "events/tui,render/tui,tui/,mode/tui"
           - name: no-ansi
             make_flags: "ANSI=0"
-            smoke_excludes: "events/tui,render/tui,tui/,mode/tui,commands/rainbow,markdown/inline_code_no_backticks,theme/compound_ansi_mapping,theme/composite_ansi_remap"
+            smoke_excludes: "events/tui,render/tui,tui/,mode/tui,commands/rainbow,markdown/inline_code_no_backticks,theme/compound_ansi_mapping,theme/composite_ansi_remap,ansi/windows_console_force_ansi,ansi/windows_console_plain_by_default,ansi/windows_msys_allows_ansi,ansi/windows_xterm_allows_ansi"
           - name: no-color
             make_flags: "COLOR=0"
-            smoke_excludes: "commands/rainbow,mode/tui_rainbow,tui/raw_ansi_available_with_ansi,mode/tui_theme_applies_to_rendered_colors,mode/tui_input_box_background,theme/compound_ansi_mapping,theme/composite_ansi_remap"
+            smoke_excludes: "commands/rainbow,mode/tui_rainbow,tui/raw_ansi_available_with_ansi,tui/windows_console_allows_raw_ansi,mode/tui_theme_applies_to_rendered_colors,mode/tui_input_box_background,theme/compound_ansi_mapping,theme/composite_ansi_remap,ansi/windows_console_force_ansi,ansi/windows_console_plain_by_default,ansi/windows_msys_allows_ansi,ansi/windows_xterm_allows_ansi"
           - name: no-repl-editline
             make_flags: "REPL_EDITLINE=0"
             smoke_excludes: ""
           - name: minimal
             make_flags: "TUI=0 ANSI=0 COLOR=0 REPL_EDITLINE=0"
-            smoke_excludes: "events/tui,render/tui,tui/,mode/tui,commands/rainbow,markdown/inline_code_no_backticks,theme/compound_ansi_mapping,theme/composite_ansi_remap"
+            smoke_excludes: "events/tui,render/tui,tui/,mode/tui,commands/rainbow,markdown/inline_code_no_backticks,theme/compound_ansi_mapping,theme/composite_ansi_remap,ansi/windows_console_force_ansi,ansi/windows_console_plain_by_default,ansi/windows_msys_allows_ansi,ansi/windows_xterm_allows_ansi"
     steps:
       - name: Checkout
         run: eval "$FETCH_SCRIPT"

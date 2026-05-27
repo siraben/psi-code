@@ -467,15 +467,22 @@ local function inline_viewport_height(terminal_height)
 end
 
 local function detect_tui_capabilities()
+  local platform = require("psi.platform")
   local info = type(psi.runtime_info) == "function" and psi.runtime_info() or {}
   local term = os.getenv("TERM") or ""
-  local ansi_ok = info.ansi ~= false and term ~= "" and term ~= "dumb"
+  local windows_ansi_ok = platform.is_windows() and platform.windows_ansi_supported()
+  local ansi_ok = info.ansi ~= false and ((term ~= "" and term ~= "dumb") or windows_ansi_ok)
   local color_ok = ansi_ok and info.color ~= false
   local force_ansi = env_bool("PSI_ANSI")
   local force_color = env_bool("PSI_COLOR")
 
+  if platform.is_windows() and not platform.windows_ansi_supported() then
+    ansi_ok = false
+    color_ok = false
+  end
   if force_ansi ~= nil then
     ansi_ok = force_ansi and info.ansi ~= false
+    color_ok = ansi_ok and info.color ~= false
   end
   if os.getenv("NO_COLOR") ~= nil and os.getenv("NO_COLOR") ~= "" then
     color_ok = false
