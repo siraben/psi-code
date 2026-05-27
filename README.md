@@ -1,9 +1,6 @@
 # psi
 
-A small C/Lua coding agent with a plain Makefile build. The long-term
-portability target is the spirit of `cc *.c -o psi`; the current tree
-uses a real Makefile because it embeds Lua/docs and links Lua, cJSON,
-argtable3, libcurl, zlib, pthread, and optional libedit.
+A small C/Lua coding agent with a plain Makefile build.
 
 ---
 
