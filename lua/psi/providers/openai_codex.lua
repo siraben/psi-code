@@ -596,6 +596,28 @@ local function complete_text_stream(creds, body, abort_check)
   return true, state_text(state)
 end
 
+local function complete_text_request_body(opts, model)
+  local body = request_body({
+    model = model,
+    system_prompt = opts.system_prompt or "",
+    messages = prelude.as_array({
+      {
+        role = "user",
+        content = prelude.as_array({
+          { type = "input_text", text = clean_text(opts.user_text) },
+        }),
+      },
+    }),
+    tool_specs = prelude.as_array({}),
+    max_tokens = opts.max_tokens,
+    thinking_level = opts.thinking_level,
+    reasoning_effort = opts.reasoning_effort,
+  })
+  body.stream = false
+  body.tools = nil
+  return body
+end
+
 function M.run_turn(opts)
   local creds, err = auth.credentials()
   if not creds then
@@ -665,7 +687,7 @@ function M.complete_text(opts)
     messages = prelude.as_array({
       {
         role = "user",
-        content = prelude.as_array({ { type = "input_text", text = opts.user_text or "" } }),
+        content = prelude.as_array({ { type = "input_text", text = clean_text(opts.user_text) } }),
       },
     }),
     tool_specs = prelude.as_array({}),
@@ -693,6 +715,7 @@ M._debug = {
   parser_new = stream_parser.sse_parser,
   parser_push = parser_push,
   finalize = finalize,
+  complete_text_request_body = complete_text_request_body,
   classify_http_error = openai_compat.classify_http_error,
 }
 

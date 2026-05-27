@@ -47,6 +47,10 @@ local session_mod = require("psi.session_manager")
 
 local M = {}
 
+local function clean_text(text)
+  return prelude.sanitize_surrogates(text or "")
+end
+
 local function state_text(state)
   if type(state.text) == "string" then
     return state.text
@@ -159,7 +163,7 @@ function M.build_api_messages(session, system_prompt, cfg)
     or transform.TOOL_IMAGE_PLACEHOLDER
   local out = prelude.array(#session + 1)
   if system_prompt and system_prompt ~= "" then
-    out[#out + 1] = { role = "system", content = system_prompt }
+    out[#out + 1] = { role = "system", content = clean_text(system_prompt) }
   end
   transform.replay_session(session, {
     user = function(message)
@@ -168,7 +172,7 @@ function M.build_api_messages(session, system_prompt, cfg)
           message.content,
           user_image_placeholder
         )
-      out[#out + 1] = { role = "user", content = content }
+      out[#out + 1] = { role = "user", content = prelude.decode_model_value(content) }
     end,
     assistant = function(message)
       local tool_calls = nil
@@ -182,7 +186,7 @@ function M.build_api_messages(session, system_prompt, cfg)
         end
       end
       local entry = { role = "assistant" }
-      local text = transform.text_from_content(message.content)
+      local text = clean_text(transform.text_from_content(message.content))
       if text ~= "" then
         entry.content = text
       end
@@ -205,7 +209,7 @@ function M.build_api_messages(session, system_prompt, cfg)
       end
       return id,
         {
-          message = tool_result_message(id, message.toolName or "", text),
+          message = tool_result_message(id, message.toolName or "", clean_text(text)),
           content = message.content,
           has_images = has_images,
         }
@@ -250,7 +254,7 @@ function M.build_api_messages(session, system_prompt, cfg)
       end
     end,
     compaction_summary = function(summary)
-      out[#out + 1] = { role = "user", content = summary }
+      out[#out + 1] = { role = "user", content = clean_text(summary) }
     end,
     custom_message = function(message)
       local content = supports_images and transform.openai_chat_content(message.content)
@@ -260,7 +264,7 @@ function M.build_api_messages(session, system_prompt, cfg)
         )
       out[#out + 1] = {
         role = message.role == "assistant" and "assistant" or "user",
-        content = content,
+        content = prelude.decode_model_value(content),
       }
     end,
   })
@@ -338,13 +342,17 @@ end
 
 local http_post_text = sched.http_post_text
 
+local function complete_text_messages(opts)
+  return prelude.as_array({
+    { role = "system", content = clean_text(opts.system_prompt) },
+    { role = "user", content = clean_text(opts.user_text) },
+  })
+end
+
 function M.complete_text(opts, cfg)
   local body = cfg.request_body({
     model = opts.model or "",
-    messages = prelude.as_array({
-      { role = "system", content = opts.system_prompt or "" },
-      { role = "user", content = opts.user_text or "" },
-    }),
+    messages = complete_text_messages(opts),
     tool_specs = prelude.as_array({}),
     max_tokens = opts.max_tokens,
   })
@@ -373,5 +381,9 @@ function M.complete_text(opts, cfg)
   end
   return true, cfg.extract_completion(parsed)
 end
+
+M._debug = {
+  complete_text_messages = complete_text_messages,
+}
 
 return M
