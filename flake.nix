@@ -178,7 +178,7 @@
 
         # ---- cosmocc helper ---------------------------------------------
 
-        mkCosmoVariant = pkgsCosmo:
+        mkCosmoVariant = { pkgsCosmo, stripDebug ? true }:
           let
             cosmoHardening = [ "fortify" "fortify3" "stackprotector" "pic" ];
 
@@ -238,6 +238,7 @@
             mbedtls = mbedtlsPatched;
             buildCC = pkgs.stdenv.cc;
             buildZlib = pkgs.zlib;
+            inherit stripDebug;
           };
 
         # ---- Optional Linux-only variants -----------------------------
@@ -260,8 +261,11 @@
               extraMeta = { platforms = [ "riscv64-linux" ]; };
             };
 
-          psi-cosmocc = mkCosmoVariant cosmoBase.pkgsCosmo;
-          psi-cosmocc-fat = mkCosmoVariant cosmoBase.pkgsCosmoFat;
+          psi-cosmocc = mkCosmoVariant { pkgsCosmo = cosmoBase.pkgsCosmo; };
+          psi-cosmocc-fat = mkCosmoVariant {
+            pkgsCosmo = cosmoBase.pkgsCosmoFat;
+            stripDebug = false;
+          };
         };
 
         # ---- Optional x86-only variants -------------------------------

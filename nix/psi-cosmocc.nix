@@ -17,6 +17,7 @@
 , buildZlib
 # cosmocc toolchain, used for bundled third_party/zlib headers.
 , cosmocc
+, stripDebug ? true
 }:
 
 # Static psi build for pkgsCosmo / pkgsCosmoFat.
@@ -87,7 +88,10 @@ stdenv.mkDerivation (finalAttrs: {
     runHook postInstall
   '';
 
-  dontStrip = true;
+  postFixup = lib.optionalString stripDebug ''
+    ${stdenv.cc.targetPrefix}strip --strip-debug "$out/bin/psi"
+  '';
+
   dontPatchELF = true;
   dontPatchShebangs = true;
 
