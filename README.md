@@ -1,6 +1,9 @@
 # psi
 
-A small C/Lua coding agent with a plain Makefile build.
+A small C/Lua coding agent with a plain Makefile build. The long-term
+portability target is the spirit of `cc *.c -o psi`; the current tree
+uses a real Makefile because it embeds Lua/docs and links Lua, cJSON,
+argtable3, libcurl, zlib, pthread, and optional libedit.
 
 ---
 
@@ -80,9 +83,9 @@ agent. See [docs/extensions.md](docs/extensions.md).
 
 ## What it isn't
 
-- A pi-mono replacement. Several pi features (RPC mode,
-  branch-aware compaction, higher-level TUI overlays/selectors, and
-  the broad pi-managed model catalog) are tracked in
+- A pi-mono replacement. Several pi features (interactive session tree
+  navigation, RPC mode, higher-level TUI overlays/selectors, and the
+  broad pi-managed model catalog) are tracked in
   [docs/port-status.md](docs/port-status.md) but not yet here.
 - A platform. There is no plugin marketplace, no auto-update, no
   telemetry, no hosted backend. psi is a binary you build.

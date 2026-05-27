@@ -15,6 +15,20 @@ for tui in 0 1; do
           ANSI="$ansi" \
           COLOR="$color" \
           REPL_EDITLINE="$editline"
+        expected_tui=$tui
+        if [ "$ansi" = 0 ]; then
+          expected_tui=0
+        fi
+        expected_color=$color
+        if [ "$ansi" = 0 ]; then
+          expected_color=0
+        fi
+        actual=$("$root/$build_dir/psi" --eval 'local i=psi.runtime_info(); return tostring(i.tui).."|"..tostring(i.ansi).."|"..tostring(i.color)')
+        expected="$([ "$expected_tui" = 1 ] && printf true || printf false)|$([ "$ansi" = 1 ] && printf true || printf false)|$([ "$expected_color" = 1 ] && printf true || printf false)"
+        if [ "$actual" != "$expected" ]; then
+          echo "feature gate mismatch: expected $expected, got $actual" >&2
+          exit 1
+        fi
       done
     done
   done
