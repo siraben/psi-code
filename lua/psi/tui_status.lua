@@ -742,11 +742,23 @@ function M.status_bar(arg_json)
   local ok, agent = pcall(require, "psi.agent_session")
   local resolved = ok and agent.model_descriptor(arg.model)
   local model = (resolved and resolved.id) or arg.model or "?"
+  local context_window = tonumber(arg.context_window)
+    or (resolved and tonumber(resolved.context_window))
   local left = pair("session", short_id(psi.session_id()), true)
   local right_parts = {
     pair("model", model, false),
     pair("messages", tostring(psi.session_message_count()), false),
   }
+  local estimate = context.estimate_context_tokens()
+  if estimate and estimate.tokens and estimate.tokens > 0 then
+    local window = context_window or context.context_window(model)
+    local pct = (estimate.tokens / window) * 100
+    right_parts[#right_parts + 1] = pair(
+      "ctx",
+      string.format("%.1f%% (%d/%d)", pct, estimate.tokens, window),
+      false
+    )
+  end
   for _, hook in ipairs(status_hooks) do
     local ok_hook, extra = pcall(hook.fn, arg)
     if ok_hook and type(extra) == "string" and extra ~= "" then
