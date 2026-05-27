@@ -71,8 +71,11 @@ they're useful before the binary is on the system. Regenerated from
 | `-h`, `--help` | — | show help |
 | `--max-tokens` | `N` | max output tokens for --agent |
 | `--model` | `MODEL` | model to use with --agent |
+| `--no-context-files` | — | disable AGENTS.md and CLAUDE.md discovery |
 | `--no-extensions` | — | disable user extension discovery |
+| `--no-prompt-templates` | — | disable prompt template discovery |
 | `--print` | `TEXT` | run the bootstrap print-mode handler |
+| `--prompt-template` | `FILE` | load an extra prompt template file or directory |
 | `--repl` | — | run the interactive line editor shell |
 | `-r`, `--resume` | — | pick a session to resume (TUI picker) |
 | `--session` | `FILE` | load and save a JSONL session file |
