@@ -352,6 +352,18 @@ local function cmd_reload()
       pcall(psi.tui.clear_clipboard_writers)
     end
   end
+  if psi.tools and psi.tools.clear_hooks then
+    pcall(psi.tools.clear_hooks)
+  end
+  if psi.session and psi.session.install_file_op_hook then
+    pcall(psi.session.install_file_op_hook)
+  end
+  if psi.events and psi.events.clear then
+    pcall(psi.events.clear)
+  end
+  if psi.prompt and psi.prompt.clear_transformers then
+    pcall(psi.prompt.clear_transformers)
+  end
   if type(psi.install_builtin_extensions) == "function" then
     pcall(psi.install_builtin_extensions)
   end

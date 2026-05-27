@@ -1730,7 +1730,11 @@ function M.reset_file_ops()
   pending_modified = {}
 end
 
-require("psi.tool_registry").add_after_hook(record_file_op)
+function M.install_file_op_hook()
+  require("psi.tool_registry").add_after_hook(record_file_op)
+end
+
+M.install_file_op_hook()
 
 -- Replace the active in-memory path with [compaction-summary] + the last
 -- keep_recent messages. The durable JSONL tree is append-only: sibling
