@@ -92,8 +92,8 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
         arg_lit0(NULL, "no-context-files", "disable AGENTS.md and CLAUDE.md discovery");
     args->no_prompt_templates =
         arg_lit0(NULL, "no-prompt-templates", "disable prompt template discovery");
-    args->prompt_template =
-        arg_str0(NULL, "prompt-template", "FILE", "load an extra prompt template file or directory");
+    args->prompt_template = arg_str0(
+        NULL, "prompt-template", "FILE", "load an extra prompt template file or directory");
     args->end = arg_end(20);
 
     status = psi_cli_argtable_add(args, args->help);
