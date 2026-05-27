@@ -21,6 +21,11 @@
 }:
 
 # Static psi build for pkgsCosmo / pkgsCosmoFat.
+#
+# OpenBSD note: the fat APE runs on OpenBSD 7.3, but current OpenBSD
+# releases enforce pinned syscall metadata that cosmocc 4.0.2 does not
+# emit. Keep this derivation OS-neutral; use a native OpenBSD build for
+# OpenBSD 7.9 until the toolchain grows that metadata.
 
 stdenv.mkDerivation (finalAttrs: {
   pname = "psi-cosmocc";
