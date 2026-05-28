@@ -23,6 +23,9 @@ local host_cell_width = type(host.cell_width) == "function" and host.cell_width 
 local EMPTY = ""
 local ESC = string.char(27)
 local BEL = string.char(7)
+local ANSI_RESET_STYLE = ESC .. "[0m"
+local ANSI_UNDERLINE_OFF = ESC .. "[24m"
+local OSC8_CLOSE_PREFIX = ESC .. "]8;;"
 local BYTE_SPACE = 32
 local BYTE_TAB = 9
 local BYTE_NEWLINE = 10
@@ -306,9 +309,9 @@ function M.clip_ansi(text, width)
   local active = {}
   update_active_from_text(active, clipped)
   if active.hyperlink ~= nil then
-    clipped = clipped .. ESC .. "]8;;" .. (active.hyperlink_terminator or BEL)
+    clipped = clipped .. OSC8_CLOSE_PREFIX .. (active.hyperlink_terminator or BEL)
   elseif #active > 0 then
-    clipped = clipped .. ESC .. "[0m"
+    clipped = clipped .. ANSI_RESET_STYLE
   end
   return clipped
 end
@@ -332,10 +335,10 @@ end
 local function line_end_reset(active)
   local out = {}
   if active.underline then
-    out[#out + 1] = ESC .. "[24m"
+    out[#out + 1] = ANSI_UNDERLINE_OFF
   end
   if active.hyperlink ~= nil then
-    out[#out + 1] = ESC .. "]8;;" .. (active.hyperlink_terminator or BEL)
+    out[#out + 1] = OSC8_CLOSE_PREFIX .. (active.hyperlink_terminator or BEL)
   end
   return table.concat(out)
 end

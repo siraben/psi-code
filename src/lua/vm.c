@@ -1399,12 +1399,10 @@ static int psi_vm_text_sgr_resets(const char *seq, size_t len) {
     return saw_digit && value == 0;
 }
 
+/* Parse one numeric SGR parameter and advance past its digits. */
 static int psi_vm_text_parse_sgr_value(const char *seq, size_t len, size_t *i, int *value) {
-    int saw_digit;
-    int parsed;
-
-    saw_digit = 0;
-    parsed = 0;
+    int saw_digit = 0;
+    int parsed = 0;
     while (*i + 1u < len) {
         unsigned char ch;
         ch = (unsigned char)seq[*i];
@@ -1421,7 +1419,7 @@ static int psi_vm_text_parse_sgr_value(const char *seq, size_t len, size_t *i, i
 
 static void psi_vm_text_update_sgr_flags(
     struct psi_vm_text_wrap_context *ctx, const char *seq, size_t len) {
-    size_t i;
+    size_t i = 2u;
 
     if (len < 3u || (unsigned char)seq[0] != PSI_VM_TEXT_ESC_BYTE || seq[1] != '[' ||
         seq[len - 1u] != 'm') {
@@ -1431,7 +1429,6 @@ static void psi_vm_text_update_sgr_flags(
         ctx->active_underline = 0;
         return;
     }
-    i = 2u;
     while (i + 1u < len) {
         int code;
         if (seq[i] == ';') {
