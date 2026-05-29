@@ -291,16 +291,23 @@ function M._live_progress.update(entry, chunk, replace)
 
   chunk = chunk:gsub("\r\n", NEWLINE)
   local partial = entry.progress_partial
-  for i = 1, #chunk do
-    local ch = chunk:sub(i, i)
+  local pos = 1
+  while pos <= #chunk do
+    local start_pos, end_pos, ch = chunk:find("([\r\n])", pos)
+    if not start_pos then
+      partial = partial .. chunk:sub(pos)
+      break
+    end
+    if start_pos > pos then
+      partial = partial .. chunk:sub(pos, start_pos - 1)
+    end
     if ch == "\r" then
       partial = EMPTY
-    elseif ch == NEWLINE then
+    else
       M._live_progress.push_line(entry, partial)
       partial = EMPTY
-    else
-      partial = partial .. ch
     end
+    pos = end_pos + 1
   end
   entry.progress_partial = partial
   return M._live_progress.display(entry)

@@ -1049,6 +1049,10 @@ end
 -- or the message count shrinks (compaction / clear).
 local last_saved_path = nil
 local last_saved_count = 0
+-- Number of active C-session messages known to be mirrored in file_entries.
+-- Direct low-level psi.session_append calls bypass track_memory_append and
+-- make this diverge, which sends save() through the full reconciliation path.
+local tracked_memory_count = 0
 local register_file_entry
 
 function reset_branch_tree()
@@ -1057,10 +1061,15 @@ function reset_branch_tree()
   file_entries = {}
   entry_by_id = {}
   children_by_parent = {}
+  tracked_memory_count = 0
 end
 
 local function reconcile_memory_entries()
-  if psi.session_message_count() == 0 then
+  local memory_count = psi.session_message_count()
+  if memory_count == tracked_memory_count then
+    return
+  end
+  if memory_count == 0 then
     reset_branch_tree()
     return
   end
@@ -1078,6 +1087,7 @@ local function reconcile_memory_entries()
       parent_id = entry.id
     end
   end
+  tracked_memory_count = memory_count
 end
 
 -- Persist the current session to disk.
@@ -1321,6 +1331,7 @@ track_memory_append = function(in_mem_role, text, body)
     data = psi.json_encode(body),
   })
   register_file_entry(entry)
+  tracked_memory_count = psi.session_message_count()
 end
 
 local function active_entries_for_leaf(id)
@@ -1376,6 +1387,7 @@ local function rebuild_active_path()
     last_entry_id = nil
     leaf_id = nil
   end
+  tracked_memory_count = psi.session_message_count()
 end
 
 local function resolve_entry_id(id_or_prefix)

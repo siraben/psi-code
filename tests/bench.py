@@ -265,6 +265,29 @@ BENCHES: list[tuple[str, str]] = [
         """,
     ),
     (
+        "tui_live_progress_long_line",
+        r"""
+        -- Long-running tools often print progress without newlines, or
+        -- rewrite one status line with carriage returns. Keep this close
+        -- to the TUI progress path so regressions in buffering shape show
+        -- up in the benchmark suite.
+        local progress = require('psi.tui_runtime')._live_progress
+        local chunk = string.rep('x', 8192)
+        local N = 100
+        local checksum = 0
+        local start = os.clock()
+        for _ = 1, N do
+          local entry = {}
+          progress.update(entry, chunk, true)
+          progress.update(entry, '\r' .. chunk .. '\n', false)
+          checksum = checksum + #(entry.progress_partial or '')
+        end
+        local dt = (os.clock() - start) * 1000
+        io.write(string.format('ms: %.1f  iterations: %d  bytes: %d  checksum: %d\n',
+                               dt, N, #chunk * 2, checksum))
+        """,
+    ),
+    (
         "sse_feed_fragmented",
         r"""
         -- Realistic adversarial workload: several large SSE events,
