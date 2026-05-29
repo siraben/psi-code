@@ -24,11 +24,20 @@ env:
   # composite action can't help here either: its action.yml lives in the repo.
   FETCH_SCRIPT: |
     token="${FORGEJO_TOKEN:-$GITHUB_TOKEN}"
-    auth_header="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
     git init .
     git remote add origin "${FORGEJO_CI_URL%/}/${FORGEJO_CI_REPOSITORY}"
-    GIT_TERMINAL_PROMPT=0 git -c "http.extraHeader=Authorization: Basic $auth_header" fetch --quiet --depth=1 origin "$GITHUB_SHA"
-    git checkout --detach FETCH_HEAD
+    fetch_ref() {
+      if [ -n "$token" ]; then
+        auth_header="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
+        GIT_TERMINAL_PROMPT=0 git -c "http.extraHeader=Authorization: Basic $auth_header" fetch --quiet --depth=1 origin "$1"
+      else
+        GIT_TERMINAL_PROMPT=0 git fetch --quiet --depth=1 origin "$1"
+      fi
+    }
+    fetch_ref "$GITHUB_SHA" ||
+      fetch_ref "$GITHUB_REF" ||
+      fetch_ref "+refs/pull/*/head:refs/remotes/origin/pr/*"
+    git checkout --detach "$GITHUB_SHA"
 
 jobs:
   format:
@@ -50,6 +59,17 @@ jobs:
         with:
           build-dir-suffix: ${{ github.job }}
       - run: nix develop --command make BUILD_DIR="$CI_BUILD_DIR" lint
+
+  sbom-audit:
+    name: SBOM audit
+    runs-on: docker
+    needs: [format, style]
+    steps:
+      - name: Checkout
+        run: eval "$FETCH_SCRIPT"
+      - uses: ./.forgejo/actions/setup
+      - name: Run runtime dependency audit
+        run: nix run .#audit-sbom -- .#default sbom
 
   infer:
     name: Infer static analysis

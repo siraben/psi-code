@@ -137,6 +137,9 @@ Optional Make flags (each defaults to `1`, set to `0` to disable):
 isolated `BUILD_DIR=build-*` trees — the regression check whenever
 preprocessor guards or optional dependencies move.
 
+Dependency SBOM generation and vulnerability gating are available via
+`nix run .#audit-sbom`; see [docs/dependency-audit.md](docs/dependency-audit.md).
+
 ## Providers
 
 Four providers are wired today. Provider selection is by `--model

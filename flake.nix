@@ -13,10 +13,11 @@
 
     flake-utils.url = "github:numtide/flake-utils";
     filnix.url = "github:mbrock/filnix";
+    sbomnix.url = "github:tiiuae/sbomnix";
     sirabenOverlay.url = "github:siraben/overlay";
   };
 
-  outputs = { self, nixpkgs, nixpkgs-cosmo, flake-utils, filnix, sirabenOverlay }:
+  outputs = { self, nixpkgs, nixpkgs-cosmo, flake-utils, filnix, sbomnix, sirabenOverlay }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         inherit (pkgs) lib;
@@ -519,6 +520,20 @@
               make BUILD_DIR=build-gcc CC=gcc
               make BUILD_DIR=build-clang CC=clang
               make BUILD_DIR=build-tcc CC=tcc HOST_CC=cc STRICT_CFLAGS= "RPATH_LDFLAGS=\$(LOCAL_RPATH_LDFLAGS)"
+            '';
+          };
+
+          audit-sbom = mkApp {
+            name = "psi-audit-sbom";
+            description = "Generate and audit runtime SBOM artifacts";
+            extraInputs = [
+              pkgs.nix
+              pkgs.python3
+              sbomnix.packages.${system}.sbomnix
+            ];
+            text = ''
+              cd "''${PSI_SRC:-$PWD}"
+              exec python3 scripts/sbom-audit.py "$@"
             '';
           };
         };
