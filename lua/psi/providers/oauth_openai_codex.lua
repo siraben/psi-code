@@ -203,6 +203,13 @@ local function base64_decode(text)
 end
 
 local function random_bytes(n)
+  if psi.random_bytes then
+    local bytes, err = psi.random_bytes(n)
+    if bytes then
+      return bytes
+    end
+    return nil, err or "OpenAI Codex OAuth requires a secure random source"
+  end
   local f = io.open("/dev/urandom", "rb")
   if f then
     local bytes = f:read(n)
@@ -211,12 +218,7 @@ local function random_bytes(n)
       return bytes
     end
   end
-  local out = {}
-  math.randomseed(os.time() * 1000003 + math.floor(os.clock() * 1000000))
-  for _ = 1, n do
-    out[#out + 1] = string.char(math.random(0, 255))
-  end
-  return table.concat(out)
+  return nil, "OpenAI Codex OAuth requires a secure random source"
 end
 
 local function urlencode(s)
@@ -297,9 +299,17 @@ local function exchange(body)
 end
 
 function M.create_authorization_flow()
-  local verifier = base64url_encode(random_bytes(32))
+  local verifier_bytes, verifier_err = random_bytes(32)
+  if not verifier_bytes then
+    return nil, verifier_err
+  end
+  local state_bytes, state_err = random_bytes(16)
+  if not state_bytes then
+    return nil, state_err
+  end
+  local verifier = base64url_encode(verifier_bytes)
   local challenge = base64url_encode(sha256_bytes(verifier))
-  local state = base64url_encode(random_bytes(16))
+  local state = base64url_encode(state_bytes)
   local params = form_encode({
     response_type = "code",
     client_id = CLIENT_ID,
@@ -389,7 +399,11 @@ function M.login_with_input(input, flow)
 end
 
 function M.begin_login()
-  pending_flow = M.create_authorization_flow()
+  local flow, err = M.create_authorization_flow()
+  if not flow then
+    return nil, err
+  end
+  pending_flow = flow
   return pending_flow
 end
 
@@ -402,7 +416,10 @@ function M.finish_login(input)
 end
 
 function M.login_interactive()
-  local flow = M.begin_login()
+  local flow, err = M.begin_login()
+  if not flow then
+    return false, err
+  end
   io.write("Open this URL in your browser:\n\n" .. flow.url .. "\n\n")
   io.write("Paste the final redirect URL or authorization code: ")
   local input = io.read("*l") or ""

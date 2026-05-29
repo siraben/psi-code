@@ -30,6 +30,7 @@ local M = {}
 
 local SESSION_VERSION = 3
 local MAX_SESSION_DIR_COMPONENT_BYTES = 180
+local PRIVATE_FILE_MODE = tonumber("600", 8)
 
 -- Optional display name set via /name; persisted into the session header
 -- so it survives reloads.
@@ -970,9 +971,7 @@ local function write_session_file(path, header, messages, count)
   end
   local n = count or #messages
 
-  -- Atomic temp+fsync+rename so a crash mid-write can't leave a
-  -- truncated session log. The host primitive caps content at 16 MiB;
-  -- larger sessions fall through to the streamed writer below.
+  -- Keep transcript files private from first write.
   if psi.file_write_atomic then
     local parts = prelude.array(n * 2 + 2)
     parts[#parts + 1] = psi.json_encode(header)
@@ -981,9 +980,11 @@ local function write_session_file(path, header, messages, count)
       parts[#parts + 1] = psi.json_encode(to_disk_entry(messages[i]))
       parts[#parts + 1] = "\n"
     end
-    if psi.file_write_atomic(path, table.concat(parts)) then
+    local ok = psi.file_write_atomic(path, table.concat(parts), PRIVATE_FILE_MODE)
+    if ok then
       return true
     end
+    return false, "Failed to create session " .. tostring(path)
   end
 
   local f, err = io.open(path, "w")
@@ -1009,11 +1010,25 @@ local function write_entry_file(path, header, entries, count)
   if not psi.mkdir_parent(path) then
     return false, "failed to create parent directory"
   end
+  local n = count or #entries
+  if psi.file_write_atomic then
+    local parts = prelude.array(n * 2 + 2)
+    parts[#parts + 1] = psi.json_encode(header)
+    parts[#parts + 1] = "\n"
+    for i = 1, n do
+      parts[#parts + 1] = psi.json_encode(entries[i])
+      parts[#parts + 1] = "\n"
+    end
+    local ok = psi.file_write_atomic(path, table.concat(parts), PRIVATE_FILE_MODE)
+    if ok then
+      return true
+    end
+    return false, "Failed to create session " .. tostring(path)
+  end
   local f, err = io.open(path, "w")
   if not f then
     return false, err
   end
-  local n = count or #entries
   local ok, werr = pcall(function()
     write_line(f, header)
     for i = 1, n do
@@ -1028,6 +1043,18 @@ local function write_entry_file(path, header, entries, count)
 end
 
 local function append_entry_file(path, entries, from_idx)
+  if psi.file_append then
+    local parts = prelude.array((#entries - (from_idx or 1) + 1) * 2)
+    for i = from_idx or 1, #entries do
+      parts[#parts + 1] = psi.json_encode(entries[i])
+      parts[#parts + 1] = "\n"
+    end
+    local ok = psi.file_append(path, table.concat(parts), PRIVATE_FILE_MODE)
+    if ok then
+      return true
+    end
+    return false, "Failed to append session entry"
+  end
   local f, err = io.open(path, "a")
   if not f then
     return false, err

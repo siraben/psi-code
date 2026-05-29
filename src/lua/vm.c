@@ -16,11 +16,14 @@
 
 #include <time.h>
 #include <errno.h>
+#include <limits.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 #include <sys/time.h>
 #if PSI_ENABLE_TUI
 #include <poll.h>
 #include <termios.h>
-#include <unistd.h>
 #include <sys/ioctl.h>
 #endif
 #include <dirent.h>
@@ -36,6 +39,7 @@
 #include "psi/host_ops.h"
 #include "psi/message.h"
 #include "psi/process.h"
+#include "psi/random.h"
 #include "psi/runtime.h"
 #include "psi/session.h"
 #include "psi/vm.h"
@@ -56,6 +60,8 @@
 #ifndef PSI_ENABLE_REPL_EDITLINE
 #define PSI_ENABLE_REPL_EDITLINE 0
 #endif
+
+#define PSI_VM_RANDOM_BYTES_MAX 1048576
 
 /* ------------------------------------------------------------------
  * Tiny OS-level helpers used by the FFI date/cwd/file_exists primitives
@@ -207,6 +213,13 @@ static int psi_vm_file_exists(const char *path) {
     if (path == NULL || path[0] == '\0')
         return 0;
     return stat(path, &st) == 0 ? 1 : 0;
+}
+
+static int psi_vm_file_is_regular(const char *path) {
+    struct stat st;
+    if (path == NULL || path[0] == '\0')
+        return 0;
+    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
 }
 
 static const char *psi_vm_file_type_name(const char *path) {
@@ -386,8 +399,13 @@ static void psi_vm_push_json_value(lua_State *L, const cJSON *v) {
     }
     if (cJSON_IsNumber(v)) {
         double d = v->valuedouble;
-        if (d == (double)(lua_Integer)d) {
-            lua_pushinteger(L, (lua_Integer)d);
+        if (d == d && d >= (double)LUA_MININTEGER && d <= (double)LUA_MAXINTEGER) {
+            lua_Integer i = (lua_Integer)d;
+            if (d == (double)i) {
+                lua_pushinteger(L, i);
+            } else {
+                lua_pushnumber(L, d);
+            }
         } else {
             lua_pushnumber(L, d);
         }
@@ -1900,6 +1918,10 @@ static int lfn_read_file(lua_State *L) {
     size_t read_n;
     char *buffer;
 
+    if (!psi_vm_file_is_regular(path)) {
+        lua_pushnil(L);
+        return 1;
+    }
     f = fopen(path, "rb");
     if (!f) {
         lua_pushnil(L);
@@ -2030,6 +2052,37 @@ static int lfn_read_file_limited(lua_State *L) {
     return 1;
 }
 
+static int lfn_random_bytes(lua_State *L) {
+    lua_Integer requested = luaL_checkinteger(L, 1);
+    size_t len;
+    unsigned char *buffer;
+
+    if (requested < 0 || requested > PSI_VM_RANDOM_BYTES_MAX) {
+        lua_pushnil(L);
+        lua_pushstring(L, "invalid byte count");
+        return 2;
+    }
+    len = (size_t)requested;
+    if (len == 0u) {
+        lua_pushliteral(L, "");
+        return 1;
+    }
+    buffer = (unsigned char *)malloc(len);
+    if (buffer == NULL)
+        return luaL_error(L, "out of memory");
+
+    if (psi_random_bytes(buffer, len) != PSI_STATUS_OK) {
+        free(buffer);
+        lua_pushnil(L);
+        lua_pushstring(L, "secure random source unavailable");
+        return 2;
+    }
+
+    lua_pushlstring(L, (const char *)buffer, len);
+    free(buffer);
+    return 1;
+}
+
 static int lfn_read_file_slice(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
     long offset = (long)luaL_optinteger(L, 2, 0);
@@ -2057,6 +2110,10 @@ static int lfn_read_file_slice(lua_State *L) {
         max_bytes = PSI_VM_READ_FILE_MAX_BYTES;
     }
 
+    if (!psi_vm_file_is_regular(path)) {
+        lua_pushnil(L);
+        return 1;
+    }
     f = fopen(path, "rb");
     if (!f) {
         lua_pushnil(L);
@@ -2281,20 +2338,59 @@ static int lfn_file_write_secure(lua_State *L) {
 }
 
 static int lfn_file_write_atomic(lua_State *L) {
-    return psi_vm_lfn_atomic_write(L, 0644);
+    mode_t mode = (mode_t)luaL_optinteger(L, 3, 0644);
+    return psi_vm_lfn_atomic_write(L, mode);
 }
 
-/* psi.file_append(path, content) -> bool
- * Single fwrite + fflush + fsync; callers build the full payload
- * (e.g. JSONL line) so a crash mid-write can't split a record. */
+static int psi_vm_file_append_mode(const char *path, const char *content, size_t len, mode_t mode) {
+    int fd;
+    size_t off;
+
+    fd = open(path, O_WRONLY | O_CREAT | O_APPEND, mode);
+    if (fd < 0)
+        return PSI_STATUS_ERROR;
+#ifndef _WIN32
+    (void)fchmod(fd, mode);
+#endif
+    off = 0u;
+    while (off < len) {
+        ssize_t n = write(fd, content + off, len - off);
+        if (n < 0) {
+            if (errno == EINTR)
+                continue;
+            close(fd);
+            return PSI_STATUS_ERROR;
+        }
+        off += (size_t)n;
+    }
+#ifndef _WIN32
+    if (fsync(fd) != 0 && errno != EINVAL) {
+        close(fd);
+        return PSI_STATUS_ERROR;
+    }
+#endif
+    if (close(fd) != 0)
+        return PSI_STATUS_ERROR;
+    return PSI_STATUS_OK;
+}
+
+/* psi.file_append(path, content[, mode]) -> bool */
 static int lfn_file_append(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
     size_t len;
     const char *content = luaL_checklstring(L, 2, &len);
     FILE *f;
+    int has_mode;
+    mode_t mode;
 
     if ((long)len > PSI_VM_FILE_WRITE_MAX_BYTES) {
         lua_pushboolean(L, 0);
+        return 1;
+    }
+    has_mode = lua_gettop(L) >= 3 && !lua_isnil(L, 3);
+    if (has_mode) {
+        mode = (mode_t)luaL_checkinteger(L, 3);
+        lua_pushboolean(L, psi_vm_file_append_mode(path, content, len, mode) == PSI_STATUS_OK);
         return 1;
     }
     f = fopen(path, "ab");
@@ -2330,32 +2426,53 @@ static int lfn_file_append(lua_State *L) {
     return 1;
 }
 
-/* psi.tempfile_path([prefix]) -> string
- *
- * Compute a unique path under the system tempdir. Does NOT create
- * the file; callers (e.g. bash spillover) decide when to materialise
- * it via psi.file_write / psi.file_append. We avoid mkstemp because
- * we want C89 portability and don't need the open-fd guarantee — the
- * filename is randomised with PID + monotonic counter + time.
- */
+/* psi.tempfile_path([prefix]) -> string|nil */
 static int lfn_tempfile_path(lua_State *L) {
     const char *prefix = luaL_optstring(L, 1, "psi-bash-");
-    static unsigned long counter = 0u;
     const char *tmpdir;
-    char buffer[1024];
-    long pid = 0;
-    long ts;
+    char safe_prefix[64];
+    char tmpl[1024];
+    size_t i;
+    size_t j;
+#ifndef _WIN32
+    int fd;
+#endif
 
     tmpdir = getenv("TMPDIR");
     if (tmpdir == NULL || *tmpdir == '\0')
         tmpdir = "/tmp";
-#ifndef _WIN32
-    pid = (long)getpid();
+    j = 0u;
+    for (i = 0u; prefix[i] != '\0' && j + 1u < sizeof(safe_prefix); i++) {
+        unsigned char ch = (unsigned char)prefix[i];
+        if (isalnum(ch) || ch == '-' || ch == '_' || ch == '.') {
+            safe_prefix[j++] = (char)ch;
+        }
+    }
+    if (j == 0u) {
+        memcpy(safe_prefix, "psi-", 5u);
+        j = 4u;
+    }
+    safe_prefix[j] = '\0';
+    if ((size_t)snprintf(tmpl, sizeof(tmpl), "%s/%sXXXXXX", tmpdir, safe_prefix) >= sizeof(tmpl)) {
+        lua_pushnil(L);
+        return 1;
+    }
+#ifdef _WIN32
+    lua_pushnil(L);
+#else
+    fd = mkstemp(tmpl);
+    if (fd < 0) {
+        lua_pushnil(L);
+        return 1;
+    }
+    (void)fchmod(fd, 0600);
+    if (close(fd) != 0) {
+        unlink(tmpl);
+        lua_pushnil(L);
+        return 1;
+    }
+    lua_pushstring(L, tmpl);
 #endif
-    ts = (long)time(NULL);
-    counter++;
-    snprintf(buffer, sizeof(buffer), "%s/%s%ld-%ld-%lu", tmpdir, prefix, pid, ts, counter);
-    lua_pushstring(L, buffer);
     return 1;
 }
 
@@ -4073,9 +4190,11 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("file_write_secure", lfn_file_write_secure);
     PSI_REG("file_write_atomic", lfn_file_write_atomic);
     PSI_REG_DOC("file_append", lfn_file_append,
-        "Append text to a file in 'ab' mode. Used by tools that spill long output.");
+        "Append text to a file in 'ab' mode. Optional mode sets file permissions.");
     PSI_REG_DOC("tempfile_path", lfn_tempfile_path,
-        "Return a unique path under $TMPDIR (or /tmp) without creating the file.");
+        "Create a temp file under $TMPDIR (or /tmp) and return its path.");
+    PSI_REG_DOC("random_bytes", lfn_random_bytes,
+        "Return N bytes from the host secure random source, or nil plus an error.");
     PSI_REG_DOC("current_date", lfn_current_date,
         "Return the current date as 'YYYY-MM-DD' in the host's local timezone.");
     PSI_REG_DOC("cwd", lfn_cwd, "Return the host process's current working directory.");

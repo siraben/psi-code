@@ -54,7 +54,7 @@ can replace any one host-facing bit and keep the rest.
 | `//` comments                         | ✅ none|
 | Endianness assumptions                | ✅ none — verified by treewide audit: no byte-order primitives (`htonl`/`bswap`/`__builtin_bswap`), no shift-assemble of multi-byte ints from byte streams, no integer-over-byte unions, no `*(uint32_t*)buf` type punning, no raw-int `fwrite`/`fread`. Embedded blobs (Lua bytecode + docs + CA bundle) are zlib-compressed byte streams, byte-order independent. |
 | `sizeof(long)` assumptions            | ✅ none|
-| Hardcoded paths                       | only `/bin/sh` and `/dev/null` (TUI only) |
+| Hardcoded paths                       | `/bin/sh`, `/dev/null` (TUI only), and `/dev/urandom` in the Unix random backend |
 | Lua shelling out for filesystem work  | avoided for built-in read/write/listing, sessions, prompt templates, and extensions; path joins, parent dirs, recursive mkdir, file type, and directory listing are C-backed primitives |
 | `errno` constants beyond C89 set      | `EAGAIN`, `EWOULDBLOCK`, `EINTR` — all POSIX, all universally present |
 | `gettimeofday` (POSIX-2001-obsoleted) | one site in `http_async.c` for `pthread_cond_timedwait` deadline; pthread is already required there, so the dependency is fine where it sits |
@@ -93,6 +93,8 @@ Suggested pattern:
      on POSIX, IO completion ports on Win, etc.).
    - `src/core/process.c` — process spawning (fork/exec on POSIX,
      stubbed for Win, would need CreateProcess).
+   - `src/core/random.c` — secure random bytes (`/dev/urandom` on Unix,
+     platform RNG on other hosts).
    - `src/lua/vm.c`'s `psi.readline` binding — line editor (libedit
      on POSIX, fgets fallback elsewhere).
    - `src/runtime/tui_mode.c` — TUI (termios + ANSI on POSIX; skip on

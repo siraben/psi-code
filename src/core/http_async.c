@@ -21,6 +21,9 @@
 #include "psi/http_async.h"
 #include "psi/http_tls.h"
 
+#define PSI_HTTP_STREAM_TOTAL_MAX_BYTES (64u * 1024u * 1024u)
+#define PSI_HTTP_STREAM_QUEUE_MAX_BYTES (4u * 1024u * 1024u)
+
 static pthread_once_t psi_http_init_once = PTHREAD_ONCE_INIT;
 static int psi_http_init_status = 1; /* non-zero = unattempted/failed */
 
@@ -67,6 +70,8 @@ struct psi_http_stream {
     pthread_cond_t cond;
     struct psi_http_chunk_node *queue_head;
     struct psi_http_chunk_node *queue_tail;
+    size_t queue_bytes;
+    size_t total_bytes;
 
     /* Terminal state: set by helper when curl_easy_perform returns.
      * Main thread reads under `mu`. */
@@ -107,8 +112,34 @@ static void psi_http_queue_push_fail(struct psi_http_stream *h) {
     pthread_mutex_unlock(&h->mu);
 }
 
+static int psi_http_queue_would_exceed_limits(const struct psi_http_stream *h, size_t len) {
+    if (len > PSI_HTTP_STREAM_TOTAL_MAX_BYTES)
+        return 1;
+    if (h->total_bytes > PSI_HTTP_STREAM_TOTAL_MAX_BYTES - len)
+        return 1;
+    if (len > PSI_HTTP_STREAM_QUEUE_MAX_BYTES)
+        return 1;
+    if (h->queue_bytes > PSI_HTTP_STREAM_QUEUE_MAX_BYTES - len)
+        return 1;
+    return 0;
+}
+
 static int psi_http_queue_push(struct psi_http_stream *h, const char *data, size_t len) {
     struct psi_http_chunk_node *node;
+
+    if (len == 0u)
+        return 1;
+
+    pthread_mutex_lock(&h->mu);
+    if (h->write_failed || psi_http_queue_would_exceed_limits(h, len)) {
+        h->write_failed = 1;
+        pthread_cond_broadcast(&h->cond);
+        pthread_mutex_unlock(&h->mu);
+        return 0;
+    }
+    h->total_bytes += len;
+    h->queue_bytes += len;
+    pthread_mutex_unlock(&h->mu);
 
     node = (struct psi_http_chunk_node *)malloc(sizeof(*node));
     if (node == NULL) {
@@ -146,6 +177,10 @@ static struct psi_http_chunk_node *psi_http_queue_pop_locked(struct psi_http_str
         if (h->queue_head == NULL) {
             h->queue_tail = NULL;
         }
+        if (h->queue_bytes >= node->len)
+            h->queue_bytes -= node->len;
+        else
+            h->queue_bytes = 0u;
     }
     return node;
 }
@@ -156,6 +191,7 @@ static void psi_http_queue_free_all(struct psi_http_stream *h) {
     node = h->queue_head;
     h->queue_head = NULL;
     h->queue_tail = NULL;
+    h->queue_bytes = 0u;
     while (node != NULL) {
         next = node->next;
         free(node->data);
@@ -170,7 +206,12 @@ static void psi_http_queue_free_all(struct psi_http_stream *h) {
 
 static size_t psi_http_stream_write_cb(void *data, size_t size, size_t nmemb, void *userdata) {
     struct psi_http_stream *h = (struct psi_http_stream *)userdata;
-    size_t total = size * nmemb;
+    size_t total;
+    if (size != 0u && nmemb > ((size_t)-1) / size) {
+        psi_http_queue_push_fail(h);
+        return 0u;
+    }
+    total = size * nmemb;
     if (!psi_http_queue_push(h, (const char *)data, total)) {
         /* Returning a short count tells curl the write failed;
          * curl_easy_perform unwinds with CURLE_WRITE_ERROR, the

@@ -147,6 +147,9 @@ end
 -- `input` stay compatible since the extra arg is optional.
 function M.dispatch(name, input, meta)
   input = input or {}
+  if active_allowlist ~= nil and not active_allowlist[name] then
+    return records.tool_failure(name, "Tool " .. tostring(name) .. " not found")
+  end
   for _, hook in ipairs(before_hooks) do
     local intercept = hook(name, input, meta)
     if intercept ~= nil then

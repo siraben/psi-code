@@ -14,6 +14,8 @@
 #include "psi/http_async.h"
 #include "psi/http_tls.h"
 
+#define PSI_HTTP_BUFFERED_MAX_BYTES (16u * 1024u * 1024u)
+
 /* curl_slist_append returns NULL on failure without freeing the
  * prior list; this wrapper assigns through only on success. */
 static int psi_http_slist_append_safe(struct curl_slist **list, const char *line) {
@@ -27,13 +29,24 @@ static int psi_http_slist_append_safe(struct curl_slist **list, const char *line
 struct psi_http_buffer {
     char *data;
     size_t length;
+    int too_large;
 };
 
 static size_t psi_http_buffer_callback(void *contents, size_t size, size_t nmemb, void *userp) {
     struct psi_http_buffer *buffer = (struct psi_http_buffer *)userp;
-    size_t total = size * nmemb;
+    size_t total;
     char *next;
 
+    if (size != 0u && nmemb > ((size_t)-1) / size) {
+        buffer->too_large = 1;
+        return 0u;
+    }
+    total = size * nmemb;
+    if (total > PSI_HTTP_BUFFERED_MAX_BYTES ||
+        buffer->length > PSI_HTTP_BUFFERED_MAX_BYTES - total) {
+        buffer->too_large = 1;
+        return 0u;
+    }
     next = (char *)realloc(buffer->data, buffer->length + total + 1u);
     if (next == NULL) {
         return 0u;
@@ -123,6 +136,7 @@ int psi_http_post(const char *url, const char *const *header_lines, size_t heade
         *error_message = NULL;
     buffer.data = NULL;
     buffer.length = 0u;
+    buffer.too_large = 0;
 
     if (psi_http_global_init() != PSI_STATUS_OK)
         return PSI_STATUS_ERROR;
@@ -144,7 +158,11 @@ int psi_http_post(const char *url, const char *const *header_lines, size_t heade
 
     if (code != CURLE_OK) {
         free(buffer.data);
-        psi_http_set_error(error_message, code, error_buffer);
+        if (buffer.too_large && error_message != NULL) {
+            *error_message = psi_strdup("HTTP response exceeded byte limit");
+        } else {
+            psi_http_set_error(error_message, code, error_buffer);
+        }
         return PSI_STATUS_ERROR;
     }
     if (response_body != NULL) {

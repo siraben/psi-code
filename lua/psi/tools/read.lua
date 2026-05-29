@@ -113,7 +113,8 @@ local function impl(input, meta)
   local source = nil
   local slice = nil
 
-  if psi.file_exists(resolved) then
+  local kind = psi.file_type and psi.file_type(resolved) or nil
+  if kind == "file" then
     local mime_type = mime.detect_supported_image_mime_from_file(resolved)
     if mime_type then
       if image_policy.blocked() then
@@ -163,6 +164,8 @@ local function impl(input, meta)
     else
       slice = psi.read_file_slice(resolved, offset, limit, TEXT_READ_MAX_BYTES)
     end
+  elseif kind ~= nil then
+    return records.tool_failure("read", "Cannot read file: " .. tostring(raw_path))
   else
     local embedded = psi.embedded_doc and psi.embedded_doc(raw_path) or nil
     if embedded then

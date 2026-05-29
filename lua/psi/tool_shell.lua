@@ -177,6 +177,11 @@ local function stream(handle, tool_call_id, opts, poll_fn)
       return
     end
     temp_path = psi.tempfile_path("psi-bash-")
+    if type(temp_path) ~= "string" or temp_path == "" then
+      temp_open_failed = true
+      temp_path = nil
+      return
+    end
     -- Pre-flush whatever we already have buffered.
     local existing = buffered_text()
     if #existing > 0 then
