@@ -93,8 +93,12 @@ stdenv.mkDerivation (finalAttrs: {
     runHook postInstall
   '';
 
+  # cosmocc binaries arrive without .debug_* but still carry a full
+  # .symtab/.strtab (~400 KB). --strip-unneeded drops those without
+  # touching the APE boot stub. --strip-all / -Wl,-s break booting
+  # ("missing elf symbol table").
   postFixup = lib.optionalString stripDebug ''
-    ${stdenv.cc.targetPrefix}strip --strip-debug "$out/bin/psi"
+    ${stdenv.cc.targetPrefix}strip --strip-unneeded "$out/bin/psi"
   '';
 
   dontPatchELF = true;

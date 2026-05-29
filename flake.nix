@@ -153,6 +153,11 @@
 
           installFlags = [ "PREFIX=$(out)" ];
 
+          # Default nix strip on bin/ is --strip-debug, which leaves
+          # .symtab/.strtab intact (~300 KB on the static musl builds).
+          # --strip-all drops those too.
+          stripAllList = [ "bin" ];
+
           # Keep the host embed helper on build-platform zlib.
           preBuild = lib.optionalString isCross ''
             makeFlagsArray+=(
