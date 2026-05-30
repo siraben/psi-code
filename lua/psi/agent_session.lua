@@ -302,11 +302,12 @@ function M.run_tree(opts)
     if not ok then
       return false, result
     end
-    return true, {
-      target = result,
-      summary = nil,
-      tree = session.branch_tree_text(),
-    }
+    return true,
+      {
+        target = result,
+        summary = nil,
+        tree = session.branch_tree_text(),
+      }
   end
 
   local entries, target_id, old_leaf, common = session.branch_entries_to_summarize(target)
@@ -318,11 +319,12 @@ function M.run_tree(opts)
     if not ok then
       return false, result
     end
-    return true, {
-      target = result,
-      summary = nil,
-      tree = session.branch_tree_text(),
-    }
+    return true,
+      {
+        target = result,
+        summary = nil,
+        tree = session.branch_tree_text(),
+      }
   end
 
   local provider, resolved = pick_provider(M.current_model(opts.model))
@@ -350,12 +352,13 @@ function M.run_tree(opts)
   if not switched then
     return false, summary_id
   end
-  return true, {
-    target = target_id,
-    summary = summary,
-    summary_id = summary_id,
-    tree = session.branch_tree_text(),
-  }
+  return true,
+    {
+      target = target_id,
+      summary = summary,
+      summary_id = summary_id,
+      tree = session.branch_tree_text(),
+    }
 end
 
 return M
