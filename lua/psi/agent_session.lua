@@ -290,4 +290,72 @@ function M.run_compact(opts)
   return true, summary
 end
 
+function M.run_tree(opts)
+  opts = opts or {}
+  local target = opts.target
+  if type(target) ~= "string" or target == "" then
+    return false, "missing target entry id"
+  end
+
+  if not opts.summarize then
+    local ok, result = session.branch(target)
+    if not ok then
+      return false, result
+    end
+    return true, {
+      target = result,
+      summary = nil,
+      tree = session.branch_tree_text(),
+    }
+  end
+
+  local entries, target_id, old_leaf, common = session.branch_entries_to_summarize(target)
+  if not entries then
+    return false, target_id
+  end
+  if old_leaf == target_id or #entries == 0 then
+    local ok, result = session.branch(target_id)
+    if not ok then
+      return false, result
+    end
+    return true, {
+      target = result,
+      summary = nil,
+      tree = session.branch_tree_text(),
+    }
+  end
+
+  local provider, resolved = pick_provider(M.current_model(opts.model))
+  local thinking_level = M.thinking_level_for(resolved, opts.thinking_level, opts.reasoning_effort)
+  local request = prompt.branch_summary_request(entries, opts.custom_instructions)
+  local ok, summary = sched.run(function()
+    return provider.complete_text({
+      system_prompt = request[1],
+      user_text = request[2],
+      model = resolved.id,
+      max_tokens = opts.max_tokens or context.compaction_budget(),
+      thinking_level = thinking_level,
+      reasoning_effort = M.current_reasoning_effort(opts.reasoning_effort),
+      abort_check = opts.abort_check,
+    })
+  end)
+  if not ok then
+    return false, summary
+  end
+  summary = (request[3] or "") .. (summary or "")
+  local switched, summary_id = session.branch_with_summary(target_id, summary, {
+    fromId = old_leaf,
+    commonAncestorId = common,
+  })
+  if not switched then
+    return false, summary_id
+  end
+  return true, {
+    target = target_id,
+    summary = summary,
+    summary_id = summary_id,
+    tree = session.branch_tree_text(),
+  }
+end
+
 return M

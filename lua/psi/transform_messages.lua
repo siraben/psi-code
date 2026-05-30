@@ -231,6 +231,22 @@ function M.replay_session(session, handlers)
         )
       end
       i = i + 1
+    elseif role == "branch-summary" then
+      flush_synthetic_results()
+      if type(handlers.branch_summary) == "function" then
+        handlers.branch_summary(
+          (type(body) == "table" and body.summary) or entry.text or "",
+          body,
+          entry
+        )
+      elseif type(handlers.compaction_summary) == "function" then
+        handlers.compaction_summary(
+          (type(body) == "table" and body.summary) or entry.text or "",
+          body,
+          entry
+        )
+      end
+      i = i + 1
     elseif
       role == "custom"
       and type(body) == "table"

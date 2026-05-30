@@ -229,6 +229,9 @@ local function response_input_from_session(session, _system_prompt, _cfg, model)
     compaction_summary = function(summary)
       out[#out + 1] = user_input(summary)
     end,
+    branch_summary = function(summary)
+      out[#out + 1] = user_input(summary)
+    end,
     custom_message = function(message)
       if message.role == "assistant" then
         local text = transform.text_from_content(message.content)

@@ -1660,6 +1660,11 @@ local function add_session_entry(state, msg)
     return
   end
 
+  if msg.role == "branch-summary" then
+    add_entry(state, "compaction", msg.text or "")
+    return
+  end
+
   if type(msg.text) == "string" and msg.text ~= "" then
     add_entry(state, "info", msg.text)
   end
@@ -3386,6 +3391,56 @@ local function reset_busy(state)
   state.busy_started_at = nil
 end
 
+local function run_tree(state, payload)
+  payload = payload or {}
+  state.busy = true
+  state.busy_kind = "tree"
+  state.busy_label = payload.summarize and "summarizing branch" or "switching branch"
+  state.busy_phase = 0
+  state.busy_tick = 0
+  state.busy_next_frame_at = now_ms() + TUI_CONST.busy_animation_interval_ms
+  state.busy_started_at = os.time()
+  psi.abort_reset()
+  set_status(state, state.busy_label, false)
+  redraw(state)
+
+  local ran, ok, result = xpcall(function()
+    return agent.run_tree({
+      target = payload.target,
+      summarize = payload.summarize,
+      custom_instructions = payload.custom_instructions,
+      model = state.opts.model,
+      max_tokens = state.opts.max_tokens,
+      thinking_level = state.opts.thinking_level,
+      reasoning_effort = state.opts.reasoning_effort,
+      abort_check = psi.is_aborted,
+    })
+  end, debug.traceback)
+
+  if not ran then
+    ok = false
+    result = result or "tree navigation failed"
+  end
+  if ok then
+    local saved, err = session.save()
+    if not saved then
+      set_status(state, "failed to save session: " .. tostring(err), true)
+    else
+      rebuild_from_session(state)
+      add_entry(state, "info", "active branch leaf: " .. tostring(result.target))
+      set_status(state, "branch switched", false)
+    end
+  else
+    add_entry(state, "error", "tree navigation failed: " .. tostring(result))
+    set_status(state, "tree navigation failed", true)
+  end
+
+  reset_busy(state)
+  state.dirty = true
+  redraw(state)
+  return true
+end
+
 local function run_btw(state, question)
   question = tostring(question or "")
   if question == "" then
@@ -3478,6 +3533,11 @@ local function handle_command(state, line)
 
   if action.kind == "compact" then
     run_compact(state, tonumber(action.payload) or 12)
+    return true
+  end
+
+  if action.kind == "tree" then
+    run_tree(state, action.payload)
     return true
   end
 

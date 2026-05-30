@@ -335,6 +335,7 @@ These are part of the stable surface:
 | `psi.agent.queue_modes()` / `queue_mode(kind)` / `set_queue_mode(kind, mode)` | Inspect or set pi-style queue drain modes, also exposed in the TUI as `/queue set-steering-mode MODE` and `/queue set-follow-up-mode MODE`. `kind` is `steering` or `follow-up`; `mode` is `one-at-a-time` or `all`. |
 | `psi.agent.pending_messages()` / `pending_message(i)` / `replace_pending(i, text)` / `remove_pending(i)` / `clear_queue(kind)` / `clear_queues()` | Inspect and edit queued messages. TUI busy-submit queues steering, and Alt-Enter queues follow-up messages. |
 | `psi.agent.side_question(question, opts)` | Ask an ephemeral `/btw`-style side question using the current transcript excerpt. Uses the currently configured model, including local providers, and does not append to the session. |
+| `psi.agent.run_tree(opts)` | Switch the active session-tree leaf. `opts.target` is an entry id or prefix; `opts.summarize=true` summarizes the branch being left and appends a `branch_summary` entry at the destination. |
 | `psi.tui.register_key_handler(fn)` | Intercept normalized TUI key events before built-in bindings. Return `{ action = "...", arg = ... }` to handle, `nil` to fall through. Returns a handler id. |
 | `psi.tui.unregister_key_handler(id)` | Remove one key handler previously returned by `register_key_handler`. |
 | `psi.tui.clear_key_handlers()` | Remove registered key handlers. Mostly useful in tests. |

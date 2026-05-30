@@ -257,6 +257,9 @@ function M.build_api_messages(session, system_prompt, cfg)
     compaction_summary = function(summary)
       out[#out + 1] = { role = "user", content = clean_text(summary) }
     end,
+    branch_summary = function(summary)
+      out[#out + 1] = { role = "user", content = summary }
+    end,
     custom_message = function(message)
       local content = supports_images and transform.openai_chat_content(message.content)
         or transform.text_from_content_with_image_placeholder(

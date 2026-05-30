@@ -261,6 +261,9 @@ local function build_api_messages(session, images_enabled)
     compaction_summary = function(summary)
       out[#out + 1] = { role = "user", content = summary }
     end,
+    branch_summary = function(summary)
+      out[#out + 1] = { role = "user", content = summary }
+    end,
     custom_message = function(message)
       out[#out + 1] = {
         role = message.role == "assistant" and "assistant" or "user",

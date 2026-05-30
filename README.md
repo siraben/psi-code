@@ -194,11 +194,16 @@ tests/                                  Python harnesses (smoke, bench, valgrind
 ## Sessions
 
 Sessions are append-only JSONL in pi's v3 schema: typed entries,
-parent pointers, cache markers, file-op provenance, custom entries.
+parent pointers, cache markers, file-op provenance, custom entries,
+and branch summaries.
 A session started under one provider can be resumed under another;
 provider-specific thinking and signature blocks may be downgraded
 during replay. Without `--session FILE`, psi assigns a path under
 `$XDG_STATE_HOME/psi/sessions` (or `~/.local/state/psi/sessions`).
+Use `/tree` to show the session tree or `/tree <entry-id> --summarize`
+to switch branches while preserving the branch you leave as summary
+context. `/branch` and `/branches` remain text aliases for quick
+inspection and switching.
 
 ## Extensions
 

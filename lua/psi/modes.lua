@@ -352,6 +352,31 @@ local function handle_slash_command(opts, line)
     print("compaction summary:\n" .. (summary or ""))
     return true, false
   end
+  if kind == "tree" then
+    local payload = action.payload or {}
+    local ok, result = agent.run_tree({
+      target = payload.target,
+      summarize = payload.summarize,
+      custom_instructions = payload.custom_instructions,
+      model = opts.model,
+      max_tokens = opts.max_tokens,
+      thinking_level = opts.thinking_level,
+      reasoning_effort = opts.reasoning_effort,
+    })
+    if not ok then
+      io.stderr:write("tree navigation failed: " .. tostring(result) .. "\n")
+      return false, false
+    end
+    if not save_current_session(opts) then
+      return false, false
+    end
+    if result.summary and result.summary ~= "" then
+      print("branch summary:\n" .. result.summary)
+    end
+    print("active branch leaf: " .. tostring(result.target))
+    print(result.tree or session.branch_tree_text())
+    return true, false
+  end
   if kind == "set-model" then
     opts.model = action.payload
     print("model set to " .. tostring(opts.model))

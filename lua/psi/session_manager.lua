@@ -15,6 +15,8 @@
 --   { id, parentId, timestamp, summary, firstKeptEntryId?,
 --     tokensBefore?, readFiles?, modifiedFiles?, compactedCount? }
 -- with in-memory role "compaction-summary".
+-- Branch summary entries use the same in-memory shape with role
+-- "branch-summary" and disk type "branch_summary".
 --
 -- The C FFI exposes:
 --   psi.session_message_count()
@@ -501,6 +503,18 @@ function M.append_compaction(summary_text, extra)
   end
   body = stamp_entry(body)
   append_body("compaction-summary", summary_text, body)
+end
+
+function M.append_branch_summary(summary_text, extra)
+  local body = { summary = summary_text or "" }
+  if extra then
+    for k, v in pairs(extra) do
+      body[k] = v
+    end
+  end
+  body = stamp_entry(body)
+  append_body("branch-summary", summary_text, body)
+  return body.id
 end
 
 function M.append_custom(name, data)
@@ -1018,6 +1032,26 @@ local function to_disk_entry(m)
     end
     return out
   end
+  if m.role == "branch-summary" then
+    local out = { type = "branch_summary" }
+    for _, k in ipairs({
+      "id",
+      "parentId",
+      "timestamp",
+      "summary",
+      "fromId",
+      "readFiles",
+      "modifiedFiles",
+    }) do
+      if body[k] ~= nil then
+        out[k] = body[k]
+      end
+    end
+    if out.summary == nil then
+      out.summary = m.text or ""
+    end
+    return out
+  end
   local out = { type = "message" }
   for _, k in ipairs({ "id", "parentId", "timestamp", "message" }) do
     if body[k] ~= nil then
@@ -1360,6 +1394,26 @@ local function append_v2_compaction(parsed)
   append_body("compaction-summary", body.summary, body)
 end
 
+local function append_v3_branch_summary(parsed)
+  local body = {}
+  for _, k in ipairs({
+    "id",
+    "parentId",
+    "timestamp",
+    "summary",
+    "fromId",
+    "readFiles",
+    "modifiedFiles",
+  }) do
+    if parsed[k] ~= nil then
+      body[k] = parsed[k]
+    end
+  end
+  last_entry_id = body.id or last_entry_id
+  leaf_id = body.id or leaf_id
+  append_body("branch-summary", body.summary, body)
+end
+
 local function append_v3_custom(parsed)
   local body = {
     __entry_type = parsed.type,
@@ -1450,6 +1504,8 @@ local function append_disk_entry_to_memory(entry)
     append_v2_message(entry)
   elseif entry.type == "compaction" then
     append_v2_compaction(entry)
+  elseif entry.type == "branch_summary" then
+    append_v3_branch_summary(entry)
   elseif
     entry.type == "custom"
     or entry.type == "custom_message"
@@ -1511,15 +1567,132 @@ function M.branch(id_or_prefix)
   return true, id
 end
 
+local function ancestor_set(id)
+  local out = {}
+  local seen = {}
+  while type(id) == "string" and id ~= "" and not seen[id] do
+    seen[id] = true
+    out[id] = true
+    local entry = entry_by_id[id]
+    id = entry and entry.parentId or nil
+  end
+  return out
+end
+
+local function branch_summary_text(entry)
+  if type(entry) ~= "table" then
+    return ""
+  end
+  if entry.type == "message" and type(entry.message) == "table" then
+    local msg = entry.message
+    if type(msg.content) == "string" then
+      return msg.content
+    end
+    if type(msg.content) == "table" then
+      local parts = {}
+      for _, block in ipairs(msg.content) do
+        if type(block) == "table" then
+          if block.type == "text" and type(block.text) == "string" then
+            parts[#parts + 1] = block.text
+          elseif block.type == "toolCall" then
+            parts[#parts + 1] = "[tool call: " .. tostring(block.name or "?") .. "]"
+          end
+        end
+      end
+      return table.concat(parts, "\n")
+    end
+  elseif entry.type == "compaction" or entry.type == "branch_summary" then
+    return entry.summary or ""
+  elseif entry.type == "custom_message" and type(entry.message) == "table" then
+    return branch_summary_text({ type = "message", message = entry.message })
+  end
+  return ""
+end
+
+local function branch_summary_role(entry)
+  if entry.type == "message" and type(entry.message) == "table" then
+    if entry.message.role == "toolResult" then
+      return "tool-result"
+    end
+    return entry.message.role or "message"
+  end
+  if entry.type == "compaction" then
+    return "compaction-summary"
+  end
+  if entry.type == "branch_summary" then
+    return "branch-summary"
+  end
+  return entry.type or "entry"
+end
+
+function M.branch_entries_to_summarize(target_id_or_prefix)
+  local target_id, err = resolve_entry_id(target_id_or_prefix)
+  if not target_id then
+    return nil, err
+  end
+  local old_leaf = leaf_id
+  if not old_leaf or old_leaf == target_id then
+    return {}, target_id, old_leaf, target_id
+  end
+  local target_ancestors = ancestor_set(target_id)
+  local entries = {}
+  local id = old_leaf
+  local common = nil
+  local seen = {}
+  while type(id) == "string" and id ~= "" and not seen[id] do
+    if target_ancestors[id] then
+      common = id
+      break
+    end
+    seen[id] = true
+    local entry = entry_by_id[id]
+    if not entry then
+      break
+    end
+    entries[#entries + 1] = entry
+    id = entry.parentId
+  end
+  local chronological = {}
+  for i = #entries, 1, -1 do
+    local entry = entries[i]
+    chronological[#chronological + 1] = {
+      id = entry.id,
+      role = branch_summary_role(entry),
+      text = branch_summary_text(entry),
+      entry = entry,
+    }
+  end
+  return chronological, target_id, old_leaf, common
+end
+
+function M.branch_with_summary(target_id_or_prefix, summary_text, extra)
+  local target_id, err = resolve_entry_id(target_id_or_prefix)
+  if not target_id then
+    return false, err
+  end
+  local old_leaf = leaf_id
+  leaf_id = target_id
+  last_entry_id = target_id
+  extra = extra or {}
+  extra.fromId = extra.fromId or old_leaf
+  local summary_id = M.append_branch_summary(summary_text or "", extra)
+  rebuild_active_path()
+  return true, summary_id
+end
+
 local function branch_entry_label(entry)
   local role = entry.type or "entry"
   if entry.type == "message" and type(entry.message) == "table" then
     role = entry.message.role or "message"
   elseif entry.type == "compaction" then
     role = "compaction"
+  elseif entry.type == "branch_summary" then
+    role = "branch-summary"
   end
   local text = entry_text(entry)
   if (not text or text == "") and entry.type == "compaction" then
+    text = entry.summary
+  elseif (not text or text == "") and entry.type == "branch_summary" then
     text = entry.summary
   end
   text = tostring(text or ""):gsub("%s+", " ")
@@ -1558,7 +1731,7 @@ function M.branch_tree_text()
   end
   local lines = {
     "session tree (* current leaf)",
-    "use /branch <id> to switch branches; new messages append below the selected leaf",
+    "use /tree <id> to switch branches; add --summarize to absorb the branch you leave",
   }
   render_branch_lines(nil, "", lines, {})
   return table.concat(lines, "\n")
@@ -1611,6 +1784,8 @@ function M.load(path)
           append_v1_entry(parsed)
         end
       elseif parsed.type == "compaction" then
+        register_file_entry(parsed)
+      elseif parsed.type == "branch_summary" then
         register_file_entry(parsed)
       elseif
         parsed.type == "custom"

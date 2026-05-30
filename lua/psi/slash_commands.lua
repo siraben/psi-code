@@ -59,6 +59,35 @@ local function parse_fork_count(line)
   return tonumber(rest) or psi.session_message_count()
 end
 
+local function parse_tree_args(rest)
+  rest = prelude.trim(rest or "")
+  if rest == "" then
+    return nil
+  end
+  local words = {}
+  for word in rest:gmatch("%S+") do
+    words[#words + 1] = word
+  end
+  local target = words[1]
+  local summarize = false
+  local custom = {}
+  for i = 2, #words do
+    local word = words[i]
+    if word == "--summarize" or word == "-s" then
+      summarize = true
+    elseif word == "--no-summarize" then
+      summarize = false
+    else
+      custom[#custom + 1] = word
+    end
+  end
+  return {
+    target = target,
+    summarize = summarize,
+    custom_instructions = table.concat(custom, " "),
+  }
+end
+
 local function split_first_word(text)
   text = prelude.trim(text or "")
   local first, rest = text:match("^(%S+)%s*(.*)$")
@@ -147,7 +176,8 @@ local function copy_auth_url(url)
 end
 
 local function fork_output_path()
-  return session.new_session_file_path(psi.cwd and psi.cwd() or nil)
+  local id = psi.session_id() or tostring(os.time())
+  return "sessions/fork-" .. id .. "-" .. tostring(os.time()) .. ".jsonl"
 end
 
 -- /clone writes a full copy of the current session at the current
@@ -156,7 +186,8 @@ end
 -- only. Implementation reuses session.fork(total, out_path) — fork
 -- with at_count = message_count is the natural full-session dump.
 local function clone_output_path()
-  return session.new_session_file_path(psi.cwd and psi.cwd() or nil)
+  local id = psi.session_id() or tostring(os.time())
+  return "sessions/clone-" .. id .. "-" .. tostring(os.time()) .. ".jsonl"
 end
 
 -- ---------- session status (/session) ----------
@@ -305,6 +336,11 @@ local function render_markdown_session()
       add("")
       add(m.text or "")
       add("")
+    elseif m.role == "branch-summary" then
+      add("## Branch summary")
+      add("")
+      add(m.text or "")
+      add("")
     end
   end
   return table.concat(lines, "\n") .. "\n"
@@ -373,18 +409,6 @@ local function cmd_reload()
     if psi.tui.clear_clipboard_writers then
       pcall(psi.tui.clear_clipboard_writers)
     end
-  end
-  if psi.tools and psi.tools.clear_hooks then
-    pcall(psi.tools.clear_hooks)
-  end
-  if psi.session and psi.session.install_file_op_hook then
-    pcall(psi.session.install_file_op_hook)
-  end
-  if psi.events and psi.events.clear then
-    pcall(psi.events.clear)
-  end
-  if psi.prompt and psi.prompt.clear_transformers then
-    pcall(psi.prompt.clear_transformers)
   end
   if type(psi.install_builtin_extensions) == "function" then
     pcall(psi.install_builtin_extensions)
@@ -813,8 +837,8 @@ local BUILTIN_COMMANDS = {
   },
   {
     name = "resume",
-    argument_hint = "[path]",
-    description = "Open the session picker or load a session file from disk",
+    argument_hint = "<path>",
+    description = "Load a session file from disk",
   },
   {
     name = "import",
@@ -881,11 +905,12 @@ local BUILTIN_COMMANDS = {
     description = "Show the session tree or switch the active branch leaf",
   },
   {
-    name = "branches",
-    description = "Show the session tree",
+    name = "tree",
+    argument_hint = "[entry-id] [--summarize] [focus]",
+    description = "Navigate the session tree and optionally summarize the branch you leave",
   },
   {
-    name = "tree",
+    name = "branches",
     description = "Show the session tree",
   },
   {
@@ -1262,7 +1287,7 @@ function M.handle(line)
   if starts_word(line, "/resume") then
     local path = arg_after(line, "/resume")
     if path == "" then
-      return records.new_command_action("resume-picker", nil)
+      return records.new_command_action("print", "usage: /resume <path>")
     end
     return records.new_command_action("resume", path)
   end
@@ -1290,18 +1315,16 @@ function M.handle(line)
   if starts_word(line, "/fork") then
     local keep = parse_fork_count(line)
     local out = fork_output_path()
-    local ok, err = session.fork(keep, out)
-    local msg = ok and ("forked " .. tostring(keep) .. " entries to " .. out)
-      or ("fork failed: " .. tostring(err or "could not determine session path"))
+    local ok = session.fork(keep, out)
+    local msg = ok and ("forked " .. tostring(keep) .. " entries to " .. out) or "fork failed"
     return records.new_command_action("print", msg)
   end
   if starts_word(line, "/clone") then
     local rest = arg_after(line, "/clone")
     local out = (rest ~= "" and rest) or clone_output_path()
     local total = psi.session_message_count()
-    local ok, err = session.fork(total, out)
-    local msg = ok and string.format("cloned %d entries to %s", total, out)
-      or ("clone failed: " .. tostring(err or "could not determine session path"))
+    local ok = session.fork(total, out)
+    local msg = ok and string.format("cloned %d entries to %s", total, out) or "clone failed"
     return records.new_command_action("print", msg)
   end
   if starts_word(line, "/branch") then
@@ -1318,7 +1341,18 @@ function M.handle(line)
       "active branch leaf: " .. tostring(result) .. "\n" .. session.branch_tree_text()
     )
   end
-  if line == "/branches" or line == "/tree" then
+  if starts_word(line, "/tree") then
+    local rest = arg_after(line, "/tree")
+    if rest == "" then
+      return records.new_command_action("print", session.branch_tree_text())
+    end
+    local payload = parse_tree_args(rest)
+    if not payload or payload.target == "" then
+      return records.new_command_action("print", "usage: /tree <entry-id> [--summarize] [focus]")
+    end
+    return records.new_command_action("tree", payload)
+  end
+  if line == "/branches" then
     return records.new_command_action("print", session.branch_tree_text())
   end
   local registered_action = dispatch_registered(line)

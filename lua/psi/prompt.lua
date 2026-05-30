@@ -236,6 +236,43 @@ function M.compaction_request(keep_recent)
   return { COMPACTION_SYSTEM, user_prompt }
 end
 
+local BRANCH_SUMMARY_PREAMBLE = table.concat({
+  "The user explored a different conversation branch before returning here.\n",
+  "Summary of that exploration:\n\n",
+})
+
+local BRANCH_SUMMARY_INSTRUCTIONS = table.concat({
+  "Create a structured summary of this conversation branch for context when returning later.\n\n",
+  "Use this EXACT format:\n\n",
+  "## Branch Goal\n",
+  "[What was the user trying to accomplish in this branch?]\n\n",
+  "## Progress\n",
+  "- [Completed work, discoveries, and decisions]\n\n",
+  "## Files and State\n",
+  "- [Relevant files read or changed, if known]\n\n",
+  "## Carry Forward\n",
+  "- [Important context that should be available on the destination branch]\n\n",
+  "Keep it concise and preserve exact file paths, commands, errors, and identifiers.",
+})
+
+function M.branch_summary_request(messages, custom_instructions)
+  local buf = {}
+  for _, m in ipairs(messages or {}) do
+    if type(m) == "table" and type(m.text) == "string" and m.text ~= "" then
+      buf[#buf + 1] = session.role_prefix(m) .. m.text .. "\n"
+    end
+  end
+  local instructions = BRANCH_SUMMARY_INSTRUCTIONS
+  if type(custom_instructions) == "string" and custom_instructions ~= "" then
+    instructions = instructions .. "\n\nAdditional focus: " .. custom_instructions
+  end
+  local user_prompt = "<conversation>\n"
+    .. table.concat(buf)
+    .. "\n</conversation>\n\n"
+    .. instructions
+  return { COMPACTION_SYSTEM, user_prompt, BRANCH_SUMMARY_PREAMBLE }
+end
+
 -- ---------- runtime summary and help ----------
 
 function M.runtime_summary()
