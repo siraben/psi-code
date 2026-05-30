@@ -1,6 +1,6 @@
 --[==[psi-test
 # Original: stripped equals plain string AND raw output contains the pi cyan shimmer. Folded.
-expect = "working (0:04  • Ctrl-G to interrupt) ...|true"
+expect = "working (0:04  • Esc to interrupt) ...|true"
 ]==]
 local ansi = require("psi.ansi")
 ansi.color_enabled = true

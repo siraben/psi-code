@@ -328,6 +328,65 @@ local function fit_text(text, width)
   return width <= 3 and text:sub(1, byte_index) or (text:sub(1, byte_index) .. "...")
 end
 
+local function pending_queue_lines(width, max_rows)
+  width = math.max(1, tonumber(width) or DEFAULT_WIDTH)
+  max_rows = max_rows ~= nil and math.max(0, tonumber(max_rows) or 0) or nil
+  if type(agent.pending_messages) ~= "function" then
+    return {}
+  end
+
+  local message_lines = {}
+  for _, item in ipairs(agent.pending_messages() or {}) do
+    local text = tostring(item and item.text or "")
+    text = text:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+    if text ~= "" then
+      local label = item and item.kind == "steering" and "Steering" or "Follow-up"
+      message_lines[#message_lines + 1] = ansi.dim(fit_text(label .. ": " .. text, width))
+    end
+  end
+  if #message_lines == 0 then
+    return {}
+  end
+
+  local key_text = "Alt-Up"
+  local ok, keybindings = pcall(require, "psi.keybindings")
+  if ok and keybindings and type(keybindings.display) == "function" then
+    key_text = keybindings.display("tui.queue.restore")
+  end
+  local hint = ansi.dim(fit_text("↳ " .. key_text .. " to edit all queued messages", width))
+
+  if max_rows == nil or max_rows >= (#message_lines + 2) then
+    local out = { "" }
+    for _, line in ipairs(message_lines) do
+      out[#out + 1] = line
+    end
+    out[#out + 1] = hint
+    return out
+  end
+
+  if max_rows <= 0 then
+    return {}
+  end
+  if max_rows == 1 then
+    return { hint }
+  end
+
+  local out = { "" }
+  local visible_messages = math.max(0, max_rows - 2)
+  local hidden = #message_lines - visible_messages
+  if hidden > 0 and visible_messages > 0 then
+    visible_messages = visible_messages - 1
+  end
+  for i = 1, visible_messages do
+    out[#out + 1] = message_lines[i]
+  end
+  if hidden > 0 then
+    out[#out + 1] = ansi.dim(fit_text("... " .. tostring(hidden) .. " more queued messages", width))
+  end
+  out[#out + 1] = hint
+  return out
+end
+
 local function apply_bg_line(bg_code, text)
   text = tostring(text or "")
   if not ansi.enabled or not ansi.color_enabled then
@@ -1674,8 +1733,13 @@ local function layout_rows(state)
   local status_visible = state.busy or state.status_text ~= nil
   local status_row = status_visible and (input_start_row - 1) or nil
   local transcript_start = 2
+  local pending_anchor_row = status_visible and (status_row - 1) or (input_start_row - 1)
+  local max_pending_rows = math.max(0, pending_anchor_row - transcript_start)
+  local pending_lines = pending_queue_lines(state.width or DEFAULT_WIDTH, max_pending_rows)
+  local pending_rows = #pending_lines
+  local pending_start_row = pending_rows > 0 and (pending_anchor_row - pending_rows + 1) or nil
   local command_completions = active_command_completions(state)
-  local completion_anchor_row = status_visible and (status_row - 1) or (input_start_row - 1)
+  local completion_anchor_row = pending_rows > 0 and (pending_start_row - 1) or pending_anchor_row
   local max_completion_rows = math.max(0, completion_anchor_row - transcript_start)
   local command_completion_rows =
     math.min(#command_completions, MAX_COMMAND_COMPLETION_ROWS, max_completion_rows)
@@ -1702,6 +1766,9 @@ local function layout_rows(state)
     input_first_line = input_first_line,
     transcript_start = transcript_start,
     transcript_height = transcript_height,
+    pending_lines = pending_lines,
+    pending_rows = pending_rows,
+    pending_start_row = pending_start_row,
     status_visible = status_visible,
     status_row = status_row,
     footer_row = footer_row,
@@ -1766,6 +1833,7 @@ local function ensure_frame_components(state)
     workspace = tui_component.block({}, { pad = true }),
     transcript = tui_component.block({}, { pad = true }),
     completions = tui_component.block({}, { pad = true }),
+    pending = tui_component.block({}, { pad = true }),
     status = tui_component.block({}, { pad = true }),
     input = tui_component.block({}, { pad = true }),
     footer = tui_component.block({}, { pad = true }),
@@ -1774,6 +1842,7 @@ local function ensure_frame_components(state)
     frame.workspace,
     frame.transcript,
     frame.completions,
+    frame.pending,
     frame.status,
     frame.input,
     frame.footer,
@@ -1842,6 +1911,7 @@ local function redraw(state)
   else
     frame.completions:set_lines({})
   end
+  frame.pending:set_lines(rows.pending_lines or {})
 
   status_arg = {
     model = state.model and state.model.id or state.opts.model,
@@ -1854,6 +1924,7 @@ local function redraw(state)
     scroll = state.scroll_offset,
     editor_mode = state.editor_mode,
     selection_kind = state.selection_kind,
+    show_queue_in_status = false,
   }
 
   if state.status_text ~= nil then
@@ -2043,6 +2114,7 @@ function chat.redraw(state)
     scroll = 0,
     editor_mode = state.editor_mode,
     selection_kind = state.selection_kind,
+    show_queue_in_status = false,
   }
   local status_text = nil
   if state.status_text ~= nil then
@@ -2056,6 +2128,10 @@ function chat.redraw(state)
       state.busy_tick
     )
   end
+  for _, line in ipairs(pending_queue_lines(frame_width)) do
+    live_lines[#live_lines + 1] = line
+  end
+
   if status_text ~= nil then
     live_lines[#live_lines + 1] = status_text
   end
@@ -2138,6 +2214,88 @@ local function byte_at(text, pos)
     return nil
   end
   return text:byte(pos + 1)
+end
+
+function M._is_punctuation_byte(b)
+  return b == 33
+    or b == 34
+    or b == 35
+    or b == 36
+    or b == 37
+    or b == 38
+    or b == 39
+    or b == 40
+    or b == 41
+    or b == 42
+    or b == 43
+    or b == 44
+    or b == 45
+    or b == 46
+    or b == 47
+    or b == 58
+    or b == 59
+    or b == 60
+    or b == 61
+    or b == 62
+    or b == 63
+    or b == 64
+    or b == 91
+    or b == 92
+    or b == 93
+    or b == 94
+    or b == 96
+    or b == 123
+    or b == 124
+    or b == 125
+    or b == 126
+end
+
+function M._word_backward_pos(text, cursor)
+  text = text or ""
+  local pos = clamp(tonumber(cursor) or 0, 0, #(text or ""))
+  while pos > 0 do
+    local b = byte_at(text, pos - 1)
+    if b == nil or not is_space_byte(b) then
+      break
+    end
+    pos = pos - 1
+  end
+  if pos == 0 then
+    return pos
+  end
+  local punctuation = M._is_punctuation_byte(byte_at(text, pos - 1))
+  while pos > 0 do
+    local b = byte_at(text, pos - 1)
+    if b == nil or is_space_byte(b) or M._is_punctuation_byte(b) ~= punctuation then
+      break
+    end
+    pos = pos - 1
+  end
+  return pos
+end
+
+function M._word_forward_pos(text, cursor)
+  text = text or ""
+  local pos = clamp(tonumber(cursor) or 0, 0, #(text or ""))
+  while pos < #text do
+    local b = byte_at(text, pos)
+    if b == nil or not is_space_byte(b) then
+      break
+    end
+    pos = pos + 1
+  end
+  if pos >= #text then
+    return pos
+  end
+  local punctuation = M._is_punctuation_byte(byte_at(text, pos))
+  while pos < #text do
+    local b = byte_at(text, pos)
+    if b == nil or is_space_byte(b) or M._is_punctuation_byte(b) ~= punctuation then
+      break
+    end
+    pos = pos + 1
+  end
+  return pos
 end
 
 local function line_bounds(text, pos)
@@ -2572,21 +2730,7 @@ local function delete_word_backward(state)
   if state.cursor == 0 then
     return
   end
-  local start = state.cursor
-  while start > 0 do
-    local b = byte_at(state.input, start - 1)
-    if b == nil or not is_space_byte(b) then
-      break
-    end
-    start = start - 1
-  end
-  while start > 0 do
-    local b = byte_at(state.input, start - 1)
-    if b == nil or is_space_byte(b) then
-      break
-    end
-    start = start - 1
-  end
+  local start = M._word_backward_pos(state.input, state.cursor)
   clear_busy_input_error(state)
   state.input = state.input:sub(1, start) .. state.input:sub(state.cursor + 1)
   state.cursor = start
@@ -2598,63 +2742,19 @@ local function delete_word_forward(state)
   if state.cursor >= #state.input then
     return
   end
-  local finish = state.cursor
-  while finish < #state.input do
-    local b = byte_at(state.input, finish)
-    if b == nil or not is_space_byte(b) then
-      break
-    end
-    finish = finish + 1
-  end
-  while finish < #state.input do
-    local b = byte_at(state.input, finish)
-    if b == nil or is_space_byte(b) then
-      break
-    end
-    finish = finish + 1
-  end
+  local finish = M._word_forward_pos(state.input, state.cursor)
   clear_busy_input_error(state)
   state.input = state.input:sub(1, state.cursor) .. state.input:sub(finish + 1)
   state.dirty = true
 end
 
 local function move_word_backward(state)
-  local pos = state.cursor
-  while pos > 0 do
-    local b = byte_at(state.input, pos - 1)
-    if b == nil or not is_space_byte(b) then
-      break
-    end
-    pos = pos - 1
-  end
-  while pos > 0 do
-    local b = byte_at(state.input, pos - 1)
-    if b == nil or is_space_byte(b) then
-      break
-    end
-    pos = pos - 1
-  end
-  state.cursor = pos
+  state.cursor = M._word_backward_pos(state.input, state.cursor)
   state.dirty = true
 end
 
 local function move_word_forward(state)
-  local pos = state.cursor
-  while pos < #state.input do
-    local b = byte_at(state.input, pos)
-    if b == nil or not is_space_byte(b) then
-      break
-    end
-    pos = pos + 1
-  end
-  while pos < #state.input do
-    local b = byte_at(state.input, pos)
-    if b == nil or is_space_byte(b) then
-      break
-    end
-    pos = pos + 1
-  end
-  state.cursor = pos
+  state.cursor = M._word_forward_pos(state.input, state.cursor)
   state.dirty = true
 end
 
@@ -2711,7 +2811,8 @@ local function queued_messages_text()
   for _, item in ipairs(agent.pending_messages() or {}) do
     local text = compact_status_text(item and item.text or "", 96)
     if text ~= "" then
-      pieces[#pieces + 1] = text
+      local label = item and item.kind == "steering" and "Steering" or "Follow-up"
+      pieces[#pieces + 1] = label .. ": " .. text
     end
   end
   return table.concat(pieces, " | ")
@@ -2730,11 +2831,14 @@ local function queue_status_text(extra_text)
 end
 
 local function busy_command_action(line)
-  if line == "/queue" or line == "/queue list" then
+  if line == "/queue" or line:match("^/queue%s+") then
+    local action = commands.handle(line)
+    if action ~= nil then
+      return action
+    end
     return {
       kind = "print",
-      payload = queued_messages_text() ~= "" and ("queued: " .. queued_messages_text())
-        or "queue is empty",
+      payload = "usage: /queue [list|state|modes|mode|steer|follow-up|clear|drop|edit]",
     }
   end
   if line:match("^/btw%s+") then
@@ -2743,7 +2847,7 @@ local function busy_command_action(line)
   return nil
 end
 
-local function queue_current_input(state, line)
+local function queue_current_input(state, line, kind)
   local count = agent.pending_message_count()
   if
     state.queue_nav_index ~= nil
@@ -2752,14 +2856,22 @@ local function queue_current_input(state, line)
   then
     if agent.replace_pending(state.queue_nav_index, line) then
       state.queue_nav_index = nil
-      set_status(state, queue_status_text(), false)
+      set_status(state, "", false)
       state.dirty = true
       return
     end
   end
-  if agent.queue_follow_up(line) then
+  kind = kind == "follow-up" and "follow-up" or "steering"
+  local ok
+  if kind == "follow-up" then
+    ok = agent.queue_follow_up(line)
+  else
+    ok = agent.queue_steering(line)
+  end
+  if ok then
+    history_add(state, line)
     state.queue_nav_index = nil
-    set_status(state, queue_status_text(), false)
+    set_status(state, "", false)
   else
     set_status(state, "failed to queue message", true)
   end
@@ -2799,12 +2911,15 @@ local function navigate_queue(state, direction)
   state.dirty = true
 end
 
-local function restore_queued_message(state)
+local function restore_queued_message(state, opts)
+  opts = opts or {}
   local count = agent.pending_message_count()
   if count == 0 then
     state.queue_nav_index = nil
-    set_status(state, "queue is empty", false)
-    return
+    if not opts.quiet then
+      set_status(state, "No queued messages to restore", false)
+    end
+    return 0
   end
   local messages = {}
   for _, item in ipairs(agent.pending_messages() or {}) do
@@ -2812,8 +2927,10 @@ local function restore_queued_message(state)
   end
   if #messages == 0 then
     state.queue_nav_index = nil
-    set_status(state, "queue is empty", false)
-    return
+    if not opts.quiet then
+      set_status(state, "No queued messages to restore", false)
+    end
+    return 0
   end
   for i = count, 1, -1 do
     agent.remove_pending(i)
@@ -2830,7 +2947,79 @@ local function restore_queued_message(state)
   clear_selection(state)
   state.block_edit = nil
   state.editor_mode = "insert"
-  set_status(state, "editing queued messages", false)
+  if opts.status_text ~= nil then
+    set_status(state, opts.status_text, false)
+  elseif not opts.quiet then
+    set_status(
+      state,
+      "Restored "
+        .. tostring(#messages)
+        .. " queued message"
+        .. (#messages == 1 and "" or "s")
+        .. " to editor",
+      false
+    )
+  end
+  state.dirty = true
+  return #messages
+end
+
+local function abort_active_turn(state)
+  local restored = 0
+  if agent.pending_message_count() > 0 then
+    restored = restore_queued_message(state, { quiet = true })
+  end
+  psi.abort_trigger()
+  if restored == 0 then
+    set_status(state, "aborting...", false)
+    state.dirty = true
+  end
+end
+
+local function open_external_editor(state)
+  local editor = os.getenv("VISUAL") or os.getenv("EDITOR")
+  if type(editor) ~= "string" or editor == "" then
+    set_status(state, "No editor configured. Set VISUAL or EDITOR.", true)
+    state.dirty = true
+    return
+  end
+  if type(psi.tui_external_editor) ~= "function" then
+    set_status(state, "external editor unavailable", true)
+    state.dirty = true
+    return
+  end
+  local path = psi.tempfile_path and psi.tempfile_path("psi-editor-") or nil
+  if type(path) ~= "string" or path == "" then
+    set_status(state, "failed to create editor temp file", true)
+    state.dirty = true
+    return
+  end
+  if not psi.file_write(path, state.input or "") then
+    set_status(state, "failed to write editor temp file", true)
+    state.dirty = true
+    return
+  end
+  set_status(state, "editing in " .. editor, false)
+  redraw(state)
+  local status, err = psi.tui_external_editor(path, editor)
+  state.force_physical_clear = true
+  if status == nil then
+    set_status(state, tostring(err or "external editor failed"), true)
+    state.dirty = true
+    return
+  end
+  if tonumber(status) == 0 then
+    local updated = psi.read_file(path)
+    updated = (updated or ""):gsub("\n$", "")
+    state.input = updated
+    state.cursor = #state.input
+    clear_selection(state)
+    state.block_edit = nil
+    state.editor_mode = "insert"
+    set_status(state, "", false)
+  else
+    set_status(state, "external editor exited with status " .. tostring(status), true)
+  end
   state.dirty = true
 end
 
@@ -3026,7 +3215,6 @@ local function observer_queued_user(state, text, kind)
   end
   state.queue_nav_index = nil
   add_entry(state, "user", text or "")
-  set_status(state, kind == "steering" and "using queued steering" or "using queued message", false)
   scroll_anchor_after(state, before)
 end
 
@@ -3376,7 +3564,7 @@ local function handle_command(state, line)
   return true
 end
 
-local function submit(state)
+local function submit(state, queue_kind)
   if state.input == "" then
     return
   end
@@ -3428,7 +3616,7 @@ local function submit(state)
         return
       end
     end
-    queue_current_input(state, line)
+    queue_current_input(state, line, queue_kind)
     return
   end
 
@@ -3486,7 +3674,7 @@ local function apply_action(state, action, arg)
     return
   end
   if action == "submit" then
-    submit(state)
+    submit(state, arg)
     return
   end
   if action == "queue-navigate" then
@@ -3626,8 +3814,11 @@ local function apply_action(state, action, arg)
     return
   end
   if action == "abort" then
-    psi.abort_trigger()
-    set_status(state, "aborting...", false)
+    abort_active_turn(state)
+    return
+  end
+  if action == "external-editor" then
+    open_external_editor(state)
     return
   end
   if action == "quit" then
@@ -3717,7 +3908,7 @@ local function handle_key_event(state, event)
       history_reverse_search(state, true)
       return
     end
-    if event.key == "escape" or event.key == "ctrl-g" then
+    if event.key == "escape" then
       history_search_cancel(state)
       return
     end
@@ -4366,6 +4557,10 @@ end
 
 function M._debug_tui_capabilities()
   return detect_tui_capabilities()
+end
+
+function M._debug_pending_queue_lines(width, max_rows)
+  return pending_queue_lines(width, max_rows)
 end
 
 function M._debug_sanitize_terminal_text(text, preserve_newlines)

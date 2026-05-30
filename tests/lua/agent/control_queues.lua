@@ -1,6 +1,10 @@
 --[==[psi-test
 expect = "true|true|2|follow-up|true|steer|nil|follow edited|0"
+files = [
+  { path = "{TMP}/config/psi/settings.json", json = { steeringMode = "all", followUpMode = "all" } },
+]
 ]==]
+require("psi.settings_manager").reload()
 local agent = require("psi.agent_session")
 agent.clear_queues()
 local ok1 = agent.queue_steering("steer")

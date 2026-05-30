@@ -24,8 +24,8 @@ local DEFINITIONS = {
   {
     id = "tui.input.clear",
     section = "Editing",
-    default_keys = {},
-    description = "Delete to start of prompt",
+    default_keys = { "ctrl-c" },
+    description = "Clear prompt",
   },
   {
     id = "tui.input.reverseSearch",
@@ -48,13 +48,13 @@ local DEFINITIONS = {
   {
     id = "tui.editor.cursorWordLeft",
     section = "Navigation",
-    default_keys = { "alt-b" },
+    default_keys = { "alt-left", "ctrl-left", "alt-b" },
     description = "Move cursor word left",
   },
   {
     id = "tui.editor.cursorWordRight",
     section = "Navigation",
-    default_keys = { "alt-f" },
+    default_keys = { "alt-right", "ctrl-right", "alt-f" },
     description = "Move cursor word right",
   },
   {
@@ -84,7 +84,7 @@ local DEFINITIONS = {
   {
     id = "tui.transcript.pageUp",
     section = "Navigation",
-    default_keys = { "page-up", "ctrl-u" },
+    default_keys = { "page-up" },
     description = "Scroll transcript page up",
   },
   {
@@ -96,20 +96,20 @@ local DEFINITIONS = {
   {
     id = "tui.queue.previous",
     section = "Navigation",
-    default_keys = { "ctrl-p" },
+    default_keys = {},
     description = "Show previous queued message",
   },
   {
     id = "tui.queue.next",
     section = "Navigation",
-    default_keys = { "ctrl-n" },
+    default_keys = {},
     description = "Show next queued message",
   },
   {
     id = "tui.queue.restore",
     section = "Navigation",
-    default_keys = { "up" },
-    description = "Edit queued message",
+    default_keys = { "alt-up" },
+    description = "Restore queued messages",
   },
   {
     id = "tui.editor.deleteCharBackward",
@@ -120,7 +120,7 @@ local DEFINITIONS = {
   {
     id = "tui.editor.deleteCharForward",
     section = "Editing",
-    default_keys = { "delete" },
+    default_keys = { "delete", "ctrl-d" },
     description = "Delete character forward",
   },
   {
@@ -132,8 +132,14 @@ local DEFINITIONS = {
   {
     id = "tui.editor.deleteWordForward",
     section = "Editing",
-    default_keys = { "alt-d" },
+    default_keys = { "alt-d", "alt-delete" },
     description = "Delete word forward",
+  },
+  {
+    id = "tui.editor.deleteToLineStart",
+    section = "Editing",
+    default_keys = { "ctrl-u" },
+    description = "Delete to start of prompt",
   },
   {
     id = "tui.editor.deleteToLineEnd",
@@ -142,10 +148,22 @@ local DEFINITIONS = {
     description = "Delete to end of prompt",
   },
   {
+    id = "app.message.followUp",
+    section = "Other",
+    default_keys = { "alt-enter" },
+    description = "Queue follow-up message",
+  },
+  {
     id = "app.interrupt",
     section = "Other",
-    default_keys = { "ctrl-g" },
+    default_keys = { "escape" },
     description = "Abort current turn",
+  },
+  {
+    id = "app.editor.external",
+    section = "Other",
+    default_keys = { "ctrl-g" },
+    description = "Open external editor",
   },
   {
     id = "app.exit",
@@ -208,11 +226,29 @@ local function normalize_key(key)
   if key == "ctrlDown" or key == "ctrldown" then
     return "ctrl-down"
   end
+  if key == "ctrlLeft" or key == "ctrlleft" then
+    return "ctrl-left"
+  end
+  if key == "ctrlRight" or key == "ctrlright" then
+    return "ctrl-right"
+  end
   if key == "altUp" or key == "altup" then
     return "alt-up"
   end
   if key == "altDown" or key == "altdown" then
     return "alt-down"
+  end
+  if key == "altLeft" or key == "altleft" then
+    return "alt-left"
+  end
+  if key == "altRight" or key == "altright" then
+    return "alt-right"
+  end
+  if key == "altDelete" or key == "altdelete" then
+    return "alt-delete"
+  end
+  if key == "altEnter" or key == "altenter" then
+    return "alt-enter"
   end
   return key
 end
@@ -361,6 +397,10 @@ local DISPLAY = {
   ["alt-b"] = "Alt-B",
   ["alt-f"] = "Alt-F",
   ["alt-d"] = "Alt-D",
+  ["alt-delete"] = "Alt-Delete",
+  ["alt-enter"] = "Alt-Enter",
+  ["alt-left"] = "Alt-Left",
+  ["alt-right"] = "Alt-Right",
   ["alt-up"] = "Alt-Up",
   ["alt-backspace"] = "Alt-Backspace",
   ["backspace"] = "Backspace",
@@ -374,6 +414,9 @@ local DISPLAY = {
   ["ctrl-l"] = "Ctrl-L",
   ["ctrl-n"] = "Ctrl-N",
   ["ctrl-p"] = "Ctrl-P",
+  ["ctrl-c"] = "Ctrl-C",
+  ["ctrl-left"] = "Ctrl-Left",
+  ["ctrl-right"] = "Ctrl-Right",
   ["ctrl-up"] = "Ctrl-Up",
   ["ctrl-u"] = "Ctrl-U",
   ["ctrl-v"] = "Ctrl-V",

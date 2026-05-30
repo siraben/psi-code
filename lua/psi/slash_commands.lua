@@ -430,11 +430,20 @@ end
 
 local function queue_summary()
   local agent = require("psi.agent_session")
+  local modes = agent.queue_modes and agent.queue_modes() or {}
   local items = agent.pending_messages()
   if #items == 0 then
-    return "queue is empty"
+    return "queue is empty\nmodes: steering="
+      .. tostring(modes.steering or "one-at-a-time")
+      .. " follow-up="
+      .. tostring(modes["follow-up"] or "one-at-a-time")
   end
-  local lines = { "queued messages" }
+  local lines = {
+    "queued messages",
+    "modes: steering=" .. tostring(modes.steering or "one-at-a-time") .. " follow-up=" .. tostring(
+      modes["follow-up"] or "one-at-a-time"
+    ),
+  }
   for _, item in ipairs(items) do
     local text = (item.text or ""):gsub("%s+", " ")
     if #text > 72 then
@@ -445,18 +454,165 @@ local function queue_summary()
   return table.concat(lines, "\n")
 end
 
-local function cmd_queue(rest)
-  local agent = require("psi.agent_session")
-  rest = prelude.trim(rest or "")
-  if rest == "" or rest == "list" then
-    return records.new_command_action("print", queue_summary())
+local function queue_kind_alias(kind)
+  kind = tostring(kind or ""):lower():gsub("_", "-")
+  if kind == "steer" or kind == "steering" then
+    return "steering"
   end
-  if rest == "clear" then
+  if kind == "follow" or kind == "followup" or kind == "follow-up" then
+    return "follow-up"
+  end
+  return nil
+end
+
+local function queue_modes_summary()
+  local agent = require("psi.agent_session")
+  local modes = agent.queue_modes and agent.queue_modes() or {}
+  return "queue modes\n  steering: "
+    .. tostring(modes.steering or "one-at-a-time")
+    .. "\n  follow-up: "
+    .. tostring(modes["follow-up"] or "one-at-a-time")
+end
+
+local function queue_state_summary()
+  local agent = require("psi.agent_session")
+  local modes = agent.queue_modes and agent.queue_modes() or {}
+  return "queue state\n  steeringMode: "
+    .. tostring(modes.steering or "one-at-a-time")
+    .. "\n  followUpMode: "
+    .. tostring(modes["follow-up"] or "one-at-a-time")
+    .. "\n  pendingMessageCount: "
+    .. tostring(agent.pending_message_count())
+end
+
+local function set_queue_mode_action(kind, mode, usage)
+  local agent = require("psi.agent_session")
+  local ok, normalized_kind, normalized_mode = agent.set_queue_mode(kind, mode)
+  if ok then
+    return records.new_command_action(
+      "print",
+      "set " .. normalized_kind .. " queue mode to " .. normalized_mode
+    )
+  end
+  return records.new_command_action("print", tostring(normalized_kind or usage))
+end
+
+local function clear_queue_action(kind)
+  local agent = require("psi.agent_session")
+  if kind == "all" then
     local n = agent.pending_message_count()
     agent.clear_queues()
     return records.new_command_action("print", "cleared " .. tostring(n) .. " queued message(s)")
   end
-  local drop = rest:match("^drop%s+(%d+)$") or rest:match("^remove%s+(%d+)$")
+  if kind ~= nil and agent.clear_queue then
+    local n = agent.clear_queue(kind) or 0
+    return records.new_command_action(
+      "print",
+      "cleared " .. tostring(n) .. " " .. kind .. " queued message(s)"
+    )
+  end
+  return records.new_command_action("print", "usage: /queue clear [steering|follow-up]")
+end
+
+local function cmd_queue(rest)
+  local agent = require("psi.agent_session")
+  rest = prelude.trim(rest or "")
+  if rest == "" or rest == "list" or rest == "pending" or rest == "messages" then
+    return records.new_command_action("print", queue_summary())
+  end
+  local verb, tail = split_first_word(rest)
+  verb = tostring(verb or ""):lower():gsub("_", "-")
+  tail = prelude.trim(tail or "")
+
+  if verb == "help" then
+    return records.new_command_action(
+      "print",
+      "usage: /queue [list|state|modes|mode KIND MODE|set-steering-mode MODE|set-follow-up-mode MODE|steer TEXT|follow-up TEXT|clear [KIND]|drop N|edit N text]"
+    )
+  end
+  if verb == "modes" or (verb == "mode" and tail == "") then
+    return records.new_command_action("print", queue_modes_summary())
+  end
+  if verb == "state" or verb == "status" then
+    return records.new_command_action("print", queue_state_summary())
+  end
+  if verb == "count" then
+    return records.new_command_action(
+      "print",
+      "pendingMessageCount: " .. tostring(agent.pending_message_count())
+    )
+  end
+  if verb == "mode" then
+    local kind, mode = split_first_word(tail)
+    return set_queue_mode_action(
+      kind,
+      mode,
+      "usage: /queue mode <steering|follow-up> <one-at-a-time|all>"
+    )
+  end
+  if verb == "set-steering-mode" or verb == "steering-mode" then
+    if tail == "" then
+      return records.new_command_action(
+        "print",
+        "steeringMode: " .. tostring(agent.queue_mode("steering") or "one-at-a-time")
+      )
+    end
+    return set_queue_mode_action(
+      "steering",
+      tail,
+      "usage: /queue set-steering-mode <one-at-a-time|all>"
+    )
+  end
+  if verb == "set-follow-up-mode" or verb == "follow-up-mode" then
+    if tail == "" then
+      return records.new_command_action(
+        "print",
+        "followUpMode: " .. tostring(agent.queue_mode("follow-up") or "one-at-a-time")
+      )
+    end
+    return set_queue_mode_action(
+      "follow-up",
+      tail,
+      "usage: /queue set-follow-up-mode <one-at-a-time|all>"
+    )
+  end
+  if verb == "steer" or verb == "steering" then
+    if tail == "" then
+      return records.new_command_action("print", "usage: /queue steer <text>")
+    end
+    if agent.queue_steering(tail) then
+      return records.new_command_action("print", "queued steering message")
+    end
+    return records.new_command_action("print", "failed to queue steering message")
+  end
+  if verb == "follow" or verb == "followup" or verb == "follow-up" then
+    if tail == "" then
+      return records.new_command_action("print", "usage: /queue follow-up <text>")
+    end
+    if agent.queue_follow_up(tail) then
+      return records.new_command_action("print", "queued follow-up message")
+    end
+    return records.new_command_action("print", "failed to queue follow-up message")
+  end
+  if verb == "clear-all" then
+    return clear_queue_action("all")
+  end
+  if verb == "clear-steering" then
+    return clear_queue_action("steering")
+  end
+  if verb == "clear-follow-up" then
+    return clear_queue_action("follow-up")
+  end
+  if verb == "clear" then
+    local kind = queue_kind_alias(tail)
+    if tail ~= "" and kind == nil then
+      return clear_queue_action(nil)
+    end
+    return clear_queue_action(kind or "all")
+  end
+  local drop = rest:match("^drop%s+(%d+)$")
+    or rest:match("^remove%s+(%d+)$")
+    or rest:match("^rm%s+(%d+)$")
   if drop then
     local removed = agent.remove_pending(tonumber(drop))
     if removed == nil then
@@ -471,7 +627,10 @@ local function cmd_queue(rest)
     end
     return records.new_command_action("print", "no queued message at " .. tostring(edit_index))
   end
-  return records.new_command_action("print", "usage: /queue [list|clear|drop N|edit N text]")
+  return records.new_command_action(
+    "print",
+    "usage: /queue [list|state|modes|mode KIND MODE|set-steering-mode MODE|set-follow-up-mode MODE|steer TEXT|follow-up TEXT|clear [KIND]|drop N|edit N text]"
+  )
 end
 
 -- ---------- self-documenting commands ----------
@@ -696,8 +855,8 @@ local BUILTIN_COMMANDS = {
   },
   {
     name = "queue",
-    argument_hint = "[list|clear|drop N|edit N text]",
-    description = "Inspect or edit queued messages",
+    argument_hint = "[subcommand]",
+    description = "Inspect, edit, enqueue, or configure queued messages",
   },
   {
     name = "system-prompt",

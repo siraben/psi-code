@@ -44,7 +44,7 @@ local block_insert = rt._debug_edit_keys("aa\nbb\ncc", 0, {
 local block_append = rt._debug_edit_keys("aa\nbb\ncc", 0, {
   {key="escape"}, {key="ctrl-v"}, text("l"), text("j"), text("A"), text("x"), {key="escape"}
 })
-local interrupt = tui.handle_key({key="ctrl-g", busy=true, editor_mode="normal", input_length=1})
+local interrupt = tui.handle_key({key="escape", busy=true, editor_mode="normal", input_length=1})
 return table.concat({
   s.editor_mode, tostring(s.cursor), s.clipboard, s.input,
   b.selection_kind or "-", b.clipboard,

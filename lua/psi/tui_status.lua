@@ -224,7 +224,14 @@ function M.handle_key(arg)
 
   if keybindings.matches(key, "tui.input.submit") then
     if input_length > 0 then
-      return action("submit")
+      return action("submit", "steering")
+    end
+    return nil
+  end
+
+  if keybindings.matches(key, "app.message.followUp") then
+    if input_length > 0 then
+      return action("submit", "follow-up")
     end
     return nil
   end
@@ -268,8 +275,11 @@ function M.handle_key(arg)
   if keybindings.matches(key, "tui.editor.deleteToLineEnd") then
     return action("kill-end")
   end
-  if keybindings.matches(key, "tui.input.clear") then
+  if keybindings.matches(key, "tui.editor.deleteToLineStart") then
     return action("kill-start")
+  end
+  if keybindings.matches(key, "tui.input.clear") then
+    return action("clear-buffer")
   end
   if not busy and keybindings.matches(key, "tui.input.reverseSearch") then
     return action("history-search")
@@ -309,6 +319,9 @@ function M.handle_key(arg)
   end
   if keybindings.matches(key, "app.suspend") then
     return action("suspend")
+  end
+  if keybindings.matches(key, "app.editor.external") then
+    return action("external-editor")
   end
 
   if keybindings.matches(key, "app.interrupt") then
@@ -358,7 +371,8 @@ local function queue_preview_all(agent)
   for _, item in ipairs(agent.pending_messages() or {}) do
     local text = queue_preview(item and item.text or "")
     if text ~= "" then
-      pieces[#pieces + 1] = text
+      local label = item and item.kind == "steering" and "Steering" or "Follow-up"
+      pieces[#pieces + 1] = label .. ": " .. text
     end
   end
   return table.concat(pieces, " | ")
@@ -700,7 +714,7 @@ function M.status_line(arg_json)
   if scroll > 0 then
     parts[#parts + 1] = "scroll:" .. tostring(scroll)
   end
-  if ok and agent.pending_message_count then
+  if arg.show_queue_in_status ~= false and ok and agent.pending_message_count then
     local queued = agent.pending_message_count()
     if queued > 0 then
       local preview = queue_preview_all(agent)

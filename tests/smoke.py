@@ -1064,7 +1064,7 @@ def t_tui_busy_status(psi: Psi):
     plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
     assert_equals(
         plain,
-        "working (0:04  • Ctrl-G to interrupt) ...",
+        "working (0:04  • Esc to interrupt) ...",
         "busy status renders selected label, hint, and animated dots",
     )
     assert_contains(out, "\x1b[38;2;0;215;255m", "busy label has a subtle shimmer")

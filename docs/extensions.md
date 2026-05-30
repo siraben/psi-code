@@ -180,7 +180,7 @@ Users can override defaults in `~/.config/psi/keybindings.json` or
 {
   "tui.input.submit": "enter",
   "tui.input.newLine": ["shift-enter"],
-  "app.interrupt": "ctrl-g"
+  "app.interrupt": "escape"
 }
 ```
 
@@ -332,7 +332,8 @@ These are part of the stable surface:
 | `psi.prompt.register_transformer(fn)` | Append a system-prompt rewriter. Receives the assembled prompt, returns a replacement (or `nil` to leave it). Runs after built-in assembly; transformers stack in registration order. |
 | `psi.agent.set_model(name)` / `psi.agent.current_model(fallback)` | Switch the default model at runtime (any prefix psi understands: `anthropic/`, `ollama/`, `openrouter/`, `openai-codex/`). Picked up on the *next* turn; the TUI status line reflects it immediately. Pass `nil` to clear. |
 | `psi.agent.queue_follow_up(text)` / `queue_steering(text)` | Queue user text for the active run loop. Follow-ups run after the current task would otherwise stop; steering is injected before the next provider request. |
-| `psi.agent.pending_messages()` / `pending_message(i)` / `replace_pending(i, text)` / `remove_pending(i)` / `clear_queues()` | Inspect and edit queued messages. TUI busy-submit uses the follow-up queue. |
+| `psi.agent.queue_modes()` / `queue_mode(kind)` / `set_queue_mode(kind, mode)` | Inspect or set pi-style queue drain modes, also exposed in the TUI as `/queue set-steering-mode MODE` and `/queue set-follow-up-mode MODE`. `kind` is `steering` or `follow-up`; `mode` is `one-at-a-time` or `all`. |
+| `psi.agent.pending_messages()` / `pending_message(i)` / `replace_pending(i, text)` / `remove_pending(i)` / `clear_queue(kind)` / `clear_queues()` | Inspect and edit queued messages. TUI busy-submit queues steering, and Alt-Enter queues follow-up messages. |
 | `psi.agent.side_question(question, opts)` | Ask an ephemeral `/btw`-style side question using the current transcript excerpt. Uses the currently configured model, including local providers, and does not append to the session. |
 | `psi.tui.register_key_handler(fn)` | Intercept normalized TUI key events before built-in bindings. Return `{ action = "...", arg = ... }` to handle, `nil` to fall through. Returns a handler id. |
 | `psi.tui.unregister_key_handler(id)` | Remove one key handler previously returned by `register_key_handler`. |

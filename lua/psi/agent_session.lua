@@ -171,6 +171,9 @@ end
 
 M.queue_steering = control.queue_steering
 M.queue_follow_up = control.queue_follow_up
+M.queue_mode = control.queue_mode
+M.queue_modes = control.queue_modes
+M.set_queue_mode = control.set_queue_mode
 M.drain_steering = control.drain_steering
 M.drain_follow_ups = control.drain_follow_ups
 M.pending_message_count = control.pending_count
@@ -179,6 +182,7 @@ M.pending_message = control.pending_message
 M.replace_pending = control.replace_pending
 M.remove_pending = control.remove_pending
 M.clear_queues = control.clear_queues
+M.clear_queue = control.clear_queue
 
 local function transcript_excerpt(max_chars)
   max_chars = tonumber(max_chars) or 24000

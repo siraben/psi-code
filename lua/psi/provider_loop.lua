@@ -67,6 +67,14 @@ local function queued_user_observer(observer, kind)
   end
 end
 
+local function append_queued_steering(observer)
+  return control.append_steering(queued_user_observer(observer, "steering"))
+end
+
+local function append_queued_follow_ups(observer)
+  return control.append_follow_ups(queued_user_observer(observer, "follow-up"))
+end
+
 local function normalize_tool_result(tc, r)
   if r and r.ok and r.values and r.values.n > 0 then
     return r.values[1]
@@ -219,7 +227,7 @@ function M.run_turn(opts, cfg)
     if abort_check() then
       return false, "aborted"
     end
-    control.append_steering(queued_user_observer(observer, "steering"))
+    append_queued_steering(observer)
 
     local api_messages = cfg.build_messages(transform.plain_session(), system_prompt, cfg, model)
     emit_context(cfg, model, system_prompt, api_messages)
@@ -314,7 +322,7 @@ function M.run_turn(opts, cfg)
     local text = cfg.text(state)
     if #tool_calls == 0 then
       cfg.after_iteration(model, opts)
-      if control.append_follow_ups(queued_user_observer(observer, "follow-up")) == 0 then
+      if append_queued_steering(observer) == 0 and append_queued_follow_ups(observer) == 0 then
         emit_turn_end(text, model)
         return true, text
       end
@@ -325,7 +333,7 @@ function M.run_turn(opts, cfg)
       end
       cfg.after_iteration(model, opts)
       if transform.all_results_terminate(results) then
-        if control.append_follow_ups(queued_user_observer(observer, "follow-up")) == 0 then
+        if append_queued_steering(observer) == 0 and append_queued_follow_ups(observer) == 0 then
           emit_turn_end(text, model)
           return true, text
         end

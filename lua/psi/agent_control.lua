@@ -7,12 +7,36 @@
 -- draining a queue appends user messages directly to the session.
 
 local session = require("psi.session_manager")
+local settings = require("psi.settings_manager")
 
 local M = {}
 
 local steering_queue = {}
 local follow_up_queue = {}
 local next_queue_id = 0
+local queue_mode_overrides = {}
+
+local function normalize_queue_name(name)
+  name = tostring(name or ""):lower():gsub("_", "-")
+  if name == "steer" or name == "steering" then
+    return "steering"
+  end
+  if name == "follow" or name == "followup" or name == "follow-up" then
+    return "follow-up"
+  end
+  return nil
+end
+
+local function normalize_queue_mode(mode)
+  mode = tostring(mode or ""):lower():gsub("_", "-")
+  if mode == "all" then
+    return "all"
+  end
+  if mode == "one" or mode == "one-at-a-time" or mode == "one-at-time" then
+    return "one-at-a-time"
+  end
+  return nil
+end
 
 local function normalize_text(message)
   if type(message) == "string" then
@@ -52,18 +76,43 @@ local function push(kind, queue, message)
   return true
 end
 
-local function drain(queue_name)
-  local out
-  if queue_name == "steering" then
-    out = steering_queue
-    steering_queue = {}
-  else
-    out = follow_up_queue
-    follow_up_queue = {}
+local function queue_mode(queue_name)
+  queue_name = normalize_queue_name(queue_name) or "follow-up"
+  if queue_mode_overrides[queue_name] ~= nil then
+    return queue_mode_overrides[queue_name]
   end
+  local key = queue_name == "steering" and "steeringMode" or "followUpMode"
+  local mode = settings.get(key, nil)
+  if mode == nil then
+    local nested = queue_name == "steering" and "queue.steeringMode" or "queue.followUpMode"
+    mode = settings.get(nested, nil)
+  end
+  return mode == "all" and "all" or "one-at-a-time"
+end
+
+local function drain(queue_name)
+  local queue
+  if queue_name == "steering" then
+    queue = steering_queue
+  else
+    queue = follow_up_queue
+  end
+
+  local count = #queue
+  if count == 0 then
+    return {}
+  end
+  if queue_mode(queue_name) ~= "all" then
+    count = 1
+  end
+
   local texts = {}
-  for i, item in ipairs(out) do
+  for i = 1, count do
+    local item = queue[i]
     texts[i] = item.text
+  end
+  for _ = 1, count do
+    table.remove(queue, 1)
   end
   return texts
 end
@@ -112,6 +161,34 @@ end
 
 function M.queue_follow_up(message)
   return push("follow-up", follow_up_queue, message)
+end
+
+function M.queue_mode(kind)
+  local normalized = normalize_queue_name(kind)
+  if normalized == nil then
+    return nil
+  end
+  return queue_mode(normalized)
+end
+
+function M.queue_modes()
+  return {
+    steering = queue_mode("steering"),
+    ["follow-up"] = queue_mode("follow-up"),
+  }
+end
+
+function M.set_queue_mode(kind, mode)
+  local normalized_kind = normalize_queue_name(kind)
+  local normalized_mode = normalize_queue_mode(mode)
+  if normalized_kind == nil then
+    return false, "queue kind must be steering or follow-up"
+  end
+  if normalized_mode == nil then
+    return false, "queue mode must be one-at-a-time or all"
+  end
+  queue_mode_overrides[normalized_kind] = normalized_mode
+  return true, normalized_kind, normalized_mode
 end
 
 function M.drain_steering()
@@ -181,6 +258,21 @@ end
 function M.clear_queues()
   steering_queue = {}
   follow_up_queue = {}
+end
+
+function M.clear_queue(kind)
+  local normalized = normalize_queue_name(kind)
+  if normalized == "steering" then
+    local n = #steering_queue
+    steering_queue = {}
+    return n
+  end
+  if normalized == "follow-up" then
+    local n = #follow_up_queue
+    follow_up_queue = {}
+    return n
+  end
+  return nil
 end
 
 return M

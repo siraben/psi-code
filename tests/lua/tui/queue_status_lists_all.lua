@@ -1,5 +1,5 @@
 --[==[psi-test
-contains = "queue:first queued | second queued"
+contains = "queue:Follow-up: first queued | Follow-up: second queued"
 ]==]
 local agent = require("psi.agent_session")
 local tui = require("psi.tui_status")

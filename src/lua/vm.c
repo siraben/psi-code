@@ -556,6 +556,8 @@ static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx) {
 #define PSI_VM_TUI_CONTROL_MAX 26
 #define PSI_VM_TUI_CONTROL_A_OFFSET 1
 #define PSI_VM_TUI_CSI_PRIMARY_PARAM 1u
+#define PSI_VM_TUI_MODIFIER_SHIFT 2u
+#define PSI_VM_TUI_MODIFIER_ALT_SHIFT 4u
 #define PSI_VM_TUI_MODIFIER_CTRL 5u
 #define PSI_VM_TUI_MODIFIER_ALT 3u
 #define PSI_VM_TUI_MODIFIER_SHIFT_MIN 2u
@@ -819,7 +821,7 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
         return "alt-backspace";
     }
     if (strcmp(sequence, "\r") == 0 || strcmp(sequence, "\n") == 0) {
-        return "shift-enter";
+        return "alt-enter";
     }
     if (strcmp(sequence, "[A") == 0 || strcmp(sequence, "OA") == 0) {
         return "up";
@@ -899,12 +901,18 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
     if (sscanf(sequence, "[%u;%u;%u%c", &first, &second, &third, &final) == 4 && final == '~' &&
         first == (unsigned int)PSI_VM_TUI_ESCAPE_BYTE && third == PSI_VM_TUI_LEGACY_ENTER_CODE &&
         second >= PSI_VM_TUI_MODIFIER_SHIFT_MIN) {
+        if (second == PSI_VM_TUI_MODIFIER_ALT || second == PSI_VM_TUI_MODIFIER_ALT_SHIFT) {
+            return "alt-enter";
+        }
         return "shift-enter";
     }
     if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 &&
         (final == 'u' || final == '~') &&
         (first == PSI_VM_TUI_LEGACY_ENTER_CODE || first == PSI_VM_TUI_KITTY_SHIFT_ENTER_CODE) &&
         second >= PSI_VM_TUI_MODIFIER_SHIFT_MIN) {
+        if (second == PSI_VM_TUI_MODIFIER_ALT || second == PSI_VM_TUI_MODIFIER_ALT_SHIFT) {
+            return "alt-enter";
+        }
         return "shift-enter";
     }
     return NULL;
@@ -3973,6 +3981,89 @@ static int lfn_tui_suspend(lua_State *L) {
     return 0;
 }
 
+static char *psi_vm_shell_quote_arg(const char *text) {
+    size_t extra;
+    size_t len;
+    size_t i;
+    size_t j;
+    char *out;
+
+    text = text != NULL ? text : "";
+    len = strlen(text);
+    extra = 2u;
+    for (i = 0u; i < len; i++) {
+        if (text[i] == '\'') {
+            extra += 3u;
+        }
+    }
+    out = (char *)malloc(len + extra + 1u);
+    if (out == NULL) {
+        return NULL;
+    }
+    j = 0u;
+    out[j++] = '\'';
+    for (i = 0u; i < len; i++) {
+        if (text[i] == '\'') {
+            out[j++] = '\'';
+            out[j++] = '\\';
+            out[j++] = '\'';
+            out[j++] = '\'';
+        } else {
+            out[j++] = text[i];
+        }
+    }
+    out[j++] = '\'';
+    out[j] = '\0';
+    return out;
+}
+
+static int lfn_tui_external_editor(lua_State *L) {
+    const char *path;
+    const char *editor;
+    char *quoted_path;
+    char *command;
+    size_t editor_len;
+    size_t path_len;
+    int status;
+
+    psi_vm_require_tui(L);
+    path = luaL_checkstring(L, 1);
+    editor = luaL_checkstring(L, 2);
+    if (editor == NULL || editor[0] == '\0') {
+        lua_pushnil(L);
+        lua_pushstring(L, "No editor configured. Set VISUAL or EDITOR.");
+        return 2;
+    }
+    quoted_path = psi_vm_shell_quote_arg(path);
+    if (quoted_path == NULL) {
+        lua_pushnil(L);
+        lua_pushstring(L, "out of memory");
+        return 2;
+    }
+    editor_len = strlen(editor);
+    path_len = strlen(quoted_path);
+    command = (char *)malloc(editor_len + 1u + path_len + 1u);
+    if (command == NULL) {
+        free(quoted_path);
+        lua_pushnil(L);
+        lua_pushstring(L, "out of memory");
+        return 2;
+    }
+    memcpy(command, editor, editor_len);
+    command[editor_len] = ' ';
+    memcpy(command + editor_len + 1u, quoted_path, path_len + 1u);
+    free(quoted_path);
+
+    psi_tui_suspend_terminal();
+    status = system(command);
+    psi_tui_resume_terminal();
+    free(command);
+    psi_vm_tui_reset_render_cache();
+
+    lua_pushinteger(L, status);
+    return 1;
+}
+
 /* psi.tui_write(text) -- emit raw bytes to stdout while the TUI is active.
  *
  * Used by chat-mode rendering to append transcript lines to the terminal's
@@ -4041,6 +4132,7 @@ static int lfn_tui_unavailable(lua_State *L) {
 #define lfn_tui_set_cursor lfn_tui_unavailable
 #define lfn_tui_refresh lfn_tui_unavailable
 #define lfn_tui_suspend lfn_tui_unavailable
+#define lfn_tui_external_editor lfn_tui_unavailable
 #define lfn_tui_write lfn_tui_unavailable
 #define lfn_tui_set_alt_screen_active lfn_tui_unavailable
 #define lfn_tui_set_tick_handler lfn_tui_unavailable
@@ -4299,6 +4391,7 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("tui_set_cursor", lfn_tui_set_cursor);
     PSI_REG("tui_refresh", lfn_tui_refresh);
     PSI_REG("tui_suspend", lfn_tui_suspend);
+    PSI_REG("tui_external_editor", lfn_tui_external_editor);
     PSI_REG("tui_write", lfn_tui_write);
     PSI_REG("tui_set_alt_screen_active", lfn_tui_set_alt_screen_active);
     PSI_REG("tui_set_tick_handler", lfn_tui_set_tick_handler);
