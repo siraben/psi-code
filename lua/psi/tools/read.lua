@@ -232,7 +232,10 @@ local function impl(input, meta)
         limit = limit,
       })
     else
-      slice = to_public_slice(psi.read_file_slice(resolved, internal_offset, limit, TEXT_READ_MAX_BYTES), offset)
+      slice = to_public_slice(
+        psi.read_file_slice(resolved, internal_offset, limit, TEXT_READ_MAX_BYTES),
+        offset
+      )
     end
   elseif kind ~= nil then
     return records.tool_failure("read", "Cannot read file: " .. tostring(raw_path))

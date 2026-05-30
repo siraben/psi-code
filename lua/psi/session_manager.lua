@@ -152,7 +152,10 @@ function M.new_session_file_path(cwd, id)
   if not dir then
     return nil
   end
-  return prelude.path_join(dir, session_file_timestamp() .. "_" .. (id or prelude.uuid_short()) .. ".jsonl")
+  return prelude.path_join(
+    dir,
+    session_file_timestamp() .. "_" .. (id or prelude.uuid_short()) .. ".jsonl"
+  )
 end
 
 -- Pick a default on-disk location for the session JSONL. Follows the

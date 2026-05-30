@@ -81,7 +81,7 @@ function M.clear_transformers()
 end
 
 function M.system_prompt()
-  local custom_path, custom_prompt = resources.system_prompt_file()
+  local _, custom_prompt = resources.system_prompt_file()
   local append_path, append_prompt = resources.append_system_prompt_file()
 
   -- Honour psi.tools.set_active(...): the "Available tools:" list

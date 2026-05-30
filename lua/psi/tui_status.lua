@@ -753,11 +753,8 @@ function M.status_bar(arg_json)
   if estimate and estimate.tokens and estimate.tokens > 0 then
     local window = context_window or context.context_window(model)
     local pct = (estimate.tokens / window) * 100
-    right_parts[#right_parts + 1] = pair(
-      "ctx",
-      string.format("%.1f%% (%d/%d)", pct, estimate.tokens, window),
-      false
-    )
+    right_parts[#right_parts + 1] =
+      pair("ctx", string.format("%.1f%% (%d/%d)", pct, estimate.tokens, window), false)
   end
   for _, hook in ipairs(status_hooks) do
     local ok_hook, extra = pcall(hook.fn, arg)

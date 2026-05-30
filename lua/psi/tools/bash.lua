@@ -52,7 +52,9 @@ local function impl(input, meta)
   extras.output = output_text
 
   if stream.timed_out then
-    local timeout_text = "Command timed out after " .. tostring(stream.timeout_seconds or timeout) .. " seconds"
+    local timeout_text = "Command timed out after "
+      .. tostring(stream.timeout_seconds or timeout)
+      .. " seconds"
     if #output_text > 0 then
       output_text = output_text .. "\n\n" .. timeout_text
     else
