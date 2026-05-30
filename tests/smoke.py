@@ -1402,6 +1402,27 @@ def t_agents_md(psi: Psi):
     assert_contains(out, "Project rule: keep changes minimal.",
                     "project rule from AGENTS.md")
 
+@test("prompt/no_context_files_short_alias")
+def t_no_context_files_short_alias(psi: Psi):
+    ctx = psi.tmp / "no-context-short"
+    ctx.mkdir(exist_ok=True)
+    (ctx / "AGENTS.md").write_text("Project rule: hidden by -nc.\n")
+    out = psi.run("-nc", "--system-prompt", cwd=ctx).stdout
+    assert_not_contains(out, "hidden by -nc", "-nc should disable context files")
+
+@test("prompt/no_prompt_templates_keeps_explicit")
+def t_no_prompt_templates_keeps_explicit(psi: Psi):
+    template = psi.tmp / "explicit-template.md"
+    template.write_text("Explicit $1\n")
+    out = psi.run(
+        "-np",
+        "--prompt-template",
+        str(template),
+        "--eval",
+        'return tostring(psi.prompt_templates.expand("/explicit-template ok"))',
+    ).stdout.strip()
+    assert_equals(out, "Explicit ok", "-np should keep explicit --prompt-template")
+
 @test("cli/help_has_tui")
 def t_help(psi: Psi):
     out = psi.run("--help").stdout

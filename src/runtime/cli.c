@@ -89,9 +89,9 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
         NULL, "chat", "use the chat-style TUI (transcript flows into terminal scrollback)");
     args->no_extensions = arg_lit0(NULL, "no-extensions", "disable user extension discovery");
     args->no_context_files =
-        arg_lit0(NULL, "no-context-files", "disable AGENTS.md and CLAUDE.md discovery");
+        arg_lit0(NULL, "no-context-files", "disable AGENTS.md and CLAUDE.md discovery (alias -nc)");
     args->no_prompt_templates =
-        arg_lit0(NULL, "no-prompt-templates", "disable prompt template discovery");
+        arg_lit0(NULL, "no-prompt-templates", "disable prompt template discovery (alias -np)");
     args->prompt_template = arg_str0(
         NULL, "prompt-template", "FILE", "load an extra prompt template file or directory");
     args->end = arg_end(20);
@@ -142,7 +142,13 @@ static int psi_cli_normalize_argv(
 
     out_index = 0;
     for (index = 0; index < argc; index++) {
-        copy[out_index++] = argv[index];
+        if (strcmp(argv[index], "-nc") == 0) {
+            copy[out_index++] = "--no-context-files";
+        } else if (strcmp(argv[index], "-np") == 0) {
+            copy[out_index++] = "--no-prompt-templates";
+        } else {
+            copy[out_index++] = argv[index];
+        }
         if (strcmp(argv[index], "--compact") == 0 &&
             (index + 1 >= argc || argv[index + 1][0] == '-')) {
             copy[out_index++] = "12";

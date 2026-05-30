@@ -71,9 +71,9 @@ they're useful before the binary is on the system. Regenerated from
 | `-h`, `--help` | — | show help |
 | `--max-tokens` | `N` | max output tokens for --agent |
 | `--model` | `MODEL` | model to use with --agent |
-| `--no-context-files` | — | disable AGENTS.md and CLAUDE.md discovery |
+| `--no-context-files` | — | disable AGENTS.md and CLAUDE.md discovery (alias -nc) |
 | `--no-extensions` | — | disable user extension discovery |
-| `--no-prompt-templates` | — | disable prompt template discovery |
+| `--no-prompt-templates` | — | disable prompt template discovery (alias -np) |
 | `--print` | `TEXT` | run the bootstrap print-mode handler |
 | `--prompt-template` | `FILE` | load an extra prompt template file or directory |
 | `--repl` | — | run the interactive line editor shell |

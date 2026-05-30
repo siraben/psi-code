@@ -228,9 +228,6 @@ function M.set_enabled(value)
 end
 
 function M.load_path(path)
-  if not enabled then
-    return false
-  end
   if type(path) ~= "string" or path == "" then
     return false
   end

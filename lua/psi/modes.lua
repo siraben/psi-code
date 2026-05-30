@@ -489,7 +489,8 @@ function M.run(opts)
   if psi.prompt_templates then
     if opts.no_prompt_templates then
       psi.prompt_templates.set_enabled(false)
-    elseif opts.prompt_template_file then
+    end
+    if opts.prompt_template_file then
       psi.prompt_templates.load_path(opts.prompt_template_file)
     end
   end
