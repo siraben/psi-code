@@ -147,6 +147,14 @@ local function session_file_timestamp()
   return (prelude.iso_timestamp():gsub(":", "-"):gsub("%.", "-"))
 end
 
+function M.new_session_file_path(cwd, id)
+  local dir = M.session_dir_for_cwd(cwd or current_cwd())
+  if not dir then
+    return nil
+  end
+  return prelude.path_join(dir, session_file_timestamp() .. "_" .. (id or prelude.uuid_short()) .. ".jsonl")
+end
+
 -- Pick a default on-disk location for the session JSONL. Follows the
 -- XDG Base Directory spec:
 -- $XDG_STATE_HOME/psi/sessions/<encoded-cwd>/<timestamp>_<id>.jsonl,
@@ -162,11 +170,10 @@ function M.ensure_default_path()
   end
   M.ensure_id()
   local id = psi.session_id()
-  local dir = M.session_dir_for_cwd(current_cwd())
-  if not dir then
+  local path = M.new_session_file_path(current_cwd(), id)
+  if not path then
     return nil
   end
-  local path = prelude.path_join(dir, session_file_timestamp() .. "_" .. id .. ".jsonl")
   psi.session_set_path(path)
   return path
 end
@@ -1670,7 +1677,7 @@ end
 
 -- Write the first `at_count` messages of the current session to a new
 -- JSONL file at `out_path`, stamped with a fresh id whose parent is the
--- current session id. The current session is not modified.
+-- current session file when available. The current session is not modified.
 function M.fork(at_count, out_path)
   if not out_path or out_path == "" then
     return false, "no path"
@@ -1688,8 +1695,11 @@ function M.fork(at_count, out_path)
     id = prelude.uuid_short(),
     timestamp = prelude.iso_timestamp(),
     cwd = current_cwd(),
-    parentSession = psi.session_id(),
   }
+  local parent = psi.session_path() or psi.session_id()
+  if parent and parent ~= "" then
+    header.parentSession = parent
+  end
   return write_session_file(out_path, header, messages, at_count)
 end
 

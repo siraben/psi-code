@@ -123,8 +123,7 @@ local function copy_auth_url(url)
 end
 
 local function fork_output_path()
-  local id = psi.session_id() or tostring(os.time())
-  return "sessions/fork-" .. id .. "-" .. tostring(os.time()) .. ".jsonl"
+  return session.new_session_file_path(psi.cwd and psi.cwd() or nil)
 end
 
 -- /clone writes a full copy of the current session at the current
@@ -133,8 +132,7 @@ end
 -- only. Implementation reuses session.fork(total, out_path) — fork
 -- with at_count = message_count is the natural full-session dump.
 local function clone_output_path()
-  local id = psi.session_id() or tostring(os.time())
-  return "sessions/clone-" .. id .. "-" .. tostring(os.time()) .. ".jsonl"
+  return session.new_session_file_path(psi.cwd and psi.cwd() or nil)
 end
 
 -- ---------- session status (/session) ----------
@@ -1260,16 +1258,18 @@ function M.handle(line)
   if starts_word(line, "/fork") then
     local keep = parse_fork_count(line)
     local out = fork_output_path()
-    local ok = session.fork(keep, out)
-    local msg = ok and ("forked " .. tostring(keep) .. " entries to " .. out) or "fork failed"
+    local ok, err = session.fork(keep, out)
+    local msg = ok and ("forked " .. tostring(keep) .. " entries to " .. out)
+      or ("fork failed: " .. tostring(err or "could not determine session path"))
     return records.new_command_action("print", msg)
   end
   if starts_word(line, "/clone") then
     local rest = arg_after(line, "/clone")
     local out = (rest ~= "" and rest) or clone_output_path()
     local total = psi.session_message_count()
-    local ok = session.fork(total, out)
-    local msg = ok and string.format("cloned %d entries to %s", total, out) or "clone failed"
+    local ok, err = session.fork(total, out)
+    local msg = ok and string.format("cloned %d entries to %s", total, out)
+      or ("clone failed: " .. tostring(err or "could not determine session path"))
     return records.new_command_action("print", msg)
   end
   if starts_word(line, "/branch") then
