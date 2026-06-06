@@ -539,7 +539,62 @@ local function persist(state, model, _content, tool_calls, stop_override, error_
   end
 end
 
-local http_post_text = sched.http_post_text
+local RAW_COMPLETION_BODY_MAX = 16 * 1024
+
+local function complete_text_stream(creds, body, abort_check)
+  local handle, begin_err = psi.http_stream_begin(api_url(), headers(creds), psi.json_encode(body))
+  if handle == nil then
+    return false, "http request failed: " .. tostring(begin_err)
+  end
+
+  local state = new_state()
+  local parser = stream_parser.sse_parser()
+  local raw_body = {}
+  local raw_body_len = 0
+  local observer = {}
+
+  while true do
+    if type(abort_check) == "function" and abort_check() then
+      psi.http_stream_finish(handle)
+      return false, "aborted"
+    end
+    local chunk, done = sched.http_poll(handle, 50)
+    if chunk ~= nil then
+      if raw_body_len < RAW_COMPLETION_BODY_MAX then
+        raw_body[#raw_body + 1] = chunk
+        raw_body_len = raw_body_len + #chunk
+      end
+      parser_push(parser, chunk, state, observer)
+    end
+    if done then
+      break
+    end
+  end
+
+  local status, transport_error = psi.http_stream_finish(handle)
+  finalize(state)
+  if status < 0 then
+    return false, "http transport error: " .. tostring(transport_error or "unknown error")
+  end
+  if status < 200 or status >= 300 then
+    return false,
+      openai_compat.classify_http_error(
+        tonumber(status) or 0,
+        table.concat(raw_body),
+        "openai-codex"
+      )
+  end
+  local stream_error = nil
+  if state.stop_reason == "error" then
+    stream_error = state.error_message or "Codex response failed"
+  elseif state.malformed_tool_input_error then
+    stream_error = "openai-codex: " .. state.malformed_tool_input_error
+  end
+  if stream_error then
+    return false, stream_error
+  end
+  return true, state_text(state)
+end
 
 function M.run_turn(opts)
   local creds, err = auth.credentials()
@@ -618,34 +673,15 @@ function M.complete_text(opts)
     thinking_level = opts.thinking_level,
     reasoning_effort = opts.reasoning_effort,
   })
-  body.stream = false
   body.tools = nil
-  local status, response =
-    http_post_text(api_url(), headers(creds), psi.json_encode(body), opts.abort_check)
-  if not status or status < 200 or status >= 300 then
-    local msg = openai_compat.classify_http_error(
-      tonumber(status) or 0,
-      tostring(response or ""),
-      "openai-codex"
-    )
-    io.stderr:write(msg .. "\n")
-    return false, msg
+  body.tool_choice = nil
+  body.parallel_tool_calls = nil
+  local ok, text = complete_text_stream(creds, body, opts.abort_check)
+  if not ok then
+    io.stderr:write(text .. "\n")
+    return false, text
   end
-  local parsed = safe_decode(response)
-  local parts = {}
-  local output = type(parsed) == "table" and parsed.output or nil
-  if type(output) == "table" then
-    for _, item in ipairs(output) do
-      if type(item) == "table" and item.type == "message" and type(item.content) == "table" then
-        for _, c in ipairs(item.content) do
-          if type(c) == "table" then
-            parts[#parts + 1] = c.text or c.refusal or ""
-          end
-        end
-      end
-    end
-  end
-  return true, table.concat(parts)
+  return true, text
 end
 
 M._debug = {
