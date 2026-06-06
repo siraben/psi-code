@@ -153,10 +153,6 @@ jobs:
             package: psi-static
             nix_build_flags: ""
             smoke_excludes: ""
-          - name: fil-c
-            package: psi-filc
-            nix_build_flags: "--cores 1 --max-jobs 1"
-            smoke_excludes: ""
           - name: cosmo
             package: psi-cosmocc
             nix_build_flags: ""
