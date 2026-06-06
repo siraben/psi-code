@@ -11,14 +11,24 @@
     #   - pkgsCosmoAarch64
     nixpkgs-cosmo.url = "github:siraben/nixpkgs/siraben/cosmopkgs";
 
-    flake-utils.url = "github:numtide/flake-utils";
     filnix.url = "github:mbrock/filnix";
     sbomnix.url = "github:tiiuae/sbomnix";
     sirabenOverlay.url = "github:siraben/overlay";
   };
 
-  outputs = { self, nixpkgs, nixpkgs-cosmo, flake-utils, filnix, sbomnix, sirabenOverlay }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs = { self, nixpkgs, nixpkgs-cosmo, filnix, sbomnix, sirabenOverlay }:
+    let
+      eachDefaultSystem = f:
+        let
+          systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+          bySystem = nixpkgs.lib.genAttrs systems f;
+        in
+          nixpkgs.lib.foldl' nixpkgs.lib.recursiveUpdate { }
+            (map (system:
+              nixpkgs.lib.mapAttrs (_: value: { ${system} = value; }) bySystem.${system}
+            ) systems);
+    in
+    eachDefaultSystem (system:
       let
         inherit (pkgs) lib;
 
