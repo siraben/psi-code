@@ -262,6 +262,7 @@ static void *psi_http_stream_thread(void *arg) {
     h->curl_error[0] = '\0';
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, h->curl_error);
     psi_http_configure_tls(curl);
+    psi_http_configure_resilience(curl);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, psi_http_stream_write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)h);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);

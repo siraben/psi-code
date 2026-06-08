@@ -8,4 +8,9 @@
  * to void* without a cast). */
 void psi_http_configure_tls(void *curl);
 
+/* Configure connect timeout, TCP keepalive, and a low-speed idle-stream
+ * watchdog (PSI_HTTP_IDLE_TIMEOUT seconds; 0 disables; default 120s).
+ * Same void* convention as psi_http_configure_tls. */
+void psi_http_configure_resilience(void *curl);
+
 #endif

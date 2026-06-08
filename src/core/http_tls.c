@@ -18,6 +18,16 @@
 #define PSI_CA_BUNDLE_FILE ""
 #endif
 
+/* Connection-resilience defaults. The watchdog aborts a transfer
+ * averaging below PSI_HTTP_LOW_SPEED_LIMIT bytes/s for the idle window:
+ * loose enough for a slow-but-live stream, tight enough that a dead
+ * half-open connection fails in bounded time. */
+#define PSI_HTTP_IDLE_TIMEOUT_SECS 120L
+#define PSI_HTTP_LOW_SPEED_LIMIT 1L
+#define PSI_HTTP_CONNECT_TIMEOUT_SECS 30L
+#define PSI_HTTP_TCP_KEEPIDLE_SECS 30L
+#define PSI_HTTP_TCP_KEEPINTVL_SECS 15L
+
 static int psi_http_path_readable(const char *path) {
     return path != NULL && path[0] != '\0' && access(path, R_OK) == 0;
 }
@@ -75,4 +85,41 @@ void psi_http_configure_tls(void *curl) {
         free(bytes);
     }
 #endif
+}
+
+static long psi_http_idle_timeout_secs(void) {
+    const char *value = getenv("PSI_HTTP_IDLE_TIMEOUT");
+    char *end;
+    long secs;
+
+    if (value == NULL || value[0] == '\0')
+        return PSI_HTTP_IDLE_TIMEOUT_SECS;
+    end = NULL;
+    secs = strtol(value, &end, 10);
+    if (end == value || *end != '\0' || secs < 0l)
+        return PSI_HTTP_IDLE_TIMEOUT_SECS;
+    return secs;
+}
+
+void psi_http_configure_resilience(void *curl) {
+    CURL *handle = (CURL *)curl;
+    long idle_secs;
+
+    if (handle == NULL)
+        return;
+
+    /* Bound the TCP/TLS handshake so a black-holed host fails fast. */
+    curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, PSI_HTTP_CONNECT_TIMEOUT_SECS);
+
+    /* Let the OS detect a dead peer on an idle connection. KEEPIDLE/KEEPINTVL
+     * are honored where supported (Linux, macOS) and ignored elsewhere. */
+    curl_easy_setopt(handle, CURLOPT_TCP_KEEPALIVE, 1L);
+    curl_easy_setopt(handle, CURLOPT_TCP_KEEPIDLE, PSI_HTTP_TCP_KEEPIDLE_SECS);
+    curl_easy_setopt(handle, CURLOPT_TCP_KEEPINTVL, PSI_HTTP_TCP_KEEPINTVL_SECS);
+
+    idle_secs = psi_http_idle_timeout_secs();
+    if (idle_secs > 0l) {
+        curl_easy_setopt(handle, CURLOPT_LOW_SPEED_LIMIT, PSI_HTTP_LOW_SPEED_LIMIT);
+        curl_easy_setopt(handle, CURLOPT_LOW_SPEED_TIME, idle_secs);
+    }
 }

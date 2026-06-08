@@ -104,6 +104,7 @@ static CURL *psi_http_build_handle(const char *url, const char *const *header_li
         curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, error_buffer);
     }
     psi_http_configure_tls(curl);
+    psi_http_configure_resilience(curl);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     if (body != NULL) {
         curl_easy_setopt(curl, CURLOPT_POST, 1L);
