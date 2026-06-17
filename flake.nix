@@ -66,7 +66,14 @@
 
         curlWithMbedtls = p: let
           mbedtls = mbedtlsLibOnly p;
-        in (p.curl.override {
+          curlPinned = p.curl.overrideAttrs (_old: {
+            version = "8.21.0";
+            src = p.fetchurl {
+              url = "https://curl.se/download/curl-8.21.0.tar.xz";
+              hash = "sha256-qhtmpw6s6D3GJFCHRWRsCK5WHeUSq0A63/uTrIf8cuY=";
+            };
+          });
+        in (curlPinned.override {
           brotliSupport = false;
           http2Support = false;
           opensslSupport = false;

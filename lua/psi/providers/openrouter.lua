@@ -249,6 +249,9 @@ local function make_config(model)
     new_state = new_state,
     finalize_tool_calls = finalize_tool_calls,
     stream_error = function(state)
+      if state.stop_reason == "network_error" then
+        return "openrouter: stream ended with network_error"
+      end
       if state.malformed_tool_input_error then
         return "openrouter: " .. state.malformed_tool_input_error
       end
@@ -283,6 +286,13 @@ local function make_config(model)
     end,
   }
 end
+
+M._debug = {
+  make_config = make_config,
+  new_state = new_state,
+  parser_new = stream_parser.sse_parser,
+  parser_push = parser_push,
+}
 
 -- ---------- Public entry points ----------
 
