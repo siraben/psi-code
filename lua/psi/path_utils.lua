@@ -21,6 +21,13 @@ function M.resolve(path)
   return psi.path_resolve(normalize_spaces(path))
 end
 
+function M.realpath(path)
+  if type(path) ~= "string" or psi.path_realpath == nil then
+    return nil
+  end
+  return psi.path_realpath(normalize_spaces(path))
+end
+
 function M.join(base, name)
   if type(base) ~= "string" or type(name) ~= "string" then
     return nil

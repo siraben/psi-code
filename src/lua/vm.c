@@ -179,6 +179,22 @@ static char *psi_vm_resolve_path(const char *path) {
     return out;
 }
 
+static char *psi_vm_realpath(const char *path) {
+#ifndef _WIN32
+    char *expanded;
+    char *resolved;
+
+    expanded = psi_vm_expand_path(path);
+    if (expanded == NULL)
+        return NULL;
+    resolved = realpath(expanded, NULL);
+    free(expanded);
+    return resolved;
+#else
+    return psi_vm_resolve_path(path);
+#endif
+}
+
 static char *psi_vm_parent_directory(const char *path) {
     size_t end;
     size_t i;
@@ -2627,6 +2643,11 @@ static int lfn_path_resolve(lua_State *L) {
     return 1;
 }
 
+static int lfn_path_realpath(lua_State *L) {
+    psi_vm_push_heap_string(L, psi_vm_realpath(luaL_checkstring(L, 1)));
+    return 1;
+}
+
 static int lfn_file_exists(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
     lua_pushboolean(L, psi_vm_file_exists(path) ? 1 : 0);
@@ -4400,6 +4421,8 @@ static void psi_vm_register_psi(lua_State *L) {
         "Expand leading '~' and '@' in a path, returning the absolute form.");
     PSI_REG_DOC("path_resolve", lfn_path_resolve,
         "Anchor a relative path at the current working directory; absolute paths pass through.");
+    PSI_REG_DOC("path_realpath", lfn_path_realpath,
+        "Return the filesystem-canonical path, or nil when it cannot be resolved.");
     PSI_REG_DOC(
         "file_exists", lfn_file_exists, "Return true when a path exists in the filesystem.");
     PSI_REG_DOC("file_type", lfn_file_type,

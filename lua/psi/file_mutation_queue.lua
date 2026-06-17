@@ -6,14 +6,29 @@
 -- tool implementations later.
 
 local M = {}
+local path_util = require("psi.path_utils")
 
 local locks = {}
+
+local function basename(path)
+  return tostring(path):match("[^/\\]+$") or tostring(path)
+end
 
 local function key(path)
   if type(path) ~= "string" or path == "" then
     return nil
   end
-  return path
+  local resolved = path_util.resolve(path) or path
+  local real = path_util.realpath(resolved)
+  if real and real ~= "" then
+    return real
+  end
+  local parent = path_util.parent(resolved)
+  local real_parent = parent and path_util.realpath(parent) or nil
+  if real_parent and real_parent ~= "" then
+    return path_util.join(real_parent, basename(resolved)) or resolved
+  end
+  return resolved
 end
 
 function M.with_path(path, fn)
