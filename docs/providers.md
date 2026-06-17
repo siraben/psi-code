@@ -55,6 +55,20 @@ request because provider streams are not resumable at that point.
   (default `1000`).
 - `PSI_HTTP_MAX_RETRY_DELAY_MS`: cap for retry sleep (default `60000`).
 
+## HTTP Timeouts
+
+All provider HTTP calls share curl-level stall protection. The defaults
+allow long model streams but fail silent network paths so the agent can
+surface a transport error or retry at the provider layer.
+
+- `PSI_HTTP_CONNECT_TIMEOUT_MS` — TCP/TLS connect timeout
+  (default `15000`; set `0` to disable).
+- `PSI_HTTP_IDLE_TIMEOUT_MS` — low-speed idle timeout for header/body
+  stalls (default `300000`; set `0` to disable).
+- `PSI_HTTP_TOTAL_TIMEOUT_MS` — optional total request deadline
+  (default disabled; useful for short metadata requests, risky for
+  long streaming turns).
+
 ## API-key credentials (auth.json)
 
 API-key providers read their key from `~/.config/psi/auth.json` in addition to

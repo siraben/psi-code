@@ -22,15 +22,37 @@
 /* Connection-resilience defaults. The watchdog aborts a transfer
  * averaging below PSI_HTTP_LOW_SPEED_LIMIT bytes/s for the idle window:
  * loose enough for a slow-but-live stream, tight enough that a dead
- * half-open connection fails in bounded time. */
-#define PSI_HTTP_IDLE_TIMEOUT_SECS 120L
+ * half-open connection fails in bounded time. Connect and idle windows
+ * are tunable in milliseconds via env vars; the legacy
+ * PSI_HTTP_IDLE_TIMEOUT (seconds) var is still honored. */
 #define PSI_HTTP_LOW_SPEED_LIMIT 1L
-#define PSI_HTTP_CONNECT_TIMEOUT_SECS 30L
+#define PSI_HTTP_CONNECT_TIMEOUT_DEFAULT_MS 15000L
+#define PSI_HTTP_IDLE_TIMEOUT_DEFAULT_MS 300000L
 #define PSI_HTTP_TCP_KEEPIDLE_SECS 30L
 #define PSI_HTTP_TCP_KEEPINTVL_SECS 15L
 
 static int psi_http_path_readable(const char *path) {
     return path != NULL && path[0] != '\0' && access(path, R_OK) == 0;
+}
+
+static long psi_http_env_long(const char *name, long fallback) {
+    const char *value;
+    char *end;
+    long parsed;
+
+    value = getenv(name);
+    if (value == NULL || value[0] == '\0')
+        return fallback;
+    parsed = strtol(value, &end, 10);
+    if (end == value || parsed < 0L)
+        return fallback;
+    return parsed;
+}
+
+static long psi_http_ceil_seconds(long ms) {
+    if (ms <= 0L)
+        return 0L;
+    return (ms + 999L) / 1000L;
 }
 
 static const char *psi_http_ca_bundle_path(void) {
@@ -121,29 +143,44 @@ void psi_http_configure_tls(void *curl) {
 #endif
 }
 
+/* Idle-stream watchdog window in seconds. Prefers the millisecond override
+ * PSI_HTTP_IDLE_TIMEOUT_MS, then the legacy PSI_HTTP_IDLE_TIMEOUT (seconds),
+ * then the default. 0 disables the watchdog. */
 static long psi_http_idle_timeout_secs(void) {
-    const char *value = getenv("PSI_HTTP_IDLE_TIMEOUT");
+    long ms;
+    const char *value;
     char *end;
     long secs;
 
+    ms = psi_http_env_long("PSI_HTTP_IDLE_TIMEOUT_MS", -1L);
+    if (ms >= 0L)
+        return psi_http_ceil_seconds(ms);
+
+    value = getenv("PSI_HTTP_IDLE_TIMEOUT");
     if (value == NULL || value[0] == '\0')
-        return PSI_HTTP_IDLE_TIMEOUT_SECS;
+        return psi_http_ceil_seconds(PSI_HTTP_IDLE_TIMEOUT_DEFAULT_MS);
     end = NULL;
     secs = strtol(value, &end, 10);
     if (end == value || *end != '\0' || secs < 0l)
-        return PSI_HTTP_IDLE_TIMEOUT_SECS;
+        return psi_http_ceil_seconds(PSI_HTTP_IDLE_TIMEOUT_DEFAULT_MS);
     return secs;
 }
 
 void psi_http_configure_resilience(void *curl) {
     CURL *handle = (CURL *)curl;
+    long connect_ms;
     long idle_secs;
+    long total_ms;
 
     if (handle == NULL)
         return;
 
-    /* Bound the TCP/TLS handshake so a black-holed host fails fast. */
-    curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, PSI_HTTP_CONNECT_TIMEOUT_SECS);
+    /* Bound the TCP/TLS handshake so a black-holed host fails fast.
+     * Tunable in milliseconds via PSI_HTTP_CONNECT_TIMEOUT_MS. */
+    connect_ms =
+        psi_http_env_long("PSI_HTTP_CONNECT_TIMEOUT_MS", PSI_HTTP_CONNECT_TIMEOUT_DEFAULT_MS);
+    if (connect_ms > 0L)
+        curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT_MS, connect_ms);
 
     /* Let the OS detect a dead peer on an idle connection. KEEPIDLE/KEEPINTVL
      * are honored where supported (Linux, macOS) and ignored elsewhere. */
@@ -151,9 +188,17 @@ void psi_http_configure_resilience(void *curl) {
     curl_easy_setopt(handle, CURLOPT_TCP_KEEPIDLE, PSI_HTTP_TCP_KEEPIDLE_SECS);
     curl_easy_setopt(handle, CURLOPT_TCP_KEEPINTVL, PSI_HTTP_TCP_KEEPINTVL_SECS);
 
+    /* Abort a connected-but-idle transfer that stalls below the low-speed
+     * floor for the idle window. */
     idle_secs = psi_http_idle_timeout_secs();
-    if (idle_secs > 0l) {
+    if (idle_secs > 0L) {
         curl_easy_setopt(handle, CURLOPT_LOW_SPEED_LIMIT, PSI_HTTP_LOW_SPEED_LIMIT);
         curl_easy_setopt(handle, CURLOPT_LOW_SPEED_TIME, idle_secs);
     }
+
+    /* Optional hard deadline for the whole request (0 disables). Useful for
+     * short metadata calls, risky for long streaming turns. */
+    total_ms = psi_http_env_long("PSI_HTTP_TOTAL_TIMEOUT_MS", 0L);
+    if (total_ms > 0L)
+        curl_easy_setopt(handle, CURLOPT_TIMEOUT_MS, total_ms);
 }
