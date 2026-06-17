@@ -116,11 +116,14 @@ static int psi_process_append_bytes(
         next_capacity *= 2u;
     }
 
-    next_buffer = (char *)realloc(*buffer, next_capacity);
+    next_buffer = (char *)malloc(next_capacity);
     if (next_buffer == NULL) {
         return PSI_STATUS_ERROR;
     }
 
+    if (*buffer != NULL && *length > 0u)
+        memcpy(next_buffer, *buffer, *length);
+    free(*buffer);
     *buffer = next_buffer;
     *capacity = next_capacity;
     memcpy(*buffer + *length, data, bytes);
@@ -1004,6 +1007,26 @@ int psi_process_terminate(struct psi_process_handle *h) {
     return PSI_STATUS_OK;
 }
 
+static int psi_process_try_reap(struct psi_process_handle *h) {
+    pid_t r;
+
+    if (h == NULL)
+        return 0;
+    if (h->reaped)
+        return 1;
+
+    r = waitpid(h->child_pid, &h->wait_status, WNOHANG);
+    if (r == h->child_pid) {
+        h->reaped = 1;
+        return 1;
+    }
+    if (r < 0) {
+        h->reaped = 1;
+        return 1;
+    }
+    return 0;
+}
+
 int psi_process_poll(
     struct psi_process_handle *h, int timeout_ms, char **chunk, size_t *chunk_len) {
     char read_buffer[PSI_PROCESS_READ_CHUNK];
@@ -1169,6 +1192,10 @@ int psi_process_poll(
             struct timespec delay;
             long step_ns;
 
+            if (psi_process_try_reap(h)) {
+                h->eof_seen = 1;
+                return 2;
+            }
             if (h->aborted) {
                 /* Child has been SIGTERM'd but hasn't closed the pipe
                  * yet. Treat this as "done" after the abort flag
