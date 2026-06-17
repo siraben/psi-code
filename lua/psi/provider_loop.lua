@@ -14,6 +14,96 @@ local session_mod = require("psi.session_manager")
 local M = {}
 
 local RAW_BODY_MAX = 16 * 1024
+local DEFAULT_MAX_RETRIES = 2
+local DEFAULT_INITIAL_RETRY_DELAY_MS = 1000
+local DEFAULT_MAX_RETRY_DELAY_MS = 60000
+local RETRY_SLEEP_SLICE_MS = 100
+
+local function nonnegative_integer(value, fallback)
+  local n = tonumber(value)
+  if n == nil or n < 0 then
+    return fallback
+  end
+  return math.floor(n)
+end
+
+local function retry_settings(opts)
+  local max_retries = opts.max_retries
+    or opts.maxRetries
+    or os.getenv("PSI_HTTP_MAX_RETRIES")
+  local initial_delay = opts.retry_delay_ms
+    or opts.initial_retry_delay_ms
+    or os.getenv("PSI_HTTP_RETRY_DELAY_MS")
+  local max_delay = opts.max_retry_delay_ms
+    or opts.maxRetryDelayMs
+    or os.getenv("PSI_HTTP_MAX_RETRY_DELAY_MS")
+  return {
+    max_retries = nonnegative_integer(max_retries, DEFAULT_MAX_RETRIES),
+    initial_delay_ms = nonnegative_integer(initial_delay, DEFAULT_INITIAL_RETRY_DELAY_MS),
+    max_delay_ms = nonnegative_integer(max_delay, DEFAULT_MAX_RETRY_DELAY_MS),
+  }
+end
+
+local function terminal_rate_limit(body)
+  if type(body) ~= "string" then
+    return false
+  end
+  local text = body:lower()
+  return text:find("usage limit", 1, true) ~= nil
+    or text:find("insufficient_quota", 1, true) ~= nil
+    or text:find("out of budget", 1, true) ~= nil
+    or text:find("quota exceeded", 1, true) ~= nil
+    or text:find("billing", 1, true) ~= nil
+end
+
+local function retryable_http_failure(status, body)
+  if status == 429 and terminal_rate_limit(body) then
+    return false
+  end
+  if status == 429 or status == 500 or status == 502 or status == 503 or status == 504 or status == 529 then
+    return true
+  end
+  if type(body) == "string" then
+    local text = body:lower()
+    return text:find("rate limit") ~= nil
+      or text:find("overloaded") ~= nil
+      or text:find("service unavailable") ~= nil
+      or text:find("upstream connect") ~= nil
+      or text:find("connection refused") ~= nil
+  end
+  return false
+end
+
+local function retry_delay_ms(settings, attempt)
+  local delay = settings.initial_delay_ms
+  local i
+  for i = 1, attempt do
+    delay = delay * 2
+    if delay >= settings.max_delay_ms then
+      return settings.max_delay_ms
+    end
+  end
+  if delay > settings.max_delay_ms then
+    return settings.max_delay_ms
+  end
+  return delay
+end
+
+local function sleep_for_retry(sched, delay_ms, abort_check)
+  local remaining = delay_ms
+  while remaining > 0 do
+    if abort_check() then
+      return false
+    end
+    local step = remaining
+    if step > RETRY_SLEEP_SLICE_MS then
+      step = RETRY_SLEEP_SLICE_MS
+    end
+    sched.sleep_ms(step)
+    remaining = remaining - step
+  end
+  return not abort_check()
+end
 
 local function emit_context(cfg, model, system_prompt, messages)
   if psi.events then
@@ -222,6 +312,11 @@ function M.run_turn(opts, cfg)
     return false
   end
   local sched = require("psi.sched")
+  local retries = retry_settings(opts)
+  local has_partial = cfg.has_partial
+    or function(state, tool_calls)
+      return cfg.text(state) ~= "" or #tool_calls > 0
+    end
 
   while true do
     if abort_check() then
@@ -243,39 +338,75 @@ function M.run_turn(opts, cfg)
     })
     emit_before_request(cfg, model, request)
 
-    local state = cfg.new_state()
-    local parser = cfg.parser_new()
-    local raw_body = {}
-    local raw_body_len = 0
-    local handle, begin_err = psi.http_stream_begin(cfg.url, cfg.headers, psi.json_encode(request))
-    if handle == nil then
-      local emsg = "http request failed: " .. tostring(begin_err)
-      if cfg.save_failed_partial then
-        cfg.save_failed_partial(state, model, "error", emsg)
-      end
-      io.stderr:write(cfg.provider_name .. ": " .. emsg .. "\n")
-      return false, emsg
-    end
+    local state = nil
+    local raw_body = nil
+    local status = -1
+    local transport_error = nil
+    local content = nil
+    local tool_calls = nil
+    local stream_error = nil
+    local attempt = 0
+    local request_json = psi.json_encode(request)
 
     while true do
-      if abort_check() then
+      local parser
+      local raw_body_len = 0
+      local handle, begin_err
+
+      state = cfg.new_state()
+      parser = cfg.parser_new()
+      raw_body = {}
+      handle, begin_err = psi.http_stream_begin(cfg.url, cfg.headers, request_json)
+      if handle == nil then
+        local emsg = "http request failed: " .. tostring(begin_err)
+        if cfg.save_failed_partial then
+          cfg.save_failed_partial(state, model, "error", emsg)
+        end
+        io.stderr:write(cfg.provider_name .. ": " .. emsg .. "\n")
+        return false, emsg
+      end
+
+      while true do
+        if abort_check() then
+          break
+        end
+        local chunk, done = sched.http_poll(handle, 50)
+        if chunk ~= nil then
+          if raw_body_len < RAW_BODY_MAX then
+            raw_body[#raw_body + 1] = chunk
+            raw_body_len = raw_body_len + #chunk
+          end
+          cfg.parser_push(parser, chunk, state, observer)
+        end
+        if done then
+          break
+        end
+      end
+      status, transport_error = psi.http_stream_finish(handle)
+      content, tool_calls = cfg.finalize(state)
+      stream_error = cfg.stream_error and cfg.stream_error(state)
+
+      local body_text = table.concat(raw_body)
+      local aborted = abort_check()
+      local partial = has_partial(state, tool_calls)
+      local retryable = (not aborted)
+        and (not partial)
+        and stream_error == nil
+        and attempt < retries.max_retries
+        and (
+          status < 0
+          or retryable_http_failure(status, body_text)
+        )
+
+      if not retryable then
         break
       end
-      local chunk, done = sched.http_poll(handle, 50)
-      if chunk ~= nil then
-        if raw_body_len < RAW_BODY_MAX then
-          raw_body[#raw_body + 1] = chunk
-          raw_body_len = raw_body_len + #chunk
-        end
-        cfg.parser_push(parser, chunk, state, observer)
-      end
-      if done then
+
+      attempt = attempt + 1
+      if not sleep_for_retry(sched, retry_delay_ms(retries, attempt - 1), abort_check) then
         break
       end
     end
-    local status, transport_error = psi.http_stream_finish(handle)
-    local content, tool_calls = cfg.finalize(state)
-    local stream_error = cfg.stream_error and cfg.stream_error(state)
 
     if status < 0 then
       local aborted = abort_check()
@@ -284,7 +415,7 @@ function M.run_turn(opts, cfg)
         or ("http transport error: " .. tostring(transport_error or "unknown error"))
       if cfg.save_failed_partial then
         cfg.save_failed_partial(state, model, reason, emsg)
-      elseif cfg.has_partial(state, tool_calls) then
+      elseif has_partial(state, tool_calls) then
         cfg.persist(state, model, content, tool_calls, reason, emsg)
         context.record_usage(psi.session_message_count(), state.usage, model)
         session_mod.save()
@@ -299,7 +430,7 @@ function M.run_turn(opts, cfg)
       local emsg = cfg.classify_http_error(status, table.concat(raw_body), cfg.provider_name)
       if cfg.save_failed_partial then
         cfg.save_failed_partial(state, model, "error", emsg)
-      elseif cfg.has_partial(state, tool_calls) then
+      elseif has_partial(state, tool_calls) then
         cfg.persist(state, model, content, tool_calls, "error", emsg)
       end
       io.stderr:write(emsg .. "\n")

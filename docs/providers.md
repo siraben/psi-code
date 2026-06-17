@@ -42,6 +42,21 @@ In priority order:
    `~/.config/psi/settings.json` or `./.psi/settings.json`.
 4. Fallback: Anthropic.
 
+## Streaming Retries
+
+Streaming provider requests retry transient failures before any assistant
+content or tool call has been parsed. This covers transport failures such
+as an empty HTTP reply plus retryable 429/5xx provider responses. Once a
+stream has produced assistant/tool partials, psi records the failure
+instead of replaying the request because provider streams are not
+resumable at that point.
+
+- `PSI_HTTP_MAX_RETRIES` — maximum retry attempts after the first request
+  (default `2`; set `0` to disable).
+- `PSI_HTTP_RETRY_DELAY_MS` — initial exponential-backoff delay
+  (default `1000`).
+- `PSI_HTTP_MAX_RETRY_DELAY_MS` — cap for retry sleep (default `60000`).
+
 ## Anthropic
 
 - Env: `ANTHROPIC_API_KEY` (required)
