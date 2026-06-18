@@ -183,6 +183,9 @@ jobs:
           - name: gcc
             package: psi-gcc
             smoke_excludes: ""
+          - name: gcc46
+            package: psi-gcc46
+            smoke_excludes: ""
           - name: clang
             package: psi-clang
             smoke_excludes: ""

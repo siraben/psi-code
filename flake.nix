@@ -132,6 +132,7 @@
         mkPsi = { p, stdenv ? p.stdenv, static ? false, extraMakeFlags ? [],
                    extraNativeBuildInputs ? [],
                    deps ? buildDeps { inherit p; },
+                   hardeningDisable ? [],
                    extraMeta ? {} }:
           let
             isCross = stdenv.buildPlatform != stdenv.hostPlatform;
@@ -150,6 +151,7 @@
 
           enableParallelBuilding = true;
           strictDeps = true;
+          inherit hardeningDisable;
 
           makeFlags = [
             "CC=${stdenv.cc.targetPrefix}cc"
@@ -286,7 +288,30 @@
 
         # ---- Optional x86-only variants -------------------------------
 
-        x86OnlyPackages = lib.optionalAttrs isX86_64Linux {
+        x86OnlyPackages = lib.optionalAttrs isX86_64Linux (let
+          gcc46 = pkgs.wrapCCWith {
+            cc = pkgs.minimal-bootstrap.gcc46;
+            isGNU = true;
+          };
+          luaC89 = (luaFor pkgs).overrideAttrs (old: {
+            postPatch = (old.postPatch or "") + ''
+              substituteInPlace src/luaconf.h \
+                --replace-fail "#define LUA_C89_NUMBERS		0" \
+                               "#define LUA_C89_NUMBERS		1"
+            '';
+            postInstall = (old.postInstall or "") + ''
+              substituteInPlace "$out/lib/pkgconfig/lua.pc" \
+                --replace-fail "Cflags: -I$out/include" \
+                               "Cflags: -I$out/include -DLUA_C89_NUMBERS=1"
+              for pc in "$out"/lib/pkgconfig/lua*.pc; do
+                if [ "$(basename "$pc")" != lua.pc ]; then
+                  rm -f "$pc"
+                  ln -s lua.pc "$pc"
+                fi
+              done
+            '';
+          });
+        in {
           psi-i686 = mkPsi {
             p = pkgs.pkgsi686Linux;
             extraMeta = { platforms = [ "i686-linux" "x86_64-linux" ]; };
@@ -312,6 +337,15 @@
             extraMeta = { platforms = [ "x86_64-linux" "i686-linux" ]; };
           };
 
+          psi-gcc46 = mkPsi {
+            p = pkgs;
+            deps = buildDeps { p = pkgs; luaPkg = luaC89; };
+            extraNativeBuildInputs = [ gcc46 ];
+            extraMakeFlags = [ "CC=${gcc46}/bin/cc" ];
+            hardeningDisable = [ "all" ];
+            extraMeta = { platforms = [ "x86_64-linux" ]; };
+          };
+
           psi-compcert = mkPsi {
             p = pkgs;
             extraNativeBuildInputs = [ pkgs.gcc pkgs.compcert ];
@@ -320,7 +354,7 @@
           };
 
           psi-filc = psiFilc;
-        };
+        });
 
         psiFilc = let
           pkgsFilc = filnix.legacyPackages.${system}.pkgsFilc;
