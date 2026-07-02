@@ -263,20 +263,31 @@ local function edit_preview(input, frame)
   if not frame or type(frame.before_text) ~= "string" then
     return nil
   end
+  -- Memoized on the frame: the preview diff is deterministic in
+  -- (before_text, input), and per-chunk recompute re-runs the whole diff.
+  if frame.preview_cache_input == input and frame.preview_cache_before == frame.before_text then
+    return frame.preview_cache_text, frame.preview_cache_bg
+  end
   local edits = diff.edits_from_input(input)
   if not edits then
     return nil
   end
   local raw = path_arg(input)
   local preview, err = diff.preview_edits(frame.before_text, edits, raw or frame.path or "")
+  frame.preview_cache_input = input
+  frame.preview_cache_before = frame.before_text
   if preview then
     frame.preview_diff = preview.diff
     frame.preview_error = nil
-    return diff_component.render_diff(preview.diff), M.BG_SUCCESS
+    frame.preview_cache_text = diff_component.render_diff(preview.diff)
+    frame.preview_cache_bg = M.BG_SUCCESS
+  else
+    frame.preview_diff = nil
+    frame.preview_error = err
+    frame.preview_cache_text = fg(FG_ERROR, err or "edit preview failed")
+    frame.preview_cache_bg = M.BG_ERROR
   end
-  frame.preview_diff = nil
-  frame.preview_error = err
-  return fg(FG_ERROR, err or "edit preview failed"), M.BG_ERROR
+  return frame.preview_cache_text, frame.preview_cache_bg
 end
 
 local function format_edit_call(input, frame)
@@ -536,9 +547,29 @@ local function component_bg_code(self, call_bg)
 end
 
 local function update_display(self)
-  local call_text, call_bg = format_call(self.tool, self.input, self.frame)
-  -- Word-wrapping preserves leading whitespace for all tool output (pi's
-  -- wrapTextWithAnsi semantics), so the edit tool needs no special case.
+  -- The call side depends only on (tool, input, frame); cache it so
+  -- per-chunk result updates skip reformatting the call preview.
+  local cache = self.call_cache
+  local call_text, call_bg
+  if
+    cache ~= nil
+    and cache.tool == self.tool
+    and cache.input == self.input
+    and cache.frame == self.frame
+    and cache.before_text == (self.frame and self.frame.before_text or nil)
+  then
+    call_text, call_bg = cache.text, cache.bg
+  else
+    call_text, call_bg = format_call(self.tool, self.input, self.frame)
+    self.call_cache = {
+      tool = self.tool,
+      input = self.input,
+      frame = self.frame,
+      before_text = self.frame and self.frame.before_text or nil,
+      text = call_text,
+      bg = call_bg,
+    }
+  end
   self.box:set_bg_fn(bg_fn(component_bg_code(self, call_bg)))
   self.call_text:set_text(call_text or "")
   if self.result ~= nil then

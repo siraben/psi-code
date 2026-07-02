@@ -45,24 +45,6 @@ local function cursor_from_frame(frame, height, width)
   }
 end
 
-local function normalize_lines(lines, height)
-  local out = {}
-  height = math.max(1, tonumber(height) or 1)
-  lines = type(lines) == "table" and lines or {}
-  for row = 1, height do
-    out[row] = tostring(lines[row] or "")
-  end
-  return out
-end
-
-local function apply_line_resets(lines)
-  local out = {}
-  for row, line in ipairs(lines) do
-    out[row] = tostring(line or "") .. LINE_RESET
-  end
-  return out
-end
-
 local function absolute_frame(lines, top)
   local frame = {}
   top = math.max(1, tonumber(top) or 1)
@@ -102,19 +84,31 @@ local function normalize_frame(frame)
   local width = math.max(1, tonumber(frame.width) or 1)
   local height = math.max(1, tonumber(frame.height) or #raw_lines or 1)
   local top = math.max(1, tonumber(frame.top) or tonumber(frame.viewport_top) or 1)
-  local lines, marker_cursor = M.extract_cursor(normalize_lines(raw_lines, height))
   local cursor = cursor_from_frame(frame, height, width)
 
-  if marker_cursor ~= nil then
-    cursor.row = clamp(marker_cursor.row, 1, height)
-    cursor.col = clamp(marker_cursor.col, 1, width)
+  -- Single pass: stringify, extract the first cursor marker, and append the
+  -- per-line style reset without building intermediate copies of the frame.
+  local lines = {}
+  local marker_found = false
+  for row = 1, height do
+    local line = tostring(raw_lines[row] or "")
+    if not marker_found then
+      local start_pos, end_pos = line:find(CURSOR_MARKER, 1, true)
+      if start_pos ~= nil then
+        marker_found = true
+        cursor.row = clamp(row, 1, height)
+        cursor.col = clamp(tui_text.visible_width(line:sub(1, start_pos - 1)) + 1, 1, width)
+        line = line:sub(1, start_pos - 1) .. line:sub(end_pos + 1)
+      end
+    end
+    lines[row] = line .. LINE_RESET
   end
 
   return {
     width = width,
     height = height,
     top = top,
-    lines = apply_line_resets(lines),
+    lines = lines,
     cursor = cursor,
     force_full = not not frame.force_full,
   }

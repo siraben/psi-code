@@ -4021,7 +4021,8 @@ static int lfn_tui_render_frame(lua_State *L) {
 }
 
 static int lfn_tui_render_lines(lua_State *L) {
-    char **next_lines;
+    char **next_lines = NULL;
+    unsigned char *changed = NULL;
     size_t line_count;
     size_t i;
     lua_Integer cursor_row_arg;
@@ -4036,31 +4037,14 @@ static int lfn_tui_render_lines(lua_State *L) {
     int full_redraw;
     int any_output;
     int cursor_changed;
+    int reuse;
+    int lines_changed;
 
     psi_vm_require_tui(L);
     luaL_checktype(L, 1, LUA_TTABLE);
     line_count = (size_t)lua_rawlen(L, 1);
     if (line_count == 0u) {
         line_count = 1u;
-    }
-    next_lines = (char **)calloc(line_count, sizeof(char *));
-    if (next_lines == NULL) {
-        return luaL_error(L, "out of memory");
-    }
-    for (i = 0u; i < line_count; i++) {
-        const char *line;
-        lua_rawgeti(L, 1, (lua_Integer)i + 1);
-        line = lua_type(L, -1) == LUA_TSTRING ? lua_tostring(L, -1) : "";
-        next_lines[i] = psi_strdup(line != NULL ? line : "");
-        lua_pop(L, 1);
-        if (next_lines[i] == NULL) {
-            size_t j;
-            for (j = 0u; j < i; j++) {
-                free(next_lines[j]);
-            }
-            free(next_lines);
-            return luaL_error(L, "out of memory");
-        }
     }
 
     cursor_row_arg = luaL_optinteger(L, 2, PSI_VM_TUI_FIRST_TERMINAL_CELL);
@@ -4079,22 +4063,66 @@ static int lfn_tui_render_lines(lua_State *L) {
     /* Lua frames are 1-based and local to the viewport; terminals are physical rows. */
     physical_cursor_row = top + cursor_row - PSI_VM_TUI_FIRST_TERMINAL_CELL;
 
+    /* When the frame height is unchanged, compare each incoming line against
+     * the cached copy in place: only changed lines are freed and duplicated,
+     * and the comparison result doubles as the differential draw mask, so no
+     * second strcmp pass is needed. */
+    reuse = psi_vm_tui_previous_lines != NULL && psi_vm_tui_previous_line_count == line_count;
+    lines_changed = 0;
+    if (reuse) {
+        changed = (unsigned char *)calloc(line_count, sizeof(unsigned char));
+        if (changed == NULL) {
+            return luaL_error(L, "out of memory");
+        }
+        for (i = 0u; i < line_count; i++) {
+            const char *line;
+            lua_rawgeti(L, 1, (lua_Integer)i + 1);
+            line = lua_type(L, -1) == LUA_TSTRING ? lua_tostring(L, -1) : "";
+            if (line == NULL) {
+                line = "";
+            }
+            if (strcmp(psi_vm_tui_previous_lines[i], line) != 0) {
+                char *copy = psi_strdup(line);
+                if (copy == NULL) {
+                    free(changed);
+                    return luaL_error(L, "out of memory");
+                }
+                free(psi_vm_tui_previous_lines[i]);
+                psi_vm_tui_previous_lines[i] = copy;
+                changed[i] = 1u;
+                lines_changed = 1;
+            }
+            lua_pop(L, 1);
+        }
+    } else {
+        next_lines = (char **)calloc(line_count, sizeof(char *));
+        if (next_lines == NULL) {
+            return luaL_error(L, "out of memory");
+        }
+        for (i = 0u; i < line_count; i++) {
+            const char *line;
+            lua_rawgeti(L, 1, (lua_Integer)i + 1);
+            line = lua_type(L, -1) == LUA_TSTRING ? lua_tostring(L, -1) : "";
+            next_lines[i] = psi_strdup(line != NULL ? line : "");
+            lua_pop(L, 1);
+            if (next_lines[i] == NULL) {
+                size_t j;
+                for (j = 0u; j < i; j++) {
+                    free(next_lines[j]);
+                }
+                free(next_lines);
+                return luaL_error(L, "out of memory");
+            }
+        }
+        lines_changed = 1;
+    }
+
     /* A moved viewport invalidates every cached physical row, even if line text matches. */
-    full_redraw = force_full || psi_vm_tui_previous_lines == NULL ||
-        psi_vm_tui_previous_line_count != line_count || psi_vm_tui_previous_top != top;
+    full_redraw = force_full || !reuse || psi_vm_tui_previous_top != top;
     cursor_changed = psi_vm_tui_previous_cursor_row != cursor_row ||
         psi_vm_tui_previous_cursor_col != cursor_col ||
         psi_vm_tui_previous_cursor_visible != cursor_visible;
-    any_output = full_redraw || cursor_changed;
-
-    if (!any_output) {
-        for (i = 0u; i < line_count; i++) {
-            if (strcmp(psi_vm_tui_previous_lines[i], next_lines[i]) != 0) {
-                any_output = 1;
-                break;
-            }
-        }
-    }
+    any_output = full_redraw || cursor_changed || lines_changed;
 
     if (any_output) {
         psi_vm_tui_write(PSI_VM_TUI_SYNC_BEGIN);
@@ -4109,12 +4137,15 @@ static int lfn_tui_render_lines(lua_State *L) {
         }
         if (full_redraw) {
             for (i = 0u; i < line_count; i++) {
-                psi_vm_tui_draw_frame_line(top + (long)i, next_lines[i]);
+                psi_vm_tui_draw_frame_line(
+                    top + (long)i, reuse ? psi_vm_tui_previous_lines[i] : next_lines[i]);
             }
         } else {
+            /* !full_redraw implies reuse: draw exactly the lines the compare
+             * pass marked changed. */
             for (i = 0u; i < line_count; i++) {
-                if (strcmp(psi_vm_tui_previous_lines[i], next_lines[i]) != 0) {
-                    psi_vm_tui_draw_frame_line(top + (long)i, next_lines[i]);
+                if (changed[i]) {
+                    psi_vm_tui_draw_frame_line(top + (long)i, psi_vm_tui_previous_lines[i]);
                 }
             }
         }
@@ -4127,9 +4158,13 @@ static int lfn_tui_render_lines(lua_State *L) {
         fflush(stdout);
     }
 
-    psi_vm_tui_reset_render_cache();
-    psi_vm_tui_previous_lines = next_lines;
-    psi_vm_tui_previous_line_count = line_count;
+    if (reuse) {
+        free(changed);
+    } else {
+        psi_vm_tui_reset_render_cache();
+        psi_vm_tui_previous_lines = next_lines;
+        psi_vm_tui_previous_line_count = line_count;
+    }
     psi_vm_tui_previous_top = top;
     psi_vm_tui_previous_cursor_row = cursor_row;
     psi_vm_tui_previous_cursor_col = cursor_col;

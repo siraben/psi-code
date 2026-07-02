@@ -43,6 +43,7 @@ local FRAME_WIDTH_MARGIN = 1
 
 local TUI_CONST = {
   busy_animation_interval_ms = 600,
+  busy_redraw_min_interval_ms = 33,
   byte_bel = 7,
   byte_backslash = 92,
   byte_cr = 13,
@@ -64,8 +65,8 @@ local TUI_CONST = {
   setting_prompt_max_rows = "tui.prompt.max_rows",
 }
 
--- Bundled chat-layout helpers. Single local keeps tui_runtime under Lua's
--- 200-locals-per-function chunk limit.
+-- Single local keeps tui_runtime under Lua's 200-locals chunk limit;
+-- additional helpers must live on this table, not as top-level locals.
 local chat = { FRAME = "frame", CHAT = "chat" }
 
 function chat.resolve_mode(opts)
@@ -578,10 +579,13 @@ end
 
 local function input_next_chunk_end(input, chunk_start, line_end, width)
   local remaining = input:sub(chunk_start + 1, line_end)
-  if display_width(remaining) <= width then
+  -- byte_index_for_width returns #remaining exactly when the whole chunk
+  -- fits within `width` cells, so one scan answers both "does it fit" and
+  -- "where does it break".
+  local limit = tui_text.byte_index_for_width(remaining, width)
+  if limit >= #remaining then
     return line_end
   end
-  local limit = tui_text.byte_index_for_width(remaining, width)
   if limit <= 0 then
     limit = 1
   end
@@ -589,14 +593,27 @@ local function input_next_chunk_end(input, chunk_start, line_end, width)
   return input_wrap_break(input, chunk_start, limit, line_end) or limit
 end
 
-local function build_input_lines(state)
+-- Wrap the prompt input into spans {start, len[, gap_start]}, cached on
+-- (input, width, prefixes) since the cursor does not feed the wrap.
+-- gap_start marks spans preceded by wrap-hidden spaces for cursor mapping.
+function chat.wrap_input_spans(state)
   local input = state.input or EMPTY
+  local prefix_first = state.input_layout.prefix_first
+  local prefix_rest = state.input_layout.prefix_rest
+  local cache = state.input_wrap_cache
+  if
+    cache ~= nil
+    and cache.input == input
+    and cache.width == state.width
+    and cache.prefix_first == prefix_first
+    and cache.prefix_rest == prefix_rest
+  then
+    return cache.lines
+  end
+
   local input_length = #input
   local lines = {}
   local pos = 0
-  local cursor_line = 1
-  local cursor_col = 0
-  local cursor_found = false
 
   while true do
     local line_end = pos
@@ -606,40 +623,21 @@ local function build_input_lines(state)
 
     if line_end == pos then
       lines[#lines + 1] = { start = pos, len = 0 }
-      if not cursor_found and state.cursor == pos then
-        cursor_line = #lines
-        cursor_col = 0
-        cursor_found = true
-      end
     else
       local chunk_start = pos
       while chunk_start < line_end do
         local hidden_start = chunk_start
         if chunk_start > pos then
           chunk_start = skip_wrapped_input_spaces(input, chunk_start, line_end)
-          if
-            chunk_start > hidden_start
-            and not cursor_found
-            and state.cursor > hidden_start
-            and state.cursor <= chunk_start
-            and #lines > 0
-          then
-            local previous = lines[#lines]
-            cursor_line = #lines
-            cursor_col = display_width(input:sub(previous.start + 1, previous.start + previous.len))
-            cursor_found = true
-          end
         end
-        local prefix = (#lines == 0) and state.input_layout.prefix_first
-          or state.input_layout.prefix_rest
+        local prefix = (#lines == 0) and prefix_first or prefix_rest
         local chunk_end =
           input_next_chunk_end(input, chunk_start, line_end, input_wrap_width(state.width, prefix))
-        lines[#lines + 1] = { start = chunk_start, len = chunk_end - chunk_start }
-        if not cursor_found and state.cursor >= chunk_start and state.cursor <= chunk_end then
-          cursor_line = #lines
-          cursor_col = display_width(input:sub(chunk_start + 1, state.cursor))
-          cursor_found = true
-        end
+        lines[#lines + 1] = {
+          start = chunk_start,
+          len = chunk_end - chunk_start,
+          gap_start = chunk_start > hidden_start and hidden_start or nil,
+        }
         chunk_start = chunk_end
       end
     end
@@ -653,11 +651,38 @@ local function build_input_lines(state)
   if #lines == 0 then
     lines[1] = { start = 0, len = 0 }
   end
-  if not cursor_found then
-    cursor_line = #lines
-    cursor_col =
-      display_width(input:sub(lines[#lines].start + 1, lines[#lines].start + lines[#lines].len))
+  state.input_wrap_cache = {
+    input = input,
+    width = state.width,
+    prefix_first = prefix_first,
+    prefix_rest = prefix_rest,
+    lines = lines,
+  }
+  return lines
+end
+
+-- Map state.cursor onto wrapped spans; a cursor inside wrap-hidden
+-- spaces sticks to the end of the previous line.
+function chat.derive_input_cursor(state, input, lines)
+  local cursor = state.cursor
+  for i = 1, #lines do
+    local line = lines[i]
+    if line.gap_start ~= nil and i > 1 and cursor > line.gap_start and cursor <= line.start then
+      local prev = lines[i - 1]
+      return i - 1, display_width(input:sub(prev.start + 1, prev.start + prev.len))
+    end
+    if cursor >= line.start and cursor <= line.start + line.len then
+      return i, display_width(input:sub(line.start + 1, cursor))
+    end
   end
+  local last = lines[#lines]
+  return #lines, display_width(input:sub(last.start + 1, last.start + last.len))
+end
+
+local function build_input_lines(state)
+  local input = state.input or EMPTY
+  local lines = chat.wrap_input_spans(state)
+  local cursor_line, cursor_col = chat.derive_input_cursor(state, input, lines)
   return lines, cursor_line, cursor_col
 end
 
@@ -1041,6 +1066,25 @@ local function invalidate_render_totals(state)
   state.flat_cache_width = nil
   state.flat_cache_version = nil
   state.flat_cache_lines = nil
+  state.flat_prefix_len = nil
+  state.flat_last_only_dirty = false
+end
+
+-- Streaming fast path: when only the LAST entry changed, patch the flat
+-- cache by truncating that entry's suffix; any structural mutation must
+-- go through invalidate_render_totals.
+function chat.invalidate_entry_render(state, index)
+  if
+    index ~= nil
+    and index == #state.entries
+    and state.flat_cache_lines ~= nil
+    and state.flat_prefix_len ~= nil
+  then
+    state.entries_version = (state.entries_version or 0) + 1
+    state.flat_last_only_dirty = true
+  else
+    invalidate_render_totals(state)
+  end
 end
 
 function set_status(state, text, is_error)
@@ -1070,6 +1114,10 @@ local function add_entry(state, kind, text, title, is_error, tool_call_id)
     tool_call_id = tool_call_id,
   }
   state.entries[#state.entries + 1] = entry
+  if type(tool_call_id) == "string" and tool_call_id ~= "" then
+    state.tool_entry_index = state.tool_entry_index or {}
+    state.tool_entry_index[kind .. "\0" .. tool_call_id] = #state.entries
+  end
   invalidate_render_totals(state)
   state.dirty = true
   return #state.entries
@@ -1104,7 +1152,7 @@ local function set_entry_text(state, index, text)
   entry.component = nil
   entry.render_cache_width = nil
   entry.render_cache_lines = nil
-  invalidate_render_totals(state)
+  chat.invalidate_entry_render(state, index)
   state.dirty = true
 end
 
@@ -1124,7 +1172,7 @@ local function append_entry_text(state, index, text)
   entry.text = nil
   entry.render_cache_width = nil
   entry.render_cache_lines = nil
-  invalidate_render_totals(state)
+  chat.invalidate_entry_render(state, index)
   state.dirty = true
 end
 
@@ -1134,6 +1182,15 @@ local function remove_entry(state, index)
   end
   table.remove(state.entries, index)
   invalidate_render_totals(state)
+  if state.tool_entry_index ~= nil then
+    for key, cached in pairs(state.tool_entry_index) do
+      if cached == index then
+        state.tool_entry_index[key] = nil
+      elseif cached > index then
+        state.tool_entry_index[key] = cached - 1
+      end
+    end
+  end
   if state.streaming_assistant_index and state.streaming_assistant_index > index then
     state.streaming_assistant_index = state.streaming_assistant_index - 1
   elseif state.streaming_assistant_index == index then
@@ -1147,13 +1204,30 @@ local function remove_entry(state, index)
   state.dirty = true
 end
 
+-- (kind, tool_call_id) -> entry index; verified on every hit (kinds can
+-- be rewritten in place) with fallback to the reverse linear scan.
 local function find_entry_by_tool_id(state, kind, tool_call_id)
   if type(tool_call_id) ~= "string" or tool_call_id == "" then
     return nil
   end
+  local map = state.tool_entry_index
+  if map == nil then
+    map = {}
+    state.tool_entry_index = map
+  end
+  local key = kind .. "\0" .. tool_call_id
+  local cached = map[key]
+  if cached ~= nil then
+    local entry = state.entries[cached]
+    if entry ~= nil and entry.kind == kind and entry.tool_call_id == tool_call_id then
+      return cached
+    end
+    map[key] = nil
+  end
   for i = #state.entries, 1, -1 do
     local entry = state.entries[i]
     if entry.kind == kind and entry.tool_call_id == tool_call_id then
+      map[key] = i
       return i
     end
   end
@@ -1167,7 +1241,7 @@ local function recolor_tool_call_block(state, tool_call_id, is_error)
     component_entry.is_error = not not is_error
     component_entry.render_cache_width = nil
     component_entry.render_cache_lines = nil
-    invalidate_render_totals(state)
+    chat.invalidate_entry_render(state, component_index)
     state.dirty = true
     return
   end
@@ -1187,8 +1261,19 @@ end
 
 local function finish_streaming_assistant(state)
   local index = state.streaming_assistant_index
-  if index ~= nil and state.entries[index] and entry_text(state.entries[index]) == "" then
-    remove_entry(state, index)
+  if index ~= nil and state.entries[index] then
+    local entry = state.entries[index]
+    if entry_text(entry) == "" then
+      remove_entry(state, index)
+    elseif entry.stream_cache ~= nil then
+      -- Drop the incremental cache and force one full render to
+      -- self-correct any seam artifacts.
+      entry.stream_cache = nil
+      entry.render_cache_width = nil
+      entry.render_cache_lines = nil
+      chat.invalidate_entry_render(state, index)
+      state.dirty = true
+    end
   end
   state.streaming_assistant_index = nil
 end
@@ -1355,6 +1440,112 @@ local function persisted_tool_result_payload(message, content_text)
   return payload
 end
 
+-- `raw` (ANSI-stripped) is computed lazily on first access; nothing on
+-- the hot render path reads it.
+chat.render_line_mt = {
+  __index = function(line, key)
+    if key == "raw" then
+      local raw = strip_ansi(line.text)
+      rawset(line, "raw", raw)
+      return raw
+    end
+    return nil
+  end,
+}
+
+function chat.ansi_entry_line(text, entry)
+  return setmetatable({ kind = "ansi", text = text, entry = entry }, chat.render_line_mt)
+end
+
+-- Start byte of the last maximal blank-line run outside a code fence
+-- (nil = no safe split point): blank lines are structural for markdown,
+-- so splitting there keeps every construct whole on one side.
+function chat.stream_safe_boundary(text)
+  local boundary = nil
+  local fence = false
+  local prev_blank = true
+  local pos = 1
+  local len = #text
+  while pos <= len do
+    local nl = text:find("\n", pos, true)
+    local line = nl and text:sub(pos, nl - 1) or text:sub(pos)
+    if is_fence_line(line) then
+      fence = not fence
+      prev_blank = false
+    elseif line:match("^%s*$") ~= nil then
+      if not fence and not prev_blank and nl ~= nil then
+        boundary = pos
+      end
+      prev_blank = true
+    else
+      prev_blank = false
+    end
+    if nl == nil then
+      break
+    end
+    pos = nl + 1
+  end
+  return boundary
+end
+
+-- Incremental markdown render for the streaming assistant entry: the
+-- stable prefix is rendered once and cached; each delta re-renders only
+-- the tail. finish_streaming_assistant forces one full corrective render.
+function chat.streaming_assistant_lines(state, entry, trimmed, first_prefix, rest_prefix)
+  local cache = entry.stream_cache
+  if
+    cache == nil
+    or cache.width ~= state.width
+    or cache.prefix_first ~= first_prefix
+    or cache.prefix_rest ~= rest_prefix
+    or trimmed:sub(1, #cache.prefix_text) ~= cache.prefix_text
+  then
+    cache = {
+      width = state.width,
+      prefix_first = first_prefix,
+      prefix_rest = rest_prefix,
+      prefix_text = "",
+      prefix_lines = {},
+    }
+    entry.stream_cache = cache
+  end
+
+  local tail_text = trimmed:sub(#cache.prefix_text + 1)
+  local boundary = chat.stream_safe_boundary(tail_text)
+  if boundary ~= nil and boundary > 1 then
+    local chunk = tail_text:sub(1, boundary - 1)
+    local chunk_component = tui_markdown.new()
+    chunk_component:set_text(chunk)
+    chunk_component:set_prefixes(
+      #cache.prefix_lines > 0 and rest_prefix or first_prefix,
+      rest_prefix
+    )
+    for _, line in ipairs(chunk_component:render(state.width)) do
+      cache.prefix_lines[#cache.prefix_lines + 1] = chat.ansi_entry_line(line, entry)
+    end
+    cache.prefix_text = cache.prefix_text .. chunk
+    tail_text = tail_text:sub(boundary)
+  end
+
+  entry.markdown_component = entry.markdown_component or tui_markdown.new()
+  local md = entry.markdown_component
+  md:set_text(tail_text)
+  md:set_prefixes(#cache.prefix_lines > 0 and rest_prefix or first_prefix, rest_prefix)
+  local tail_rendered = md:render(state.width)
+
+  local lines = {}
+  local prefix_lines = cache.prefix_lines
+  for i = 1, #prefix_lines do
+    lines[i] = prefix_lines[i]
+  end
+  for _, line in ipairs(tail_rendered) do
+    lines[#lines + 1] = chat.ansi_entry_line(line, entry)
+  end
+  entry.render_cache_width = state.width
+  entry.render_cache_lines = lines
+  return lines
+end
+
 local function entry_render_lines(state, entry)
   if entry.render_cache_width == state.width and entry.render_cache_lines ~= nil then
     return entry.render_cache_lines
@@ -1364,12 +1555,7 @@ local function entry_render_lines(state, entry)
     local rendered = entry.component:render(state.width)
     local lines = {}
     for _, line in ipairs(rendered) do
-      lines[#lines + 1] = {
-        kind = "ansi",
-        text = line,
-        raw = strip_ansi(line),
-        entry = entry,
-      }
+      lines[#lines + 1] = chat.ansi_entry_line(line, entry)
     end
     entry.render_cache_width = state.width
     entry.render_cache_lines = lines
@@ -1402,18 +1588,20 @@ local function entry_render_lines(state, entry)
   if entry.kind == "assistant" then
     local first_prefix, rest_prefix = entry_prefixes(entry)
     local trimmed = sanitize_terminal_text(trim_trailing_newlines(entry_text(entry)), true)
+    if
+      state.streaming_assistant_index ~= nil
+      and state.entries[state.streaming_assistant_index] == entry
+    then
+      return chat.streaming_assistant_lines(state, entry, trimmed, first_prefix, rest_prefix)
+    end
+    entry.stream_cache = nil
     entry.markdown_component = entry.markdown_component or tui_markdown.new()
     entry.markdown_component:set_text(trimmed)
     entry.markdown_component:set_prefixes(first_prefix, rest_prefix)
     local rendered = entry.markdown_component:render(state.width)
     local lines = {}
     for _, line in ipairs(rendered) do
-      lines[#lines + 1] = {
-        kind = "ansi",
-        text = line,
-        raw = strip_ansi(line),
-        entry = entry,
-      }
+      lines[#lines + 1] = chat.ansi_entry_line(line, entry)
     end
     entry.render_cache_width = state.width
     entry.render_cache_lines = lines
@@ -1429,12 +1617,7 @@ local function entry_render_lines(state, entry)
     local boxed = render_boxed_lines(rendered, state.width, PI_STYLE.bg_user_message, 1, 1)
     local lines = {}
     for _, line in ipairs(boxed) do
-      lines[#lines + 1] = {
-        kind = "ansi",
-        text = line,
-        raw = strip_ansi(line),
-        entry = entry,
-      }
+      lines[#lines + 1] = chat.ansi_entry_line(line, entry)
     end
     entry.render_cache_width = state.width
     entry.render_cache_lines = lines
@@ -1499,6 +1682,11 @@ local function entry_render_lines(state, entry)
   return lines
 end
 
+function chat.entry_panel_join(prev, entry)
+  return (prev ~= nil and prev.kind == "tool_call" and entry.kind == "tool_result")
+    or (prev ~= nil and prev.kind == "tool_result" and entry.kind == "tool_result")
+end
+
 local function flattened_render_lines(state)
   if
     state.flat_cache_width == state.width
@@ -1507,13 +1695,47 @@ local function flattened_render_lines(state)
   then
     return state.flat_cache_lines
   end
+
+  local last_index = #state.entries
+  if
+    state.flat_last_only_dirty
+    and state.flat_cache_lines ~= nil
+    and state.flat_cache_width == state.width
+    and state.flat_prefix_len ~= nil
+    and last_index > 0
+  then
+    -- Only the last entry changed since the cache was built: truncate its
+    -- suffix (separator included) and re-append its rendered lines.
+    local lines = state.flat_cache_lines
+    local total = state.flat_prefix_len
+    for i = #lines, total + 1, -1 do
+      lines[i] = nil
+    end
+    local entry = state.entries[last_index]
+    if total > 0 and not chat.entry_panel_join(state.entries[last_index - 1], entry) then
+      total = total + 1
+      lines[total] = { kind = "blank", text = "" }
+    end
+    local entry_lines = entry_render_lines(state, entry)
+    for j = 1, #entry_lines do
+      total = total + 1
+      lines[total] = entry_lines[j]
+    end
+    state.flat_cache_version = state.entries_version
+    state.total_cache_width = state.width
+    state.total_cache_version = state.entries_version
+    state.total_cache_lines = total
+    state.flat_last_only_dirty = false
+    return lines
+  end
+
   local lines = {}
   local total = 0
   for i, entry in ipairs(state.entries) do
-    local prev = state.entries[i - 1]
-    local same_panel_as_prev = (prev and prev.kind == "tool_call" and entry.kind == "tool_result")
-      or (prev and prev.kind == "tool_result" and entry.kind == "tool_result")
-    if total > 0 and not same_panel_as_prev then
+    if i == last_index then
+      state.flat_prefix_len = total
+    end
+    if total > 0 and not chat.entry_panel_join(state.entries[i - 1], entry) then
       total = total + 1
       lines[total] = { kind = "blank", text = "" }
     end
@@ -1523,12 +1745,16 @@ local function flattened_render_lines(state)
       lines[total] = entry_lines[j]
     end
   end
+  if last_index == 0 then
+    state.flat_prefix_len = 0
+  end
   state.flat_cache_width = state.width
   state.flat_cache_version = state.entries_version
   state.flat_cache_lines = lines
   state.total_cache_width = state.width
   state.total_cache_version = state.entries_version
   state.total_cache_lines = total
+  state.flat_last_only_dirty = false
   return lines
 end
 
@@ -1642,7 +1868,7 @@ local function add_session_entry(state, msg)
       local entry = state.entries[component_index]
       entry.title = tool_name
       update_tool_execution_component(entry, payload, false)
-      invalidate_render_totals(state)
+      chat.invalidate_entry_render(state, component_index)
       return
     end
     local result_text, is_error = tool_result_text(message.toolCallId, tool_name, payload)
@@ -1670,6 +1896,7 @@ end
 
 local function rebuild_from_session(state, messages)
   state.entries = {}
+  state.tool_entry_index = nil
   state.streaming_assistant_index = nil
   state.streaming_thinking_index = nil
   state.show_thinking = tui.show_thinking() == "1"
@@ -1799,7 +2026,16 @@ local function max_scroll_offset(state)
 end
 
 local function scroll_by(state, delta)
-  state.scroll_offset = clamp(state.scroll_offset + delta, 0, max_scroll_offset(state))
+  -- Clamp against the height recorded by the last redraw (O(1)); redraw's
+  -- own clamp stays authoritative and re-clamps if the layout changed.
+  local transcript_height = state.last_transcript_height
+  local max_scroll
+  if transcript_height ~= nil then
+    max_scroll = math.max(0, total_rendered_lines(state) - transcript_height)
+  else
+    max_scroll = max_scroll_offset(state)
+  end
+  state.scroll_offset = clamp(state.scroll_offset + delta, 0, max_scroll)
   state.dirty = true
 end
 
@@ -1864,6 +2100,40 @@ local function ensure_frame_components(state)
   return frame
 end
 
+-- Footer cache: rebuilt only when model/session/count change; never
+-- cached while extension status hooks are registered (output may vary).
+function chat.footer_bar_line(state, status_arg, frame_width)
+  local hooks_active = tui.has_status_hooks ~= nil and tui.has_status_hooks()
+  local session_id = type(psi.session_id) == "function" and psi.session_id() or nil
+  local message_count = type(psi.session_message_count) == "function"
+      and psi.session_message_count()
+    or nil
+  local cache = state.footer_bar_cache
+  if
+    not hooks_active
+    and cache ~= nil
+    and cache.model == status_arg.model
+    and cache.session_id == session_id
+    and cache.message_count == message_count
+    and cache.width == frame_width
+  then
+    return cache.line
+  end
+  local line = tui.compose_bar(tui.status_bar(status_arg) or "", frame_width)
+  if hooks_active then
+    state.footer_bar_cache = nil
+  else
+    state.footer_bar_cache = {
+      model = status_arg.model,
+      session_id = session_id,
+      message_count = message_count,
+      width = frame_width,
+      line = line,
+    }
+  end
+  return line
+end
+
 local function redraw(state)
   if state.layout_mode == chat.CHAT then
     return chat.redraw(state)
@@ -1875,6 +2145,7 @@ local function redraw(state)
   local rows = layout_rows(state)
   local total_lines = total_rendered_lines(state)
   local max_scroll = math.max(0, total_lines - rows.transcript_height)
+  state.last_transcript_height = rows.transcript_height
   local status_arg
   local status_text = ""
   local cwd
@@ -1892,9 +2163,16 @@ local function redraw(state)
   end
   frame_width = math.max(1, state.width)
   cwd = psi.cwd() or "."
-  frame.workspace:set_lines({
-    tui.compose_bar(tui.workspace_bar_for_width(cwd, frame_width), frame_width),
-  })
+  local ws_cache = state.workspace_bar_cache
+  if ws_cache == nil or ws_cache.cwd ~= cwd or ws_cache.width ~= frame_width then
+    ws_cache = {
+      cwd = cwd,
+      width = frame_width,
+      line = tui.compose_bar(tui.workspace_bar_for_width(cwd, frame_width), frame_width),
+    }
+    state.workspace_bar_cache = ws_cache
+  end
+  frame.workspace:set_lines({ ws_cache.line })
 
   local first_line = total_lines - rows.transcript_height - state.scroll_offset + 1
   if first_line < 1 then
@@ -1987,7 +2265,7 @@ local function redraw(state)
   input_component_lines[#input_component_lines + 1] = style_input_border(input_width)
   frame.input:set_lines(input_component_lines)
 
-  frame.footer:set_lines({ tui.compose_bar(tui.status_bar(status_arg) or "", frame_width) })
+  frame.footer:set_lines({ chat.footer_bar_line(state, status_arg, frame_width) })
   local visible_cursor_line = rows.cursor_line - rows.input_first_line + 1
   local cursor_prefix = rows.cursor_line == 1 and state.input_layout.prefix_first
     or state.input_layout.prefix_rest
@@ -2186,7 +2464,7 @@ function chat.redraw(state)
     live_lines[#live_lines + 1] = rendered
   end
   live_lines[#live_lines + 1] = style_input_border(input_width)
-  live_lines[#live_lines + 1] = tui.compose_bar(tui.status_bar(status_arg) or "", frame_width)
+  live_lines[#live_lines + 1] = chat.footer_bar_line(state, status_arg, frame_width)
 
   -- 4. Emit live region inside synchronized output, then position cursor.
   out[#out + 1] = "\27[?2026h\27[?25l"
@@ -3111,7 +3389,7 @@ local function observer_tool_progress(state, tool_call_id, chunk)
       text = M._live_progress.update(entry, chunk, false)
     end
     update_tool_execution_component(entry, { ok = true, output = text }, true)
-    invalidate_render_totals(state)
+    chat.invalidate_entry_render(state, index)
     state.dirty = true
     scroll_anchor_after(state, before)
     return
@@ -3183,7 +3461,7 @@ local function observer_tool_result(state, tool_call_id, tool_name, output_json)
     entry.progress_partial = nil
     entry.progress_total_lines = nil
     update_tool_execution_component(entry, result, false)
-    invalidate_render_totals(state)
+    chat.invalidate_entry_render(state, component_index)
     state.dirty = true
     scroll_anchor_after(state, before)
     return
@@ -4114,7 +4392,20 @@ local function tick(state)
     end
   end
   if state.dirty or (state.ui and state.ui.dirty) then
-    redraw(state)
+    if state.busy then
+      -- Throttle busy redraws to busy_redraw_min_interval_ms; `dirty`
+      -- stays set on skip so the next tick paints, and the non-busy
+      -- path below always paints the final frame.
+      local now = now_ms()
+      local last = state.last_busy_paint_at
+      if last == nil or now - last >= TUI_CONST.busy_redraw_min_interval_ms or now < last then
+        state.last_busy_paint_at = now
+        redraw(state)
+      end
+    else
+      state.last_busy_paint_at = nil
+      redraw(state)
+    end
   end
 end
 

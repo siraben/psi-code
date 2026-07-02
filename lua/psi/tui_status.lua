@@ -15,7 +15,6 @@ local M = {}
 local BAR_SPLIT = string.char(31)
 local busy_rng_seeded = false
 local enabled_setting
-M._visible_width_cache = { entries = 0 }
 
 local DEFAULT_BUSY_LABELS = {
   { label = "working", weight = 1 },
@@ -96,6 +95,12 @@ end
 
 function M.clear_status_hooks()
   status_hooks = {}
+end
+
+-- Hook output can vary per call: status/footer bars must not be cached
+-- while any extension status hook is registered.
+function M.has_status_hooks()
+  return #status_hooks > 0
 end
 
 local command_action_handlers = {}

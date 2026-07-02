@@ -13,6 +13,9 @@ local platform = require("psi.platform")
 
 local ESC = string.char(27)
 local code_map = {}
+-- Codes form a small closed set, so memoize resolve results per code
+-- string; the memo is invalidated whenever the code map changes.
+local resolve_cache = {}
 
 M.enabled = true
 M.color_enabled = true
@@ -42,6 +45,10 @@ local function resolve_code(code)
   code = tostring(code or "")
   if code_map[code] ~= nil then
     return code_map[code]
+  end
+  local cached = resolve_cache[code]
+  if cached ~= nil then
+    return cached
   end
   local values = {}
   for part in code:gmatch("[^;]+") do
@@ -78,7 +85,9 @@ local function resolve_code(code)
       i = i + 1
     end
   end
-  return #parts > 0 and table.concat(parts, ";") or code
+  local resolved = #parts > 0 and table.concat(parts, ";") or code
+  resolve_cache[code] = resolved
+  return resolved
 end
 
 function M.resolve(code)
@@ -87,6 +96,7 @@ end
 
 function M.set_code_map(next_map)
   code_map = {}
+  resolve_cache = {}
   for key, value in pairs(next_map or {}) do
     if value ~= nil then
       code_map[tostring(key)] = tostring(value)
