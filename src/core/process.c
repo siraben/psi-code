@@ -10,6 +10,7 @@
 #include <time.h>
 #ifndef _WIN32
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -53,6 +54,11 @@ static const int PSI_PROCESS_ABORT_ESCALATE_MS = 500;
  * Also the per-chunk quantum fed to the progress callback.
  * #define so it's usable as an array dimension in C89. */
 #define PSI_PROCESS_READ_CHUNK 4096
+
+/* Cap on how many bytes a single psi_process_poll call drains once
+ * the pipe turns readable — bounds per-call latency while amortizing
+ * the malloc/read overhead across many pipe-sized chunks. */
+#define PSI_PROCESS_DRAIN_MAX_BYTES (64 * 1024)
 
 /* Fallback poll interval used by psi_process_poll when the caller
  * passes a longer timeout — we wake up at most every 20 ms so the
@@ -1135,8 +1141,9 @@ int psi_process_poll(
 
     /* Loop until either we produce a chunk, time runs out, or
      * the pipe hits EOF. Each iteration: one non-blocking read(),
-     * optionally followed by a short nanosleep capped at the
-     * remaining budget. */
+     * optionally followed by a short poll() wait capped at the
+     * remaining budget (and at PSI_PROCESS_POLL_DELAY_MS so the
+     * abort signal stays responsive). */
     total_waited_ns = 0L;
     max_wait_ns = (timeout_ms > 0) ? (long)timeout_ms * PSI_PROCESS_MS_TO_NS : 0L;
 
@@ -1144,41 +1151,73 @@ int psi_process_poll(
         ssize_t read_count;
         read_count = read(h->pipe_fd, read_buffer, sizeof(read_buffer));
         if (read_count > 0) {
-            char *copy;
-            size_t read_size;
+            char *acc = NULL;
+            size_t drained = 0u;
 
-            read_size = (size_t)read_count;
-            if (read_size > sizeof(read_buffer))
-                return -1;
-
+            /* One upfront allocation sized for the whole drain: the
+             * loop below never copies past the cap plus one trailing
+             * read, and the buffer is shrunk to fit before handoff. */
             if (chunk != NULL) {
-                copy = (char *)malloc(read_size + 1u);
-                if (copy == NULL)
+                acc = (char *)malloc(
+                    (size_t)PSI_PROCESS_DRAIN_MAX_BYTES + (size_t)PSI_PROCESS_READ_CHUNK + 1u);
+                if (acc == NULL)
                     return -1;
-                memcpy(copy, read_buffer, read_size);
-                copy[read_size] = '\0';
-                *chunk = copy;
             }
-            if (chunk_len != NULL)
-                *chunk_len = read_size;
 
-            /* Also stash into the internal buffer so finish() can
-             * reassemble even if the caller didn't consume every
-             * chunk. Respect the 256 KiB ceiling; once full we
-             * stop buffering but still return to the caller. */
-            if (h->output_length < PSI_PROCESS_OUTPUT_MAX_BYTES) {
-                size_t to_copy = read_size;
-                if (h->output_length + to_copy > PSI_PROCESS_OUTPUT_MAX_BYTES) {
+            /* Drain repeated reads while the pipe stays readable so a
+             * fast producer doesn't cost one poll round-trip per
+             * 4 KiB. Stop at the drain cap to bound latency. */
+            for (;;) {
+                size_t read_size = (size_t)read_count;
+                if (read_size > sizeof(read_buffer)) {
+                    free(acc);
+                    return -1;
+                }
+
+                if (acc != NULL) {
+                    memcpy(acc + drained, read_buffer, read_size);
+                }
+
+                /* Also stash into the internal buffer so finish() can
+                 * reassemble even if the caller didn't consume every
+                 * chunk. Respect the 256 KiB ceiling; once full we
+                 * stop buffering but still return to the caller. */
+                if (h->output_length < PSI_PROCESS_OUTPUT_MAX_BYTES) {
+                    size_t to_copy = read_size;
+                    if (h->output_length + to_copy > PSI_PROCESS_OUTPUT_MAX_BYTES) {
+                        h->truncated = 1;
+                        to_copy = PSI_PROCESS_OUTPUT_MAX_BYTES - h->output_length;
+                    }
+                    if (psi_process_append_bytes(&h->output_buffer, &h->output_length,
+                            &h->output_capacity, read_buffer, to_copy) != PSI_STATUS_OK) {
+                        /* Keep going — the caller's copy already has the bytes. */
+                    }
+                } else {
                     h->truncated = 1;
-                    to_copy = PSI_PROCESS_OUTPUT_MAX_BYTES - h->output_length;
                 }
-                if (psi_process_append_bytes(&h->output_buffer, &h->output_length,
-                        &h->output_capacity, read_buffer, to_copy) != PSI_STATUS_OK) {
-                    /* Keep going — the caller's copy already has the bytes. */
+
+                drained += read_size;
+                if (drained >= (size_t)PSI_PROCESS_DRAIN_MAX_BYTES)
+                    break;
+                read_count = read(h->pipe_fd, read_buffer, sizeof(read_buffer));
+                if (read_count <= 0) {
+                    /* EOF or would-block: return what we have; the
+                     * next poll call observes EOF/EAGAIN itself. */
+                    break;
                 }
-            } else {
-                h->truncated = 1;
             }
+
+            if (acc != NULL) {
+                char *shrunk;
+                acc[drained] = '\0';
+                shrunk = (char *)realloc(acc, drained + 1u);
+                if (shrunk != NULL)
+                    acc = shrunk;
+            }
+            if (chunk != NULL)
+                *chunk = acc;
+            if (chunk_len != NULL)
+                *chunk_len = drained;
             return 1;
         }
 
@@ -1189,8 +1228,8 @@ int psi_process_poll(
 
         /* read_count < 0 */
         if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
-            struct timespec delay;
-            long step_ns;
+            struct pollfd pfd;
+            long step_ms;
 
             if (psi_process_try_reap(h)) {
                 h->eof_seen = 1;
@@ -1206,17 +1245,21 @@ int psi_process_poll(
             if (timeout_ms <= 0)
                 return 0; /* non-blocking */
 
-            step_ns = PSI_PROCESS_POLL_DELAY_NS;
-            if (max_wait_ns - total_waited_ns < step_ns) {
-                step_ns = max_wait_ns - total_waited_ns;
+            step_ms = (long)PSI_PROCESS_POLL_DELAY_MS;
+            if ((max_wait_ns - total_waited_ns) / PSI_PROCESS_MS_TO_NS < step_ms) {
+                step_ms = (max_wait_ns - total_waited_ns) / PSI_PROCESS_MS_TO_NS;
             }
-            if (step_ns <= 0L)
+            if (step_ms <= 0L)
                 return 0;
 
-            delay.tv_sec = 0;
-            delay.tv_nsec = step_ns;
-            nanosleep(&delay, NULL);
-            total_waited_ns += step_ns;
+            pfd.fd = h->pipe_fd;
+            pfd.events = POLLIN;
+            pfd.revents = 0;
+            /* Readable, timeout, and error all loop back into read();
+             * the wait is charged in full so the budget stays a hard
+             * upper bound. */
+            (void)poll(&pfd, (nfds_t)1, (int)step_ms);
+            total_waited_ns += step_ms * PSI_PROCESS_MS_TO_NS;
 
             if (psi_abort_signal_is_triggered(h->abort_signal) && !h->aborted) {
                 h->aborted = 1;

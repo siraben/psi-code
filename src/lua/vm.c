@@ -1741,8 +1741,10 @@ static int psi_vm_text_wrap_flush_word(struct psi_vm_text_wrap_context *ctx) {
         }
     }
 
-    /* A flushed word is disposable scratch; free it so ownership stays local. */
-    psi_vm_text_builder_free(&ctx->word);
+    /* A flushed word is disposable scratch; clear it (keeping the
+     * capacity for the next word) — psi_vm_text_wrap_context_free
+     * releases the allocation once wrapping is done. */
+    psi_vm_text_builder_clear(&ctx->word);
     ctx->word_width = 0;
     return 1;
 }
@@ -2269,16 +2271,35 @@ static int lfn_read_file_slice(lua_State *L) {
     truncated = 0;
     while ((read_count = fread(read_buffer, 1u, sizeof(read_buffer), f)) > 0u) {
         size_t pos;
-        for (pos = 0u; pos < read_count; pos++) {
-            int ch = read_buffer[pos];
-            saw_any = 1;
-            last_was_nl = 0;
+
+        saw_any = 1;
+        pos = 0u;
+        /* Walk the block newline-to-newline: memchr finds each line
+         * end and the whole span is copied at once when the current
+         * line falls inside the requested window. */
+        while (pos < read_count) {
+            const unsigned char *nl;
+            size_t span;
+            int has_nl;
+
+            nl = (const unsigned char *)memchr(read_buffer + pos, '\n', read_count - pos);
+            has_nl = nl != NULL;
+            span = has_nl ? (size_t)(nl - (read_buffer + pos)) + 1u : read_count - pos;
             if (line >= offset && line < offset + limit && !truncated) {
+                size_t want = span;
+
                 if ((long)len >= max_bytes) {
                     truncated = 1;
-                } else {
-                    if (len + 2u > cap) {
-                        next_cap = cap * 2u;
+                    want = 0u;
+                } else if (want > (size_t)max_bytes - len) {
+                    truncated = 1;
+                    want = (size_t)max_bytes - len;
+                }
+                if (want > 0u) {
+                    if (len + want + 1u > cap) {
+                        next_cap = cap;
+                        while (len + want + 1u > next_cap)
+                            next_cap *= 2u;
                         if ((long)next_cap > max_bytes + 1l)
                             next_cap = (size_t)max_bytes + 1u;
                         next = (char *)realloc(buffer, next_cap);
@@ -2290,15 +2311,17 @@ static int lfn_read_file_slice(lua_State *L) {
                         buffer = next;
                         cap = next_cap;
                     }
-                    buffer[len++] = (char)ch;
+                    memcpy(buffer + len, read_buffer + pos, want);
+                    len += want;
                 }
             }
-            if (ch == '\n') {
+            pos += span;
+            if (has_nl) {
                 total_lines++;
                 line++;
-                last_was_nl = 1;
             }
         }
+        last_was_nl = read_buffer[read_count - 1u] == '\n';
         if (read_count < sizeof(read_buffer))
             break;
     }
@@ -2477,10 +2500,12 @@ static int lfn_file_write_atomic(lua_State *L) {
     return psi_vm_lfn_atomic_write(L, mode);
 }
 
-static int psi_vm_file_append_mode(const char *path, const char *content, size_t len, mode_t mode) {
+static int psi_vm_file_append_mode(
+    const char *path, const char *content, size_t len, mode_t mode, int do_sync) {
     int fd;
     size_t off;
 
+    (void)do_sync;
     fd = open(path, O_WRONLY | O_CREAT | O_APPEND, mode);
     if (fd < 0)
         return PSI_STATUS_ERROR;
@@ -2499,7 +2524,7 @@ static int psi_vm_file_append_mode(const char *path, const char *content, size_t
         off += (size_t)n;
     }
 #ifndef _WIN32
-    if (fsync(fd) != 0 && errno != EINVAL) {
+    if (do_sync && fsync(fd) != 0 && errno != EINVAL) {
         close(fd);
         return PSI_STATUS_ERROR;
     }
@@ -2509,8 +2534,7 @@ static int psi_vm_file_append_mode(const char *path, const char *content, size_t
     return PSI_STATUS_OK;
 }
 
-/* psi.file_append(path, content[, mode]) -> bool */
-static int lfn_file_append(lua_State *L) {
+static int psi_vm_lfn_file_append(lua_State *L, int do_sync) {
     const char *path = luaL_checkstring(L, 1);
     size_t len;
     const char *content = luaL_checklstring(L, 2, &len);
@@ -2525,7 +2549,8 @@ static int lfn_file_append(lua_State *L) {
     has_mode = lua_gettop(L) >= 3 && !lua_isnil(L, 3);
     if (has_mode) {
         mode = (mode_t)luaL_checkinteger(L, 3);
-        lua_pushboolean(L, psi_vm_file_append_mode(path, content, len, mode) == PSI_STATUS_OK);
+        lua_pushboolean(
+            L, psi_vm_file_append_mode(path, content, len, mode, do_sync) == PSI_STATUS_OK);
         return 1;
     }
     f = fopen(path, "ab");
@@ -2544,7 +2569,7 @@ static int lfn_file_append(lua_State *L) {
         return 1;
     }
 #ifndef _WIN32
-    {
+    if (do_sync) {
         int fd = fileno(f);
         if (fd >= 0 && fsync(fd) != 0 && errno != EINVAL) {
             fclose(f);
@@ -2559,6 +2584,16 @@ static int lfn_file_append(lua_State *L) {
     }
     lua_pushboolean(L, 1);
     return 1;
+}
+
+/* psi.file_append(path, content[, mode]) -> bool */
+static int lfn_file_append(lua_State *L) {
+    return psi_vm_lfn_file_append(L, 1);
+}
+
+/* psi.file_append_nosync(path, content[, mode]) -> bool */
+static int lfn_file_append_nosync(lua_State *L) {
+    return psi_vm_lfn_file_append(L, 0);
 }
 
 /* psi.tempfile_path([prefix]) -> string|nil */
@@ -3491,6 +3526,7 @@ static int psi_vm_http_request(lua_State *L, const char *url, const char *body, 
     struct psi_host_context *host;
     long status_code;
     char *response;
+    size_t response_len;
     char *error_message;
     int status;
 
@@ -3501,9 +3537,10 @@ static int psi_vm_http_request(lua_State *L, const char *url, const char *body, 
     host = PSI_VM_HOST(L);
     status_code = 0l;
     response = NULL;
+    response_len = 0u;
     error_message = NULL;
     status = psi_http_post(url, (const char *const *)headers, header_count, body, body_len,
-        host ? host->abort_signal : NULL, &status_code, &response, &error_message);
+        host ? host->abort_signal : NULL, &status_code, &response, &response_len, &error_message);
 
     psi_lua_free_headers(headers, header_count);
 
@@ -3515,7 +3552,11 @@ static int psi_vm_http_request(lua_State *L, const char *url, const char *body, 
         return 2;
     }
     lua_pushinteger(L, status_code);
-    lua_pushstring(L, response != NULL ? response : "");
+    if (response != NULL) {
+        lua_pushlstring(L, response, response_len);
+    } else {
+        lua_pushliteral(L, "");
+    }
     free(response);
     return 2;
 }
@@ -4438,6 +4479,8 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("file_write_atomic", lfn_file_write_atomic);
     PSI_REG_DOC("file_append", lfn_file_append,
         "Append text to a file in 'ab' mode. Optional mode sets file permissions.");
+    PSI_REG_DOC("file_append_nosync", lfn_file_append_nosync,
+        "Append text to a file without fsync. For scratch/spill files that need no durability.");
     PSI_REG_DOC("tempfile_path", lfn_tempfile_path,
         "Return a temp path under $TMPDIR, $TEMP, $TMP, or /tmp; POSIX creates it 0600.");
     PSI_REG_DOC("random_bytes", lfn_random_bytes,

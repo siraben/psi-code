@@ -11,10 +11,10 @@ struct psi_abort_signal;
 
 int psi_http_post(const char *url, const char *const *header_lines, size_t header_count,
     const char *body, size_t body_len, const struct psi_abort_signal *abort_signal,
-    long *status_code, char **response_body, char **error_message);
+    long *status_code, char **response_body, size_t *response_len, char **error_message);
 
 int psi_http_get(const char *url, const char *const *header_lines, size_t header_count,
     const struct psi_abort_signal *abort_signal, long *status_code, char **response_body,
-    char **error_message);
+    size_t *response_len, char **error_message);
 
 #endif

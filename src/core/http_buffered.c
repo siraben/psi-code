@@ -29,12 +29,14 @@ static int psi_http_slist_append_safe(struct curl_slist **list, const char *line
 struct psi_http_buffer {
     char *data;
     size_t length;
+    size_t capacity;
     int too_large;
 };
 
 static size_t psi_http_buffer_callback(void *contents, size_t size, size_t nmemb, void *userp) {
     struct psi_http_buffer *buffer = (struct psi_http_buffer *)userp;
     size_t total;
+    size_t required;
     char *next;
 
     if (size != 0u && nmemb > ((size_t)-1) / size) {
@@ -47,11 +49,27 @@ static size_t psi_http_buffer_callback(void *contents, size_t size, size_t nmemb
         buffer->too_large = 1;
         return 0u;
     }
-    next = (char *)realloc(buffer->data, buffer->length + total + 1u);
-    if (next == NULL) {
-        return 0u;
+    required = buffer->length + total + 1u;
+    if (required > buffer->capacity) {
+        size_t next_capacity;
+
+        next_capacity = buffer->capacity == 0u ? 4096u : buffer->capacity;
+        while (required > next_capacity) {
+            if (next_capacity > (size_t)PSI_HTTP_BUFFERED_MAX_BYTES) {
+                next_capacity = required;
+                break;
+            }
+            next_capacity *= 2u;
+        }
+        if (next_capacity > (size_t)PSI_HTTP_BUFFERED_MAX_BYTES + 1u)
+            next_capacity = (size_t)PSI_HTTP_BUFFERED_MAX_BYTES + 1u;
+        next = (char *)realloc(buffer->data, next_capacity);
+        if (next == NULL) {
+            return 0u;
+        }
+        buffer->data = next;
+        buffer->capacity = next_capacity;
     }
-    buffer->data = next;
     memcpy(buffer->data + buffer->length, contents, total);
     buffer->length += total;
     buffer->data[buffer->length] = '\0';
@@ -122,7 +140,7 @@ static CURL *psi_http_build_handle(const char *url, const char *const *header_li
 
 int psi_http_post(const char *url, const char *const *header_lines, size_t header_count,
     const char *body, size_t body_len, const struct psi_abort_signal *abort_signal,
-    long *status_code, char **response_body, char **error_message) {
+    long *status_code, char **response_body, size_t *response_len, char **error_message) {
     CURL *curl;
     CURLcode code;
     struct curl_slist *headers;
@@ -133,10 +151,13 @@ int psi_http_post(const char *url, const char *const *header_lines, size_t heade
         *status_code = 0l;
     if (response_body != NULL)
         *response_body = NULL;
+    if (response_len != NULL)
+        *response_len = 0u;
     if (error_message != NULL)
         *error_message = NULL;
     buffer.data = NULL;
     buffer.length = 0u;
+    buffer.capacity = 0u;
     buffer.too_large = 0;
 
     if (psi_http_global_init() != PSI_STATUS_OK)
@@ -174,6 +195,8 @@ int psi_http_post(const char *url, const char *const *header_lines, size_t heade
             if (*response_body == NULL)
                 return PSI_STATUS_ERROR;
         }
+        if (response_len != NULL)
+            *response_len = buffer.length;
     } else {
         free(buffer.data);
     }
@@ -182,7 +205,7 @@ int psi_http_post(const char *url, const char *const *header_lines, size_t heade
 
 int psi_http_get(const char *url, const char *const *header_lines, size_t header_count,
     const struct psi_abort_signal *abort_signal, long *status_code, char **response_body,
-    char **error_message) {
+    size_t *response_len, char **error_message) {
     return psi_http_post(url, header_lines, header_count, NULL, 0u, abort_signal, status_code,
-        response_body, error_message);
+        response_body, response_len, error_message);
 }

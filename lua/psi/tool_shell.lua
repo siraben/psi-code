@@ -177,11 +177,15 @@ local function stream(handle, tool_call_id, opts, poll_fn)
     end
   end
 
+  -- Spill files are scratch data; skip the per-chunk fsync when the
+  -- host exposes the non-durable append.
+  local spill_append = psi.file_append_nosync or psi.file_append
+
   local function ensure_tempfile()
     if temp_path or temp_open_failed or not spill_to_disk then
       return
     end
-    if psi.tempfile_path == nil or psi.file_append == nil then
+    if psi.tempfile_path == nil or spill_append == nil then
       temp_open_failed = true
       return
     end
@@ -194,7 +198,7 @@ local function stream(handle, tool_call_id, opts, poll_fn)
     -- Pre-flush whatever we already have buffered.
     local existing = buffered_text()
     if #existing > 0 then
-      if not psi.file_append(temp_path, existing) then
+      if not spill_append(temp_path, existing) then
         temp_open_failed = true
         temp_path = nil
       end
@@ -219,7 +223,7 @@ local function stream(handle, tool_call_id, opts, poll_fn)
         local already_spilling = temp_path ~= nil
         ensure_tempfile()
         if temp_path and already_spilling then
-          if not psi.file_append(temp_path, chunk) then
+          if not spill_append(temp_path, chunk) then
             temp_open_failed = true
           end
         end
