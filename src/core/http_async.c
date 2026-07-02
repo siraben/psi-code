@@ -27,13 +27,69 @@
 static pthread_once_t psi_http_init_once = PTHREAD_ONCE_INIT;
 static int psi_http_init_status = 1; /* non-zero = unattempted/failed */
 
+/* Process-wide share: TLS session cache + connection pool. Handles run
+ * on the caller's thread and stream threads, so lock callbacks are
+ * required. Never destroyed: must outlive every easy handle. */
+static CURLSH *psi_http_share = NULL;
+static pthread_mutex_t psi_http_share_locks[CURL_LOCK_DATA_LAST];
+
+static void psi_http_share_lock_cb(
+    CURL *handle, curl_lock_data data, curl_lock_access access, void *userptr) {
+    (void)handle;
+    (void)access;
+    (void)userptr;
+    if ((int)data >= 0 && (int)data < (int)CURL_LOCK_DATA_LAST)
+        pthread_mutex_lock(&psi_http_share_locks[(int)data]);
+}
+
+static void psi_http_share_unlock_cb(CURL *handle, curl_lock_data data, void *userptr) {
+    (void)handle;
+    (void)userptr;
+    if ((int)data >= 0 && (int)data < (int)CURL_LOCK_DATA_LAST)
+        pthread_mutex_unlock(&psi_http_share_locks[(int)data]);
+}
+
+static void psi_http_share_init(void) {
+    CURLSH *share;
+    int i;
+
+    for (i = 0; i < (int)CURL_LOCK_DATA_LAST; i++) {
+        if (pthread_mutex_init(&psi_http_share_locks[i], NULL) != 0) {
+            while (i > 0) {
+                i--;
+                pthread_mutex_destroy(&psi_http_share_locks[i]);
+            }
+            return;
+        }
+    }
+    share = curl_share_init();
+    if (share == NULL)
+        return;
+    if (curl_share_setopt(share, CURLSHOPT_LOCKFUNC, psi_http_share_lock_cb) != CURLSHE_OK ||
+        curl_share_setopt(share, CURLSHOPT_UNLOCKFUNC, psi_http_share_unlock_cb) != CURLSHE_OK ||
+        curl_share_setopt(share, CURLSHOPT_SHARE, CURL_LOCK_DATA_SSL_SESSION) != CURLSHE_OK ||
+        curl_share_setopt(share, CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT) != CURLSHE_OK) {
+        curl_share_cleanup(share);
+        return;
+    }
+    psi_http_share = share;
+}
+
 static void psi_http_init_cb(void) {
     psi_http_init_status = (curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK) ? 0 : 1;
+    if (psi_http_init_status == 0)
+        psi_http_share_init();
 }
 
 int psi_http_global_init(void) {
     pthread_once(&psi_http_init_once, psi_http_init_cb);
     return psi_http_init_status == 0 ? PSI_STATUS_OK : PSI_STATUS_ERROR;
+}
+
+void *psi_http_share_handle(void) {
+    if (psi_http_global_init() != PSI_STATUS_OK)
+        return NULL;
+    return (void *)psi_http_share;
 }
 
 /* curl_slist_append returns NULL on failure without freeing the
@@ -168,36 +224,52 @@ static int psi_http_queue_push(struct psi_http_stream *h, const char *data, size
     return 1;
 }
 
-static struct psi_http_chunk_node *psi_http_queue_pop_locked(struct psi_http_stream *h) {
+/* Detach the entire queued list under `mu`, zeroing the queue
+ * accounting so the producer's back-pressure check
+ * (queue_bytes vs PSI_HTTP_STREAM_QUEUE_MAX_BYTES) sees the drain. */
+static struct psi_http_chunk_node *psi_http_queue_detach_locked(struct psi_http_stream *h) {
     struct psi_http_chunk_node *node;
-
-    node = h->queue_head;
-    if (node != NULL) {
-        h->queue_head = node->next;
-        if (h->queue_head == NULL) {
-            h->queue_tail = NULL;
-        }
-        if (h->queue_bytes >= node->len)
-            h->queue_bytes -= node->len;
-        else
-            h->queue_bytes = 0u;
-    }
-    return node;
-}
-
-static void psi_http_queue_free_all(struct psi_http_stream *h) {
-    struct psi_http_chunk_node *node, *next;
 
     node = h->queue_head;
     h->queue_head = NULL;
     h->queue_tail = NULL;
     h->queue_bytes = 0u;
+    return node;
+}
+
+static void psi_http_chunk_list_free(struct psi_http_chunk_node *node) {
+    struct psi_http_chunk_node *next;
+
     while (node != NULL) {
         next = node->next;
         free(node->data);
         free(node);
         node = next;
     }
+}
+
+/* Re-attach a detached sublist at the front of the queue, restoring
+ * its byte accounting. Used only on the poll-side OOM fallback. */
+static void psi_http_queue_requeue_front(
+    struct psi_http_stream *h, struct psi_http_chunk_node *head, size_t bytes) {
+    struct psi_http_chunk_node *tail;
+
+    if (head == NULL)
+        return;
+    tail = head;
+    while (tail->next != NULL)
+        tail = tail->next;
+    pthread_mutex_lock(&h->mu);
+    tail->next = h->queue_head;
+    h->queue_head = head;
+    if (h->queue_tail == NULL)
+        h->queue_tail = tail;
+    h->queue_bytes += bytes;
+    pthread_mutex_unlock(&h->mu);
+}
+
+static void psi_http_queue_free_all(struct psi_http_stream *h) {
+    psi_http_chunk_list_free(psi_http_queue_detach_locked(h));
 }
 
 /* ------------------------------------------------------------------
@@ -261,6 +333,8 @@ static void *psi_http_stream_thread(void *arg) {
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)h->body_len);
     h->curl_error[0] = '\0';
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, h->curl_error);
+    if (psi_http_share != NULL)
+        curl_easy_setopt(curl, CURLOPT_SHARE, psi_http_share);
     psi_http_configure_tls(curl);
     psi_http_configure_resilience(curl);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, psi_http_stream_write_cb);
@@ -359,6 +433,54 @@ int psi_http_stream_begin(const char *url, const char *const *header_lines, size
     return PSI_STATUS_OK;
 }
 
+/* Join a detached chunk list into one buffer. On allocation failure,
+ * hand off the first node as-is and re-queue the rest: no bytes lost. */
+static void psi_http_chunk_list_join(
+    struct psi_http_stream *h, struct psi_http_chunk_node *head, char **out, size_t *out_len) {
+    struct psi_http_chunk_node *node;
+    size_t total;
+    char *joined;
+    size_t off;
+
+    if (head->next == NULL) {
+        /* Single chunk: hand off the buffer without copying. */
+        *out = head->data;
+        *out_len = head->len;
+        free(head);
+        return;
+    }
+
+    total = 0u;
+    for (node = head; node != NULL; node = node->next)
+        total += node->len;
+
+    joined = (char *)malloc(total);
+    if (joined == NULL) {
+        size_t rest_bytes;
+
+        rest_bytes = total - head->len;
+        *out = head->data;
+        *out_len = head->len;
+        node = head->next;
+        free(head);
+        psi_http_queue_requeue_front(h, node, rest_bytes);
+        return;
+    }
+
+    off = 0u;
+    node = head;
+    while (node != NULL) {
+        struct psi_http_chunk_node *next = node->next;
+        memcpy(joined + off, node->data, node->len);
+        off += node->len;
+        free(node->data);
+        free(node);
+        node = next;
+    }
+    *out = joined;
+    *out_len = off;
+}
+
 int psi_http_stream_poll(
     struct psi_http_stream *h, int timeout_ms, char **chunk, size_t *chunk_len) {
     struct psi_http_chunk_node *node;
@@ -394,7 +516,7 @@ int psi_http_stream_poll(
         }
     }
 
-    node = psi_http_queue_pop_locked(h);
+    node = psi_http_queue_detach_locked(h);
     if (node != NULL) {
         result = 1;
     } else if (h->done) {
@@ -405,13 +527,16 @@ int psi_http_stream_poll(
     pthread_mutex_unlock(&h->mu);
 
     if (node != NULL) {
-        if (chunk != NULL)
-            *chunk = node->data;
-        else
-            free(node->data);
-        if (chunk_len != NULL)
-            *chunk_len = node->len;
-        free(node);
+        if (chunk != NULL) {
+            char *joined = NULL;
+            size_t joined_len = 0u;
+            psi_http_chunk_list_join(h, node, &joined, &joined_len);
+            *chunk = joined;
+            if (chunk_len != NULL)
+                *chunk_len = joined_len;
+        } else {
+            psi_http_chunk_list_free(node);
+        }
     }
     return result;
 }

@@ -3,6 +3,7 @@
  * was compiled in (PSI_HAVE_EMBEDDED_CA). Static binaries shipped
  * without a host certificate store rely on the embedded path. */
 
+#include <pthread.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <curl/curl.h>
@@ -51,16 +52,24 @@ static const char *psi_http_ca_bundle_path(void) {
     return NULL;
 }
 
-void psi_http_configure_tls(void *curl) {
-    CURL *handle = (CURL *)curl;
-    const char *ca_bundle;
+/* TLS answer resolved once per process, under pthread_once (streaming
+ * helper threads call this too). Changing CURL_CA_BUNDLE mid-process
+ * has no effect; acceptable. */
+static pthread_once_t psi_http_tls_once = PTHREAD_ONCE_INIT;
+static char *psi_http_tls_bundle_path = NULL;
+#ifdef PSI_HAVE_EMBEDDED_CA
+static unsigned char *psi_http_tls_embedded_bytes = NULL;
+static size_t psi_http_tls_embedded_len = 0u;
+#endif
 
-    if (handle == NULL)
-        return;
+static void psi_http_tls_resolve_cb(void) {
+    const char *ca_bundle;
 
     ca_bundle = psi_http_ca_bundle_path();
     if (ca_bundle != NULL) {
-        curl_easy_setopt(handle, CURLOPT_CAINFO, ca_bundle);
+        /* Copy: getenv() storage may be invalidated by later
+         * setenv/putenv calls on other threads. */
+        psi_http_tls_bundle_path = psi_strdup(ca_bundle);
         return;
     }
 
@@ -69,7 +78,6 @@ void psi_http_configure_tls(void *curl) {
         const struct psi_embedded_data *entry = &psi_embedded_ca_table[0];
         unsigned char *bytes;
         uLongf raw_len;
-        struct curl_blob blob;
 
         bytes = (unsigned char *)malloc(entry->raw_len);
         if (bytes == NULL)
@@ -77,12 +85,38 @@ void psi_http_configure_tls(void *curl) {
         raw_len = (uLongf)entry->raw_len;
         if (uncompress(bytes, &raw_len, entry->src, (uLong)entry->len) == Z_OK &&
             raw_len == (uLongf)entry->raw_len) {
-            blob.data = (void *)bytes;
-            blob.len = entry->raw_len;
-            blob.flags = CURL_BLOB_COPY;
-            curl_easy_setopt(handle, CURLOPT_CAINFO_BLOB, &blob);
+            /* Never freed: process-lifetime cache handed to curl
+             * per handle via CURL_BLOB_COPY. */
+            psi_http_tls_embedded_bytes = bytes;
+            psi_http_tls_embedded_len = entry->raw_len;
+        } else {
+            free(bytes);
         }
-        free(bytes);
+    }
+#endif
+}
+
+void psi_http_configure_tls(void *curl) {
+    CURL *handle = (CURL *)curl;
+
+    if (handle == NULL)
+        return;
+
+    pthread_once(&psi_http_tls_once, psi_http_tls_resolve_cb);
+
+    if (psi_http_tls_bundle_path != NULL) {
+        curl_easy_setopt(handle, CURLOPT_CAINFO, psi_http_tls_bundle_path);
+        return;
+    }
+
+#ifdef PSI_HAVE_EMBEDDED_CA
+    if (psi_http_tls_embedded_bytes != NULL && psi_http_tls_embedded_len > 0u) {
+        struct curl_blob blob;
+
+        blob.data = (void *)psi_http_tls_embedded_bytes;
+        blob.len = psi_http_tls_embedded_len;
+        blob.flags = CURL_BLOB_COPY;
+        curl_easy_setopt(handle, CURLOPT_CAINFO_BLOB, &blob);
     }
 #endif
 }

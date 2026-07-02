@@ -37,6 +37,11 @@ struct psi_abort_signal;
  * libcurl's resources anyway. */
 int psi_http_global_init(void);
 
+/* Process-wide CURLSH (TLS session cache + connection pool), created
+ * lazily and never destroyed: curl requires it to outlive every easy
+ * handle. NULL means "no sharing". */
+void *psi_http_share_handle(void);
+
 struct psi_http_stream;
 
 int psi_http_stream_begin(const char *url, const char *const *header_lines, size_t header_count,

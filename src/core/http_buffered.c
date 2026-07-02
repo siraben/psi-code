@@ -101,11 +101,16 @@ static CURL *psi_http_build_handle(const char *url, const char *const *header_li
     const struct psi_abort_signal *abort_signal, char *error_buffer) {
     CURL *curl;
     struct curl_slist *headers = NULL;
+    void *share;
     size_t i;
 
     curl = curl_easy_init();
     if (curl == NULL)
         return NULL;
+
+    share = psi_http_share_handle();
+    if (share != NULL)
+        curl_easy_setopt(curl, CURLOPT_SHARE, share);
 
     for (i = 0; i < header_count; i++) {
         if (psi_http_slist_append_safe(&headers, header_lines[i]) != PSI_STATUS_OK) {
