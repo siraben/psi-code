@@ -306,6 +306,16 @@ local function parse_args(text)
   return type(parsed) == "table" and parsed or {}
 end
 
+-- Raw argument JSON parts for a streaming tool block; concatenated and
+-- parsed only at done/finalize boundaries (per-delta reparse is
+-- quadratic in argument size).
+local function tool_raw_args(block)
+  if block.arg_parts then
+    return table.concat(block.arg_parts)
+  end
+  return ""
+end
+
 local function finish_item(state, item)
   local current = state.current
   if type(item) ~= "table" then
@@ -336,8 +346,10 @@ local function finish_item(state, item)
     end
     current.signature = psi.json_encode(item)
   elseif item.type == "function_call" and current and current.kind == "tool" then
-    current.arg_text = item.arguments or current.arg_text or ""
-    current.arguments = parse_args(current.arg_text)
+    if type(item.arguments) == "string" then
+      current.arg_parts = { item.arguments }
+    end
+    current.arguments = parse_args(tool_raw_args(current))
   end
   state.current = nil
 end
@@ -388,8 +400,7 @@ local function handle_event(data, state, observer)
         kind = "tool",
         id = tostring(item.call_id or "") .. "|" .. tostring(item.id or ""),
         name = item.name,
-        arg_text = item.arguments or "",
-        arguments = parse_args(item.arguments or "{}"),
+        arg_parts = { item.arguments or "" },
       }
       state.blocks[#state.blocks + 1] = b
       state.current = b
@@ -419,13 +430,15 @@ local function handle_event(data, state, observer)
     end
   elseif typ == "response.function_call_arguments.delta" then
     if state.current and state.current.kind == "tool" then
-      state.current.arg_text = (state.current.arg_text or "") .. (event.delta or "")
-      state.current.arguments = parse_args(state.current.arg_text)
+      local parts = state.current.arg_parts
+      parts[#parts + 1] = event.delta or ""
     end
   elseif typ == "response.function_call_arguments.done" then
     if state.current and state.current.kind == "tool" then
-      state.current.arg_text = event.arguments or state.current.arg_text or ""
-      state.current.arguments = parse_args(state.current.arg_text)
+      if type(event.arguments) == "string" then
+        state.current.arg_parts = { event.arguments }
+      end
+      state.current.arguments = parse_args(tool_raw_args(state.current))
     end
   elseif typ == "response.output_item.done" then
     finish_item(state, event.item)
@@ -464,8 +477,8 @@ local function finalize(state)
   local tool_calls = prelude.array(#state.blocks)
   for _, b in ipairs(state.blocks) do
     if b.kind == "tool" and b.name and b.name ~= "" then
-      -- Malformed arg_text → stream_error; don't dispatch with {}.
-      local raw = b.arg_text or ""
+      -- Malformed argument JSON → stream_error; don't dispatch with {}.
+      local raw = tool_raw_args(b)
       local args = b.arguments
       if not args and #raw > 0 then
         local parsed = safe_decode(raw, nil)
@@ -525,7 +538,7 @@ local function persist(state, model, _content, tool_calls, stop_override, error_
         type = "tool_use",
         id = b.id,
         name = b.name,
-        input = b.arguments or parse_args(b.arg_text or "{}"),
+        input = b.arguments or parse_args(tool_raw_args(b)),
       }
     end
   end

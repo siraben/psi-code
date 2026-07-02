@@ -12,6 +12,9 @@ local M = {}
 
 local safe_decode = prelude.safe_json_decode
 
+-- Wire guard for text reaching a provider request: session appends are
+-- already lossy-decoded, but system prompts / append_raw / extension text
+-- can bypass that path. Valid input costs one scan and no allocation.
 local function clean_text(text)
   return prelude.sanitize_surrogates(text or "")
 end

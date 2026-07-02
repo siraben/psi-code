@@ -212,6 +212,11 @@ local function dispatch_tools(tool_calls, observer, abort_check, cfg, model)
 
   local observed = {}
   local results = {}
+  -- Memoized per-index normalization/encoding so the final
+  -- append loop below doesn't recompute what observe_done already
+  -- produced for the same result.
+  local result_alists = {}
+  local result_jsons = {}
   local function observe_done(i, r)
     local tc = tool_calls[i]
     if tc == nil then
@@ -219,6 +224,8 @@ local function dispatch_tools(tool_calls, observer, abort_check, cfg, model)
     end
     local result_alist = normalize_tool_result(tc, r)
     local result_json = psi.json_encode(result_alist)
+    result_alists[i] = result_alist
+    result_jsons[i] = result_json
     observed[i] = true
     if observer.on_tool_result then
       observer.on_tool_result(tc.id, tc.name, result_json)
@@ -287,8 +294,12 @@ local function dispatch_tools(tool_calls, observer, abort_check, cfg, model)
 
   for i, tc in ipairs(tool_calls) do
     local r = results[i]
-    local result_alist = normalize_tool_result(tc, r)
-    local result_json = psi.json_encode(result_alist)
+    local result_alist = result_alists[i]
+    local result_json = result_jsons[i]
+    if result_alist == nil then
+      result_alist = normalize_tool_result(tc, r)
+      result_json = psi.json_encode(result_alist)
+    end
     if (not observed[i]) and observer.on_tool_result then
       observer.on_tool_result(tc.id, tc.name, result_json)
     end

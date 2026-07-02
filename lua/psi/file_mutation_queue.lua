@@ -31,21 +31,40 @@ local function key(path)
   return resolved
 end
 
+-- Release the lock for `k`: hand ownership to the oldest waiter (FIFO)
+-- or free the slot when nobody is queued.
+local function release(k)
+  local lock = locks[k]
+  local waiter = lock and table.remove(lock.waiters, 1) or nil
+  if waiter then
+    waiter.ready = true
+  else
+    locks[k] = nil
+  end
+end
+
 function M.with_path(path, fn)
   local k = key(path)
   if not k then
     return fn()
   end
-  while locks[k] do
+  local lock = locks[k]
+  if lock then
     if coroutine.running() and psi and psi.sched and psi.sched.sleep_ms then
-      psi.sched.sleep_ms(10)
-    else
-      break
+      -- Sleep-poll our own flag: the scheduler has no wakeup primitive,
+      -- and per-waiter flags keep hand-off FIFO and O(1) per release.
+      local waiter = { ready = false }
+      lock.waiters[#lock.waiters + 1] = waiter
+      repeat
+        psi.sched.sleep_ms(10)
+      until waiter.ready
     end
+    -- Non-coroutine callers cannot wait; they barge in.
+  else
+    locks[k] = { waiters = {} }
   end
-  locks[k] = true
   local ok, a, b, c = pcall(fn)
-  locks[k] = nil
+  release(k)
   if not ok then
     error(a, 0)
   end

@@ -111,8 +111,12 @@ local function drain(queue_name)
     local item = queue[i]
     texts[i] = item.text
   end
-  for _ = 1, count do
-    table.remove(queue, 1)
+  -- One bulk shift of the remainder; removing drained items one at a
+  -- time re-shifts the tail on every iteration.
+  local len = #queue
+  table.move(queue, count + 1, len, 1)
+  for i = len - count + 1, len do
+    queue[i] = nil
   end
   return texts
 end

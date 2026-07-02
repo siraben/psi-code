@@ -13,6 +13,10 @@ local M = {}
 
 -- handlers[event] = { fn1, fn2, ... }
 local handlers = {}
+-- snapshots[event] = immutable copy of handlers[event] used by emit.
+-- Invalidated (never mutated) by on()/off() so an emit that is
+-- mid-dispatch keeps iterating the array it captured.
+local snapshots = {}
 local aliases = {
   ["session-start"] = "session_start",
   ["session-shutdown"] = "session_shutdown",
@@ -42,6 +46,7 @@ function M.on(event, fn)
   end
   local list = list_for(event)
   list[#list + 1] = fn
+  snapshots[event] = nil
 end
 
 function M.off(event, fn)
@@ -54,6 +59,7 @@ function M.off(event, fn)
       table.remove(list, i)
     end
   end
+  snapshots[event] = nil
 end
 
 function M.emit(event, payload)
@@ -65,17 +71,15 @@ function M.emit(event, payload)
   if not list then
     return
   end
-  -- Snapshot the handler list before iterating. A handler that calls
-  -- psi.events.on/off for the SAME event during emission would
-  -- otherwise mutate the array ipairs is walking — registering a new
-  -- handler could cause it to fire in the same cycle (unexpected),
-  -- and unregistering via table.remove would shift subsequent
-  -- handlers left and skip one.
-  local snapshot = {}
-  local n = #list
-  for i = 1, n do
-    snapshot[i] = list[i]
+  local snapshot = snapshots[event]
+  if snapshot == nil then
+    snapshot = {}
+    for i = 1, #list do
+      snapshot[i] = list[i]
+    end
+    snapshots[event] = snapshot
   end
+  local n = #snapshot
   for i = 1, n do
     local ok, err = pcall(snapshot[i], payload)
     if not ok then

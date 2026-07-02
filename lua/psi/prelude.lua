@@ -303,35 +303,51 @@ local function utf8_seq_ok(s, i, c, n)
   return b3 ~= nil and b3 >= 0x80 and b3 <= 0xBF
 end
 
+-- Shared span scanner for sanitize_surrogates / decode_utf8_lossy: copies
+-- clean spans in bulk; valid input returns the ORIGINAL string with no
+-- allocation. replacement == nil drops invalid bytes, U+FFFD substitutes.
+local function rewrite_invalid_utf8(text, replacement)
+  local out = nil
+  local copied = 0 -- everything up to and including this index is handled
+  local n = #text
+  local i = 1
+  while true do
+    local j = text:find("[\x80-\xFF]", i)
+    if not j then
+      break
+    end
+    local c = string.byte(text, j)
+    local seq = utf8_seq_len(c)
+    if seq > 1 and utf8_seq_ok(text, j, c, seq) then
+      i = j + seq
+    else
+      if out == nil then
+        out = {}
+      end
+      if j > copied + 1 then
+        out[#out + 1] = text:sub(copied + 1, j - 1)
+      end
+      if replacement then
+        out[#out + 1] = replacement
+      end
+      copied = j
+      i = j + 1
+    end
+  end
+  if out == nil then
+    return text
+  end
+  if copied < n then
+    out[#out + 1] = text:sub(copied + 1)
+  end
+  return table.concat(out)
+end
+
 function M.sanitize_surrogates(text)
   if type(text) ~= "string" or text == "" then
     return text or ""
   end
-  -- Fast path: pure ASCII (no high bit set) is always valid UTF-8.
-  if not text:find("[\x80-\xFF]") then
-    return text
-  end
-  local out = {}
-  local n = #text
-  local i = 1
-  while i <= n do
-    local c = string.byte(text, i)
-    local seq = utf8_seq_len(c)
-    if seq == 1 then
-      out[#out + 1] = string.char(c)
-      i = i + 1
-    elseif seq > 1 and utf8_seq_ok(text, i, c, seq) then
-      out[#out + 1] = text:sub(i, i + seq - 1)
-      i = i + seq
-    else
-      -- Invalid lead or truncated trailers: drop this byte only and
-      -- retry from the next. This matches the "maximal subpart"
-      -- recovery strategy: replace ill-formed sequences without
-      -- losing valid bytes that immediately follow.
-      i = i + 1
-    end
-  end
-  return table.concat(out)
+  return rewrite_invalid_utf8(text, nil)
 end
 
 -- Decode arbitrary bytes to model-visible text the way pi-mono's
@@ -343,53 +359,52 @@ function M.decode_utf8_lossy(text)
   if type(text) ~= "string" or text == "" then
     return text or ""
   end
-  if not text:find("[\x80-\xFF]") then
-    return text
-  end
-  local out = {}
-  local n = #text
-  local i = 1
-  while i <= n do
-    local c = string.byte(text, i)
-    local seq = utf8_seq_len(c)
-    if seq == 1 then
-      out[#out + 1] = string.char(c)
-      i = i + 1
-    elseif seq > 1 and utf8_seq_ok(text, i, c, seq) then
-      out[#out + 1] = text:sub(i, i + seq - 1)
-      i = i + seq
-    else
-      out[#out + 1] = REPLACEMENT
-      i = i + 1
-    end
-  end
-  return table.concat(out)
+  return rewrite_invalid_utf8(text, REPLACEMENT)
 end
 
+-- Copy-on-write recursive decode returning (decoded, changed): clean
+-- values return the ORIGINAL unchanged; only tables on the path to a
+-- rewrite are re-allocated. Input and result are immutable snapshots.
 local function decode_value(value, seen)
   if type(value) == "string" then
-    return M.decode_utf8_lossy(value)
+    local decoded = M.decode_utf8_lossy(value)
+    return decoded, decoded ~= value
   elseif type(value) ~= "table" then
-    return value
+    return value, false
   end
-  seen = seen or {}
   if seen[value] then
-    return value
+    -- Cycle: resolve to the original table, matching the pre-COW
+    -- behavior of returning `value` for already-seen tables.
+    return value, false
   end
   seen[value] = true
-  local out = {}
+  local out = nil
   for k, v in pairs(value) do
-    out[k] = decode_value(v, seen)
+    local decoded, changed = decode_value(v, seen)
+    if out ~= nil then
+      out[k] = decoded
+    elseif changed then
+      -- First rewritten child: shallow-copy; keys visited earlier were
+      -- unchanged, so their raw copies are already correct.
+      out = {}
+      for k2, v2 in pairs(value) do
+        out[k2] = v2
+      end
+      out[k] = decoded
+    end
+  end
+  if out == nil then
+    return value, false
   end
   local mt = getmetatable(value)
   if mt then
     setmetatable(out, mt)
   end
-  return out
+  return out, true
 end
 
 function M.decode_model_value(value)
-  return decode_value(value, {})
+  return (decode_value(value, {}))
 end
 
 -- ---------- paths ----------

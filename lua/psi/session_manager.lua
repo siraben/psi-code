@@ -297,6 +297,19 @@ end
 
 local track_memory_append
 
+-- Cache of the most recent thinking_level_change (known == false means
+-- cold: fall back to the scan). Updated on every append that carries
+-- one; invalidated when the in-memory session is reset or rebuilt.
+local thinking_level_known = false
+local thinking_level_value = nil
+
+local function note_thinking_level_body(body)
+  if type(body) == "table" and body.__entry_type == "thinking_level_change" then
+    thinking_level_known = true
+    thinking_level_value = body.thinkingLevel
+  end
+end
+
 local function append_body(in_mem_role, text, body)
   text = prelude.decode_utf8_lossy(text or "")
   body = prelude.decode_model_value(body)
@@ -306,6 +319,7 @@ local function append_body(in_mem_role, text, body)
     psi.json_encode(body),
     estimate_tokens(in_mem_role, text, body)
   )
+  note_thinking_level_body(body)
   if track_memory_append and not suppress_tree_tracking then
     track_memory_append(in_mem_role, text, body)
   end
@@ -324,6 +338,7 @@ function append_raw(in_mem_role, text, data)
     last_entry_id = body.id
     leaf_id = body.id
   end
+  note_thinking_level_body(body)
   if track_memory_append and not suppress_tree_tracking then
     track_memory_append(in_mem_role, text, body)
   end
@@ -551,14 +566,26 @@ function M.append_thinking_level_change(level)
 end
 
 function M.current_thinking_level()
+  -- Guard against a bare psi.session_clear() that bypassed the Lua
+  -- reset paths: an empty session never has a thinking level.
+  if psi.session_message_count() == 0 then
+    return nil
+  end
+  if thinking_level_known then
+    return thinking_level_value
+  end
+  local level = nil
   local msgs = psi.session_messages()
   for i = #msgs, 1, -1 do
     local body = prelude.safe_json_decode(msgs[i].data, nil)
     if type(body) == "table" and body.__entry_type == "thinking_level_change" then
-      return body.thinkingLevel
+      level = body.thinkingLevel
+      break
     end
   end
-  return nil
+  thinking_level_known = true
+  thinking_level_value = level
+  return level
 end
 
 -- ---------- JSONL persistence ----------
@@ -954,25 +981,9 @@ function M.resolve_resume_path(cwd, choose)
   return selected, nil, infos
 end
 
--- Convert an in-memory (role, text, data) record into a v2 disk entry.
-local function to_disk_entry(m)
-  local body = prelude.safe_json_decode(m.data, nil)
-  if type(body) ~= "table" then
-    -- Legacy/synthetic record with no structured body: synthesize one
-    -- inline. Must NOT call stamp_entry here — to_disk_entry is a
-    -- formatter invoked by save() and fork(), and mutating
-    -- last_entry_id would corrupt the live in-memory chain with the
-    -- ids of records being serialized. fork() in particular promises
-    -- "current session is not modified".
-    body = {
-      id = prelude.uuid_short(),
-      timestamp = prelude.iso_timestamp(),
-      message = {
-        role = m.role or "user",
-        content = prelude.as_array({ text_block(m.text) }),
-      },
-    }
-  end
+-- Builds a v2 disk entry sharing subtables with `body`; callers treat
+-- both as immutable snapshots.
+local function disk_entry_from_body(role, text, body)
   if body.__entry_type == "custom" then
     return {
       type = "custom",
@@ -1010,7 +1021,7 @@ local function to_disk_entry(m)
       thinkingLevel = body.thinkingLevel,
     }
   end
-  if m.role == "compaction-summary" then
+  if role == "compaction-summary" then
     local out = { type = "compaction" }
     for _, k in ipairs({
       "id",
@@ -1028,11 +1039,11 @@ local function to_disk_entry(m)
       end
     end
     if out.summary == nil then
-      out.summary = m.text or ""
+      out.summary = text or ""
     end
     return out
   end
-  if m.role == "branch-summary" then
+  if role == "branch-summary" then
     local out = { type = "branch_summary" }
     for _, k in ipairs({
       "id",
@@ -1048,7 +1059,7 @@ local function to_disk_entry(m)
       end
     end
     if out.summary == nil then
-      out.summary = m.text or ""
+      out.summary = text or ""
     end
     return out
   end
@@ -1059,6 +1070,25 @@ local function to_disk_entry(m)
     end
   end
   return out
+end
+
+-- Convert an in-memory (role, text, data) record into a v2 disk entry.
+local function to_disk_entry(m)
+  local body = prelude.safe_json_decode(m.data, nil)
+  if type(body) ~= "table" then
+    -- Legacy record without a structured body: synthesize one inline.
+    -- Must NOT stamp_entry here: save()/fork() invoke this formatter, and
+    -- mutating last_entry_id would corrupt the live in-memory chain.
+    body = {
+      id = prelude.uuid_short(),
+      timestamp = prelude.iso_timestamp(),
+      message = {
+        role = m.role or "user",
+        content = prelude.as_array({ text_block(m.text) }),
+      },
+    }
+  end
+  return disk_entry_from_body(m.role, m.text, body)
 end
 
 local function write_session_file(path, header, messages, count)
@@ -1185,6 +1215,8 @@ function reset_branch_tree()
   entry_by_id = {}
   children_by_parent = {}
   tracked_memory_count = 0
+  thinking_level_known = false
+  thinking_level_value = nil
 end
 
 local function reconcile_memory_entries()
@@ -1468,12 +1500,7 @@ track_memory_append = function(in_mem_role, text, body)
   if type(body) ~= "table" then
     return
   end
-  local entry = to_disk_entry({
-    role = in_mem_role,
-    text = text or "",
-    data = psi.json_encode(body),
-  })
-  register_file_entry(entry)
+  register_file_entry(disk_entry_from_body(in_mem_role, text or "", body))
   tracked_memory_count = psi.session_message_count()
 end
 
@@ -1519,6 +1546,10 @@ end
 local function rebuild_active_path()
   psi.session_clear()
   last_entry_id = nil
+  -- The rebuilt branch may not contain the previously cached
+  -- thinking_level_change; re-derive from the entries replayed below.
+  thinking_level_known = false
+  thinking_level_value = nil
   local active = active_entries_for_leaf(leaf_id)
   suppress_tree_tracking = true
   for _, entry in ipairs(active) do
