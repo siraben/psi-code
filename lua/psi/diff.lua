@@ -33,33 +33,40 @@ local function restore_line_endings(text, ending)
   return text or ""
 end
 
+-- Normalize CRLF/CR to LF. Returns the text plus a sorted array of the
+-- normalized indices of LFs that replaced CRLF pairs, or nil when the
+-- text has no "\r" (identity mapping).
 local function normalize_with_raw_map(text)
   text = text or ""
-  local normalized, raw_start, raw_end = {}, {}, {}
+  if not text:find("\r", 1, true) then
+    return text, nil
+  end
+  local crlf_lfs = {}
   local i = 1
-  while i <= #text do
-    local byte = text:byte(i)
-    if byte == 13 then
-      local next_i = i + 1
-      if text:byte(next_i) == 10 then
-        normalized[#normalized + 1] = "\n"
-        raw_start[#normalized] = i
-        raw_end[#normalized] = next_i
-        i = next_i + 1
-      else
-        normalized[#normalized + 1] = "\n"
-        raw_start[#normalized] = i
-        raw_end[#normalized] = i
-        i = i + 1
-      end
+  while true do
+    local cr = text:find("\r\n", i, true)
+    if not cr then
+      break
+    end
+    -- Normalized LF index = raw CR index minus CRLF pairs already seen.
+    crlf_lfs[#crlf_lfs + 1] = cr - #crlf_lfs
+    i = cr + 2
+  end
+  return normalize_to_lf(text), crlf_lfs
+end
+
+-- Number of entries in the sorted array `positions` that are <= n.
+local function count_le(positions, n)
+  local lo, hi = 1, #positions
+  while lo <= hi do
+    local mid = math.floor((lo + hi) / 2)
+    if positions[mid] <= n then
+      lo = mid + 1
     else
-      normalized[#normalized + 1] = text:sub(i, i)
-      raw_start[#normalized] = i
-      raw_end[#normalized] = i
-      i = i + 1
+      hi = mid - 1
     end
   end
-  return table.concat(normalized), raw_start, raw_end
+  return lo - 1
 end
 
 local function strip_bom(text)
@@ -70,16 +77,21 @@ local function strip_bom(text)
   return "", text
 end
 
+-- Returns count plus first-match start/end, saving a second find pass.
 local function count_occurrences(content, needle)
   if needle == "" then
     return 0
   end
   local count = 0
+  local first_start, first_end = nil, nil
   local start = 1
   while true do
     local i, j = content:find(needle, start, true)
     if not i then
-      return count
+      return count, first_start, first_end
+    end
+    if count == 0 then
+      first_start, first_end = i, j
     end
     count = count + 1
     start = j + 1
@@ -174,14 +186,13 @@ function M.apply_edits_to_normalized_content(normalized_content, edits, path)
 
   local matched = {}
   for i, edit in ipairs(normalized_edits) do
-    local count = count_occurrences(normalized_content, edit.oldText)
+    local count, start_index, end_index = count_occurrences(normalized_content, edit.oldText)
     if count == 0 then
       return nil, not_found_error(path, i - 1, #normalized_edits)
     end
     if count > 1 then
       return nil, duplicate_error(path, i - 1, #normalized_edits, count)
     end
-    local start_index, end_index = normalized_content:find(edit.oldText, 1, true)
     matched[#matched + 1] = {
       edit_index = i - 1,
       start_index = start_index,
@@ -228,17 +239,24 @@ end
 
 function M.apply_edits_to_text(raw_content, edits, path)
   local bom, content = strip_bom(raw_content or "")
-  local file_ending = detect_line_ending(content)
-  local normalized, raw_start, raw_end = normalize_with_raw_map(content)
+  local normalized, crlf_lfs = normalize_with_raw_map(content)
   local applied, err = M.apply_edits_to_normalized_content(normalized, edits, path)
   if not applied then
     return nil, err
   end
+  if crlf_lfs == nil then
+    applied.output = bom .. applied.newContent
+    return applied
+  end
+  local file_ending = detect_line_ending(content)
   local output = content
   for i = #(applied.matches or {}), 1, -1 do
     local match = applied.matches[i]
-    local first = raw_start[match.start_index] or (#content + 1)
-    local last = raw_end[match.start_index + match.match_length - 1] or (first - 1)
+    -- Raw start of normalized n = n + CRLF pairs strictly before it; the
+    -- raw end also covers the LF when n is a CRLF-derived LF.
+    local last_index = match.start_index + match.match_length - 1
+    local first = match.start_index + count_le(crlf_lfs, match.start_index - 1)
+    local last = last_index + count_le(crlf_lfs, last_index)
     local original = content:sub(first, last)
     local replacement_ending = original:find("[\r\n]") and detect_line_ending(original)
       or file_ending
@@ -299,9 +317,9 @@ local function lcs_ops(old_lines, new_lines)
   return ops
 end
 
-local function simple_ops(old_lines, new_lines)
-  local prefix = 0
+local function common_affixes(old_lines, new_lines)
   local limit = math.min(#old_lines, #new_lines)
+  local prefix = 0
   while prefix < limit and old_lines[prefix + 1] == new_lines[prefix + 1] do
     prefix = prefix + 1
   end
@@ -312,16 +330,40 @@ local function simple_ops(old_lines, new_lines)
   do
     suffix = suffix + 1
   end
+  return prefix, suffix
+end
+
+-- Diff two line arrays into +/-/= ops. Common prefix/suffix are trimmed
+-- before the O(n*m) LCS; middles over MAX_LCS_CELLS fall back to plain
+-- delete-then-insert ops.
+local function diff_ops(old_lines, new_lines)
+  local prefix, suffix = common_affixes(old_lines, new_lines)
+
+  local mid_old, mid_new = {}, {}
+  for i = prefix + 1, #old_lines - suffix do
+    mid_old[#mid_old + 1] = old_lines[i]
+  end
+  for i = prefix + 1, #new_lines - suffix do
+    mid_new[#mid_new + 1] = new_lines[i]
+  end
+
+  local middle = lcs_ops(mid_old, mid_new)
+  if not middle then
+    middle = {}
+    for _, line in ipairs(mid_old) do
+      middle[#middle + 1] = { tag = "-", line = line }
+    end
+    for _, line in ipairs(mid_new) do
+      middle[#middle + 1] = { tag = "+", line = line }
+    end
+  end
 
   local ops = {}
   for i = 1, prefix do
     ops[#ops + 1] = { tag = "=", line = old_lines[i] }
   end
-  for i = prefix + 1, #old_lines - suffix do
-    ops[#ops + 1] = { tag = "-", line = old_lines[i] }
-  end
-  for i = prefix + 1, #new_lines - suffix do
-    ops[#ops + 1] = { tag = "+", line = new_lines[i] }
+  for _, op in ipairs(middle) do
+    ops[#ops + 1] = op
   end
   for i = #old_lines - suffix + 1, #old_lines do
     ops[#ops + 1] = { tag = "=", line = old_lines[i] }
@@ -475,7 +517,7 @@ function M.generate_diff_string(old_content, new_content, context_lines)
   context_lines = math.max(0, math.floor(tonumber(context_lines) or DEFAULT_CONTEXT_LINES))
   local old_lines = split_lines(old_content or "")
   local new_lines = split_lines(new_content or "")
-  local raw_ops = lcs_ops(old_lines, new_lines) or simple_ops(old_lines, new_lines)
+  local raw_ops = diff_ops(old_lines, new_lines)
   local ops, first_changed_line = annotate_ops(raw_ops)
   local changes = collect_change_indices(ops)
   local output = {}

@@ -1,4 +1,4 @@
--- psi.tool_shell: POSIX shell quoting and command-result wrapping.
+-- psi.tool_shell: streaming command runners and command-result wrapping.
 
 local records = require("psi.records")
 local sched = require("psi.sched")
@@ -7,24 +7,6 @@ local platform = require("psi.platform")
 local prelude = require("psi.prelude")
 
 local M = {}
-
--- Wraps text in single quotes with '\'' escapes for embedded quotes.
-function M.quote(text)
-  if text == nil then
-    return "''"
-  end
-  local parts = { "'" }
-  for i = 1, #text do
-    local ch = text:sub(i, i)
-    if ch == "'" then
-      parts[#parts + 1] = "'\\''"
-    else
-      parts[#parts + 1] = ch
-    end
-  end
-  parts[#parts + 1] = "'"
-  return table.concat(parts)
-end
 
 -- ---------------------------------------------------------------------------
 -- Streaming runner. Drives process_begin / process_poll / process_finish
@@ -145,6 +127,7 @@ local function stream(handle, tool_call_id, opts, poll_fn)
   local temp_path = nil
   local temp_open_failed = false
   local last_progress_text = nil
+  local last_progress_ms = nil
 
   local function buffered_text()
     if buf_first > #buf then
@@ -230,11 +213,17 @@ local function stream(handle, tool_call_id, opts, poll_fn)
       end
       if psi.tool_progress ~= nil and tool_call_id ~= nil then
         if opts.progress == "truncated" then
-          local preview = truncate_for_mode(buffered_text(), opts)
-          local preview_text = preview.content or ""
-          if preview_text ~= last_progress_text then
-            psi.tool_progress(tool_call_id, progress_replace_payload(preview_text))
-            last_progress_text = preview_text
+          -- Recomputing the preview concatenates the whole rolling buffer;
+          -- throttle to one recompute per 200ms (the final one is exact).
+          local now = psi.time_ms ~= nil and psi.time_ms() or nil
+          if now == nil or last_progress_ms == nil or now - last_progress_ms >= 200 then
+            last_progress_ms = now
+            local preview = truncate_for_mode(buffered_text(), opts)
+            local preview_text = preview.content or ""
+            if preview_text ~= last_progress_text then
+              psi.tool_progress(tool_call_id, progress_replace_payload(preview_text))
+              last_progress_text = preview_text
+            end
           end
         else
           psi.tool_progress(tool_call_id, chunk)

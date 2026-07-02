@@ -43,7 +43,11 @@ CFLAGS        ?= -O2
 CPPFLAGS      ?=
 LDFLAGS       ?=
 RPATH_LDFLAGS ?=
-GIT_COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || printf unknown)
+# Simply-expanded so git runs once per make invocation, not once per
+# compiled object; the origin check preserves env/command-line overrides.
+ifeq ($(origin GIT_COMMIT), undefined)
+GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || printf unknown)
+endif
 
 # -Wno-long-long suppresses the C90-pedantic warning Lua forces
 # via lua_Integer being long long.
@@ -59,6 +63,9 @@ DEPFLAGS ?= -MMD -MP
 BUILD_DIR      = build
 TARGET         = $(BUILD_DIR)/psi
 LUA_BOOT_FILE ?= $(abspath lua/boot.lua)
+# Simply-expanded so curl-config runs once per make invocation.
+CURL_SSL_BACKENDS := $(shell curl-config --ssl-backends 2>/dev/null)
+CURL_CA_BUNDLE    := $(shell curl-config --ca 2>/dev/null)
 CA_BUNDLE_FILE ?= $(CURL_CA_BUNDLE)
 
 SOURCES := $(sort $(shell find src -name '*.c' 2>/dev/null))
@@ -105,7 +112,9 @@ LUA_PKG_CONFIG ?= lua5.5
 PKG_DEPS  = LUA:$(LUA_PKG_CONFIG) CJSON:libcjson CURL:libcurl ZLIB:zlib
 PKG_DEPS += $(if $(filter 1,$(REPL_EDITLINE)),EDIT:libedit)
 
-LOCAL_CPPFLAGS  = -Iinclude -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600 \
+# Simply-expanded (:=) so the pkg-config shells inside dep_cflags /
+# dep_libs run only once per make invocation.
+LOCAL_CPPFLAGS := -Iinclude -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600 \
                   -DPSI_LUA_BOOT_FILE=\"$(LUA_BOOT_FILE)\" \
                   -DPSI_GIT_COMMIT=\"$(GIT_COMMIT)\" \
                   -DPSI_ENABLE_TUI=$(TUI) \
@@ -118,15 +127,13 @@ LOCAL_CPPFLAGS += $(CA_BUNDLE_CPPFLAGS)
 LOCAL_CPPFLAGS += $(foreach d,$(PKG_DEPS),$(call dep_cflags,$(d)))
 LOCAL_CPPFLAGS += $(call pkg_cflags,ARGTABLE,argtable3)
 
-LOCAL_LDFLAGS  = $(foreach d,$(PKG_DEPS),$(call dep_libs,$(d)))
+LOCAL_LDFLAGS := $(foreach d,$(PKG_DEPS),$(call dep_libs,$(d)))
 # argtable3 isn't always packaged with pkg-config; fall back to -largtable3.
 LOCAL_LDFLAGS += $(if $(PSI_LIBS_ARGTABLE),$(PSI_LIBS_ARGTABLE),$(or $(call pkg_libs,ARGTABLE,argtable3),-largtable3))
 LOCAL_LDFLAGS += $(if $(PSI_LIBS_PTHREAD),$(PSI_LIBS_PTHREAD),-lpthread)
 
 comma := ,
-LOCAL_RPATH_LDFLAGS = $(patsubst -L%,-Wl$(comma)-rpath$(comma)%,$(filter -L%,$(LOCAL_LDFLAGS)))
-CURL_SSL_BACKENDS   = $(shell curl-config --ssl-backends 2>/dev/null)
-CURL_CA_BUNDLE      = $(shell curl-config --ca 2>/dev/null)
+LOCAL_RPATH_LDFLAGS := $(patsubst -L%,-Wl$(comma)-rpath$(comma)%,$(filter -L%,$(LOCAL_LDFLAGS)))
 
 # Cross builds: HOST_* vars must point at the build host's zlib so
 # the embed helper doesn't link against the target arch's libs.

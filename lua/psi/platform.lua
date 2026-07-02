@@ -33,7 +33,7 @@ local function runtime_cwd()
   return nil
 end
 
-function M.is_windows()
+local function detect_windows()
   if os.getenv("OS") == "Windows_NT" then
     return true
   end
@@ -46,6 +46,17 @@ function M.is_windows()
   end
   cwd = cwd or ""
   return cwd:match("^/[A-Za-z]/") ~= nil
+end
+
+-- The host shape can't change mid-process; memoize the detection so
+-- hot paths (shell_argv, path mapping) don't re-read the environment.
+local is_windows_cached = nil
+
+function M.is_windows()
+  if is_windows_cached == nil then
+    is_windows_cached = detect_windows()
+  end
+  return is_windows_cached
 end
 
 function M.windows_ansi_supported()

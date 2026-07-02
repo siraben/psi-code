@@ -8,44 +8,13 @@ local image_policy = require("psi.image_policy")
 local mime = require("psi.mime")
 local text_decode = require("psi.text_decode")
 local truncate = require("psi.truncate")
+local base64 = require("psi.base64")
 
-local BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 local TEXT_READ_MAX_BYTES = truncate.DEFAULT_MAX_BYTES
 local INLINE_IMAGE_BASE64_LIMIT_BYTES = 4718592
 local INLINE_IMAGE_RAW_LIMIT_BYTES = math.floor(INLINE_IMAGE_BASE64_LIMIT_BYTES * 3 / 4)
 local NON_VISION_IMAGE_NOTE =
   "[Current model does not support images. The image will be omitted from this request.]"
-
-local function byte_at(text, index)
-  return text:byte(index, index) or 0
-end
-
-local function base64_char(index)
-  return BASE64_ALPHABET:sub(index + 1, index + 1)
-end
-
-local function base64_encode(text)
-  text = tostring(text or "")
-  local out = {}
-  local out_index = 0
-  for index = 1, #text, 3 do
-    local first = byte_at(text, index)
-    local second = byte_at(text, index + 1)
-    local third = byte_at(text, index + 2)
-    local triple = (first << 16) | (second << 8) | third
-    local remaining = #text - index + 1
-
-    out_index = out_index + 1
-    out[out_index] = base64_char((triple >> 18) & 0x3f)
-    out_index = out_index + 1
-    out[out_index] = base64_char((triple >> 12) & 0x3f)
-    out_index = out_index + 1
-    out[out_index] = remaining >= 2 and base64_char((triple >> 6) & 0x3f) or "="
-    out_index = out_index + 1
-    out[out_index] = remaining >= 3 and base64_char(triple & 0x3f) or "="
-  end
-  return table.concat(out)
-end
 
 local function byte_preview(bytes)
   local hex = {}
@@ -222,7 +191,7 @@ local function impl(input, meta)
       local content = { { type = "text", text = text } }
       local omitted = nil
       if type(data) == "string" then
-        content[#content + 1] = { type = "image", data = base64_encode(data), mimeType = mime_type }
+        content[#content + 1] = { type = "image", data = base64.encode(data), mimeType = mime_type }
       else
         omitted = "image exceeds psi inline image limit ("
           .. image_read_limit_text()

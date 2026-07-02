@@ -1,6 +1,7 @@
 -- psi.clipboard: shared clipboard backends for slash commands and TUI.
 
 local settings = require("psi.settings_manager")
+local base64 = require("psi.base64")
 
 local M = {}
 
@@ -22,8 +23,6 @@ local ST = ESC .. "\\"
 local OSC52_PREFIX = ESC .. "]52;"
 local TMUX_DCS_PREFIX = ESC .. "Ptmux;" .. ESC
 local TMUX_DCS_SUFFIX = ST
-
-local BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 local CLIPBOARD_CMDS = {
   { name = "xclip", cmd = "xclip -selection clipboard" },
@@ -56,36 +55,7 @@ local function tmux_passthrough()
   return settings.get(CONFIG_TMUX_PASSTHROUGH, DEFAULT_TMUX_PASSTHROUGH) ~= false
 end
 
-local function byte_at(text, index)
-  return text:byte(index, index) or 0
-end
-
-local function base64_char(index)
-  return BASE64_ALPHABET:sub(index + 1, index + 1)
-end
-
-function M.base64_encode(text)
-  text = tostring(text or "")
-  local out = {}
-  local out_index = 0
-  for index = 1, #text, 3 do
-    local first = byte_at(text, index)
-    local second = byte_at(text, index + 1)
-    local third = byte_at(text, index + 2)
-    local triple = (first << 16) | (second << 8) | third
-    local remaining = #text - index + 1
-
-    out_index = out_index + 1
-    out[out_index] = base64_char((triple >> 18) & 0x3f)
-    out_index = out_index + 1
-    out[out_index] = base64_char((triple >> 12) & 0x3f)
-    out_index = out_index + 1
-    out[out_index] = remaining >= 2 and base64_char((triple >> 6) & 0x3f) or "="
-    out_index = out_index + 1
-    out[out_index] = remaining >= 3 and base64_char(triple & 0x3f) or "="
-  end
-  return table.concat(out)
-end
+M.base64_encode = base64.encode
 
 local function osc52_sequence_from_encoded(encoded, env)
   env = type(env) == "table" and env or {}

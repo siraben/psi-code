@@ -350,13 +350,12 @@ function M.definitions()
   return out
 end
 
+local EMPTY_KEYS = {}
+
+-- Returns the resolved key list for `id`. The returned table is the
+-- shared resolved list; callers must not mutate it.
 function M.keys(id)
-  local keys = ensure_resolved()[id] or {}
-  local out = {}
-  for i, key in ipairs(keys) do
-    out[i] = key
-  end
-  return out
+  return ensure_resolved()[id] or EMPTY_KEYS
 end
 
 function M.resolved()
