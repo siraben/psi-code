@@ -128,6 +128,18 @@ local function normalize_offset(value)
   return value
 end
 
+local function normalize_byte_offset(value)
+  value = tonumber(value)
+  if value == nil then
+    return 0
+  end
+  value = math.floor(value)
+  if value < 0 then
+    return 0
+  end
+  return value
+end
+
 local function to_public_slice(slice, public_offset)
   if type(slice) ~= "table" then
     return slice
@@ -155,7 +167,7 @@ local function impl(input, meta)
   local kind = psi.file_type and psi.file_type(resolved) or nil
   if kind == "file" then
     if mode == "bytes" or mode == "binary" then
-      local byte_slice = psi.read_file_bytes(resolved, offset, limit)
+      local byte_slice = psi.read_file_bytes(resolved, normalize_byte_offset(input.offset), limit)
       if type(byte_slice) == "table" and type(byte_slice.bytes) == "string" then
         local text = byte_preview(byte_slice.bytes)
         if byte_slice.truncated then
