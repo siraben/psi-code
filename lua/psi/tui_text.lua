@@ -565,14 +565,15 @@ function M.wrap_ansi(text, width, opts)
     -- pi's wrapTextWithAnsi and the native psi_vm_text_wrap_flush_word.
     if pending_space ~= nil then
       local space_width = pending_space_width > 0 and pending_space_width or 1
-      if line_width == 0 and soft_wrapped then
-        -- Suppress leading whitespace on a soft-wrapped line.
-      elseif line_width > 0 and line_width + space_width + word_width > width then
-        emit_line()
-        soft_wrapped = true
-      else
-        line[#line + 1] = string.rep(" ", space_width)
-        line_width = line_width + space_width
+      local suppress_leading = line_width == 0 and soft_wrapped
+      if not suppress_leading then
+        if line_width > 0 and line_width + space_width + word_width > width then
+          emit_line()
+          soft_wrapped = true
+        else
+          line[#line + 1] = string.rep(" ", space_width)
+          line_width = line_width + space_width
+        end
       end
     end
     pending_space = nil
