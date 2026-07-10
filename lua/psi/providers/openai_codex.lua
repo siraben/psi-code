@@ -618,6 +618,13 @@ local function complete_text_request_body(opts, model)
   return body
 end
 
+-- Mirrors pi's hasConfiguredAuth; consulted by the resolver before
+-- falling back to this provider so an unconfigured codex login does not
+-- get selected and print an OAuth error (psi.api_registry.provider_has_auth).
+function M.has_auth()
+  return auth.has_credentials and auth.has_credentials() or false
+end
+
 function M.run_turn(opts)
   local creds, err = auth.credentials()
   if not creds then

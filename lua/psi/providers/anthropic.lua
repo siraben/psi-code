@@ -684,6 +684,25 @@ function M.complete_text(opts)
   return true, table.concat(text_parts)
 end
 
+-- ---------- Auth availability ----------
+--
+-- Mirrors pi's ModelRegistry.hasConfiguredAuth: the resolver consults
+-- this before falling back to a provider so we never silently route to
+-- (and print auth errors from) a provider the user has not configured.
+function M.has_auth()
+  local api_key = os.getenv("ANTHROPIC_API_KEY")
+  if api_key and api_key ~= "" then
+    return true
+  end
+  if psi.amiga_bridge_api_key then
+    local bridge = psi.amiga_bridge_api_key()
+    if bridge and bridge ~= "" then
+      return true
+    end
+  end
+  return false
+end
+
 -- ---------- Agent turn (streaming + tool loop) ----------
 
 function M.run_turn(opts)

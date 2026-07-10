@@ -316,6 +316,37 @@ function M.resolve_model(provider_name, requested)
   return env(p.model_env, p.default_model)
 end
 
+-- Order in which implicit fallbacks are preferred when no authenticated
+-- default is available. Mirrors the spirit of pi's defaultModelPerProvider
+-- iteration (first known provider with configured auth wins).
+--
+-- ollama is deliberately excluded: it is a local, credential-less provider
+-- whose has_auth() is always true, so including it here would make it the
+-- silent default in an otherwise-unconfigured environment. It remains fully
+-- usable via an explicit "ollama/..." model or defaults.provider = ollama.
+local FALLBACK_PROVIDER_ORDER = { "anthropic", "openai-codex", "openrouter" }
+
+local function first_authenticated_provider()
+  for _, name in ipairs(FALLBACK_PROVIDER_ORDER) do
+    if providers[name] and M.provider_has_auth(name) then
+      return providers[name]
+    end
+  end
+  -- No cloud provider has configured auth. Keep anthropic as the
+  -- deterministic hard default (matching prior behaviour and the resulting
+  -- "ANTHROPIC_API_KEY is not set" guidance) rather than returning nil.
+  return providers.anthropic
+end
+
+-- Resolve a model string to (provider_spec, model_rest).
+--
+-- Explicit selections are always honoured verbatim: a "provider/model"
+-- prefix, or $PSI_PROVIDER, or a settings default whose provider has
+-- configured auth. When only an *implicit* fallback is left (empty model
+-- and no authenticated default), we pick the first provider that has
+-- credentials instead of blindly routing to settings.defaults.provider.
+-- This is what stops an Anthropic session from emitting openai-codex
+-- OAuth errors on background/default resolution paths.
 function M.resolve_route(model)
   if type(model) == "string" then
     local provider_name, rest = model:match("^([^/]+)/(.+)$")
@@ -336,12 +367,15 @@ function M.resolve_route(model)
       return M.resolve_route(configured_model)
     end
     local configured_provider = settings.get("defaults.provider", nil)
-    if providers[configured_provider] then
+    -- Honour the configured default provider only when it actually has
+    -- credentials; otherwise fall through to an authenticated provider so
+    -- we don't select (and print auth errors from) an unconfigured one.
+    if providers[configured_provider] and M.provider_has_auth(configured_provider) then
       return providers[configured_provider], model
     end
   end
 
-  return providers.anthropic, model
+  return first_authenticated_provider(), model
 end
 
 function M.resolve_descriptor(model)
@@ -374,6 +408,27 @@ function M.load_api(api_name)
     return nil
   end
   return require(spec.module)
+end
+
+-- Auth gate, ported from pi's ModelRegistry.hasConfiguredAuth: report
+-- whether a provider has credentials configured. Providers expose an
+-- optional has_auth(); if absent we assume true (no credential needed).
+-- Loading a provider module or calling has_auth must never throw here --
+-- the resolver relies on this being side-effect-free and total.
+function M.provider_has_auth(provider_name)
+  local spec = providers[provider_name]
+  if not spec then
+    return false
+  end
+  local ok, mod = pcall(M.load_api, spec.api)
+  if not ok or type(mod) ~= "table" then
+    return false
+  end
+  if type(mod.has_auth) ~= "function" then
+    return true
+  end
+  local ok_call, result = pcall(mod.has_auth)
+  return ok_call and result == true
 end
 
 return M

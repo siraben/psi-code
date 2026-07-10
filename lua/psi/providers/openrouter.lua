@@ -296,6 +296,13 @@ local function check_api_key()
   return true
 end
 
+-- Mirrors pi's hasConfiguredAuth; consulted by the resolver before
+-- falling back to this provider (see psi.api_registry.provider_has_auth).
+function M.has_auth()
+  local key = os.getenv(API_KEY_ENV)
+  return key ~= nil and key ~= ""
+end
+
 function M.run_turn(opts)
   local ok, err = check_api_key()
   if not ok then

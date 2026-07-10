@@ -367,6 +367,14 @@ function M.credentials()
   return M.ensure_fresh(entry)
 end
 
+-- Cheap presence check: is there a stored oauth credential at all?
+-- Deliberately does NOT trigger a token refresh (no network), so it is
+-- safe to call from the model resolver's auth gate.
+function M.has_credentials()
+  local entry = auth_storage.get(PROVIDER)
+  return type(entry) == "table" and entry.type == "oauth" and type(entry.refresh) == "string"
+end
+
 function M.login_with_input(input, flow)
   flow = flow or pending_flow
   if type(flow) ~= "table" or type(flow.verifier) ~= "string" then

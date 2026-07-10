@@ -193,6 +193,12 @@ end
 
 -- ---------- Public entry points ----------
 
+-- Ollama is a local server and needs no credentials, so it is always
+-- considered authenticated for the resolver's auth gate.
+function M.has_auth()
+  return true
+end
+
 function M.run_turn(opts)
   local model = resolve_model(opts.model)
   return compat.run_turn({
