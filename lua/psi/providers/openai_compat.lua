@@ -44,6 +44,7 @@ local transform = require("psi.transform_messages")
 local image_policy = require("psi.image_policy")
 local tools = require("psi.tools")
 local session_mod = require("psi.session_manager")
+local notice = require("psi.notice")
 
 local M = {}
 
@@ -364,19 +365,19 @@ function M.complete_text(opts, cfg)
     http_post_text(cfg.url, cfg.headers, psi.json_encode(body), opts.abort_check)
   if status == nil then
     local msg = cfg.provider_name .. ": http post failed: " .. tostring(response)
-    io.stderr:write(msg .. "\n")
+    notice.error(msg)
     return false, msg
   end
   if status < 200 or status >= 300 then
     local msg = M.classify_http_error(status, tostring(response or ""), cfg.provider_name)
-    io.stderr:write(msg .. "\n")
+    notice.error(msg)
     return false, msg
   end
 
   local parsed = safe_decode(response)
   if type(parsed) ~= "table" then
     local msg = cfg.provider_name .. ": malformed JSON response"
-    io.stderr:write(msg .. "\n")
+    notice.error(msg)
     return false, msg
   end
   return true, cfg.extract_completion(parsed)

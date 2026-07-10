@@ -4303,6 +4303,25 @@ function M.run(opts)
   state.layout_mode = layout_mode
   rebuild_from_session(state)
 
+  -- Direct provider writes corrupt the alt-screen paint; this subscriber
+  -- also disables psi.notice's io.stderr fallback while the TUI runs.
+  if psi.events and psi.events.on then
+    psi.events.on("notice", function(payload)
+      if type(payload) ~= "table" then
+        return
+      end
+      local text = tostring(payload.text or "")
+      if text == "" then
+        return
+      end
+      local is_error = payload.level == "error" or payload.level == "warn"
+      add_entry(state, is_error and "error" or "info", text)
+      if state.running then
+        redraw(state)
+      end
+    end)
+  end
+
   local success, runtime_err = xpcall(function()
     psi.tui_set_tick_handler(function()
       tick(state)

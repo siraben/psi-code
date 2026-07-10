@@ -12,6 +12,7 @@
 local compat = require("psi.providers.openai_compat")
 local prelude = require("psi.prelude")
 local stream_parser = require("psi.stream_parser")
+local notice = require("psi.notice")
 
 local M = {}
 
@@ -300,7 +301,7 @@ local function check_api_key()
   local key = os.getenv(API_KEY_ENV)
   if not key or key == "" then
     local msg = API_KEY_ENV .. " is not set"
-    io.stderr:write(msg .. "\n")
+    notice.error(msg)
     return false, msg
   end
   return true
