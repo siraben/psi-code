@@ -11,6 +11,7 @@ local current_name = nil
 local current_theme = nil
 
 local DEFAULT_THEME_NAME = "pi-dark"
+local LIGHT_THEME_NAME = "pi-light"
 local TUI_SLOTS = {
   "header",
   "accent",
@@ -31,7 +32,7 @@ local DEFAULT_THEME = {
     ["33"] = "38;2;255;255;0", -- warning/yellow #ffff00
     ["34"] = "38;2;95;135;255", -- border/blue #5f87ff
     ["36"] = "38;2;138;190;183", -- accent #8abeb7
-    ["37"] = "37", -- pi text is default fg; keep white-ish ANSI fallback
+    ["37"] = "38;2;212;212;212", -- pi text #d4d4d4
     ["90"] = "38;2;102;102;102", -- dimGray #666666
     ["96"] = "38;2;0;215;255", -- cyan #00d7ff
     ["1;36"] = "1;38;2;138;190;183",
@@ -55,6 +56,45 @@ local DEFAULT_THEME = {
     success = { fg = 150, bg = 234 },
     error = { fg = 174, bg = 234 },
     chrome = { fg = 244, bg = 234 },
+  },
+}
+
+-- pi-mono light theme, translated to SGR. Mirrors
+-- /root/pi-mono/packages/coding-agent/src/modes/interactive/theme/light.json
+-- The tool background tints are deliberately pale so that the dark
+-- toolTitle/text stays legible; the dark theme uses the inverse.
+local LIGHT_THEME = {
+  ansi = {
+    ["2"] = "38;2;118;118;118", -- dim / dimGray #767676
+    ["31"] = "38;2;170;85;85", -- error/red #aa5555
+    ["32"] = "38;2;88;132;88", -- success/green #588458
+    ["33"] = "38;2;154;115;38", -- warning/yellow #9a7326
+    ["34"] = "38;2;84;125;167", -- border/blue #547da7
+    ["36"] = "38;2;90;128;128", -- accent/teal #5a8080
+    ["37"] = "38;2;31;35;40", -- text #1f2328
+    ["90"] = "38;2;118;118;118", -- dimGray #767676
+    ["96"] = "38;2;90;128;128", -- borderAccent/teal #5a8080
+    ["1;36"] = "1;38;2;90;128;128",
+    ["38;5;242"] = "38;2;108;108;108", -- toolOutput/mediumGray #6c6c6c
+    ["38;5;245"] = "38;2;108;108;108",
+    ["38;5;81"] = "38;2;90;128;128",
+    ["38;5;108"] = "38;2;88;132;88",
+    ["38;5;174"] = "38;2;170;85;85",
+    ["38;5;221"] = "38;2;154;115;38",
+    ["48;5;236"] = "48;2;232;232;240", -- toolPendingBg #e8e8f0
+    ["48;5;22"] = "48;2;232;240;232", -- toolSuccessBg #e8f0e8
+    ["48;5;52"] = "48;2;240;232;232", -- toolErrorBg #f0e8e8
+    ["48;5;237"] = "48;2;208;208;224", -- selectedBg #d0d0e0
+    ["48;5;238"] = "48;2;232;232;232", -- userMsgBg #e8e8e8
+  },
+  tui = {
+    header = { fg = 25, bg = 255 },
+    accent = { fg = 30, bg = 255 },
+    text = { fg = 235, bg = 255 },
+    warning = { fg = 136, bg = 255 },
+    success = { fg = 65, bg = 255 },
+    error = { fg = 131, bg = 255 },
+    chrome = { fg = 243, bg = 255 },
   },
 }
 
@@ -126,6 +166,40 @@ local function configured_name()
   return nil
 end
 
+-- Detect whether the terminal has a light or dark background so the
+-- default theme can flip, mirroring pi's COLORFGBG-based detection
+-- (packages/coding-agent/.../theme.ts detectTerminalBackgroundFromEnv).
+-- Returns "light", "dark", or nil when there is no reliable hint.
+local function detect_terminal_theme()
+  local force = os.getenv("PSI_THEME_BACKGROUND")
+  if force == "light" or force == "dark" then
+    return force
+  end
+  local colorfgbg = os.getenv("COLORFGBG")
+  if type(colorfgbg) == "string" and colorfgbg ~= "" then
+    local bg = nil
+    for part in colorfgbg:gmatch("[^;]+") do
+      local n = tonumber((part:gsub("%s", "")))
+      if n and n >= 0 and n <= 255 then
+        bg = n
+      end
+    end
+    if bg ~= nil then
+      -- ANSI base indices 0-6 and 8 are dark; 7 and 15 (and other
+      -- high-luminance indices) are light backgrounds.
+      if bg == 7 or bg == 15 or bg >= 231 then
+        return "light"
+      end
+      return "dark"
+    end
+  end
+  return nil
+end
+
+local function default_theme_name()
+  return detect_terminal_theme() == "light" and LIGHT_THEME_NAME or DEFAULT_THEME_NAME
+end
+
 local function apply(theme)
   ansi.set_code_map(theme.ansi or {})
 end
@@ -194,11 +268,12 @@ function M.apply_configured(opts)
     apply(current_theme)
     return true
   end
-  return M.use(DEFAULT_THEME_NAME)
+  return M.use(default_theme_name())
 end
 
 function M.bootstrap()
   M.register(DEFAULT_THEME_NAME, DEFAULT_THEME)
+  M.register(LIGHT_THEME_NAME, LIGHT_THEME)
   return M.apply_configured()
 end
 

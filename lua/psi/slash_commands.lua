@@ -117,6 +117,30 @@ local function cmd_thinking(rest)
   return records.new_command_action("set-thinking", level)
 end
 
+-- /theme lists the registered themes or switches the active one. This
+-- mirrors pi's /theme command; psi ships pi-dark and pi-light.
+local function cmd_theme(rest)
+  local name = (rest or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  local available = {}
+  if psi.theme and psi.theme.names then
+    local ok, names = pcall(psi.theme.names)
+    if ok and type(names) == "table" then
+      available = names
+    end
+  end
+  if name == "" then
+    local current = psi.theme and psi.theme.current_name and psi.theme.current_name() or "?"
+    local lines = { "active theme: " .. tostring(current), "", "available themes:" }
+    for _, n in ipairs(available) do
+      lines[#lines + 1] = (n == current and "* " or "  ") .. n
+    end
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "usage: /theme <name>"
+    return records.new_command_action("print", table.concat(lines, "\n"))
+  end
+  return records.new_command_action("set-theme", name)
+end
+
 local function copy_auth_url(url)
   local copied = clipboard.write_osc52(url, { source = "openai-codex-login" })
   return copied and true or false
@@ -818,6 +842,11 @@ local BUILTIN_COMMANDS = {
     description = "Set reasoning level",
   },
   {
+    name = "theme",
+    argument_hint = "[name]",
+    description = "List or switch the color theme",
+  },
+  {
     name = "login",
     argument_hint = "<provider>",
     description = "Authenticate an OAuth provider",
@@ -1191,6 +1220,9 @@ function M.handle(line)
   end
   if starts_word(line, "/thinking") then
     return cmd_thinking(arg_after(line, "/thinking"))
+  end
+  if starts_word(line, "/theme") then
+    return cmd_theme(arg_after(line, "/theme"))
   end
   if starts_word(line, "/login") then
     local provider, input = split_first_word(arg_after(line, "/login"))

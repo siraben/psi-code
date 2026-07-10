@@ -3539,6 +3539,21 @@ local function handle_command(state, line)
     return true
   end
 
+  if action.kind == "set-theme" then
+    local ok, err = false, "theme unavailable"
+    if psi.theme and psi.theme.use then
+      ok, err = psi.theme.use(action.payload)
+    end
+    if not ok then
+      set_status(state, "theme: " .. tostring(err or "unknown theme"), true)
+      return true
+    end
+    add_entry(state, "info", "theme set to " .. tostring(action.payload))
+    state.dirty = true
+    set_status(state, "", false)
+    return true
+  end
+
   if action.kind == "resume" then
     local ok, err = session.load(action.payload)
     if not ok then
