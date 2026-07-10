@@ -1670,21 +1670,23 @@ local function add_session_entry(state, msg)
   end
 end
 
-local function rebuild_from_session(state)
+local function rebuild_from_session(state, messages)
   state.entries = {}
   state.streaming_assistant_index = nil
   state.streaming_thinking_index = nil
   state.show_thinking = tui.show_thinking() == "1"
   invalidate_render_totals(state)
-  for _, msg in ipairs(session.messages()) do
+  for _, msg in ipairs(messages or session.messages()) do
     add_session_entry(state, msg)
   end
-  history_seed_from_session(state)
+  if messages == nil then
+    history_seed_from_session(state)
+  end
   state.scroll_offset = 0
   state.chat_committed_entry_count = 0
-  state.chat_first_paint = false
-  state.chat_live_rows = 0
-  state.chat_cursor_offset = 0
+  -- Keep the previous live-region anchor until chat.redraw erases it.  A
+  -- reset here makes the next redraw clear from the input cursor instead,
+  -- leaving the old input border above resumed session output.
   state.dirty = true
 end
 
@@ -5162,6 +5164,8 @@ function M._debug_chat_redraw_sequence(steps)
         state.input = step.text or ""
         state.cursor = #state.input
         state.dirty = true
+      elseif step.kind == "rebuild" then
+        rebuild_from_session(state, step.entries or {})
       end
       writes = {}
       chat.redraw(state)
