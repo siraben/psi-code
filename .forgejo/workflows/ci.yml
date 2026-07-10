@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     branches:
-      - "**"
+      - master
   pull_request:
 
 concurrency:
@@ -24,6 +24,10 @@ env:
   # composite action can't help here either: its action.yml lives in the repo.
   FETCH_SCRIPT: |
     token="${FORGEJO_TOKEN:-$GITHUB_TOKEN}"
+    # Forgejo's docker runner can reuse the mounted workspace across jobs.
+    # Start from an empty checkout area so old .git state and untracked build
+    # artifacts cannot leak into a later run.
+    find . -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
     git init .
     git remote add origin "${FORGEJO_CI_URL%/}/${FORGEJO_CI_REPOSITORY}"
     fetch_ref() {
@@ -117,6 +121,7 @@ jobs:
     needs: [format, style]
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
         include:
           - name: default
@@ -155,6 +160,7 @@ jobs:
     needs: [format, style]
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
         include:
           - name: glibc
@@ -190,6 +196,7 @@ jobs:
     needs: [format, style]
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
         include:
           - name: gcc
