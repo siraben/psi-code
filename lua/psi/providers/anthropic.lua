@@ -667,9 +667,7 @@ function M.complete_text(opts)
     return false
   end
   if status < 200 or status >= 300 then
-    notice.error(
-      "Anthropic API request failed (" .. tostring(status) .. "): " .. (body or "")
-    )
+    notice.error("Anthropic API request failed (" .. tostring(status) .. "): " .. (body or ""))
     return false
   end
   local parsed = safe_decode(body)
