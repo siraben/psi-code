@@ -1108,6 +1108,8 @@ struct psi_vm_text_wrap_context {
     int line_width;
     int word_width;
     int pending_space;
+    int pending_space_width;
+    int soft_wrapped;
     int width;
     int active_underline;
     int active_hyperlink_terminator;
@@ -1597,6 +1599,8 @@ static void psi_vm_text_wrap_context_init(
     ctx->line_width = 0;
     ctx->word_width = 0;
     ctx->pending_space = 0;
+    ctx->pending_space_width = 0;
+    ctx->soft_wrapped = 0;
     ctx->width = width;
     ctx->active_underline = 0;
     ctx->active_hyperlink_terminator = 0;
@@ -1661,11 +1665,13 @@ static int psi_vm_text_wrap_append_piece(
             return 0;
         }
         ctx->line_width = 0;
+        ctx->soft_wrapped = 1;
     }
     if (!psi_vm_text_builder_append(&ctx->line, piece, piece_len)) {
         return 0;
     }
     ctx->line_width += piece_width;
+    ctx->soft_wrapped = 0;
     return 1;
 }
 
@@ -1673,19 +1679,36 @@ static int psi_vm_text_wrap_flush_word(struct psi_vm_text_wrap_context *ctx) {
     if (ctx->word.len == 0u) {
         return 1;
     }
-    if (ctx->pending_space && ctx->line_width > 0 &&
-        ctx->line_width + 1 + ctx->word_width <= ctx->width) {
-        if (!psi_vm_text_builder_append_char(&ctx->line, (char)PSI_VM_TEXT_SPACE_BYTE)) {
-            return 0;
+    if (ctx->pending_space) {
+        /* Preserve the full whitespace run so indentation is not collapsed.
+         * Mirrors pi's wrapTextWithAnsi: whitespace is kept verbatim except
+         * when it would begin a soft-wrapped continuation line, where it is
+         * dropped ("don't start new line with whitespace"). A whitespace run
+         * at the true start of a source line (line_width == 0 and not
+         * soft-wrapped) is retained as leading indentation. */
+        int space_width = ctx->pending_space_width > 0 ? ctx->pending_space_width : 1;
+        if (ctx->line_width == 0 && ctx->soft_wrapped) {
+            /* Suppress leading whitespace on a soft-wrapped line. */
+        } else if (ctx->line_width > 0 &&
+            ctx->line_width + space_width + ctx->word_width > ctx->width) {
+            /* Space plus the following word overflows: wrap instead. */
+            if (!psi_vm_text_wrap_push_line(ctx, 0)) {
+                return 0;
+            }
+            ctx->line_width = 0;
+            ctx->soft_wrapped = 1;
+        } else {
+            int k;
+            for (k = 0; k < space_width; k++) {
+                if (!psi_vm_text_builder_append_char(&ctx->line, (char)PSI_VM_TEXT_SPACE_BYTE)) {
+                    return 0;
+                }
+            }
+            ctx->line_width += space_width;
         }
-        ctx->line_width++;
-    } else if (ctx->pending_space && ctx->line_width > 0) {
-        if (!psi_vm_text_wrap_push_line(ctx, 0)) {
-            return 0;
-        }
-        ctx->line_width = 0;
     }
     ctx->pending_space = 0;
+    ctx->pending_space_width = 0;
 
     if (ctx->word_width <= ctx->width) {
         if (!psi_vm_text_wrap_append_piece(ctx, ctx->word.data, ctx->word.len, ctx->word_width)) {
@@ -1899,11 +1922,19 @@ static int lfn_tui_text_wrap_ansi(lua_State *L) {
                     ok = psi_vm_text_wrap_flush_word(&wrap) && psi_vm_text_wrap_push_line(&wrap, 0);
                     wrap.line_width = 0;
                     wrap.pending_space = 0;
+                    wrap.pending_space_width = 0;
+                    /* A hard newline starts a fresh source line, so leading
+                     * whitespace on it must be preserved (not treated as a
+                     * soft-wrap continuation). */
+                    wrap.soft_wrapped = 0;
                 } else if ((unsigned char)text[i] == PSI_VM_TEXT_SPACE_BYTE ||
                     (unsigned char)text[i] == PSI_VM_TEXT_TAB_BYTE) {
                     psi_vm_text_next_cluster(text, len, i, &next_i, &cluster_width);
                     ok = psi_vm_text_wrap_flush_word(&wrap);
+                    /* Accumulate the actual whitespace width so runs of
+                     * spaces/tabs are preserved rather than collapsed to one. */
                     wrap.pending_space = 1;
+                    wrap.pending_space_width += cluster_width > 0 ? cluster_width : 1;
                 } else {
                     psi_vm_text_next_cluster(text, len, i, &next_i, &cluster_width);
                     ok = psi_vm_text_builder_append(&wrap.word, text + i, next_i - i);

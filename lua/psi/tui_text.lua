@@ -502,6 +502,8 @@ function M.wrap_ansi(text, width, opts)
   local word = {}
   local word_width = 0
   local pending_space = nil
+  local pending_space_width = 0
+  local soft_wrapped = false
 
   local function emit_line()
     local rendered = table.concat(line)
@@ -525,9 +527,11 @@ function M.wrap_ansi(text, width, opts)
     end
     if line_width > 0 and line_width + piece_width > width then
       emit_line()
+      soft_wrapped = true
     end
     line[#line + 1] = piece
     line_width = line_width + piece_width
+    soft_wrapped = false
   end
 
   if opts.preserve_whitespace then
@@ -555,13 +559,24 @@ function M.wrap_ansi(text, width, opts)
       return
     end
     local word_text = table.concat(word)
-    if pending_space ~= nil and line_width > 0 and line_width + 1 + word_width <= width then
-      line[#line + 1] = pending_space
-      line_width = line_width + 1
-    elseif pending_space ~= nil and line_width > 0 then
-      emit_line()
+    -- Preserve the full whitespace run so indentation is not collapsed, and
+    -- keep leading whitespace at the start of a source line. Only suppress
+    -- whitespace that would begin a soft-wrapped continuation line. Mirrors
+    -- pi's wrapTextWithAnsi and the native psi_vm_text_wrap_flush_word.
+    if pending_space ~= nil then
+      local space_width = pending_space_width > 0 and pending_space_width or 1
+      if line_width == 0 and soft_wrapped then
+        -- Suppress leading whitespace on a soft-wrapped line.
+      elseif line_width > 0 and line_width + space_width + word_width > width then
+        emit_line()
+        soft_wrapped = true
+      else
+        line[#line + 1] = string.rep(" ", space_width)
+        line_width = line_width + space_width
+      end
     end
     pending_space = nil
+    pending_space_width = 0
     if word_width <= width then
       append_piece(word_text, word_width)
       update_active_from_text(active, word_text)
@@ -596,9 +611,12 @@ function M.wrap_ansi(text, width, opts)
         flush_word()
         emit_line()
         pending_space = nil
+        pending_space_width = 0
+        soft_wrapped = false
       elseif is_space_cluster(cluster) then
         flush_word()
         pending_space = " "
+        pending_space_width = pending_space_width + (cluster_width > 0 and cluster_width or 1)
       else
         word[#word + 1] = cluster
         word_width = word_width + cluster_width
