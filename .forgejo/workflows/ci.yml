@@ -34,9 +34,21 @@ env:
         GIT_TERMINAL_PROMPT=0 git fetch --quiet --depth=1 origin "$1"
       fi
     }
-    fetch_ref "$GITHUB_SHA" ||
-      fetch_ref "$GITHUB_REF" ||
-      fetch_ref "+refs/pull/*/head:refs/remotes/origin/pr/*"
+    # When a pipeline pileup has every job container fetching at once, the
+    # server intermittently refuses connections and git exits 128 within
+    # seconds, failing the job before it does any work. Retry each ref with
+    # backoff before falling through to the next one.
+    fetch_ref_retry() {
+      attempt=1
+      until fetch_ref "$1"; do
+        [ "$attempt" -ge 5 ] && return 1
+        sleep $((attempt * 3))
+        attempt=$((attempt + 1))
+      done
+    }
+    fetch_ref_retry "$GITHUB_SHA" ||
+      fetch_ref_retry "$GITHUB_REF" ||
+      fetch_ref_retry "+refs/pull/*/head:refs/remotes/origin/pr/*"
     git checkout --detach "$GITHUB_SHA"
 
 jobs:
