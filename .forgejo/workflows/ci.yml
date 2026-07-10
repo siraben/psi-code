@@ -100,11 +100,10 @@ jobs:
     needs: [valgrind]
     steps:
       - name: Run runtime dependency audit
-        continue-on-error: true
         run: |
           eval "$FETCH_SCRIPT"
           eval "$SETUP_SCRIPT"
-          PSI_SBOM_TRIAGE=0 nix run .#audit-sbom -- .#default sbom
+          nix run .#audit-sbom -- .#default sbom
 
   infer:
     name: Infer static analysis
