@@ -4259,6 +4259,28 @@ function M.run(opts)
   state.layout_mode = layout_mode
   rebuild_from_session(state)
 
+  -- Route operational notices (auto-compaction progress, auth/HTTP
+  -- failures) into the transcript instead of letting providers write
+  -- them straight to the terminal, which corrupts the alt-screen paint.
+  -- The presence of this subscriber is also what tells psi.notice to
+  -- stop falling back to io.stderr while the TUI owns the screen.
+  if psi.events and psi.events.on then
+    psi.events.on("notice", function(payload)
+      if type(payload) ~= "table" then
+        return
+      end
+      local text = tostring(payload.text or "")
+      if text == "" then
+        return
+      end
+      local is_error = payload.level == "error" or payload.level == "warn"
+      add_entry(state, is_error and "error" or "info", text)
+      if state.running then
+        redraw(state)
+      end
+    end)
+  end
+
   local success, runtime_err = xpcall(function()
     psi.tui_set_tick_handler(function()
       tick(state)

@@ -28,6 +28,7 @@ local transform = require("psi.transform_messages")
 local image_policy = require("psi.image_policy")
 local tools = require("psi.tools")
 local session_mod = require("psi.session_manager")
+local notice = require("psi.notice")
 
 local M = {}
 
@@ -603,9 +604,9 @@ local function maybe_auto_compact(model, opts)
   if not over then
     return
   end
-  io.stderr:write(
+  notice.info(
     string.format(
-      "psi: auto-compacting (context ~%d tokens, threshold %d)\n",
+      "psi: auto-compacting (context ~%d tokens, threshold %d)",
       est.tokens,
       context.context_window(model) - context.reserve_tokens()
     )
@@ -617,12 +618,12 @@ local function maybe_auto_compact(model, opts)
     model = model,
   })
   if not ok then
-    io.stderr:write("psi: auto-compaction failed\n")
+    notice.error("psi: auto-compaction failed")
   else
     context.reset_usage()
     session_mod.save()
     if summary and summary ~= "" then
-      io.stderr:write("psi: compacted; kept " .. tostring(keep) .. " recent messages\n")
+      notice.info("psi: compacted; kept " .. tostring(keep) .. " recent messages")
     end
   end
 end
@@ -640,7 +641,7 @@ function M.complete_text(opts)
   end
   if not api_key or api_key == "" then
     local msg = "ANTHROPIC_API_KEY is not set"
-    io.stderr:write(msg .. "\n")
+    notice.error(msg)
     return false, msg
   end
   -- Same UTF-8 sanitisation as the streaming path; both fields arrive
@@ -662,12 +663,12 @@ function M.complete_text(opts)
     opts.abort_check
   )
   if status == nil then
-    io.stderr:write("http post failed: " .. tostring(body) .. "\n")
+    notice.error("http post failed: " .. tostring(body))
     return false
   end
   if status < 200 or status >= 300 then
-    io.stderr:write(
-      "Anthropic API request failed (" .. tostring(status) .. "): " .. (body or "") .. "\n"
+    notice.error(
+      "Anthropic API request failed (" .. tostring(status) .. "): " .. (body or "")
     )
     return false
   end
@@ -712,7 +713,7 @@ function M.run_turn(opts)
   end
   if not api_key or api_key == "" then
     local msg = "ANTHROPIC_API_KEY is not set"
-    io.stderr:write(msg .. "\n")
+    notice.error(msg)
     return false, msg
   end
 

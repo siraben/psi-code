@@ -11,6 +11,7 @@ local settings = require("psi.settings_manager")
 local session_mod = require("psi.session_manager")
 local stream_parser = require("psi.stream_parser")
 local thinking = require("psi.thinking")
+local notice = require("psi.notice")
 local tools = require("psi.tools")
 local transform = require("psi.transform_messages")
 
@@ -628,8 +629,8 @@ end
 function M.run_turn(opts)
   local creds, err = auth.credentials()
   if not creds then
-    io.stderr:write(
-      "openai-codex auth failed: " .. tostring(err) .. "\nRun /login openai-codex first.\n"
+    notice.error(
+      "openai-codex auth failed: " .. tostring(err) .. "\nRun /login openai-codex first."
     )
     return false, err
   end
@@ -684,7 +685,7 @@ function M.complete_text(opts)
   local creds, err = auth.credentials()
   if not creds then
     local msg = "openai-codex auth failed: " .. tostring(err) .. " (run /login openai-codex)"
-    io.stderr:write(msg .. "\n")
+    notice.error(msg)
     return false, msg
   end
   local model = resolve_model(opts.model)
@@ -707,7 +708,7 @@ function M.complete_text(opts)
   body.parallel_tool_calls = nil
   local ok, text = complete_text_stream(creds, body, opts.abort_check)
   if not ok then
-    io.stderr:write(text .. "\n")
+    notice.error(text)
     return false, text
   end
   return true, text
