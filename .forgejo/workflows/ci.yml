@@ -7,8 +7,8 @@ on:
   pull_request:
 
 concurrency:
-  group: ci-${{ github.repository }}
-  cancel-in-progress: false
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   NIX_CONFIG: |
