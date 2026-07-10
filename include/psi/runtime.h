@@ -23,11 +23,14 @@ struct psi_cli_options {
     const char *model;
     const char *thinking_level;
     const char *layout_mode;
+    const char *prompt_template_file;
     long max_tokens;
     long keep_recent;
     int resume;
     int continue_recent;
     int load_extensions;
+    int no_context_files;
+    int no_prompt_templates;
 };
 
 int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv);

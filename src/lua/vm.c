@@ -5029,6 +5029,18 @@ int psi_vm_run_lua_mode(
         lua_pushstring(vm->L, options->layout_mode);
         lua_setfield(vm->L, -2, "layout_mode");
     }
+    if (options->prompt_template_file != NULL) {
+        lua_pushstring(vm->L, options->prompt_template_file);
+        lua_setfield(vm->L, -2, "prompt_template_file");
+    }
+    if (options->no_context_files) {
+        lua_pushboolean(vm->L, 1);
+        lua_setfield(vm->L, -2, "no_context_files");
+    }
+    if (options->no_prompt_templates) {
+        lua_pushboolean(vm->L, 1);
+        lua_setfield(vm->L, -2, "no_prompt_templates");
+    }
     lua_pushinteger(vm->L, (lua_Integer)options->max_tokens);
     lua_setfield(vm->L, -2, "max_tokens");
     lua_pushinteger(vm->L, (lua_Integer)options->keep_recent);

@@ -24,6 +24,7 @@ local prelude = require("psi.prelude")
 local M = {}
 
 local templates = {}
+local enabled = true
 
 local function parse_command_args(argsString)
   -- bash-ish: respect single and double quotes, split on whitespace.
@@ -154,31 +155,34 @@ local function list_markdown_files(dir)
   return out
 end
 
+local function load_template_file(path, name)
+  local raw = prelude.safe_read(path)
+  if not raw then
+    return false
+  end
+  local fm, body = parse_frontmatter(raw)
+  local stem = name or path:match("([^/]+)%.md$") or path:match("([^/]+)$") or "template"
+  local desc = fm.description
+  if not desc or desc == "" then
+    local first = body:match("([^\n]+)")
+    if first then
+      desc = prelude.trim(first):sub(1, 60)
+    end
+  end
+  templates[stem] = {
+    name = stem,
+    description = desc or "",
+    argument_hint = fm["argument-hint"],
+    content = body,
+    path = path,
+  }
+  return true
+end
+
 local function load_from_dir(dir)
   for _, name in ipairs(list_markdown_files(dir)) do
     local path = prelude.path_join(dir, name)
-    local raw = prelude.safe_read(path)
-    if raw then
-      local fm, body = parse_frontmatter(raw)
-      local stem = name:gsub("%.md$", "")
-      local desc = fm.description
-      if not desc or desc == "" then
-        -- Fall back to the first non-empty line, trimmed to 60 chars.
-        local first = body:match("([^\n]+)")
-        if first then
-          desc = prelude.trim(first):sub(1, 60)
-        end
-      end
-      -- Name collision resolution: project-local (later) wins over
-      -- global (earlier) because load_all pushes them in that order.
-      templates[stem] = {
-        name = stem,
-        description = desc or "",
-        argument_hint = fm["argument-hint"],
-        content = body,
-        path = path,
-      }
-    end
+    load_template_file(path, name:gsub("%.md$", ""))
   end
 end
 
@@ -188,6 +192,10 @@ local sorted_cache_version = -1
 
 function M.load()
   templates = {}
+  if not enabled then
+    version = version + 1
+    return
+  end
   version = version + 1
   local env_dirs = os.getenv("PSI_PROMPTS_DIR") or ""
   for dir in (env_dirs .. ":"):gmatch("([^:]*):") do
@@ -205,6 +213,40 @@ function M.load()
     end
   end
   load_from_dir("./.psi/prompts")
+end
+
+function M.clear()
+  templates = {}
+  version = version + 1
+end
+
+function M.set_enabled(value)
+  enabled = value ~= false
+  if not enabled then
+    M.clear()
+  end
+end
+
+function M.load_path(path)
+  if type(path) ~= "string" or path == "" then
+    return false
+  end
+  if psi.file_exists(path) then
+    local entries = psi.list_dir(path)
+    if type(entries) == "table" then
+      load_from_dir(path)
+      version = version + 1
+      return true
+    end
+    if path:match("%.md$") then
+      local ok = load_template_file(path)
+      if ok then
+        version = version + 1
+      end
+      return ok
+    end
+  end
+  return false
 end
 
 function M.version()

@@ -390,6 +390,22 @@ local function handle_slash_command(opts, line)
     print("resumed " .. path .. " (" .. tostring(psi.session_message_count()) .. " messages)")
     return true, false
   end
+  if kind == "resume-picker" then
+    local selected, err = session.resolve_resume_path(psi.cwd(), choose_session_cli)
+    if not selected then
+      io.stderr:write("resume failed: " .. tostring(err) .. "\n")
+      return true, false
+    end
+    local ok, load_err = session.load(selected)
+    if not ok then
+      io.stderr:write("resume failed: " .. tostring(load_err) .. "\n")
+      return true, false
+    end
+    opts.session_file = selected
+    psi.context.reset_usage()
+    print("resumed " .. selected .. " (" .. tostring(psi.session_message_count()) .. " messages)")
+    return true, false
+  end
   if kind == "name" then
     session.set_display_name(action.payload)
     session.save()
@@ -468,6 +484,16 @@ local DISPATCH = {
 }
 
 function M.run(opts)
+  opts = opts or {}
+  psi.no_context_files = opts.no_context_files and true or false
+  if psi.prompt_templates then
+    if opts.no_prompt_templates then
+      psi.prompt_templates.set_enabled(false)
+    end
+    if opts.prompt_template_file then
+      psi.prompt_templates.load_path(opts.prompt_template_file)
+    end
+  end
   local fn = DISPATCH[opts.mode]
   if not fn then
     io.stderr:write("psi.modes.run: unknown mode '" .. tostring(opts.mode) .. "'\n")

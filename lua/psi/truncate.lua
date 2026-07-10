@@ -38,6 +38,9 @@ local function split_lines(text)
     lines[#lines + 1] = text:sub(start, nl - 1)
     start = nl + 1
   end
+  if len > 0 and text:sub(len, len) == "\n" and lines[#lines] == "" then
+    lines[#lines] = nil
+  end
   if #lines == 0 then
     lines[1] = ""
   end

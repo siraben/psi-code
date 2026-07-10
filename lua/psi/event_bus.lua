@@ -96,4 +96,8 @@ function M.handlers(event)
   return out
 end
 
+function M.clear()
+  handlers = {}
+end
+
 return M

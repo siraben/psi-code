@@ -4,9 +4,10 @@ Aspirations: build cleanly on every platform that has a C compiler
 and a Lua interpreter, with the same spirit as Nils Holm's
 *Scheme 9 from Empty Space* (S9fES). psi is not a literal
 `cc *.c -o psi` project: it embeds Lua/docs at build time and links
-Lua 5.5, cJSON, argtable3, libcurl, zlib, and optionally libedit.
-The shape of the code is deliberately set up so an adventurous porter
-can replace any one host-facing bit and keep the rest.
+Lua 5.5, cJSON, argtable3, libcurl, zlib, pthread, and optionally
+libedit. The shape of the code is deliberately set up so an
+adventurous porter can replace any one host-facing bit and keep the
+rest.
 
 ## Principles applied (S9fES-derived)
 
@@ -26,11 +27,12 @@ can replace any one host-facing bit and keep the rest.
    machine) are fair game; if anything ever breaks under those
    conditions it tends to be in upstream Lua/cJSON, not psi itself.
 
-3. **POSIX is gated, not assumed.** `src/core/process.c` wraps every
-   POSIX include in `#ifndef _WIN32`; the `_WIN32` arm is empty
-   today but intentionally leaves a hook for a future
-   CreateProcess-based implementation. No `#include <unistd.h>` in a
-   header that callers might not need POSIX for.
+3. **POSIX is isolated, not gone.** Public headers avoid POSIX-only
+   includes, and `src/core/process.c` keeps the process backend behind
+   platform branches. The current Unix build still uses POSIX headers
+   in implementation files (`dirent`, `stat`, `fcntl`, pthread/curl,
+   and terminal APIs), so a new non-POSIX port must replace those host
+   shims rather than expect the tree to be plain ANSI C already.
 
 4. **Platform-specific code should live in dedicated files.** The
    current tree ships the portable core plus Linux-oriented build
@@ -80,6 +82,7 @@ can replace any one host-facing bit and keep the rest.
 | **Cygwin / MSYS2**         | should build, slowly | fork is emulated and slow; agent feels sluggish but works. libcurl and pthread present via packages. PE-format static linking has gotchas. |
 | **Haiku**                  | plausible, not currently checked in | The repo no longer carries `haiku/` port artifacts. Expect pkg-config/package-name fixes and termios/libedit details before claiming support. |
 | **Windows (Cosmopolitan APE)** | runs via `packages.psi-cosmocc-fat` | This is the supported Windows path today: a fat APE executable built by the flake. The Lua runtime uses feature/env detection to route shell-string commands through `cmd.exe` when it observes a Windows host, while keeping POSIX behavior unchanged elsewhere. |
+| **9front**                 | target, unverified in this tree | requires non-POSIX process, HTTP, filesystem, and terminal shims. |
 | **Windows (MSVC native)**  | does not build | `process.c`'s `_WIN32` arm is empty. Need CreateProcess-based replacement plus a libcurl-or-WinHTTP HTTP backend. ~500 LoC of C. |
 | **plain MS-DOS / DJGPP**   | unsupported | no fork, no pthread, no full POSIX. Out of scope. |
 | **Embedded (no fork/exec)**| unsupported | tool-call path requires process spawning. Could in theory build a `--no-tools` mode — not a stated goal. |

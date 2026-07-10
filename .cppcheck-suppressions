@@ -36,6 +36,12 @@ variableScope:src/core/process.c
 staticFunction:src/core/common.c
 staticFunction:src/core/session.c
 
+# ---- cppcheck 2.21 style noise after nixpkgs bump ----
+# These are style-only findings in C89-style implementation code, not bugs.
+funcArgNamesDifferentUnnamed:src/core/process.c
+variableScope:src/lua/vm.c
+constVariablePointer:src/lua/vm.c
+
 # ---- deliberate style in large TUI function ----
 # psi_tui_redraw et al declare locals C89-style at the top of the
 # function; narrowing per-site would hurt readability of a rendering

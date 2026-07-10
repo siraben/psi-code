@@ -39,11 +39,20 @@ max output tokens for \-\-agent
 \fB\-\-model\fR \fIMODEL\fR
 model to use with \-\-agent
 .TP
+\fB\-\-no-context-files\fR
+disable AGENTS.md and CLAUDE.md discovery (alias \-nc)
+.TP
 \fB\-\-no-extensions\fR
 disable user extension discovery
 .TP
+\fB\-\-no-prompt-templates\fR
+disable prompt template discovery (alias \-np)
+.TP
 \fB\-\-print\fR \fITEXT\fR
 run the bootstrap print\-mode handler
+.TP
+\fB\-\-prompt-template\fR \fIFILE\fR
+load an extra prompt template file or directory
 .TP
 \fB\-\-repl\fR
 run the interactive line editor shell
@@ -87,8 +96,8 @@ Show current session info
 Start a fresh session in place
 Aliases: /clear
 .TP
-\fB/resume <path>\fR
-Load a session file from disk
+\fB/resume [path]\fR
+Open the session picker or load a session file from disk
 .TP
 \fB/import <path>\fR
 Import a JSONL session
@@ -127,6 +136,9 @@ Duplicate the current session at its current position
 Show the session tree or switch the active branch leaf
 .TP
 \fB/branches\fR
+Show the session tree
+.TP
+\fB/tree\fR
 Show the session tree
 .TP
 \fB/reload\fR
