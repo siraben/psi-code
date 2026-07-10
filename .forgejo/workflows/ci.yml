@@ -7,8 +7,8 @@ on:
   pull_request:
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.repository }}
+  cancel-in-progress: false
 
 env:
   NIX_CONFIG: |
@@ -24,10 +24,10 @@ env:
   # composite action can't help here either: its action.yml lives in the repo.
   FETCH_SCRIPT: |
     token="${FORGEJO_TOKEN:-$GITHUB_TOKEN}"
-    # Forgejo's docker runner can reuse the mounted workspace across jobs.
-    # Start from an empty checkout area so old .git state and untracked build
-    # artifacts cannot leak into a later run.
-    find . -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+    workspace="/tmp/psi-ci-${GITHUB_RUN_ID}-${GITHUB_JOB}-${GITHUB_RUN_ATTEMPT}-workspace"
+    rm -rf "$workspace"
+    mkdir -p "$workspace"
+    cd "$workspace"
     git init .
     git remote add origin "${FORGEJO_CI_URL%/}/${FORGEJO_CI_REPOSITORY}"
     fetch_ref() {
@@ -54,49 +54,66 @@ env:
       fetch_ref_retry "$GITHUB_REF" ||
       fetch_ref_retry "+refs/pull/*/head:refs/remotes/origin/pr/*"
     git checkout --detach "$GITHUB_SHA"
+  SETUP_SCRIPT: |
+    tag="/tmp/psi-ci-${GITHUB_RUN_ID}-${GITHUB_JOB}-${GITHUB_RUN_ATTEMPT}"
+    home_dir="${tag}-home"
+    cache_dir="${tag}-cache"
+    rm -rf "$home_dir" "$cache_dir"
+    mkdir -p "$home_dir" "$cache_dir"
+    export HOME="$home_dir"
+    export XDG_CACHE_HOME="$cache_dir"
+    if [ -n "${BUILD_DIR_SUFFIX:-}" ]; then
+      build_dir="${tag}-${BUILD_DIR_SUFFIX}"
+      rm -rf build "$build_dir"
+      mkdir -p "$build_dir"
+      ln -s "$build_dir" build
+      export CI_BUILD_DIR="$build_dir"
+    fi
 
 jobs:
   format:
     name: C formatting
     runs-on: docker
     steps:
-      - name: Checkout
-        run: eval "$FETCH_SCRIPT"
-      - uses: ./.forgejo/actions/setup
-      - run: nix develop --command make check-format-c
+      - name: Check C formatting
+        run: |
+          eval "$FETCH_SCRIPT"
+          eval "$SETUP_SCRIPT"
+          nix develop --command make check-format-c
 
   style:
     name: Style and static analysis
     runs-on: docker
+    needs: [format]
     steps:
-      - name: Checkout
-        run: eval "$FETCH_SCRIPT"
-      - uses: ./.forgejo/actions/setup
-        with:
-          build-dir-suffix: ${{ github.job }}
-      - run: nix develop --command make BUILD_DIR="$CI_BUILD_DIR" lint
+      - name: Run style and static analysis
+        env:
+          BUILD_DIR_SUFFIX: ${{ github.job }}
+        run: |
+          eval "$FETCH_SCRIPT"
+          eval "$SETUP_SCRIPT"
+          nix develop --command make BUILD_DIR="$CI_BUILD_DIR" lint
 
   sbom-audit:
     name: SBOM audit
     runs-on: docker
-    needs: [format, style]
+    needs: [valgrind]
     steps:
-      - name: Checkout
-        run: eval "$FETCH_SCRIPT"
-      - uses: ./.forgejo/actions/setup
       - name: Run runtime dependency audit
-        run: nix run .#audit-sbom -- .#default sbom
+        run: |
+          eval "$FETCH_SCRIPT"
+          eval "$SETUP_SCRIPT"
+          nix run .#audit-sbom -- .#default sbom
 
   infer:
     name: Infer static analysis
     runs-on: docker
-    needs: [format, style]
+    needs: [style]
     steps:
-      - name: Checkout
-        run: eval "$FETCH_SCRIPT"
-      - uses: ./.forgejo/actions/setup
       - name: Run Infer
         run: |
+          eval "$FETCH_SCRIPT"
+          eval "$SETUP_SCRIPT"
           tag="/tmp/psi-ci-${GITHUB_RUN_ID}-${GITHUB_JOB}-${GITHUB_RUN_ATTEMPT}"
           export INFER_BUILD_DIR="${tag}-build"
           export INFER_RESULTS_DIR="${tag}-infer-out"
@@ -105,23 +122,22 @@ jobs:
   scan-build:
     name: Clang static analyzer
     runs-on: docker
-    needs: [format, style]
+    needs: [infer]
     steps:
-      - name: Checkout
-        run: eval "$FETCH_SCRIPT"
-      - uses: ./.forgejo/actions/setup
       - name: Run scan-build
         run: |
+          eval "$FETCH_SCRIPT"
+          eval "$SETUP_SCRIPT"
           export SCAN_BUILD_BUILD_DIR="/tmp/psi-ci-${GITHUB_RUN_ID}-${GITHUB_JOB}-${GITHUB_RUN_ATTEMPT}-build"
           nix run .#scan-build
 
   feature-matrix:
     name: Build and smoke (${{ matrix.name }})
     runs-on: docker
-    needs: [format, style]
+    needs: [scan-build]
     strategy:
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 1
       matrix:
         include:
           - name: default
@@ -143,24 +159,23 @@ jobs:
             make_flags: "TUI=0 ANSI=0 COLOR=0 REPL_EDITLINE=0"
             smoke_excludes: "events/tui,render/tui,tui/,mode/tui,commands/rainbow,markdown/inline_code_no_backticks,theme/compound_ansi_mapping,theme/composite_ansi_remap,ansi/windows_console_force_ansi,ansi/windows_console_plain_by_default,ansi/windows_msys_allows_ansi,ansi/windows_xterm_allows_ansi"
     steps:
-      - name: Checkout
-        run: eval "$FETCH_SCRIPT"
-      - uses: ./.forgejo/actions/setup
-        with:
-          build-dir-suffix: feature-${{ matrix.name }}
       - name: Build and run smoke tests
         env:
+          BUILD_DIR_SUFFIX: feature-${{ matrix.name }}
           MAKE_FLAGS: ${{ matrix.make_flags }}
           SMOKE_EXCLUDES: ${{ matrix.smoke_excludes }}
-        run: bash scripts/ci/build-and-smoke.sh
+        run: |
+          eval "$FETCH_SCRIPT"
+          eval "$SETUP_SCRIPT"
+          bash scripts/ci/build-and-smoke.sh
 
   libc-matrix:
     name: Libc package and smoke (${{ matrix.name }})
     runs-on: docker
-    needs: [format, style]
+    needs: [feature-matrix]
     strategy:
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 1
       matrix:
         include:
           - name: glibc
@@ -180,23 +195,23 @@ jobs:
             nix_build_flags: ""
             smoke_excludes: ""
     steps:
-      - name: Checkout
-        run: eval "$FETCH_SCRIPT"
-      - uses: ./.forgejo/actions/setup
       - name: Build package and run smoke tests when applicable
         env:
           PACKAGE_ATTR: ${{ matrix.package }}
           NIX_BUILD_FLAGS: ${{ matrix.nix_build_flags }}
           SMOKE_EXCLUDES: ${{ matrix.smoke_excludes }}
-        run: bash scripts/ci/package-smoke.sh
+        run: |
+          eval "$FETCH_SCRIPT"
+          eval "$SETUP_SCRIPT"
+          bash scripts/ci/package-smoke.sh
 
   compiler-matrix:
     name: Compiler package and smoke (${{ matrix.name }})
     runs-on: docker
-    needs: [format, style]
+    needs: [libc-matrix]
     strategy:
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 1
       matrix:
         include:
           - name: gcc
@@ -215,27 +230,26 @@ jobs:
             package: psi-compcert
             smoke_excludes: ""
     steps:
-      - name: Checkout
-        run: eval "$FETCH_SCRIPT"
-      - uses: ./.forgejo/actions/setup
       - name: Build package and run smoke tests
         env:
           PACKAGE_ATTR: ${{ matrix.package }}
           SMOKE_EXCLUDES: ${{ matrix.smoke_excludes }}
-        run: bash scripts/ci/package-smoke.sh
+        run: |
+          eval "$FETCH_SCRIPT"
+          eval "$SETUP_SCRIPT"
+          bash scripts/ci/package-smoke.sh
 
   valgrind:
     name: Valgrind
     runs-on: docker
-    needs: [format, style]
+    needs: [compiler-matrix]
     steps:
-      - name: Checkout
-        run: eval "$FETCH_SCRIPT"
-      - uses: ./.forgejo/actions/setup
-        with:
-          build-dir-suffix: ${{ github.job }}
       - name: Run memcheck harness
+        env:
+          BUILD_DIR_SUFFIX: ${{ github.job }}
         run: |
+          eval "$FETCH_SCRIPT"
+          eval "$SETUP_SCRIPT"
           nix develop --command bash -euxo pipefail -c '
             make BUILD_DIR="$CI_BUILD_DIR"
             bash tests/valgrind.sh
