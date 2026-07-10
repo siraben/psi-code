@@ -15,7 +15,10 @@ M.BG_PENDING = "48;5;236"
 M.BG_SUCCESS = "48;5;22"
 M.BG_ERROR = "48;5;52"
 
-local FG_TITLE = "1"
+-- FG_TITLE pairs a bold weight with the theme text slot ("37") so that
+-- it flips with the active theme. pi renders toolTitle in the "text"
+-- color; a bare bold code would leave black text on light themes.
+local FG_TITLE = "1;37"
 local FG_ACCENT = "36"
 local FG_MUTED = "38;5;242"
 local FG_DIM = "90"
