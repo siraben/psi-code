@@ -28,9 +28,7 @@ local function nonnegative_integer(value, fallback)
 end
 
 local function retry_settings(opts)
-  local max_retries = opts.max_retries
-    or opts.maxRetries
-    or os.getenv("PSI_HTTP_MAX_RETRIES")
+  local max_retries = opts.max_retries or opts.maxRetries or os.getenv("PSI_HTTP_MAX_RETRIES")
   local initial_delay = opts.retry_delay_ms
     or opts.initial_retry_delay_ms
     or os.getenv("PSI_HTTP_RETRY_DELAY_MS")
@@ -60,7 +58,14 @@ local function retryable_http_failure(status, body)
   if status == 429 and terminal_rate_limit(body) then
     return false
   end
-  if status == 429 or status == 500 or status == 502 or status == 503 or status == 504 or status == 529 then
+  if
+    status == 429
+    or status == 500
+    or status == 502
+    or status == 503
+    or status == 504
+    or status == 529
+  then
     return true
   end
   if type(body) == "string" then
@@ -76,8 +81,7 @@ end
 
 local function retry_delay_ms(settings, attempt)
   local delay = settings.initial_delay_ms
-  local i
-  for i = 1, attempt do
+  for _ = 1, attempt do
     delay = delay * 2
     if delay >= settings.max_delay_ms then
       return settings.max_delay_ms
@@ -338,13 +342,13 @@ function M.run_turn(opts, cfg)
     })
     emit_before_request(cfg, model, request)
 
-    local state = nil
-    local raw_body = nil
-    local status = -1
-    local transport_error = nil
-    local content = nil
-    local tool_calls = nil
-    local stream_error = nil
+    local state
+    local raw_body
+    local status
+    local transport_error
+    local content
+    local tool_calls
+    local stream_error
     local attempt = 0
     local request_json = psi.json_encode(request)
 
@@ -389,14 +393,11 @@ function M.run_turn(opts, cfg)
       local body_text = table.concat(raw_body)
       local aborted = abort_check()
       local partial = has_partial(state, tool_calls)
-      local retryable = (not aborted)
-        and (not partial)
+      local retryable = not aborted
+        and not partial
         and stream_error == nil
         and attempt < retries.max_retries
-        and (
-          status < 0
-          or retryable_http_failure(status, body_text)
-        )
+        and (status < 0 or retryable_http_failure(status, body_text))
 
       if not retryable then
         break
