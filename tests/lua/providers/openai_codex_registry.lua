@@ -1,9 +1,9 @@
 --[==[psi-test
-expect = "openai-codex|openai-codex-responses|gpt-5.5|272000|true|image|text"
+expect = "openai-codex|openai-codex-responses|gpt-5.6-terra|372000|true|image|text"
 ]==]
 local p = require("psi.api_registry")
-local desc = p.resolve_descriptor("openai-codex/gpt-5.5")
-local model = p.model("openai-codex/gpt-5.5")
+local desc = p.resolve_descriptor("openai-codex/gpt-5.6-terra")
+local model = p.model("openai-codex/gpt-5.6-terra")
 return table.concat(
   {
     desc.provider,

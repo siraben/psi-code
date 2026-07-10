@@ -11,6 +11,7 @@ local VALID = {
   medium = true,
   high = true,
   xhigh = true,
+  max = true,
 }
 
 function M.is_valid(level)
@@ -41,6 +42,7 @@ function M.supports_xhigh(model)
     or id:find("gpt%-5%.3", 1, false) ~= nil
     or id:find("gpt%-5%.4", 1, false) ~= nil
     or id:find("gpt%-5%.5", 1, false) ~= nil
+    or id:find("gpt%-5%.6", 1, false) ~= nil
     or id:find("deepseek%-v4%-pro", 1, false) ~= nil
     or id:find("opus%-4%-6", 1, false) ~= nil
     or id:find("opus%-4%.6", 1, false) ~= nil
@@ -53,7 +55,7 @@ function M.available(model)
     return { "off" }
   end
   if M.supports_xhigh(model) then
-    return { "off", "minimal", "low", "medium", "high", "xhigh" }
+    return { "off", "minimal", "low", "medium", "high", "xhigh", "max" }
   end
   return { "off", "minimal", "low", "medium", "high" }
 end
@@ -63,7 +65,7 @@ function M.clamp(level, model)
   if not M.supports_thinking(model) then
     return "off"
   end
-  if level == "xhigh" and not M.supports_xhigh(model) then
+  if (level == "xhigh" or level == "max") and not M.supports_xhigh(model) then
     return "high"
   end
   return level
@@ -83,6 +85,7 @@ function M.request_effort(level, model)
       or id:find("gpt%-5%.3", 1, false) ~= nil
       or id:find("gpt%-5%.4", 1, false) ~= nil
       or id:find("gpt%-5%.5", 1, false) ~= nil
+      or id:find("gpt%-5%.6", 1, false) ~= nil
     )
   then
     return "low"
@@ -91,7 +94,7 @@ function M.request_effort(level, model)
     return "high"
   end
   if id == "gpt-5.1-codex-mini" then
-    if level == "high" or level == "xhigh" then
+    if level == "high" or level == "xhigh" or level == "max" then
       return "high"
     end
     return "medium"
