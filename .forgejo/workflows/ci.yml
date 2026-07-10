@@ -131,118 +131,71 @@ jobs:
           export SCAN_BUILD_BUILD_DIR="/tmp/psi-ci-${GITHUB_RUN_ID}-${GITHUB_JOB}-${GITHUB_RUN_ATTEMPT}-build"
           nix run .#scan-build
 
-  feature-matrix:
-    name: Build and smoke (${{ matrix.name }})
+  feature-smoke:
+    name: Build and smoke feature variants
     runs-on: docker
     needs: [scan-build]
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        include:
-          - name: default
-            make_flags: ""
-            smoke_excludes: ""
-          - name: no-tui
-            make_flags: "TUI=0"
-            smoke_excludes: "events/tui,render/tui,tui/,mode/tui"
-          - name: no-ansi
-            make_flags: "ANSI=0"
-            smoke_excludes: "events/tui,render/tui,tui/,mode/tui,commands/rainbow,markdown/inline_code_no_backticks,theme/compound_ansi_mapping,theme/composite_ansi_remap,ansi/windows_console_force_ansi,ansi/windows_console_plain_by_default,ansi/windows_msys_allows_ansi,ansi/windows_xterm_allows_ansi"
-          - name: no-color
-            make_flags: "COLOR=0"
-            smoke_excludes: "commands/rainbow,mode/tui_rainbow,tui/raw_ansi_available_with_ansi,tui/windows_console_allows_raw_ansi,mode/tui_theme_applies_to_rendered_colors,mode/tui_input_box_background,theme/compound_ansi_mapping,theme/composite_ansi_remap,ansi/windows_console_force_ansi,ansi/windows_console_plain_by_default,ansi/windows_msys_allows_ansi,ansi/windows_xterm_allows_ansi"
-          - name: no-repl-editline
-            make_flags: "REPL_EDITLINE=0"
-            smoke_excludes: ""
-          - name: minimal
-            make_flags: "TUI=0 ANSI=0 COLOR=0 REPL_EDITLINE=0"
-            smoke_excludes: "events/tui,render/tui,tui/,mode/tui,commands/rainbow,markdown/inline_code_no_backticks,theme/compound_ansi_mapping,theme/composite_ansi_remap,ansi/windows_console_force_ansi,ansi/windows_console_plain_by_default,ansi/windows_msys_allows_ansi,ansi/windows_xterm_allows_ansi"
     steps:
-      - name: Build and run smoke tests
-        env:
-          BUILD_DIR_SUFFIX: feature-${{ matrix.name }}
-          MAKE_FLAGS: ${{ matrix.make_flags }}
-          SMOKE_EXCLUDES: ${{ matrix.smoke_excludes }}
+      - name: Build and run smoke variants
         run: |
           eval "$FETCH_SCRIPT"
           eval "$SETUP_SCRIPT"
-          bash scripts/ci/build-and-smoke.sh
+          run_feature() {
+            name="$1"
+            make_flags="$2"
+            smoke_excludes="$3"
+            build_dir="/tmp/psi-ci-${GITHUB_RUN_ID}-${GITHUB_JOB}-${GITHUB_RUN_ATTEMPT}-${name}"
+            rm -rf build "$build_dir"
+            mkdir -p "$build_dir"
+            ln -s "$build_dir" build
+            MAKE_FLAGS="$make_flags" SMOKE_EXCLUDES="$smoke_excludes" CI_BUILD_DIR="$build_dir" bash scripts/ci/build-and-smoke.sh
+          }
+          run_feature default "" ""
+          run_feature no-tui "TUI=0" "events/tui,render/tui,tui/,mode/tui"
+          run_feature no-ansi "ANSI=0" "events/tui,render/tui,tui/,mode/tui,commands/rainbow,markdown/inline_code_no_backticks,theme/compound_ansi_mapping,theme/composite_ansi_remap,ansi/windows_console_force_ansi,ansi/windows_console_plain_by_default,ansi/windows_msys_allows_ansi,ansi/windows_xterm_allows_ansi"
+          run_feature no-color "COLOR=0" "commands/rainbow,mode/tui_rainbow,tui/raw_ansi_available_with_ansi,tui/windows_console_allows_raw_ansi,mode/tui_theme_applies_to_rendered_colors,mode/tui_input_box_background,theme/compound_ansi_mapping,theme/composite_ansi_remap,ansi/windows_console_force_ansi,ansi/windows_console_plain_by_default,ansi/windows_msys_allows_ansi,ansi/windows_xterm_allows_ansi"
+          run_feature no-repl-editline "REPL_EDITLINE=0" ""
+          run_feature minimal "TUI=0 ANSI=0 COLOR=0 REPL_EDITLINE=0" "events/tui,render/tui,tui/,mode/tui,commands/rainbow,markdown/inline_code_no_backticks,theme/compound_ansi_mapping,theme/composite_ansi_remap,ansi/windows_console_force_ansi,ansi/windows_console_plain_by_default,ansi/windows_msys_allows_ansi,ansi/windows_xterm_allows_ansi"
 
-  libc-matrix:
-    name: Libc package and smoke (${{ matrix.name }})
+  libc-smoke:
+    name: Libc package and smoke variants
     runs-on: docker
-    needs: [feature-matrix]
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        include:
-          - name: glibc
-            package: psi-gcc
-            nix_build_flags: ""
-            smoke_excludes: ""
-          - name: musl-static
-            package: psi-static
-            nix_build_flags: ""
-            smoke_excludes: ""
-          - name: cosmo
-            package: psi-cosmocc
-            nix_build_flags: ""
-            smoke_excludes: ""
-          - name: c-ward
-            package: c-ward
-            nix_build_flags: ""
-            smoke_excludes: ""
+    needs: [feature-smoke]
     steps:
-      - name: Build package and run smoke tests when applicable
-        env:
-          PACKAGE_ATTR: ${{ matrix.package }}
-          NIX_BUILD_FLAGS: ${{ matrix.nix_build_flags }}
-          SMOKE_EXCLUDES: ${{ matrix.smoke_excludes }}
+      - name: Build packages and run smoke tests when applicable
         run: |
           eval "$FETCH_SCRIPT"
           eval "$SETUP_SCRIPT"
-          bash scripts/ci/package-smoke.sh
+          run_package() {
+            PACKAGE_ATTR="$1" NIX_BUILD_FLAGS="$2" SMOKE_EXCLUDES="$3" bash scripts/ci/package-smoke.sh
+          }
+          run_package psi-gcc "" ""
+          run_package psi-static "" ""
+          run_package psi-cosmocc "" ""
+          run_package c-ward "" ""
 
-  compiler-matrix:
-    name: Compiler package and smoke (${{ matrix.name }})
+  compiler-smoke:
+    name: Compiler package and smoke variants
     runs-on: docker
-    needs: [libc-matrix]
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        include:
-          - name: gcc
-            package: psi-gcc
-            smoke_excludes: ""
-          - name: gcc46
-            package: psi-gcc46
-            smoke_excludes: ""
-          - name: clang
-            package: psi-clang
-            smoke_excludes: ""
-          - name: tcc
-            package: psi-tcc
-            smoke_excludes: ""
-          - name: compcert
-            package: psi-compcert
-            smoke_excludes: ""
+    needs: [libc-smoke]
     steps:
-      - name: Build package and run smoke tests
-        env:
-          PACKAGE_ATTR: ${{ matrix.package }}
-          SMOKE_EXCLUDES: ${{ matrix.smoke_excludes }}
+      - name: Build packages and run smoke tests
         run: |
           eval "$FETCH_SCRIPT"
           eval "$SETUP_SCRIPT"
-          bash scripts/ci/package-smoke.sh
+          run_package() {
+            PACKAGE_ATTR="$1" SMOKE_EXCLUDES="$2" bash scripts/ci/package-smoke.sh
+          }
+          run_package psi-gcc ""
+          run_package psi-gcc46 ""
+          run_package psi-clang ""
+          run_package psi-tcc ""
+          run_package psi-compcert ""
 
   valgrind:
     name: Valgrind
     runs-on: docker
-    needs: [compiler-matrix]
+    needs: [compiler-smoke]
     steps:
       - name: Run memcheck harness
         env:
