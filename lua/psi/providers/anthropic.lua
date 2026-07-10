@@ -686,6 +686,20 @@ function M.complete_text(opts)
   return true, table.concat(text_parts)
 end
 
+function M.has_auth()
+  local api_key = os.getenv("ANTHROPIC_API_KEY")
+  if api_key and api_key ~= "" then
+    return true
+  end
+  if psi.amiga_bridge_api_key then
+    local bridge = psi.amiga_bridge_api_key()
+    if bridge and bridge ~= "" then
+      return true
+    end
+  end
+  return false
+end
+
 -- ---------- Agent turn (streaming + tool loop) ----------
 
 function M.run_turn(opts)

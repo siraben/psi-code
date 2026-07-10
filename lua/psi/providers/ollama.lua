@@ -193,6 +193,11 @@ end
 
 -- ---------- Public entry points ----------
 
+-- Local server, no credentials: always authenticated.
+function M.has_auth()
+  return true
+end
+
 function M.run_turn(opts)
   local model = resolve_model(opts.model)
   return compat.run_turn({

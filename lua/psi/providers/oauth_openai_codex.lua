@@ -367,6 +367,13 @@ function M.credentials()
   return M.ensure_fresh(entry)
 end
 
+-- Presence check only; never refreshes tokens, so the resolver's auth
+-- gate can call it without network I/O.
+function M.has_credentials()
+  local entry = auth_storage.get(PROVIDER)
+  return type(entry) == "table" and entry.type == "oauth" and type(entry.refresh) == "string"
+end
+
 function M.login_with_input(input, flow)
   flow = flow or pending_flow
   if type(flow) ~= "table" or type(flow.verifier) ~= "string" then

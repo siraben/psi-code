@@ -307,6 +307,11 @@ local function check_api_key()
   return true
 end
 
+function M.has_auth()
+  local key = os.getenv(API_KEY_ENV)
+  return key ~= nil and key ~= ""
+end
+
 function M.run_turn(opts)
   local ok, err = check_api_key()
   if not ok then

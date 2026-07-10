@@ -635,6 +635,10 @@ local function complete_text_request_body(opts, model)
   return body
 end
 
+function M.has_auth()
+  return auth.has_credentials and auth.has_credentials() or false
+end
+
 function M.run_turn(opts)
   local creds, err = auth.credentials()
   if not creds then

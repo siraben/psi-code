@@ -346,6 +346,19 @@ function M.resolve_model(provider_name, requested)
   return env(p.model_env, p.default_model)
 end
 
+-- ollama is excluded: its has_auth() is always true, which would make it
+-- the silent default in an otherwise-unconfigured environment.
+local FALLBACK_PROVIDER_ORDER = { "anthropic", "openai-codex", "openrouter" }
+
+local function first_authenticated_provider()
+  for _, name in ipairs(FALLBACK_PROVIDER_ORDER) do
+    if providers[name] and M.provider_has_auth(name) then
+      return providers[name]
+    end
+  end
+  return providers.anthropic
+end
+
 function M.resolve_route(model)
   if type(model) == "string" then
     local provider_name, rest = model:match("^([^/]+)/(.+)$")
@@ -366,12 +379,12 @@ function M.resolve_route(model)
       return M.resolve_route(configured_model)
     end
     local configured_provider = settings.get("defaults.provider", nil)
-    if providers[configured_provider] then
+    if providers[configured_provider] and M.provider_has_auth(configured_provider) then
       return providers[configured_provider], model
     end
   end
 
-  return providers.anthropic, model
+  return first_authenticated_provider(), model
 end
 
 function M.resolve_descriptor(model)
@@ -404,6 +417,23 @@ function M.load_api(api_name)
     return nil
   end
   return require(spec.module)
+end
+
+-- Must never throw; the resolver treats this as total.
+function M.provider_has_auth(provider_name)
+  local spec = providers[provider_name]
+  if not spec then
+    return false
+  end
+  local ok, mod = pcall(M.load_api, spec.api)
+  if not ok or type(mod) ~= "table" then
+    return false
+  end
+  if type(mod.has_auth) ~= "function" then
+    return true
+  end
+  local ok_call, result = pcall(mod.has_auth)
+  return ok_call and result == true
 end
 
 return M
