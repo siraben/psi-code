@@ -17,7 +17,7 @@ env:
   LANG: C.UTF-8
   LC_ALL: C.UTF-8
   TERM: xterm-256color
-  FORGEJO_CI_URL: http://127.0.0.1:3010
+  FORGEJO_CI_URL: https://office-desktop.tail5ca7.ts.net/forgejo
   FORGEJO_CI_REPOSITORY: siraben/psi-coding-agent
   # actions/checkout is a JS action and the runner image (nixos/nix:latest)
   # has no Node, so we hand-roll the fetch. The repo isn't on disk yet, so a
