@@ -1,41 +1,39 @@
 # psi extensions
 
-psi has a small, Lua-native extension surface. An extension is a single
-`.lua` file that returns a function; on startup psi discovers and invokes
-it with the `psi` global. From there an extension can register tools,
-subscribe to events, and add slash commands — the same APIs psi uses
-internally.
+psi extensions are local Lua files. Each file returns a function; at startup,
+psi loads it and passes in the `psi` global. From there the extension can
+register tools, subscribe to events, add slash commands, customize themes, or
+hook the TUI.
 
-This document codifies the **stable API surface** and the initial **event
-catalog**. Anything not documented here is internal and may change.
+This document defines the stable API surface and event catalog. Anything not
+listed here is internal and may change.
 
 ---
 
 ## Discovery
 
-At boot, psi scans three locations in order (earlier entries win on
-conflicts; later ones see the cumulative `psi` state):
+At boot, psi scans three locations in order. Earlier entries win on conflicts;
+later entries see the cumulative `psi` state.
 
 1. `$PSI_EXTENSIONS_DIR` (colon-separated list of directories)
 2. `~/.config/psi/extensions/`
 3. `./.psi/extensions/` (project-local)
 
-Every `*.lua` file in each directory is `dofile`'d. If it returns a
-function, psi invokes it with the `psi` global. Extension load failures
-are logged to stderr and don't abort psi.
+Every `*.lua` file in each directory is loaded with `dofile`. If it returns a
+function, psi invokes it with the `psi` global. Extension load failures are
+logged to stderr and do not abort psi.
 
-Security model: extensions are trusted local code, not a sandbox. They run
-with the same filesystem, process, network, and credential access as psi
-itself, and project-local `./.psi/extensions/` files are discovered on
-startup. Review third-party or repository-provided extensions before running
-them, and use `--no-extensions` when opening an untrusted checkout.
+Security model: extensions are trusted local code. They run with the same
+filesystem, process, network, and credential access as psi itself, and
+project-local `./.psi/extensions/` files are discovered on startup. Review
+third-party or repository-provided extensions before running them, and use
+`--no-extensions` when opening an untrusted checkout.
 
-`/reload` reloads keybinding/settings/prompt-template state, resets bundled
-TUI extension state, clears TUI key, status, and clipboard hooks, reloads user
-extensions, and then runs TUI startup hooks so settings-gated extensions
-reconcile with the fresh configuration. Extension registration should therefore
-be idempotent across a fresh load; TUI hooks do not need to defensively
-unregister themselves first.
+`/reload` reloads keybindings, settings, prompt templates, bundled TUI
+extension state, TUI key/status/clipboard hooks, and user extensions. It then
+runs TUI startup hooks so settings-gated extensions can match the fresh
+configuration. Extension registration should be idempotent across a fresh load;
+TUI hooks do not need to unregister themselves first.
 
 ## Extension skeleton
 
@@ -76,11 +74,11 @@ end
 
 ## Stable API surface
 
-Everything below is guaranteed not to break compatibility within a minor
-version. Experimental or internal helpers live off the `psi` global but
-are not listed here and may change without notice.
+Everything below is stable within a minor version. Experimental or internal
+helpers may exist on the `psi` global, but unlisted helpers can change without
+notice.
 
-### Tools — `psi.tools`
+### Tools: `psi.tools`
 
 | API | Notes |
 |---|---|
@@ -127,7 +125,7 @@ are not listed here and may change without notice.
 - `psi.tool_registry.optional_number(input, field, default)`
 - `psi.tool_registry.optional_boolean(input, field, default)`
 
-### Events — `psi.events`
+### Events: `psi.events`
 
 | API | Notes |
 |---|---|
@@ -141,7 +139,7 @@ values ignored, errors swallowed per handler with a stderr log line.
 Designed so adding a subscriber never interferes with rendering or
 session state.
 
-### Slash commands — `psi.commands`
+### Slash commands: `psi.commands`
 
 | API | Notes |
 |---|---|
@@ -152,9 +150,8 @@ session state.
 | `psi.commands.registered_commands()` | Extension command metadata currently registered. |
 | `psi.commands.help_text()` | Generated help text for built-ins, extensions, and prompt templates. |
 
-Built-in commands take precedence over registered ones — extensions
-cannot shadow them. The list isn't reproduced here; psi documents
-itself:
+Built-in commands take precedence over registered ones, so extensions cannot
+shadow them. The list is not reproduced here; psi can describe it at runtime:
 
 ```
 psi> /help                # short list of all commands
@@ -167,11 +164,11 @@ Bundled (but extension-owned) commands like `/vim` and `/btw` come
 from `lua/psi/extensions/`; they show up under the same `/help`,
 `/describe`, and `/apropos` queries.
 
-### Keybindings — `psi.keybindings`
+### Keybindings: `psi.keybindings`
 
-Keybinding metadata lives in `lua/psi/keybindings.lua`, mirroring pi's
-action-id approach. The TUI dispatch, footer hint, and `/hotkeys` all
-read from the same resolved key map.
+Keybinding metadata lives in `lua/psi/keybindings.lua`, mirroring pi's action-id
+approach. TUI dispatch, footer hints, and `/hotkeys` all read from the same
+resolved key map.
 
 Users can override defaults in `~/.config/psi/keybindings.json` or
 `./.psi/keybindings.json`:
@@ -194,8 +191,8 @@ Users can override defaults in `~/.config/psi/keybindings.json` or
 | `psi.keybindings.hotkeys_text()` | Generated `/hotkeys` text. |
 | `psi.keybindings.reload()` | Reload keybinding JSON files. `/reload` calls this. |
 
-For the live default action map, hit `/hotkeys` in the TUI or query
-the registry by id:
+For the live default action map, run `/hotkeys` in the TUI or query the
+registry by id:
 
 ```
 psi> /hotkeys                          # full Navigation/Editing/Other table
@@ -216,11 +213,11 @@ Built-in dispatchers also understand actions such as `ansi-print`,
 return `print` unless they coordinate with a frontend that explicitly
 handles another action kind.
 
-### Themes — `psi.theme`
+### Themes: `psi.theme`
 
-Theme support stays Lua-first: extensions register a theme spec, then
-select it. The bundled default is a dark TUI theme; custom themes can
-override just the slots they care about and inherit the rest.
+Theme support stays Lua-first: extensions register a theme spec, then select it.
+The bundled default is a dark TUI theme; custom themes can override only the
+slots they need and inherit the rest.
 
 | API | Notes |
 |---|---|
@@ -264,32 +261,29 @@ return function(psi)
 end
 ```
 
-### Render hooks — `psi.render.register_hook(event, fn)`
+### Render hooks: `psi.render.register_hook(event, fn)`
 
-For extensions that want to *change the rendered terminal output*
-(rather than just observe). Handlers receive a payload table and return
-one of:
+Use render hooks when an extension needs to change terminal output rather than
+just observe events. Handlers receive a payload table and return one of:
 
-- `nil` / `false` — contribute nothing (observer-style).
-- a `"string"` — appended to the running render in registration order.
-- `{replace = true, text = "..."}` — **discards** everything earlier
-  hooks in this chain contributed and starts over with `text`.
-  Subsequent hooks in the chain still append. Use this when you need
-  to *replace* a built-in renderer rather than add alongside it (e.g.
-  swap `read`'s default tool-result block for a numbered one).
+- `nil` / `false`: contribute nothing (observer-style).
+- a `"string"`: appended to the running render in registration order.
+- `{replace = true, text = "..."}`: discards earlier output from this hook
+  chain and starts over with `text`. Subsequent hooks still append. Use this
+  when replacing a built-in renderer, such as swapping `read`'s default
+  tool-result block for a numbered one.
 
-Render-hook mutations only affect what the **user sees** on the
-terminal. If you also want to change what the **model sees** (the
-tool-result payload fed back into its context), use a
-`psi.tools.add_after_hook` — see below. The two are independent.
+Render-hook mutations only affect terminal output. To change the tool-result
+payload sent back to the model, use `psi.tools.add_after_hook`. The two paths
+are independent.
 
-`psi.render.events()` returns the list of event names the render
-bridge dispatches (currently `before-turn`, `assistant-text`,
-`thinking-delta`, `tool-call`, `tool-result`, `after-turn`).
-Extensions can inspect this rather than hard-coding names.
+`psi.render.events()` returns the event names dispatched by the render bridge:
+currently `before-turn`, `assistant-text`, `thinking-delta`, `tool-call`,
+`tool-result`, and `after-turn`. Extensions can inspect this list instead of
+hard-coding names.
 
-Most extensions should use `psi.events.on` instead. Use render hooks
-only when you need to mutate the on-screen output.
+Most extensions should use `psi.events.on`. Use render hooks only when the
+on-screen output must change.
 
 **TUI mode:** `before-turn` and `after-turn` render-hook output is
 surfaced as info entries in the transcript. `assistant-text` is *not*
@@ -297,15 +291,17 @@ piped through the hook chain in TUI (streamed tokens go straight to
 the assistant-entry renderer); use the `assistant-text-delta` event
 via `psi.events.on` if you need per-delta visibility.
 
-**Do not use `io.stderr:write` from a hook running during a TUI
-turn.** The TUI redirects stderr to `$XDG_STATE_HOME/psi/debug.log`
-(default `~/.local/state/psi/debug.log`) while a turn is in flight so
-provider/curl chatter doesn't corrupt the ANSI TUI. Bytes
-written during the turn are appended to the log, not shown. To show
-text in the transcript, return it as a string from a render hook; to
-show text in the status bar, register a `psi.tui.register_status_hook`
-(see below). Tail the debug log with `tail -F
-~/.local/state/psi/debug.log` in another pane for diagnostics.
+**Do not use `io.stderr:write` from a hook running during a TUI turn.** During a
+turn, the TUI redirects stderr to `$XDG_STATE_HOME/psi/debug.log` (default
+`~/.local/state/psi/debug.log`) so provider/curl output cannot corrupt the ANSI
+TUI. Bytes written during the turn go to the log, not the transcript. To show
+text in the transcript, return it from a render hook. To show text in the status
+bar, register a `psi.tui.register_status_hook`. For diagnostics, tail the log in
+another pane:
+
+```sh
+tail -F ~/.local/state/psi/debug.log
+```
 
 ### Safe C primitives on `psi`
 
@@ -314,7 +310,7 @@ These are part of the stable surface:
 | API | Notes |
 |---|---|
 | `psi.cwd()` | Current working directory string. |
-| `psi.read_file(path)` / `psi.read_file_prefix(path, max_bytes)` / `psi.read_file_limited(path, max_bytes)` / `psi.read_file_slice(path, offset, limit, max_bytes)` / `psi.read_file_bytes(path, offset, limit)` / `psi.file_write(path, content)` / `psi.file_append(path, content)` | File I/O. `read_file_prefix` sniffs bounded binary prefixes, `read_file_limited` reads only files under an explicit byte cap, `read_file_slice` returns text plus line/truncation metadata without slurping the whole file into Lua, and `read_file_bytes` returns a byte range plus byte-size metadata for binary inspection. `file_append` opens the path in `"ab"` mode — used by the bash tool to spill long output to a temp file. |
+| `psi.read_file(path)` / `psi.read_file_prefix(path, max_bytes)` / `psi.read_file_limited(path, max_bytes)` / `psi.read_file_slice(path, offset, limit, max_bytes)` / `psi.read_file_bytes(path, offset, limit)` / `psi.file_write(path, content)` / `psi.file_append(path, content)` | File I/O. `read_file_prefix` sniffs bounded binary prefixes, `read_file_limited` reads only files under an explicit byte cap, `read_file_slice` returns text plus line/truncation metadata without slurping the whole file into Lua, and `read_file_bytes` returns a byte range plus byte-size metadata for binary inspection. `file_append` opens the path in `"ab"` mode; the bash tool uses it to spill long output to a temp file. |
 | `psi.tempfile_path([prefix])` | Returns a temp path under `$TMPDIR`, `$TEMP`, `$TMP`, or `/tmp`; POSIX builds create a private 0600 file when possible. The bash tool uses this for spillover when output exceeds the in-memory truncation cap. |
 | `psi.random_bytes(n)` | Returns bytes from the host secure random source, or `nil` plus an error. |
 | `psi.file_exists(path)` / `psi.file_type(path)` / `psi.list_dir(path)` | Filesystem inspection. `file_type` returns `file`, `directory`, `other`, or `nil`; `list_dir` returns names without `.` or `..`. |
@@ -327,7 +323,7 @@ These are part of the stable surface:
 | `psi.session_message_count()` / `psi.session_messages()` | Read current in-memory session. |
 | `psi.embedded_doc(name)` / `psi.embedded_doc_names()` | Fetch doc files bundled into the binary (e.g. `README.md`). |
 | `psi.embedded_source(name)` / `psi.embedded_source_names()` | Fetch the raw Lua source of an embedded module (e.g. `psi.render`). Useful for live introspection when there is no on-disk path. |
-| `psi.tool_call(name, input)` | Dispatch a tool through the full before/after hook chain. **Prefer this over calling `tool.impl` directly** — `impl` skips hook processing (permissions, redaction, extension transforms). |
+| `psi.tool_call(name, input)` | Dispatch a tool through the full before/after hook chain. Prefer this over calling `tool.impl` directly: `impl` skips hook processing (permissions, redaction, extension transforms). |
 | `psi.tools.cancel(reason)` | Shorthand for a failure `ToolResult` used in before-hooks to short-circuit dispatch. Example: `tools.add_before_hook(function(n, i) if n == "bash" and i.command:find("rm %-rf") then return tools.cancel("refused") end end)`. |
 | `psi.prompt.register_transformer(fn)` | Append a system-prompt rewriter. Receives the assembled prompt, returns a replacement (or `nil` to leave it). Runs after built-in assembly; transformers stack in registration order. |
 | `psi.agent.set_model(name)` / `psi.agent.current_model(fallback)` | Switch the default model at runtime (any prefix psi understands: `anthropic/`, `ollama/`, `openrouter/`, `openai-codex/`). Picked up on the *next* turn; the TUI status line reflects it immediately. Pass `nil` to clear. |
@@ -370,10 +366,10 @@ It is enabled by default so yanks update terminal clipboards, including tmux
 via DCS passthrough. Disable it with
 `"extensions": { "osc52_clipboard": { "enabled": false } }`.
 
-Image attachments can be disabled globally with
-`"images": { "block_images": true }` in settings. When disabled, image blocks
-are replaced with `Image reading is disabled.` before provider requests, and
-the read tool omits image payloads instead of storing them in the session.
+Image attachments can be disabled globally with `"images": { "block_images":
+true }` in settings. When disabled, image blocks are replaced with `Image
+reading is disabled.` before provider requests, and the read tool omits image
+payloads instead of storing them in the session.
 
 ### Prompt templates
 
@@ -381,11 +377,11 @@ Drop a `.md` file in any of:
 
 - `$PSI_PROMPTS_DIR` (colon-separated list, env override)
 - `$XDG_CONFIG_HOME/psi/prompts/` (default `~/.config/psi/prompts/`)
-- `./.psi/prompts/` (project-local — overrides global on name collision)
+- `./.psi/prompts/` (project-local; overrides global on name collision)
 
-…and typing `/<filename> args…` in the REPL or TUI expands the body
-with bash-style argument substitution and sends the result as the
-user's next turn. Filename minus `.md` becomes the slash-command name.
+Typing `/<filename> args...` in the REPL or TUI expands the body with bash-style
+argument substitution and sends the result as the user's next turn. The filename
+minus `.md` becomes the slash-command name.
 
 Frontmatter (optional, between leading `---` lines):
 
@@ -420,12 +416,11 @@ stable as well.
 
 ## Event catalog
 
-Every event is fired synchronously from the agent turn loop. Order is
-defined below. Handlers must be fast — they run on the turn's critical
-path.
+Every event fires synchronously from the agent turn loop, in the order defined
+below. Handlers must be fast because they run on the turn's critical path.
 
-Psi emits its historical hyphenated event names and aliases several of
-them to pi-style underscore names (`turn_end`, `tool_execution_start`,
+Psi emits its historical hyphenated event names and aliases several of them to
+pi-style underscore names (`turn_end`, `tool_execution_start`,
 `after_provider_response`, etc.) for new extension code.
 
 | Event | Firing site | Payload |
@@ -443,10 +438,10 @@ them to pi-style underscore names (`turn_end`, `tool_execution_start`,
 | `after-turn` | Right after `turn-end`, during render flush. | `{ text, ["assistant-streamed"] }` |
 | `compaction-start` | Before `psi.session.do_compact` clears the in-memory session and appends the summary. Extensions (e.g. autosave) can flush current on-disk state before the rewrite. | `{ total, keep_recent, compacted }` |
 | `compaction-end` | After the summary + kept tail are appended back. Pair with `compaction-start`; the summary text is included so loggers don't have to re-read the session. | `{ total, keep_recent, compacted, summary }` |
-| `context` | Right before a provider request is built, once per turn iteration. **The `messages` table is mutable** — handlers may insert, remove, or replace entries and the edits hit the wire. Use for RAG injection, tool-result redaction, mid-context compression. | `{ messages, model, provider, system_prompt }` |
+| `context` | Right before a provider request is built, once per turn iteration. The `messages` table is mutable: handlers may insert, remove, or replace entries and the edits hit the wire. Use for RAG injection, tool-result redaction, mid-context compression. | `{ messages, model, provider, system_prompt }` |
 | `resources_discover` | During context/resource discovery before the system prompt is finalized. | `{ context_files, diagnostics }` |
 | `session-start` | Fired once when a session is loaded (`source="load"`) or freshly created (`source="new"`). Extensions that own log files / counters / timers should initialise here instead of on the first `before-turn`. | `{ id, path, source, message_count }` |
-| `session-shutdown` | Fired once, just before host teardown (TUI state free or REPL exit). Flush your state here — the Lua VM is still live. | `{ id, path, message_count }` |
+| `session-shutdown` | Fired once, just before host teardown (TUI state free or REPL exit). Flush your state here; the Lua VM is still live. | `{ id, path, message_count }` |
 
 Subscribe pattern:
 
@@ -463,22 +458,23 @@ end)
 
 ## Non-goals (today)
 
-What we **intentionally** do not support yet — open tickets, not bugs:
+Unsupported today:
 
 - No `psi install` / package manager. Extensions are single-file drops.
 - No TypeScript. Lua only.
 - No stable provider registration API yet. Built-in Anthropic, Ollama,
-  OpenRouter, and OpenAI Codex providers are available through the provider registry, but
-  extension authors should treat registration internals as unstable.
-- No sandboxing. Extensions run with full Lua and `psi` access — trust
+  OpenRouter, and OpenAI Codex providers are available through the provider
+  registry, but extension authors should treat registration internals as
+  unstable.
+- No sandboxing. Extensions run with full Lua and `psi` access; trust
   the files you install.
 - No extension manifest, versioning, or compatibility checks.
 - No file-watcher hot reload. `/reload` is the explicit manual reload path.
 - No MCP bridge.
 - No dedicated system-prompt event. Use `psi.prompt.register_transformer(fn)`
   for extension-controlled prompt rewrites.
-- psi keeps the event catalog intentionally compact. New events will be
-  added on demand.
+- The event catalog is intentionally compact. New events are added when an
+  extension needs them.
 
 ## Packaged extensions
 
@@ -494,14 +490,14 @@ external extensions.
 
 ## Internal, not stable
 
-These are on the `psi` global but subject to change without notice:
+These names may exist on the `psi` global, but they can change without notice:
 
 - `psi.render.capture_frame` / `release_frame` / `lookup_frame`.
 - `psi.anthropic.*` (internals of the turn loop).
-- `psi.context` (token accounting — field names may shift).
+- `psi.context` (token accounting; field names may shift).
 - `psi.session.append_user` / `append_assistant` / `append_tool_result`
   (use `psi.events` to observe instead of calling these directly).
 - Anything named starting with `_`.
 
-If you find yourself reaching for one of these, consider opening an
-issue — it likely points to a missing stable API.
+If you need one of these, consider opening an issue. It likely points to a
+missing stable API.

@@ -1,26 +1,25 @@
 # Providers
 
-psi currently ships with four routed providers:
+psi ships with four routed providers:
 
 - Anthropic, the default, via `https://api.anthropic.com`
 - Ollama, local, via `/api/chat`
 - OpenRouter, via OpenAI-compatible `/chat/completions`
 - OpenAI Codex, via ChatGPT's Codex Responses backend
 
-For the current default-model and env-var mapping, ask the running
-agent (this is always live, even after you add a provider via an
-extension):
+For current default models and environment-variable mappings, ask the running
+agent. Runtime introspection stays current after provider registry changes:
 
 ```
 psi> /apropos provider:
 psi> /describe provider:openai-codex
 ```
 
-The chosen provider drives a single `run_turn` / `complete_text`
-contract, so sessions are provider-neutral on disk — a session started
-with one provider can be resumed with another, provided the tool names
-line up. Cross-provider resumes are best-effort: provider-specific
-thinking/signature/cache details may be downgraded during replay.
+Providers implement a shared `run_turn` / `complete_text` contract, so sessions
+are provider-neutral on disk. A session started with one provider can be resumed
+with another as long as the tool names line up. Cross-provider resumes are
+best-effort: provider-specific thinking, signature, and cache details may be
+downgraded during replay.
 
 Routing metadata lives in `lua/psi/api_registry.lua`. API-specific wire
 adapters live in `lua/psi/providers/anthropic.lua`,
@@ -31,38 +30,37 @@ adapters live in `lua/psi/providers/anthropic.lua`,
 
 In priority order:
 
-1. **Model prefix** — `--model=ollama/llama3.1:latest` or
+1. **Model prefix:** `--model=ollama/llama3.1:latest` or
    `--model=anthropic/claude-sonnet-4-6` or
    `--model=openrouter/google/gemini-3-flash-preview` or
    `--model=openai-codex/gpt-5.5`. The prefix is stripped before being
    forwarded to the provider.
-2. **`PSI_PROVIDER`** env var — `anthropic` (default), `ollama`, or
+2. **`PSI_PROVIDER` env var:** `anthropic` (default), `ollama`, or
    `openrouter`, or `openai-codex`.
-3. **Settings** — `defaults.provider` and `defaults.model` in
+3. **Settings:** `defaults.provider` and `defaults.model` in
    `~/.config/psi/settings.json` or `./.psi/settings.json`.
 4. Fallback: Anthropic.
 
 ## Streaming Retries
 
-Streaming provider requests retry transient failures before any assistant
-content or tool call has been parsed. This covers transport failures such
-as an empty HTTP reply plus retryable 429/5xx provider responses. Once a
-stream has produced assistant/tool partials, psi records the failure
-instead of replaying the request because provider streams are not
-resumable at that point.
+Streaming provider requests retry transient failures until assistant content or
+a tool call has been parsed. This covers transport failures such as an empty
+HTTP reply and retryable 429/5xx provider responses. Once a stream has produced
+assistant or tool partials, psi records the failure instead of replaying the
+request because provider streams are not resumable at that point.
 
-- `PSI_HTTP_MAX_RETRIES` — maximum retry attempts after the first request
+- `PSI_HTTP_MAX_RETRIES`: maximum retry attempts after the first request
   (default `2`; set `0` to disable).
-- `PSI_HTTP_RETRY_DELAY_MS` — initial exponential-backoff delay
+- `PSI_HTTP_RETRY_DELAY_MS`: initial exponential-backoff delay
   (default `1000`).
-- `PSI_HTTP_MAX_RETRY_DELAY_MS` — cap for retry sleep (default `60000`).
+- `PSI_HTTP_MAX_RETRY_DELAY_MS`: cap for retry sleep (default `60000`).
 
 ## Anthropic
 
 - Env: `ANTHROPIC_API_KEY` (required)
-- `PSI_ANTHROPIC_MODEL` — default model when none is passed (default
+- `PSI_ANTHROPIC_MODEL`: default model when none is passed (default
   `claude-opus-4-7`).
-- `PSI_ANTHROPIC_BASE_URL` — override the API host (for proxies).
+- `PSI_ANTHROPIC_BASE_URL`: override the API host (for proxies).
 - `PSI_PROMPT_CACHE=0` disables ephemeral prompt caching.
 - Image attachments are enabled by default for image-capable providers and
   models. Set `"images": { "block_images": true }` in
@@ -75,21 +73,21 @@ resumable at that point.
 - No API key.
 - Requires an Ollama daemon reachable at `PSI_OLLAMA_BASE_URL`
   (default `http://localhost:11434/`).
-- `PSI_OLLAMA_MODEL` — default model when none is passed (default
+- `PSI_OLLAMA_MODEL`: default model when none is passed (default
   `llama3.1:latest`).
 - Tool use requires a model that Ollama advertises as tool-capable
   (e.g. llama3.1, llama3.2, qwen2.5). Non-tool models work for chat
   but the agent loop will never fire tool calls.
 - Usage totals are translated to the normalized session shape
   (`usage.input = prompt_eval_count`, `usage.output = eval_count`).
-- No prompt caching on the wire — Ollama doesn't support it.
+- No prompt caching on the wire. Ollama does not support it.
 
 ## OpenRouter
 
 - Env: `OPENROUTER_API_KEY` (required).
-- `PSI_OPENROUTER_MODEL` — default model when none is passed
+- `PSI_OPENROUTER_MODEL`: default model when none is passed
   (default `google/gemini-3-flash-preview`).
-- `PSI_OPENROUTER_BASE_URL` — override the API host.
+- `PSI_OPENROUTER_BASE_URL`: override the API host.
 - Optional attribution:
   - `PSI_OPENROUTER_REFERER`
   - `PSI_OPENROUTER_TITLE`
@@ -98,16 +96,15 @@ resumable at that point.
 
 ## OpenAI Codex
 
-- Auth: `/login openai-codex`, open the printed URL, then paste the
-  final redirect URL or authorization code back with
-  `/login openai-codex <redirect-url-or-code>`. The auth URL is also
-  copied through OSC 52 when terminal clipboard support is enabled.
-  Credentials are stored in `~/.config/psi/auth.json` with mode `0600`
-  when `chmod` is available.
-- `PSI_AUTH_FILE` — override the credential file path.
-- `PSI_OPENAI_CODEX_MODEL` — default model when none is passed (default
+- Auth: `/login openai-codex`, open the printed URL, then paste the final
+  redirect URL or authorization code back with `/login openai-codex
+  <redirect-url-or-code>`. When terminal clipboard support is enabled, the auth
+  URL is also copied through OSC 52. Credentials are stored in
+  `~/.config/psi/auth.json` with mode `0600` when `chmod` is available.
+- `PSI_AUTH_FILE`: override the credential file path.
+- `PSI_OPENAI_CODEX_MODEL`: default model when none is passed (default
   `gpt-5.5`).
-- `PSI_OPENAI_CODEX_BASE_URL` — override the ChatGPT backend host.
+- `PSI_OPENAI_CODEX_BASE_URL`: override the ChatGPT backend host.
 - Thinking/reasoning level follows pi-mono naming:
   `off`, `minimal`, `low`, `medium`, `high`, `xhigh`. The default is
   `medium`; `off`/`none` omits the reasoning block. Use
@@ -115,11 +112,11 @@ resumable at that point.
   session. `/set effort <off|minimal|low|medium|high|xhigh|none>` is
   also accepted for compatibility with the lower-level setting name.
   `minimal` is sent as `low` for current OpenAI Codex models.
-- `PSI_THINKING` — optional global default thinking level.
-- `PSI_OPENAI_CODEX_REASONING` — optional legacy Codex-specific
+- `PSI_THINKING`: optional global default thinking level.
+- `PSI_OPENAI_CODEX_REASONING`: optional legacy Codex-specific
   default. For a config default, set `defaults.reasoning_effort` in
   `~/.config/psi/settings.json` or `./.psi/settings.json`.
-- `PSI_OPENAI_CODEX_VERBOSITY` — optional text verbosity
+- `PSI_OPENAI_CODEX_VERBOSITY`: optional text verbosity
   (`low`, `medium`, `high`; default `low`).
 - Uses the Responses-shaped adapter in `lua/psi/providers/openai_codex.lua`.
 
@@ -156,9 +153,8 @@ PSI_OLLAMA_BASE_URL=http://workstation.local:11434 \
 - Provider registration from extensions. The registry exists in Lua,
   but public extension APIs for adding providers are not frozen yet.
 - Bedrock, Gemini native, Mistral native, and Azure responses.
-- Browser callback completion for OAuth. OpenAI Codex currently uses
-  the same manual paste fallback that pi-mono supports for headless
-  sessions.
+- Browser callback completion for OAuth. OpenAI Codex currently uses the same
+  manual paste fallback that pi-mono supports for headless sessions.
 - Full pricing metadata. OpenRouter context-window and output-token
   metadata is cached lazily as JSON under the user cache directory; the
   first lookup for a missing OpenRouter model refreshes the cache from

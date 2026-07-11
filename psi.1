@@ -114,6 +114,9 @@ Set runtime options
 \fB/thinking <level>\fR
 Set reasoning level
 .TP
+\fB/theme [name]\fR
+List or switch the color theme
+.TP
 \fB/login <provider>\fR
 Authenticate an OAuth provider
 .TP
@@ -135,6 +138,9 @@ Duplicate the current session at its current position
 \fB/branch [entry-id]\fR
 Show the session tree or switch the active branch leaf
 .TP
+\fB/tree [entry-id] [--summarize] [focus]\fR
+Navigate the session tree and optionally summarize the branch you leave
+.TP
 \fB/branches\fR
 Show the session tree
 .TP
@@ -147,8 +153,8 @@ Reload extensions, prompt templates, and keybindings
 \fB/rainbow\fR
 Show all 256 terminal background colors
 .TP
-\fB/queue [list|clear|drop N|edit N text]\fR
-Inspect or edit queued messages
+\fB/queue [subcommand]\fR
+Inspect, edit, enqueue, or configure queued messages
 .TP
 \fB/system-prompt\fR
 Print the current coding\-agent system prompt

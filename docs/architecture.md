@@ -1,29 +1,28 @@
 # psi architecture
 
-This document describes the runtime shape `psi` is expected to satisfy.
-It is a current-state and forward-state document only. Code and docs should
-move toward this model; migration history and compatibility notes do not
-belong here.
+This document describes the runtime model `psi` is expected to follow. It covers
+current behavior and intended direction. Migration notes and compatibility
+history belong in issue threads or port-status docs, not here.
 
 ## Design rules
 
-- Keep the host small. C exists for OS, terminal, process, filesystem, HTTP,
-  and Lua embedding boundaries.
+- Keep the host small. C exists for OS, terminal, process, filesystem, HTTP, and
+  Lua embedding boundaries.
 - Keep policy in Lua. Session orchestration, provider logic, rendering,
-  commands, layout, and tool policy belong in `lua/psi/*.lua`.
+  commands, layout, and tool policy belong under `lua/psi/`.
 - Keep execution single-threaded at the Lua boundary. One thread owns
   `lua_State`; no helper thread may call into Lua.
 - Keep frontends thin. Print, REPL, and TUI are different I/O shells over the
   same runtime.
-- Prefer append-only state. Sessions, tool events, and compaction artifacts
-  should be recorded as durable facts rather than mutable snapshots.
-- Favor explicit seams. If a behavior is host-dependent, expose a narrow
-  primitive and keep the policy above it in Lua.
+- Prefer append-only state. Record sessions, tool events, and compaction
+  artifacts as durable facts rather than mutable snapshots.
+- Make host-dependent behavior explicit. Expose a narrow primitive and keep the
+  policy above it in Lua.
 - Gate host-dependent capabilities. Optional OS, terminal, and library-backed
   behavior should compile out cleanly and report availability through
   `psi.runtime_info()`.
-- Treat architecture docs as target behavior. New work should describe how the
-  system should work, not how older code happened to work.
+- Treat architecture docs as target behavior. New work should describe the model
+  the system is moving toward, not preserve old implementation notes.
 
 ## Runtime layers
 
@@ -55,9 +54,9 @@ psi> /describe psi.read_file_slice
 psi> /describe psi.tool_call
 ```
 
-CLI flags accepted by the entry point are kept in markdown because
-they're useful before the binary is on the system. Regenerated from
-`src/runtime/cli.c` by `make docs`:
+CLI flags accepted by the entry point are kept in markdown because they are
+useful before the binary is installed. Regenerate this table from
+`src/runtime/cli.c` with `make docs`:
 
 <!-- @generated:cli-options -->
 | Flag | Argument | Description |
@@ -99,12 +98,12 @@ Lua owns the runtime model:
 - prompt assembly, context shaping, render hooks, and event hooks
 - TUI state, rendering, and key policy
 
-Lua is the default place to implement features unless the feature must touch
-the terminal, OS, or embedded VM boundary directly.
+Lua is the default place for new features unless the feature must touch the
+terminal, OS, or embedded VM boundary directly.
 
-Lua policy must not assume that every host capability is present. It should
-check `psi.runtime_info()` or a module-level capability wrapper and degrade
-cleanly when a feature is disabled.
+Lua policy must not assume every host capability is present. It should check
+`psi.runtime_info()` or a module-level capability wrapper and degrade cleanly
+when a feature is disabled.
 
 ### 3. Frontends
 
@@ -124,20 +123,19 @@ Frontends should not fork their own provider or session semantics.
 `lua_State` has exactly one owner thread. All Lua code, render hooks, provider
 loops, tool hooks, and TUI state transitions execute on that thread.
 
-This rule is the core concurrency guarantee. It removes shared-memory races
-inside Lua and turns runtime concurrency into explicit cooperative
-interleaving.
+This rule is the concurrency guarantee. It removes shared-memory races inside
+Lua and turns runtime concurrency into explicit cooperative interleaving.
 
 ### Helper threads and subprocesses
 
-The runtime may use helper execution contexts for I/O:
+The runtime may use helper contexts for I/O:
 
 - `src/core/http_async.c` performs streaming HTTP work behind a pollable handle
 - `src/core/process.c` manages shell child processes behind a pollable handle
 
-Those helpers communicate with Lua through byte buffers, status flags, and
-poll functions exposed by C. They never run Lua callbacks and never mutate Lua
-state directly.
+Those helpers communicate with Lua through byte buffers, status flags, and poll
+functions exposed by C. They never run Lua callbacks or mutate Lua state
+directly.
 
 ### Cooperative scheduler
 
@@ -158,30 +156,30 @@ coroutine logic runs without a UI loop.
 Providers may emit multiple tool calls in one assistant turn. The runtime runs
 those tool calls concurrently through `sched.run_all(...)`.
 
-Concurrency here means cooperative interleaving on the one Lua thread, plus any
-underlying subprocess or HTTP activity driven by pollable handles. There are no
-Lua data races, but there can be real-world side-effect races if two tools
-touch the same external resource.
+Concurrency here means cooperative interleaving on the one Lua thread, plus
+subprocess or HTTP activity driven by pollable handles. Lua data races are off
+the table, but external side effects can still race if two tools touch the same
+resource.
 
 `sched.run_all(..., { on_done = fn })` reports each tool as it completes, so the
 TUI can update individual tool panels without waiting for the slowest sibling.
 Session persistence still writes the final tool-result messages after the batch
 settles, preserving the existing provider-loop transcript shape.
 
-Current discipline:
+Current rules:
 
 - read/search/process style tools can run concurrently
 - file mutation tools that know their target path should serialize that target
 - tools with arbitrary side effects must provide their own serialization policy
-  or accept the consequences of parallel execution
+  or accept parallel execution
 
 The runtime should preserve concurrency where it is safe and narrow it where
 the side effects are ambiguous.
 
 ### Cancellation
 
-Cancellation is modeled as a shared abort signal stored in the host context and
-observed from Lua through `abort_check` / `psi.is_aborted()`.
+Cancellation is a shared abort signal stored in the host context and observed
+from Lua through `abort_check` / `psi.is_aborted()`.
 
 - frontends trigger cancellation through host primitives
 - provider loops poll the signal at safe boundaries
@@ -194,10 +192,10 @@ runtime in a state where the next turn can start normally.
 
 ### Ownership split
 
-The TUI is Lua-owned. It now defaults to an inline raw-mode terminal surface:
-the normal screen buffer and terminal scrollback stay in use, while the TUI
-renderer updates the visible viewport with ANSI line frames. Alt-screen mode is
-kept as an explicit compatibility/debug path via `PSI_TUI_ALT_SCREEN=1`.
+The TUI is Lua-owned. It defaults to an inline raw-mode terminal surface: the
+normal screen buffer and terminal scrollback stay in use while the TUI renderer
+updates the visible viewport with ANSI line frames. Alt-screen mode remains
+available through `PSI_TUI_ALT_SCREEN=1`.
 
 Lua owns:
 
@@ -242,13 +240,13 @@ C owns only the terminal boundary:
 - `lua/psi/tui_layout.lua` owns layout policy such as prefixes, footer text,
   and row caps
 
-The intended rule is simple: C reports terminal facts, implements stable
-terminal text math, and writes terminal bytes; Lua decides what the interface
-means and what the screen should say.
+The rule is simple: C reports terminal facts, implements terminal text math, and
+writes terminal bytes. Lua decides what the interface means and what the screen
+should say.
 
 ### TUI rendering path
 
-The TUI renderer is selected by Lua at startup from host/runtime capabilities.
+Lua selects the TUI renderer at startup from host/runtime capabilities.
 `lua/psi/tui_runtime.lua` derives `ansi`, `color`, and `raw_ansi` from
 `psi.runtime_info()`, `TERM`, `NO_COLOR`, and explicit override environment
 variables.
@@ -295,8 +293,8 @@ The TUI is an optional host capability.
 - even when compiled in, `psi.tui_*` primitives are guarded so non-TUI modes
   cannot accidentally call terminal operations before the TUI is active
 
-Lua-owned TUI code should treat the host terminal as a capability, not as a
-global assumption.
+Lua-owned TUI code should treat the host terminal as a capability, not a global
+assumption.
 
 ### TUI extension hooks
 
@@ -309,8 +307,8 @@ transcript, updates the status bar, or falls through to the default policy.
 `/reload` resets bundled TUI extension state, clears TUI key, status, and
 clipboard hooks, reloads user extensions, and then runs TUI startup hooks. That
 keeps repeated reloads idempotent while letting settings-gated extensions, such
-as bundled Vim modal editing and OSC 52 clipboard yanks, reinstall exactly the
-hooks their current configuration requires.
+as bundled Vim modal editing and OSC 52 clipboard yanks, reinstall the hooks
+their current configuration requires.
 
 ### ANSI and color
 
@@ -324,14 +322,14 @@ ANSI styling is also capability-driven.
   or dim when ANSI support is present
 
 Render helpers should go through `lua/psi/ansi.lua` instead of hard-coding
-escape sequences. This lets dumb terminals, no-color environments, CI logs,
-and small ports all share the same rendering policy.
+escape sequences. That gives dumb terminals, no-color environments, CI logs,
+and small ports the same rendering policy.
 
 ## Portability and feature gates
 
-Build-time feature gates are part of the host boundary. They let small ports
-or constrained environments build a useful `psi` without carrying every POSIX
-or terminal dependency.
+Build-time feature gates are part of the host boundary. They let small ports or
+constrained environments build a useful `psi` without carrying every POSIX or
+terminal dependency.
 
 Current gates:
 
@@ -349,7 +347,7 @@ builds the complete `TUI` / `ANSI` / `COLOR` / `REPL_EDITLINE` matrix into
 isolated build directories and should be run whenever C preprocessor guards
 or optional dependencies change.
 
-The architectural rule for new gates:
+Rules for new gates:
 
 - the Makefile flag should map to a `PSI_ENABLE_*` C define
 - unavailable dependencies should be absent from compile and link flags
@@ -358,8 +356,8 @@ The architectural rule for new gates:
 - Lua should discover availability through `psi.runtime_info()` and degrade
   policy rather than branching on platform names
 
-This pattern should be reused for future optional boundaries such as network,
-process tools, filesystem persistence, or embedded-asset compression.
+Use the same pattern for future optional boundaries such as network, process
+tools, filesystem persistence, or embedded-asset compression.
 
 ## Sessions and lifecycle events
 
@@ -419,8 +417,8 @@ result for the session log.
 
 ## Extension surface
 
-The primary extension API is the `psi.*` Lua surface plus the event and render
-hook systems.
+The primary extension API is the `psi.*` Lua surface plus event and render
+hooks.
 
 Extensions should be able to:
 
@@ -443,6 +441,5 @@ Near-term direction:
 - add tests around event ordering, session lifecycle, and concurrent tool
   behavior whenever the runtime surface changes
 
-The default question for new code should be: "Can this be expressed as Lua
-policy on top of a narrow host primitive?" If the answer is yes, it belongs in
-Lua.
+For new code, ask: "Can this be expressed as Lua policy on top of a narrow host
+primitive?" If yes, it belongs in Lua.
