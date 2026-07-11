@@ -147,7 +147,7 @@ session state.
 | `psi.commands.register(name, { handler = fn, description = "...", argument_hint = "..." })` | Metadata form. `/help` includes the description and argument hint. |
 | `psi.commands.unregister(name)` | Remove a previously registered command. |
 | `psi.commands.builtin_commands()` | Built-in command metadata used to generate `/help`. |
-| `psi.commands.registered_commands()` | Extension command metadata currently registered. |
+| `psi.commands.registered_commands()` | Registered extension command metadata. |
 | `psi.commands.help_text()` | Generated help text for built-ins, extensions, and prompt templates. |
 
 Built-in commands take precedence over registered ones, so extensions cannot
@@ -223,7 +223,7 @@ slots they need and inherit the rest.
 |---|---|
 | `psi.theme.register(name, spec)` | Add or replace a named theme. |
 | `psi.theme.use(name_or_spec)` | Apply a registered theme or an ad-hoc spec immediately. |
-| `psi.theme.current()` | Returns the currently applied normalized theme table. |
+| `psi.theme.current()` | Returns the applied normalized theme table. |
 | `psi.theme.current_name()` | Returns the active theme name. |
 | `psi.theme.names()` | Sorted array of registered theme names. |
 
@@ -278,9 +278,8 @@ payload sent back to the model, use `psi.tools.add_after_hook`. The two paths
 are independent.
 
 `psi.render.events()` returns the event names dispatched by the render bridge:
-currently `before-turn`, `assistant-text`, `thinking-delta`, `tool-call`,
-`tool-result`, and `after-turn`. Extensions can inspect this list instead of
-hard-coding names.
+`before-turn`, `assistant-text`, `thinking-delta`, `tool-call`, `tool-result`,
+and `after-turn`. Extensions can inspect this list instead of hard-coding names.
 
 Most extensions should use `psi.events.on`. Use render hooks only when the
 on-screen output must change.
@@ -330,7 +329,7 @@ These are part of the stable surface:
 | `psi.agent.queue_follow_up(text)` / `queue_steering(text)` | Queue user text for the active run loop. Follow-ups run after the current task would otherwise stop; steering is injected before the next provider request. |
 | `psi.agent.queue_modes()` / `queue_mode(kind)` / `set_queue_mode(kind, mode)` | Inspect or set pi-style queue drain modes, also exposed in the TUI as `/queue set-steering-mode MODE` and `/queue set-follow-up-mode MODE`. `kind` is `steering` or `follow-up`; `mode` is `one-at-a-time` or `all`. |
 | `psi.agent.pending_messages()` / `pending_message(i)` / `replace_pending(i, text)` / `remove_pending(i)` / `clear_queue(kind)` / `clear_queues()` | Inspect and edit queued messages. TUI busy-submit queues steering, and Alt-Enter queues follow-up messages. |
-| `psi.agent.side_question(question, opts)` | Ask an ephemeral `/btw`-style side question using the current transcript excerpt. Uses the currently configured model, including local providers, and does not append to the session. |
+| `psi.agent.side_question(question, opts)` | Ask an ephemeral `/btw`-style side question using the current transcript excerpt. Uses the configured model, including local providers, and does not append to the session. |
 | `psi.agent.run_tree(opts)` | Switch the active session-tree leaf. `opts.target` is an entry id or prefix; `opts.summarize=true` summarizes the branch being left and appends a `branch_summary` entry at the destination. |
 | `psi.tui.register_key_handler(fn)` | Intercept normalized TUI key events before built-in bindings. Return `{ action = "...", arg = ... }` to handle, `nil` to fall through. Returns a handler id. |
 | `psi.tui.unregister_key_handler(id)` | Remove one key handler previously returned by `register_key_handler`. |
@@ -346,7 +345,7 @@ These are part of the stable surface:
 | `psi.session.send_message(role, text)` | Inject a user or assistant message into the in-memory session without triggering a turn. `role` is `"user"` or `"assistant"`. Call `psi.session.save()` afterwards to persist. Replaces the former internal-only `append_user` / `append_assistant` for extension use. |
 | `psi.session.append_custom(name, data)` | Persist extension data in the session file without adding it to model context. |
 | `psi.session.append_custom_message(text, opts)` | Persist a model-visible custom message. `opts.role` may be `"user"` or `"assistant"`; `opts.hidden=true` keeps it out of provider context. |
-| `psi.providers.all_providers()` / `all_models()` | Inspect the built-in provider/model registry. Provider registration exists internally but is not yet a stable extension API. |
+| `psi.providers.all_providers()` / `all_models()` | Inspect the built-in provider/model registry. Provider registration exists internally but is not a stable extension API. |
 | `psi.settings.get(path, default)` / `reload()` | Read layered JSON settings from `~/.config/psi/settings.json` and `./.psi/settings.json`. |
 | `psi.resources.context_files()` | Discover global/project context files. Emits `resources_discover`. |
 | `psi.prompt_templates.load()` / `list()` / `find(name)` / `expand(text)` | Loader + lookup + runtime expansion for user-authored slash-command templates. `/reload` reloads them. See "Prompt templates" below. |
@@ -419,9 +418,9 @@ stable as well.
 Every event fires synchronously from the agent turn loop, in the order defined
 below. Handlers must be fast because they run on the turn's critical path.
 
-Psi emits its historical hyphenated event names and aliases several of them to
-pi-style underscore names (`turn_end`, `tool_execution_start`,
-`after_provider_response`, etc.) for new extension code.
+Psi emits hyphenated event names and aliases several of them to pi-style
+underscore names (`turn_end`, `tool_execution_start`,
+`after_provider_response`, etc.) for extension code.
 
 | Event | Firing site | Payload |
 |---|---|---|
@@ -456,9 +455,9 @@ end)
 
 ---
 
-## Non-goals (today)
+## Non-goals
 
-Unsupported today:
+Unsupported:
 
 - No `psi install` / package manager. Extensions are single-file drops.
 - No TypeScript. Lua only.

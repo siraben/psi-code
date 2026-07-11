@@ -7,8 +7,8 @@ psi ships with four routed providers:
 - OpenRouter, via OpenAI-compatible `/chat/completions`
 - OpenAI Codex, via ChatGPT's Codex Responses backend
 
-For current default models and environment-variable mappings, ask the running
-agent. Runtime introspection stays current after provider registry changes:
+For default models and environment-variable mappings, ask the running agent.
+Runtime introspection stays accurate after provider registry changes:
 
 ```
 psi> /apropos provider:
@@ -153,8 +153,8 @@ PSI_OLLAMA_BASE_URL=http://workstation.local:11434 \
 - Provider registration from extensions. The registry exists in Lua,
   but public extension APIs for adding providers are not frozen yet.
 - Bedrock, Gemini native, Mistral native, and Azure responses.
-- Browser callback completion for OAuth. OpenAI Codex currently uses the same
-  manual paste fallback that pi-mono supports for headless sessions.
+- Browser callback completion for OAuth. OpenAI Codex uses the same manual paste
+  fallback that pi-mono supports for headless sessions.
 - Full pricing metadata. OpenRouter context-window and output-token
   metadata is cached lazily as JSON under the user cache directory; the
   first lookup for a missing OpenRouter model refreshes the cache from

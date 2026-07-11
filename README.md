@@ -219,9 +219,9 @@ tests/                  Python harnesses for smoke, bench, and valgrind runs
 
 ## Evals
 
-There is no published eval suite yet. The repository currently uses smoke
-tests, build-matrix checks, benchmark harnesses, and valgrind-oriented tests
-under `tests/`.
+There is no published eval suite yet. The repository uses smoke tests,
+build-matrix checks, benchmark harnesses, and valgrind-oriented tests under
+`tests/`.
 
 ## Naming
 
