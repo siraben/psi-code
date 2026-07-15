@@ -1741,9 +1741,7 @@ static int psi_vm_text_wrap_flush_word(struct psi_vm_text_wrap_context *ctx) {
         }
     }
 
-    /* A flushed word is disposable scratch; clear it (keeping the
-     * capacity for the next word) — psi_vm_text_wrap_context_free
-     * releases the allocation once wrapping is done. */
+    /* Scratch: clear but keep capacity for the next word. */
     psi_vm_text_builder_clear(&ctx->word);
     ctx->word_width = 0;
     return 1;
@@ -2302,12 +2300,17 @@ static int lfn_read_file_slice(lua_State *L) {
                             next_cap *= 2u;
                         if ((long)next_cap > max_bytes + 1l)
                             next_cap = (size_t)max_bytes + 1u;
-                        next = (char *)realloc(buffer, next_cap);
+                        /* malloc+memcpy, not realloc: Infer cannot prove
+                         * the failed-realloc free safe; geometric growth
+                         * amortizes the copy. */
+                        next = (char *)malloc(next_cap);
                         if (!next) {
                             free(buffer);
                             fclose(f);
                             return luaL_error(L, "out of memory");
                         }
+                        memcpy(next, buffer, len);
+                        free(buffer);
                         buffer = next;
                         cap = next_cap;
                     }
@@ -4022,6 +4025,7 @@ static int lfn_tui_render_frame(lua_State *L) {
 
 static int lfn_tui_render_lines(lua_State *L) {
     char **next_lines = NULL;
+    char **prev_lines = NULL;
     unsigned char *changed = NULL;
     size_t line_count;
     size_t i;
@@ -4063,11 +4067,12 @@ static int lfn_tui_render_lines(lua_State *L) {
     /* Lua frames are 1-based and local to the viewport; terminals are physical rows. */
     physical_cursor_row = top + cursor_row - PSI_VM_TUI_FIRST_TERMINAL_CELL;
 
-    /* When the frame height is unchanged, compare each incoming line against
-     * the cached copy in place: only changed lines are freed and duplicated,
-     * and the comparison result doubles as the differential draw mask, so no
-     * second strcmp pass is needed. */
-    reuse = psi_vm_tui_previous_lines != NULL && psi_vm_tui_previous_line_count == line_count;
+    /* Same-height frames compare lines in place: only changed lines are
+     * re-duplicated, and the compare doubles as the draw mask. */
+    /* Local snapshot lets the static analyzers prove the reuse path
+     * dereferences non-NULL. */
+    prev_lines = psi_vm_tui_previous_lines;
+    reuse = prev_lines != NULL && psi_vm_tui_previous_line_count == line_count;
     lines_changed = 0;
     if (reuse) {
         changed = (unsigned char *)calloc(line_count, sizeof(unsigned char));
@@ -4081,14 +4086,14 @@ static int lfn_tui_render_lines(lua_State *L) {
             if (line == NULL) {
                 line = "";
             }
-            if (strcmp(psi_vm_tui_previous_lines[i], line) != 0) {
+            if (strcmp(prev_lines[i], line) != 0) {
                 char *copy = psi_strdup(line);
                 if (copy == NULL) {
                     free(changed);
                     return luaL_error(L, "out of memory");
                 }
-                free(psi_vm_tui_previous_lines[i]);
-                psi_vm_tui_previous_lines[i] = copy;
+                free(prev_lines[i]);
+                prev_lines[i] = copy;
                 changed[i] = 1u;
                 lines_changed = 1;
             }
@@ -4127,7 +4132,7 @@ static int lfn_tui_render_lines(lua_State *L) {
     if (any_output) {
         psi_vm_tui_write(PSI_VM_TUI_SYNC_BEGIN);
         psi_vm_tui_write(PSI_VM_TUI_CURSOR_HIDE);
-        if (full_redraw && psi_vm_tui_previous_lines != NULL &&
+        if (full_redraw && prev_lines != NULL &&
             (psi_vm_tui_previous_top != top || psi_vm_tui_previous_line_count != line_count)) {
             /* Clear rows that belonged to the previous viewport before drawing the new one. */
             for (i = 0u; i < psi_vm_tui_previous_line_count; i++) {
@@ -4137,15 +4142,14 @@ static int lfn_tui_render_lines(lua_State *L) {
         }
         if (full_redraw) {
             for (i = 0u; i < line_count; i++) {
-                psi_vm_tui_draw_frame_line(
-                    top + (long)i, reuse ? psi_vm_tui_previous_lines[i] : next_lines[i]);
+                psi_vm_tui_draw_frame_line(top + (long)i, reuse ? prev_lines[i] : next_lines[i]);
             }
         } else {
             /* !full_redraw implies reuse: draw exactly the lines the compare
              * pass marked changed. */
             for (i = 0u; i < line_count; i++) {
                 if (changed[i]) {
-                    psi_vm_tui_draw_frame_line(top + (long)i, psi_vm_tui_previous_lines[i]);
+                    psi_vm_tui_draw_frame_line(top + (long)i, prev_lines[i]);
                 }
             }
         }
