@@ -1135,6 +1135,209 @@ function M.command_suggestions(text, limit)
   return out
 end
 
+local function completion_scan_dir(dir)
+  if dir == "" then
+    return "."
+  end
+  if dir:sub(1, 2) == "~/" then
+    local home = os.getenv("HOME") or os.getenv("USERPROFILE")
+    if home and home ~= "" then
+      return home .. dir:sub(2)
+    end
+  end
+  return dir
+end
+
+local function completion_is_dir(path)
+  return psi.list_dir ~= nil and psi.list_dir(path) ~= nil
+end
+
+local function path_completions(token, limit)
+  if type(token) ~= "string" or not psi.list_dir then
+    return nil
+  end
+  local slash = token:match("^.*()/")
+  local dir, base
+  if slash then
+    dir = token:sub(1, slash)
+    base = token:sub(slash + 1)
+  else
+    dir = ""
+    base = token
+  end
+  local scan = completion_scan_dir(dir)
+  local entries = psi.list_dir(scan)
+  if type(entries) ~= "table" then
+    return nil
+  end
+  table.sort(entries)
+  local allow_hidden = base:sub(1, 1) == "."
+  local scan_prefix = scan:sub(-1) == "/" and scan or (scan .. "/")
+  local out = {}
+  for _, name in ipairs(entries) do
+    if #out >= (limit or 20) then
+      break
+    end
+    local matches = base == "" or name:sub(1, #base) == base
+    local visible = allow_hidden or name:sub(1, 1) ~= "."
+    if matches and visible then
+      local is_dir = completion_is_dir(scan_prefix .. name)
+      out[#out + 1] = {
+        insert = dir .. name .. (is_dir and "/" or ""),
+        label = name .. (is_dir and "/" or ""),
+        trailing = is_dir and "" or " ",
+      }
+    end
+  end
+  return out
+end
+
+local function model_arg_completions(arg, limit)
+  local ok, registry = pcall(require, "psi.api_registry")
+  if not ok or type(registry) ~= "table" or not registry.all_models then
+    return nil
+  end
+  local ok_models, models = pcall(registry.all_models)
+  if not ok_models or type(models) ~= "table" then
+    return nil
+  end
+  local out = {}
+  for _, m in ipairs(models) do
+    if #out >= (limit or 40) then
+      break
+    end
+    local id = m.id
+    if type(id) == "string" and (arg == "" or id:find(arg, 1, true) ~= nil) then
+      out[#out + 1] = { insert = id, label = id, description = m.name, trailing = "" }
+    end
+  end
+  return out
+end
+
+local function theme_arg_completions(arg, limit)
+  local names = {}
+  if psi.theme and psi.theme.names then
+    local ok, list = pcall(psi.theme.names)
+    if ok and type(list) == "table" then
+      names = list
+    end
+  end
+  local out = {}
+  for _, n in ipairs(names) do
+    if #out >= (limit or 40) then
+      break
+    end
+    if type(n) == "string" and (arg == "" or n:find(arg, 1, true) ~= nil) then
+      out[#out + 1] = { insert = n, label = n, trailing = "" }
+    end
+  end
+  return out
+end
+
+local function static_arg_completions(values)
+  return function(arg, limit)
+    local out = {}
+    for _, v in ipairs(values) do
+      if #out >= (limit or 40) then
+        break
+      end
+      if arg == "" or v:sub(1, #arg) == arg then
+        out[#out + 1] = { insert = v, label = v, trailing = "" }
+      end
+    end
+    return out
+  end
+end
+
+local PATH_ARG_COMMANDS = {
+  resume = true,
+  import = true,
+  export = true,
+  clone = true,
+}
+
+local ENUM_ARG_COMPLETERS = {
+  model = model_arg_completions,
+  theme = theme_arg_completions,
+  thinking = static_arg_completions({ "off", "minimal", "low", "medium", "high", "xhigh" }),
+  login = static_arg_completions({ "openai-codex" }),
+}
+
+function M.input_completions(input, cursor, limit, force)
+  if type(input) ~= "string" then
+    return nil
+  end
+  cursor = tonumber(cursor) or #input
+  if cursor < 0 then
+    cursor = 0
+  elseif cursor > #input then
+    cursor = #input
+  end
+  local before = input:sub(1, cursor)
+  limit = tonumber(limit) or 24
+
+  if before:match("^/[%w%-_]*$") then
+    local cmds = M.command_suggestions(before, limit)
+    if type(cmds) ~= "table" or #cmds == 0 then
+      return nil
+    end
+    local items = {}
+    for _, c in ipairs(cmds) do
+      local label = "/" .. c.name
+      if c.argument_hint and c.argument_hint ~= "" then
+        label = label .. " " .. c.argument_hint
+      end
+      local desc = c.description
+      if c.alias_of and c.alias_of ~= c.name then
+        local base = (desc and desc ~= "") and (" - " .. desc) or ""
+        desc = "alias for /" .. c.alias_of .. base
+      end
+      items[#items + 1] = {
+        insert = "/" .. c.name,
+        label = label,
+        description = desc,
+        trailing = (c.argument_hint and c.argument_hint ~= "") and " " or "",
+      }
+    end
+    return { start = 1, items = items }
+  end
+
+  local cmd_name, sep = before:match("^/(%S+)(%s+)")
+  if cmd_name then
+    local arg = before:sub(#("/" .. cmd_name .. sep) + 1)
+    if PATH_ARG_COMMANDS[cmd_name] then
+      local token = arg:match("(%S*)$") or ""
+      local items = path_completions(token, limit)
+      if type(items) ~= "table" or #items == 0 then
+        return nil
+      end
+      return { start = cursor - #token + 1, items = items }
+    end
+    local completer = ENUM_ARG_COMPLETERS[cmd_name]
+    if not completer or arg:find("%s") then
+      return nil
+    end
+    local items = completer(arg, limit)
+    if type(items) ~= "table" or #items == 0 then
+      return nil
+    end
+    return { start = cursor - #arg + 1, items = items }
+  end
+
+  local token = before:match("(%S*)$") or ""
+  local path_like = token:find("/", 1, true) ~= nil
+    or token:sub(1, 1) == "."
+    or token:sub(1, 2) == "~/"
+  if token == "" or (not force and not path_like) then
+    return nil
+  end
+  local items = path_completions(token, limit)
+  if type(items) ~= "table" or #items == 0 then
+    return nil
+  end
+  return { start = cursor - #token + 1, items = items }
+end
+
 local function command_invocation(cmd)
   local hint = cmd.argument_hint and (" " .. cmd.argument_hint) or ""
   return "/" .. cmd.name .. hint

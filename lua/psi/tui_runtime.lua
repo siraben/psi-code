@@ -666,24 +666,28 @@ local function active_command_completions(state)
     state.command_completion_index = 1
     state.command_completion_input = nil
     state.command_completion_items = nil
+    state.command_completion_start = nil
     return {}
   end
-  if not state.input:match("^/[%w%-%_]*$") then
-    state.command_completion_index = 1
-    state.command_completion_input = nil
-    state.command_completion_items = nil
-    return {}
-  end
-  if state.command_completion_input == state.input and state.command_completion_items then
+  local force = state.command_completion_force == true
+    and state.command_completion_force_input == state.input
+  if
+    state.command_completion_input == state.input
+    and state.command_completion_force_cached == force
+    and state.command_completion_items
+  then
     return state.command_completion_items
   end
   if state.command_completion_input ~= state.input then
-    state.command_completion_input = state.input
     state.command_completion_index = 1
   end
 
-  local items = commands.command_suggestions(state.input, 32)
+  local result = commands.input_completions(state.input, state.cursor, 32, force)
+  local items = (result and result.items) or {}
+  state.command_completion_input = state.input
+  state.command_completion_force_cached = force
   state.command_completion_items = items
+  state.command_completion_start = result and result.start or nil
   if #items == 0 then
     state.command_completion_index = 1
     return items
@@ -698,29 +702,23 @@ local function accept_command_completion(state)
   if not item then
     return false
   end
-  local next_input = "/" .. item.name
-  if item.argument_hint and item.argument_hint ~= "" then
-    next_input = next_input .. " "
-  end
-  state.input = next_input
+  local start = state.command_completion_start or 1
+  local before = state.input:sub(1, start - 1)
+  state.input = before .. tostring(item.insert or "") .. (item.trailing or "")
   state.cursor = #state.input
-  state.command_completion_input = state.input
+  state.command_completion_input = nil
   state.command_completion_items = nil
+  state.command_completion_force = nil
+  state.command_completion_force_input = nil
   state.dirty = true
   return true
 end
 
 local function format_command_completion(item, selected, width)
   local marker = selected and "> " or "  "
-  local label = "/" .. tostring(item.name or "")
-  if item.argument_hint and item.argument_hint ~= "" then
-    label = label .. " " .. item.argument_hint
-  end
+  local label = tostring(item.label or item.insert or "")
 
   local desc = item.description or ""
-  if item.alias_of and item.alias_of ~= item.name then
-    desc = "alias for /" .. item.alias_of .. (desc ~= "" and (" - " .. desc) or "")
-  end
 
   local label_width = math.min(28, math.max(12, math.floor((tonumber(width) or 80) * 0.36)))
   label = fit_text(label, label_width)
@@ -4035,6 +4033,21 @@ local function handle_key_event(state, event)
   end
 
   local completions = active_command_completions(state)
+  if
+    #completions == 0
+    and event.key == "tab"
+    and not state.busy
+    and state.cursor == #(state.input or "")
+  then
+    state.command_completion_force = true
+    state.command_completion_force_input = state.input
+    completions = active_command_completions(state)
+    if #completions > 0 then
+      state.command_completion_index = 1
+      state.dirty = true
+    end
+    return
+  end
   if #completions > 0 then
     if event.key == "up" then
       state.command_completion_index = (state.command_completion_index or 1) - 1
@@ -4052,10 +4065,13 @@ local function handle_key_event(state, event)
       state.dirty = true
       return
     end
-    if event.key == "right" and state.cursor == #state.input then
+    if (event.key == "tab" or event.key == "right") and state.cursor == #state.input then
       if accept_command_completion(state) then
         return
       end
+    end
+    if event.key == "tab" then
+      return
     end
   end
 
