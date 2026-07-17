@@ -2667,6 +2667,50 @@ local function move_line_end(state)
   state.dirty = true
 end
 
+-- pi parity: move within a multi-line draft; recall history only at the edge.
+function chat.editor_arrow_up(state)
+  if not history_input_target(state) then
+    return false
+  end
+  local input = state.input or ""
+  local line, col = line_col_at(input, state.cursor)
+  if line > 1 then
+    move_line(state, -1)
+    return true
+  end
+  if input == "" or col == 0 or state.history_index ~= nil then
+    if #state.prompt_history > 0 then
+      history_up(state)
+      return true
+    end
+    return false
+  end
+  move_line_start(state, false)
+  return true
+end
+
+function chat.editor_arrow_down(state)
+  if not history_input_target(state) then
+    return false
+  end
+  local input = state.input or ""
+  local line = line_col_at(input, state.cursor)
+  if line < line_count(input) then
+    move_line(state, 1)
+    return true
+  end
+  if state.history_index ~= nil then
+    history_down(state)
+    return true
+  end
+  local _, finish = line_bounds(input, state.cursor)
+  if state.cursor < finish then
+    move_line_end(state)
+    return true
+  end
+  return false
+end
+
 local function set_insert_mode(state)
   clear_selection(state)
   state.block_edit = nil
@@ -4353,6 +4397,13 @@ local function handle_key_event(state, event)
     end
   end
 
+  if event.key == "up" and chat.editor_arrow_up(state) then
+    return
+  end
+  if event.key == "down" and chat.editor_arrow_down(state) then
+    return
+  end
+
   local result = tui.handle_key({
     key = event.key,
     busy = state.busy,
@@ -5138,6 +5189,14 @@ function M._debug_history_sequence(history, keys, input)
       end
     elseif key == "line-down" then
       if not (history_down_applicable(state) and history_down(state)) then
+        state.scrolled = true
+      end
+    elseif key == "arrow-up" then
+      if not chat.editor_arrow_up(state) then
+        state.scrolled = true
+      end
+    elseif key == "arrow-down" then
+      if not chat.editor_arrow_down(state) then
         state.scrolled = true
       end
     elseif key == "ctrl-r" or key == "reverse" then
