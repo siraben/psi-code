@@ -13,6 +13,7 @@
 -- }
 
 local prelude = require("psi.prelude")
+local credential = require("psi.credential")
 
 local M = {}
 
@@ -66,9 +67,9 @@ function M.get(provider)
   return read_all()[provider]
 end
 
-function M.set(provider, credential)
+function M.set(provider, entry)
   local data = read_all()
-  data[provider] = credential
+  data[provider] = entry
   return write_all(data)
 end
 
@@ -90,6 +91,53 @@ function M.get_api_key(provider)
     return entry.access, entry
   end
   return nil, entry
+end
+
+-- Does the auth file hold an api_key entry for `provider`? A presence
+-- check only: it never runs a `!shell-command` or reads the environment,
+-- so callers can use it in an auth gate without side effects.
+function M.has_api_key_entry(provider)
+  local entry = M.get(provider)
+  return type(entry) == "table"
+    and entry.type == "api_key"
+    and type(entry.key) == "string"
+    and entry.key ~= ""
+end
+
+-- Resolve the effective API key for `provider`, giving the auth file
+-- precedence over the environment variable (matching pi). The auth-file
+-- value is run through psi.credential so `$VAR`, `${VAR}`, and
+-- `!shell-command` forms are expanded. Returns (key, source) where
+-- source is "auth-file" or "env", or nil when neither is configured.
+function M.resolve_api_key(provider, env_var)
+  if M.has_api_key_entry(provider) then
+    local entry = M.get(provider)
+    local resolved = credential.resolve(entry.key)
+    if resolved and resolved ~= "" then
+      return resolved, "auth-file"
+    end
+  end
+  if env_var then
+    local env = os.getenv(env_var)
+    if env and env ~= "" then
+      return env, "env"
+    end
+  end
+  return nil
+end
+
+-- Presence gate for api-key providers: an auth-file entry (not yet
+-- resolved) or a set environment variable. Avoids running credential
+-- shell commands, so it is safe on the resolver's hot path.
+function M.has_api_key(provider, env_var)
+  if M.has_api_key_entry(provider) then
+    return true
+  end
+  if env_var then
+    local env = os.getenv(env_var)
+    return env ~= nil and env ~= ""
+  end
+  return false
 end
 
 return M

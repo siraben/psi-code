@@ -13,9 +13,11 @@ local compat = require("psi.providers.openai_compat")
 local prelude = require("psi.prelude")
 local stream_parser = require("psi.stream_parser")
 local notice = require("psi.notice")
+local auth_storage = require("psi.auth_storage")
 
 local M = {}
 
+local PROVIDER = "openrouter"
 local API_KEY_ENV = "OPENROUTER_API_KEY"
 local BASE_URL_ENV = "PSI_OPENROUTER_BASE_URL"
 local BASE_URL_DEFAULT = "https://openrouter.ai/api/v1/"
@@ -56,8 +58,14 @@ local function model_supports_images(model)
   return false
 end
 
+-- Auth-file entry (with $VAR/${VAR}/!command resolution) takes
+-- precedence over OPENROUTER_API_KEY; see psi.auth_storage.
+local function resolve_key()
+  return auth_storage.resolve_api_key(PROVIDER, API_KEY_ENV)
+end
+
 local function headers()
-  local key = os.getenv(API_KEY_ENV) or ""
+  local key = resolve_key() or ""
   local hdrs = {
     "Content-Type: application/json",
     "Authorization: Bearer " .. key,
@@ -298,9 +306,9 @@ M._debug = {
 -- ---------- Public entry points ----------
 
 local function check_api_key()
-  local key = os.getenv(API_KEY_ENV)
+  local key = resolve_key()
   if not key or key == "" then
-    local msg = API_KEY_ENV .. " is not set"
+    local msg = API_KEY_ENV .. " is not set (and no auth-file entry for " .. PROVIDER .. ")"
     notice.error(msg)
     return false, msg
   end
@@ -308,8 +316,7 @@ local function check_api_key()
 end
 
 function M.has_auth()
-  local key = os.getenv(API_KEY_ENV)
-  return key ~= nil and key ~= ""
+  return auth_storage.has_api_key(PROVIDER, API_KEY_ENV)
 end
 
 function M.run_turn(opts)

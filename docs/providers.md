@@ -55,9 +55,39 @@ request because provider streams are not resumable at that point.
   (default `1000`).
 - `PSI_HTTP_MAX_RETRY_DELAY_MS`: cap for retry sleep (default `60000`).
 
+## API-key credentials (auth.json)
+
+API-key providers read their key from `~/.config/psi/auth.json` in addition to
+the environment variable, matching pi-mono's credential handling. The
+**auth-file entry takes precedence over the environment variable**.
+
+Each provider is keyed by its provider name (`anthropic`, `openrouter`, …):
+
+```json
+{
+  "openrouter": { "type": "api_key", "key": "sk-or-..." },
+  "anthropic":  { "type": "api_key", "key": "${WORK_ANTHROPIC_KEY}" }
+}
+```
+
+The `key` field is resolved at use time:
+
+- **Literal** — used verbatim (`"sk-or-..."`).
+- **`$VAR` / `${VAR}`** — substituted from the process environment; embedded
+  references (`"pre-${VAR}-post"`) are interpolated too. An unset variable
+  collapses to empty.
+- **`!shell-command`** — the command after `!` is run and its trimmed stdout
+  becomes the key. Results are cached per psi process, so a command that mints a
+  short-lived token runs at most once per session.
+
+The file is written with mode `0600` (see OpenAI Codex below). `PSI_AUTH_FILE`
+overrides its path. OpenAI Codex OAuth credentials live in the same file under
+the `openai-codex` key and are unaffected by this API-key resolution.
+
 ## Anthropic
 
-- Env: `ANTHROPIC_API_KEY` (required)
+- Auth: `ANTHROPIC_API_KEY`, or an `anthropic` api_key entry in `auth.json`
+  (see [API-key credentials](#api-key-credentials-authjson); auth file wins).
 - `PSI_ANTHROPIC_MODEL`: default model when none is passed (default
   `claude-opus-4-7`).
 - `PSI_ANTHROPIC_BASE_URL`: override the API host (for proxies).
@@ -84,7 +114,8 @@ request because provider streams are not resumable at that point.
 
 ## OpenRouter
 
-- Env: `OPENROUTER_API_KEY` (required).
+- Auth: `OPENROUTER_API_KEY`, or an `openrouter` api_key entry in `auth.json`
+  (see [API-key credentials](#api-key-credentials-authjson); auth file wins).
 - `PSI_OPENROUTER_MODEL`: default model when none is passed
   (default `google/gemini-3-flash-preview`).
 - `PSI_OPENROUTER_BASE_URL`: override the API host.

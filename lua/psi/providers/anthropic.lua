@@ -29,8 +29,12 @@ local image_policy = require("psi.image_policy")
 local tools = require("psi.tools")
 local session_mod = require("psi.session_manager")
 local notice = require("psi.notice")
+local auth_storage = require("psi.auth_storage")
 
 local M = {}
+
+local PROVIDER = "anthropic"
+local API_KEY_ENV = "ANTHROPIC_API_KEY"
 
 local MODEL_ENV = "PSI_ANTHROPIC_MODEL"
 local MODEL_DEFAULT = "claude-opus-4-7"
@@ -61,6 +65,23 @@ end
 
 local function resolve_model(m)
   return prelude.resolve_env(m, MODEL_ENV, MODEL_DEFAULT)
+end
+
+-- Effective API key, in precedence order: auth-file entry (with
+-- $VAR/${VAR}/!command resolution) > ANTHROPIC_API_KEY > amiga bridge.
+-- Returns nil when none are configured.
+local function resolve_api_key()
+  local key = auth_storage.resolve_api_key(PROVIDER, API_KEY_ENV)
+  if key and key ~= "" then
+    return key
+  end
+  if psi.amiga_bridge_api_key then
+    local bridge = psi.amiga_bridge_api_key()
+    if bridge and bridge ~= "" then
+      return bridge
+    end
+  end
+  return nil
 end
 
 -- Tool specs for the API: drop prompt_snippet + prompt_guidelines,
@@ -638,10 +659,7 @@ M.maybe_auto_compact = maybe_auto_compact
 local http_post_text = sched.http_post_text
 
 function M.complete_text(opts)
-  local api_key = os.getenv("ANTHROPIC_API_KEY")
-  if (not api_key or api_key == "") and psi.amiga_bridge_api_key then
-    api_key = psi.amiga_bridge_api_key()
-  end
+  local api_key = resolve_api_key()
   if not api_key or api_key == "" then
     local msg = "ANTHROPIC_API_KEY is not set"
     notice.error(msg)
@@ -687,8 +705,7 @@ function M.complete_text(opts)
 end
 
 function M.has_auth()
-  local api_key = os.getenv("ANTHROPIC_API_KEY")
-  if api_key and api_key ~= "" then
+  if auth_storage.has_api_key(PROVIDER, API_KEY_ENV) then
     return true
   end
   if psi.amiga_bridge_api_key then
@@ -703,10 +720,7 @@ end
 -- ---------- Agent turn (streaming + tool loop) ----------
 
 function M.run_turn(opts)
-  local api_key = os.getenv("ANTHROPIC_API_KEY")
-  if (not api_key or api_key == "") and psi.amiga_bridge_api_key then
-    api_key = psi.amiga_bridge_api_key()
-  end
+  local api_key = resolve_api_key()
   if not api_key or api_key == "" then
     local msg = "ANTHROPIC_API_KEY is not set"
     notice.error(msg)
