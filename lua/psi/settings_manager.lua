@@ -41,7 +41,12 @@ function M.reload()
   if home and home ~= "" then
     merge(out, read_json(prelude.path_join(home, ".config/psi/settings.json")))
   end
-  merge(out, read_json(".psi/settings.json"))
+  -- The project layer is repo-supplied config: gate it on the trust
+  -- decision boot made (psi.project_trusted). nil (modules used outside
+  -- a full boot) keeps the historical permissive behavior for tests.
+  if psi.project_trusted ~= false then
+    merge(out, read_json(".psi/settings.json"))
+  end
   cached = out
   return cached
 end

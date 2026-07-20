@@ -1,6 +1,7 @@
 --[==[psi-test
 expect = "true|false|Image reading is disabled.|nil|true"
 cwd = "read-image-blocked"
+env = { PSI_TRUST = "always" }
 files = [
   { path = ".psi/settings.json", json = { images = { block_images = true } } },
 ]

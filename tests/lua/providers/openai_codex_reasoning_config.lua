@@ -1,7 +1,7 @@
 --[==[psi-test
 expect = "xhigh|nil|medium"
 cwd = "codex-reasoning-config"
-env = { PSI_OPENAI_CODEX_REASONING = "" }
+env = { PSI_OPENAI_CODEX_REASONING = "", PSI_TRUST = "always" }
 files = [
   { path = ".psi/settings.json", json = { defaults = { reasoning_effort = "medium" } } },
 ]

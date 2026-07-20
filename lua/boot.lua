@@ -37,6 +37,10 @@ psi.diff = require("psi.diff")
 psi.records = require("psi.records")
 psi.context = require("psi.context")
 psi.settings = require("psi.settings_manager")
+-- Resolve project trust before anything reads repo-local configuration
+-- (theme -> settings at the next line would already merge ./.psi/settings.json).
+psi.trust = require("psi.trust_manager")
+psi.project_trusted = psi.trust.resolve(psi.boot_interactive == true)
 psi.theme = require("psi.theme")
 psi.theme.bootstrap()
 psi.providers = require("psi.api_registry")
@@ -248,7 +252,11 @@ function psi.load_extensions()
   if home and home ~= "" then
     load_extensions_from(psi.path.join(home, ".config/psi/extensions"))
   end
-  load_extensions_from("./.psi/extensions")
+  -- Project-local extensions are arbitrary repo-supplied code: only run
+  -- them when the trust resolution at boot decided the cwd is trusted.
+  if psi.project_trusted ~= false then
+    load_extensions_from("./.psi/extensions")
+  end
 end
 
 if psi.load_user_extensions ~= false then

@@ -1,6 +1,7 @@
 --[==[psi-test
 expect = "1|1|1"
 cwd = "reload-extension-registries"
+env = { PSI_TRUST = "always" }
 files = [
   { path = ".psi/extensions/hook.lua", text = '''
 return function(psi)

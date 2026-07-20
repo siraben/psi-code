@@ -24,10 +24,24 @@ function, psi invokes it with the `psi` global. Extension load failures are
 logged to stderr and do not abort psi.
 
 Security model: extensions are trusted local code. They run with the same
-filesystem, process, network, and credential access as psi itself, and
-project-local `./.psi/extensions/` files are discovered on startup. Review
-third-party or repository-provided extensions before running them, and use
-`--no-extensions` when opening an untrusted checkout.
+filesystem, process, network, and credential access as psi itself.
+Project-local resources — `./.psi/extensions/`, `./.psi/settings.json`,
+`./.psi/keybindings.json`, `./.psi/prompts/`, `./.psi/SYSTEM.md`, and
+`./.psi/APPEND_SYSTEM.md` — only load when the project directory is trusted:
+
+- Interactive REPL/TUI boots ask once ("Trust project folder?") when any of
+  these exist in the cwd; `always`/`never` answers persist to
+  `~/.config/psi/trusted.json`.
+- Non-interactive modes (`--print`, `--eval`, `--agent`, `--compact`) skip
+  them silently unless a stored decision or `PSI_TRUST=always|never` says
+  otherwise.
+- The global default policy can be set with `"project_trust": "ask" |
+  "always" | "never"` in `~/.config/psi/settings.json`.
+- `--no-extensions` still disables extension discovery entirely regardless
+  of trust.
+
+Review third-party or repository-provided extensions before trusting a
+checkout.
 
 `/reload` reloads keybindings, settings, prompt templates, bundled TUI
 extension state, TUI key/status/clipboard hooks, and user extensions. It then

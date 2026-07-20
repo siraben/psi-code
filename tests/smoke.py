@@ -412,7 +412,7 @@ def t_no_extensions_disables_user_extension_discovery(psi: Psi):
     enabled_marker = psi.tmp / "extension-enabled-marker"
     disabled_marker = psi.tmp / "extension-disabled-marker"
     reload_marker = psi.tmp / "extension-disabled-reload-marker"
-    psi.run("--eval", "return 'ok'", cwd=project, env_extra={"PSI_EXTENSION_MARKER": enabled_marker})
+    psi.run("--eval", "return 'ok'", cwd=project, env_extra={"PSI_EXTENSION_MARKER": enabled_marker, "PSI_TRUST": "always"})
     assert_true(enabled_marker.exists(), "project extension did not load in the default mode")
 
     psi.run(
@@ -1251,6 +1251,7 @@ def t_tui_show_thinking_config(psi: Psi):
         "--eval",
         'return require("psi.tui_status").show_thinking()',
         cwd=project,
+        env_extra={"PSI_TRUST": "always"},
     ).stdout.strip()
     assert_equals(out, "1", "project setting enables thinking in TUI")
 
@@ -1555,6 +1556,7 @@ def t_tui_theme_applies_to_rendered_colors(psi: Psi):
         env_extra={
             "NO_COLOR": "",
             "PSI_EXTENSIONS_DIR": str(extdir),
+            "PSI_TRUST": "always",
             "TERM": "xterm-256color",
             "XDG_STATE_HOME": str(psi.tmp / "state-tui-theme"),
         },

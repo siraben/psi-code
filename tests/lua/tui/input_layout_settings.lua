@@ -1,6 +1,7 @@
 --[==[psi-test
 expect = "7"
 cwd = "tui-layout-settings"
+env = { PSI_TRUST = "always" }
 files = [
   { path = ".psi/settings.json", json = { tui = { prompt = { max_rows = 7 } } } },
 ]

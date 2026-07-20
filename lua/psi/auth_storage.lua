@@ -38,6 +38,12 @@ local function read_all()
   if not psi.file_exists(path) then
     return {}
   end
+  -- Repair loose permissions on pre-existing files (e.g. copied from a
+  -- backup or written by another tool): credentials must stay 0600.
+  -- Best-effort; a failed chmod must not break the read.
+  if psi.file_chmod then
+    pcall(psi.file_chmod, path, tonumber("600", 8))
+  end
   local parsed = prelude.safe_json_decode(psi.read_file(path), nil)
   if type(parsed) == "table" then
     return parsed

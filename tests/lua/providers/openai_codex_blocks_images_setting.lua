@@ -1,6 +1,7 @@
 --[==[psi-test
 expect = "string|Read image file [image/png]\nImage reading is disabled."
 cwd = "openai-codex-blocks-images"
+env = { PSI_TRUST = "always" }
 files = [
   { path = ".psi/settings.json", json = { images = { block_images = true } } },
 ]

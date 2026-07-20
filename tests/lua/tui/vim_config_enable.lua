@@ -1,6 +1,7 @@
 --[==[psi-test
 expect = "normal"
 cwd = "vim-config"
+env = { PSI_TRUST = "always" }
 files = [
   { path = ".psi/settings.json", json = { extensions = { vim_keybindings = { enabled = true } } } },
 ]

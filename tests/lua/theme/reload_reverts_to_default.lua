@@ -1,7 +1,7 @@
 --[==[psi-test
 expect = "pi-dark|233|234"
 cwd = "theme-reload-project"
-env = { PSI_EXTENSIONS_DIR = "{TMP}/theme-reload-ext" }
+env = { PSI_EXTENSIONS_DIR = "{TMP}/theme-reload-ext", PSI_TRUST = "always" }
 files = [
   { path = "{TMP}/theme-reload-project/.psi/settings.json", json = { theme = { name = "toxic" } } },
   { path = "{TMP}/theme-reload-ext/toxic.lua", text = "return function(psi)\n  psi.theme.register('toxic', {\n    tui = { chrome = { fg = 244, bg = 233 } },\n  })\nend\n" },

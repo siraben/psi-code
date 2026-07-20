@@ -172,7 +172,8 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
     }
 
     psi_session_init(&session);
-    status = psi_vm_init(&vm, options->boot_file, stdin, stdout, stderr, options->load_extensions);
+    status = psi_vm_init(&vm, options->boot_file, stdin, stdout, stderr, options->load_extensions,
+        1 /* interactive: trust prompt allowed */);
     if (status != PSI_STATUS_OK) {
         psi_session_free(&session);
         return status;

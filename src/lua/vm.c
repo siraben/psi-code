@@ -2772,6 +2772,22 @@ static int lfn_mkdir_parent(lua_State *L) {
     return 1;
 }
 
+/* psi.file_chmod(path, mode) -> bool. Best-effort permission repair for
+ * files psi owns (auth.json, trust store); follows symlinks on purpose —
+ * the caller passes paths it resolved itself. */
+static int lfn_file_chmod(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    mode_t mode = (mode_t)luaL_checkinteger(L, 2);
+#ifdef _WIN32
+    PSI_UNUSED(path);
+    PSI_UNUSED(mode);
+    lua_pushboolean(L, 0);
+#else
+    lua_pushboolean(L, chmod(path, mode) == 0 ? 1 : 0);
+#endif
+    return 1;
+}
+
 static void psi_vm_process_progress(void *userdata, const char *chunk, size_t len) {
     struct psi_host_context *host = (struct psi_host_context *)userdata;
     if (host == NULL || host->active_observer == NULL)
@@ -4545,6 +4561,7 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG_DOC("mkdir_p", lfn_mkdir_p,
         "Create a directory and any missing parents; succeeds if the path already exists.");
     PSI_REG("mkdir_parent", lfn_mkdir_parent);
+    PSI_REG("file_chmod", lfn_file_chmod);
     PSI_REG_DOC("runtime_info", lfn_runtime_info,
         "Return a table describing compiled-in capabilities (TUI, ANSI, COLOR, REPL_EDITLINE).");
     PSI_REG_DOC("cell_width", lfn_cell_width,
@@ -4727,7 +4744,7 @@ static const struct psi_embedded_data *psi_vm_embedded_find(const char *name) {
 }
 
 int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *output,
-    FILE *error_output, int load_extensions) {
+    FILE *error_output, int load_extensions, int interactive) {
     PSI_UNUSED(input);
     PSI_UNUSED(output);
     PSI_UNUSED(error_output);
@@ -4759,6 +4776,11 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
     lua_getglobal(vm->L, "psi");
     lua_pushboolean(vm->L, load_extensions ? 1 : 0);
     lua_setfield(vm->L, -2, "load_user_extensions");
+    /* Interactive boots (REPL / TUI) may ask the project-trust question;
+     * non-interactive modes (print/eval/agent/compact) default to
+     * untrusted instead of prompting. */
+    lua_pushboolean(vm->L, interactive ? 1 : 0);
+    lua_setfield(vm->L, -2, "boot_interactive");
     lua_pop(vm->L, 1);
 
     /* Bootstrap: use the file at boot_file if it exists (source-tree

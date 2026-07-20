@@ -183,7 +183,11 @@ static int psi_run_via_lua(const struct psi_cli_options *options) {
         return PSI_STATUS_ERROR;
 
     psi_session_init(&session);
-    status = psi_vm_init(&vm, options->boot_file, stdin, stdout, stderr, options->load_extensions);
+    /* Only the line-oriented interactive REPL may answer the
+     * project-trust prompt at boot; one-shot modes default to
+     * untrusted (see lua/psi/trust_manager.lua). */
+    status = psi_vm_init(&vm, options->boot_file, stdin, stdout, stderr, options->load_extensions,
+        options->mode == PSI_CLI_MODE_REPL);
     if (status != PSI_STATUS_OK) {
         psi_session_free(&session);
         return status;

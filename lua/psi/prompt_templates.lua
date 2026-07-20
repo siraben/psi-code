@@ -212,7 +212,11 @@ function M.load()
       load_from_dir(prelude.path_join(home, ".config/psi/prompts"))
     end
   end
-  load_from_dir("./.psi/prompts")
+  -- Repo-local templates only when the project is trusted (boot's
+  -- psi.project_trusted; nil outside a full boot keeps test behavior).
+  if psi.project_trusted ~= false then
+    load_from_dir("./.psi/prompts")
+  end
 end
 
 function M.clear()

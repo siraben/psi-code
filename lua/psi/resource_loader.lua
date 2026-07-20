@@ -102,8 +102,12 @@ end
 function M.system_prompt_file()
   local cfg = config_dir()
   local cwd = psi.cwd()
+  -- Repo-local SYSTEM.md replaces the system prompt: trust-gated.
+  local project = psi.project_trusted ~= false
+      and prelude.path_join(prelude.path_join(cwd, ".psi"), "SYSTEM.md")
+    or nil
   return first_existing({
-    prelude.path_join(prelude.path_join(cwd, ".psi"), "SYSTEM.md"),
+    project,
     cfg and prelude.path_join(cfg, "SYSTEM.md") or nil,
   })
 end
@@ -111,8 +115,12 @@ end
 function M.append_system_prompt_file()
   local cfg = config_dir()
   local cwd = psi.cwd()
+  -- Same trust gate as SYSTEM.md.
+  local project = psi.project_trusted ~= false
+      and prelude.path_join(prelude.path_join(cwd, ".psi"), "APPEND_SYSTEM.md")
+    or nil
   return first_existing({
-    prelude.path_join(prelude.path_join(cwd, ".psi"), "APPEND_SYSTEM.md"),
+    project,
     cfg and prelude.path_join(cfg, "APPEND_SYSTEM.md") or nil,
   })
 end

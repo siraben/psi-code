@@ -37,7 +37,9 @@ end
 
 local function target()
   local configured = settings.get(CONFIG_TARGET, DEFAULT_TARGET)
-  if type(configured) == "string" and configured ~= "" then
+  -- The target lands inside an OSC 52 escape sequence, so it must never
+  -- carry control bytes: a single alnum is all the sequence allows.
+  if type(configured) == "string" and configured:match("^[A-Za-z0-9]$") then
     return configured
   end
   return DEFAULT_TARGET

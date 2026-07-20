@@ -299,7 +299,10 @@ local function load_overrides()
   if home and home ~= "" then
     merge(out, read_json(prelude.path_join(home, ".config/psi/keybindings.json")))
   end
-  merge(out, read_json(".psi/keybindings.json"))
+  -- Same trust gate as settings: repo-local overrides only when trusted.
+  if psi.project_trusted ~= false then
+    merge(out, read_json(".psi/keybindings.json"))
+  end
   return out
 end
 
