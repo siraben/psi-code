@@ -201,6 +201,15 @@ local function transcript_excerpt(max_chars)
   return out:sub(#out - max_chars + 1)
 end
 
+local SIDE_QUESTION_SYSTEM = table.concat({
+  "You are answering an ephemeral /btw side question inside psi. ",
+  "The caller will provide a bounded transcript excerpt and a side question. ",
+  "Answer concisely from that excerpt. ",
+  "If the excerpt is empty or insufficient, say that plainly. ",
+  "You cannot call tools in this mode. ",
+  "Do not ask to run tools, do not modify files, and do not add anything to the main transcript.",
+})
+
 -- Append the user's turn, build the system prompt, and drive the
 -- streaming tool loop via the chosen provider's run_turn.
 --
@@ -249,23 +258,27 @@ function M.side_question(question, opts)
   local excerpt_text = excerpt ~= "" and excerpt or "(empty transcript)"
 
   local provider, resolved = pick_provider(M.current_model(opts.model))
-  local side_system = prompt.system_prompt()
-    .. "\n\n"
-    .. "You are answering an ephemeral /btw side question. "
-    .. "Do not call tools, do not modify files, and do not add anything to the main transcript. "
-    .. "Answer concisely from the supplied transcript excerpt and say when the excerpt is insufficient."
   local user_text = "Current transcript excerpt:\n\n"
     .. excerpt_text
     .. "\n\nSide question:\n"
     .. question
 
-  return provider.complete_text({
-    system_prompt = side_system,
-    user_text = user_text,
-    model = resolved.id,
-    max_tokens = opts.max_tokens or 1024,
-    abort_check = opts.abort_check,
-  })
+  local function complete()
+    return provider.complete_text({
+      system_prompt = SIDE_QUESTION_SYSTEM,
+      user_text = user_text,
+      model = resolved.id,
+      max_tokens = opts.max_tokens or 1024,
+      thinking_level = M.thinking_level_for(resolved, opts.thinking_level, opts.reasoning_effort),
+      reasoning_effort = M.current_reasoning_effort(opts.reasoning_effort),
+      abort_check = opts.abort_check,
+    })
+  end
+
+  if sched.in_coroutine and sched.in_coroutine() then
+    return complete()
+  end
+  return sched.run(complete)
 end
 
 -- Summarize the older half of the session using a one-shot completion

@@ -6,7 +6,6 @@ local markdown = require("psi.markdown")
 local prelude = require("psi.prelude")
 local records = require("psi.records")
 local render = require("psi.render")
-local sched = require("psi.sched")
 local session = require("psi.session_manager")
 local settings = require("psi.settings_manager")
 local tui = require("psi.tui_status")
@@ -3739,14 +3738,12 @@ local function run_btw(state, question)
   redraw(state)
 
   local ran, ok, answer = xpcall(function()
-    return sched.run(function()
-      return agent.side_question(question, {
-        model = state.opts.model,
-        max_tokens = 1024,
-        context_chars = 24000,
-        abort_check = psi.is_aborted,
-      })
-    end)
+    return agent.side_question(question, {
+      model = state.opts.model,
+      max_tokens = 1024,
+      context_chars = 24000,
+      abort_check = psi.is_aborted,
+    })
   end, debug.traceback)
 
   if not ran then

@@ -338,7 +338,7 @@ These are part of the stable surface:
 | `psi.agent.queue_follow_up(text)` / `queue_steering(text)` | Queue user text for the active run loop. Follow-ups run after the current task would otherwise stop; steering is injected before the next provider request. |
 | `psi.agent.queue_modes()` / `queue_mode(kind)` / `set_queue_mode(kind, mode)` | Inspect or set pi-style queue drain modes, also exposed in the TUI as `/queue set-steering-mode MODE` and `/queue set-follow-up-mode MODE`. `kind` is `steering` or `follow-up`; `mode` is `one-at-a-time` or `all`. |
 | `psi.agent.pending_messages()` / `pending_message(i)` / `replace_pending(i, text)` / `remove_pending(i)` / `clear_queue(kind)` / `clear_queues()` | Inspect and edit queued messages. TUI busy-submit queues steering, and Alt-Enter queues follow-up messages. |
-| `psi.agent.side_question(question, opts)` | Ask an ephemeral `/btw`-style side question using the current transcript excerpt. Uses the configured model, including local providers, and does not append to the session. |
+| `psi.agent.side_question(question, opts)` | Ask an ephemeral `/btw`-style side question using the current transcript excerpt. Uses the configured model, including local providers, does not expose tools, and does not append to the session. |
 | `psi.agent.run_tree(opts)` | Switch the active session-tree leaf. `opts.target` is an entry id or prefix; `opts.summarize=true` summarizes the branch being left and appends a `branch_summary` entry at the destination. |
 | `psi.tui.register_key_handler(fn)` | Intercept normalized TUI key events before built-in bindings. Return `{ action = "...", arg = ... }` to handle, `nil` to fall through. Returns a handler id. |
 | `psi.tui.unregister_key_handler(id)` | Remove one key handler previously returned by `register_key_handler`. |
@@ -492,9 +492,11 @@ Packaged Lua extensions are bundled under `lua/psi/extensions/` and
 loaded before user/project extensions. They use the same public API as
 external extensions.
 
-- `/btw <question>` asks the configured provider a quick side question
-  against a transcript excerpt. The answer is rendered like command
-  output and is not persisted into the conversation.
+- `/btw <question>` asks the configured provider, including local
+  providers, a quick side question against a bounded transcript excerpt.
+  The request is idle-only in the TUI, carries no tools, uses an explicit
+  empty-transcript marker for new sessions, forwards aborts, and does not
+  persist either the question or answer into the conversation.
 
 ---
 

@@ -19,13 +19,16 @@ from __future__ import annotations
 
 import argparse
 import contextvars
+import http.server
 import json
 import os
 import re
 import shlex
 import signal
+import socketserver
 import subprocess
 import sys
+import threading
 import tempfile
 import time
 from pathlib import Path
@@ -1694,6 +1697,56 @@ def t_print_without_state_home(psi: Psi):
 def t_repl_quit(psi: Psi):
     # `:quit` should cleanly exit the line-editor shell.
     psi.run("--repl", input_text=":quit\n")
+
+@test("mode/repl_btw_ollama_ephemeral")
+def t_repl_btw_ollama_ephemeral(psi: Psi):
+    requests: list[dict] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers.get("content-length", "0"))
+            body = self.rfile.read(length).decode("utf-8")
+            requests.append(json.loads(body))
+            payload = json.dumps({"message": {"content": "side answer"}}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, _fmt, *_args):
+            return
+
+    class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
+        daemon_threads = True
+
+    server = Server(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{server.server_address[1]}/"
+        session_path = psi.tmp / "repl-btw.jsonl"
+        res = psi.run(
+            "--session",
+            str(session_path),
+            "--model",
+            "ollama/qwen2.5",
+            "--repl",
+            input_text="/btw what is visible?\n/quit\n",
+            env_extra={"PSI_OLLAMA_BASE_URL": base},
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert_contains(res.stdout, "/btw what is visible?", "REPL echoes btw command")
+    assert_contains(res.stdout, "side answer", "REPL prints side answer")
+    assert_equals(len(requests), 1, "btw should make one provider request")
+    assert_equals(requests[0].get("tools"), None, "btw request must not advertise tools")
+    joined = json.dumps(requests[0].get("messages", []))
+    assert_contains(joined, "(empty transcript)", "empty session marker reaches provider")
+    if session_path.exists():
+        assert_equals(session_path.read_text(), "", "btw must not persist transcript entries")
 
 @test("mode/tui_quits")
 def t_tui_quits(psi: Psi):
