@@ -61,7 +61,7 @@ useful before the binary is installed. Regenerate this table from
 <!-- @generated:cli-options -->
 | Flag | Argument | Description |
 |---|---|---|
-| `--agent` | `TEXT` | run a single Anthropic-backed coding-agent turn |
+| `--agent` | `TEXT` | run a single coding-agent turn |
 | `--boot` | `FILE` | override the Lua bootstrap file |
 | `--chat` | — | use the chat-style TUI (transcript flows into terminal scrollback) |
 | `--compact` | `N` | compact the current session, keeping the most recent N messages |

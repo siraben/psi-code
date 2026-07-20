@@ -73,8 +73,7 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
     args->boot = arg_str0(NULL, "boot", "FILE", "override the Lua bootstrap file");
     args->system_prompt =
         arg_lit0(NULL, "system-prompt", "print the default coding-agent system prompt");
-    args->agent =
-        arg_str0(NULL, "agent", "TEXT", "run a single Anthropic-backed coding-agent turn");
+    args->agent = arg_str0(NULL, "agent", "TEXT", "run a single coding-agent turn");
     args->model = arg_str0(NULL, "model", "MODEL", "model to use with --agent");
     args->thinking = arg_str0(
         NULL, "thinking", "LEVEL", "thinking level: off, minimal, low, medium, high, xhigh");
