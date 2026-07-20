@@ -1,11 +1,13 @@
 # Providers
 
-psi ships with four routed providers:
+psi ships with five routed providers:
 
 - Anthropic, the default, via `https://api.anthropic.com`
 - Ollama, local, via `/api/chat`
 - OpenRouter, via OpenAI-compatible `/chat/completions`
 - OpenAI Codex, via ChatGPT's Codex Responses backend
+- Moonshot (Kimi For Coding), via the Anthropic-compatible
+  `https://api.kimi.com/coding`
 
 For default models and environment-variable mappings, ask the running agent.
 Runtime introspection stays accurate after provider registry changes:
@@ -25,6 +27,8 @@ Routing metadata lives in `lua/psi/api_registry.lua`. API-specific wire
 adapters live in `lua/psi/providers/anthropic.lua`,
 `lua/psi/providers/openai_compat.lua`, `lua/psi/providers/openrouter.lua`,
 `lua/psi/providers/openai_codex.lua`, and `lua/psi/providers/ollama.lua`.
+`lua/psi/providers/moonshot.lua` is a thin flavour over the Anthropic adapter,
+since Kimi For Coding speaks the same Anthropic Messages wire format.
 
 ## Selection
 
@@ -33,10 +37,10 @@ In priority order:
 1. **Model prefix:** `--model=ollama/llama3.1:latest` or
    `--model=anthropic/claude-sonnet-4-6` or
    `--model=openrouter/google/gemini-3-flash-preview` or
-   `--model=openai-codex/gpt-5.5`. The prefix is stripped before being
-   forwarded to the provider.
-2. **`PSI_PROVIDER` env var:** `anthropic` (default), `ollama`, or
-   `openrouter`, or `openai-codex`.
+   `--model=openai-codex/gpt-5.5` or `--model=moonshot/kimi-for-coding`. The
+   prefix is stripped before being forwarded to the provider.
+2. **`PSI_PROVIDER` env var:** `anthropic` (default), `ollama`,
+   `openrouter`, `openai-codex`, or `moonshot`.
 3. **Settings:** `defaults.provider` and `defaults.model` in
    `~/.config/psi/settings.json` or `./.psi/settings.json`.
 4. Fallback: Anthropic.
@@ -103,7 +107,7 @@ the `openai-codex` key and are unaffected by this API-key resolution.
 - Auth: `ANTHROPIC_API_KEY`, or an `anthropic` api_key entry in `auth.json`
   (see [API-key credentials](#api-key-credentials-authjson); auth file wins).
 - `PSI_ANTHROPIC_MODEL`: default model when none is passed (default
-  `claude-opus-4-7`).
+  `claude-opus-4-8`).
 - `PSI_ANTHROPIC_BASE_URL`: override the API host (for proxies).
 - `PSI_PROMPT_CACHE=0` disables ephemeral prompt caching.
 - Image attachments are enabled by default for image-capable providers and
@@ -165,6 +169,20 @@ the `openai-codex` key and are unaffected by this API-key resolution.
   (`low`, `medium`, `high`; default `low`).
 - Uses the Responses-shaped adapter in `lua/psi/providers/openai_codex.lua`.
 
+## Moonshot (Kimi For Coding)
+
+- Env: `KIMI_API_KEY` (required). Keys look like `sk-kimi-…`.
+- `PSI_MOONSHOT_MODEL`: default model when none is passed (default `k3`).
+  Available models: `k3` (1M context), `kimi-for-coding`,
+  `kimi-for-coding-highspeed`.
+- `PSI_MOONSHOT_BASE_URL`: override the API host (default
+  `https://api.kimi.com/coding/`; `v1/messages` is appended).
+- Kimi For Coding exposes an Anthropic-Messages-compatible endpoint, so this
+  provider is a thin flavour over `lua/psi/providers/anthropic.lua`: it reuses
+  the same streaming, tool-call, thinking, and ephemeral prompt-cache machinery.
+  Requests are authenticated with a Bearer token plus the `KimiCLI/1.5`
+  User-Agent.
+
 ## Examples
 
 ```bash
@@ -180,6 +198,10 @@ PSI_PROVIDER=ollama PSI_OLLAMA_MODEL=llama3.2 psi --agent="..."
 # OpenRouter
 OPENROUTER_API_KEY=... \
   psi --model=openrouter/google/gemini-3-flash-preview --agent="..."
+
+# Moonshot / Kimi For Coding
+KIMI_API_KEY=sk-kimi-... \
+  psi --model=moonshot/k3 --agent="..."
 
 # OpenAI Codex
 psi

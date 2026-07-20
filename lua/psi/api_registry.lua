@@ -193,10 +193,19 @@ M.register_api("openai-codex-responses", {
   },
 })
 
+M.register_api("moonshot-messages", {
+  module = "psi.providers.moonshot",
+  compat = {
+    supports_reasoning = true,
+    supports_tool_use = true,
+    thinking_format = "anthropic",
+  },
+})
+
 M.register_provider("anthropic", {
   api = "anthropic-messages",
   model_env = "PSI_ANTHROPIC_MODEL",
-  default_model = "claude-opus-4-7",
+  default_model = "claude-opus-4-8",
 })
 
 M.register_provider("ollama", {
@@ -215,6 +224,21 @@ M.register_provider("openai-codex", {
   api = "openai-codex-responses",
   model_env = "PSI_OPENAI_CODEX_MODEL",
   default_model = "gpt-5.5",
+})
+
+M.register_provider("moonshot", {
+  api = "moonshot-messages",
+  model_env = "PSI_MOONSHOT_MODEL",
+  default_model = "k3",
+})
+
+M.register_model("anthropic/claude-opus-4-8", {
+  provider = "anthropic",
+  api = "anthropic-messages",
+  context_window = 1000000,
+  max_output_tokens = 128000,
+  reasoning = true,
+  input = { "text", "image" },
 })
 
 M.register_model("anthropic/claude-opus-4-7", {
@@ -322,6 +346,36 @@ M.register_model("openai-codex/gpt-5.3-codex-spark", {
   input = { "text" },
 })
 
+M.register_model("moonshot/k3", {
+  provider = "moonshot",
+  api = "moonshot-messages",
+  context_window = 1048576,
+  max_output_tokens = 65536,
+  reasoning = true,
+  supports_tool_use = true,
+  input = { "text" },
+})
+
+M.register_model("moonshot/kimi-for-coding", {
+  provider = "moonshot",
+  api = "moonshot-messages",
+  context_window = 262144,
+  max_output_tokens = 16384,
+  reasoning = true,
+  supports_tool_use = true,
+  input = { "text" },
+})
+
+M.register_model("moonshot/kimi-for-coding-highspeed", {
+  provider = "moonshot",
+  api = "moonshot-messages",
+  context_window = 262144,
+  max_output_tokens = 16384,
+  reasoning = true,
+  supports_tool_use = true,
+  input = { "text" },
+})
+
 function M.resolve_model(provider_name, requested)
   local p = providers[provider_name]
   if not p then
@@ -348,7 +402,7 @@ end
 
 -- ollama is excluded: its has_auth() is always true, which would make it
 -- the silent default in an otherwise-unconfigured environment.
-local FALLBACK_PROVIDER_ORDER = { "anthropic", "openai-codex", "openrouter" }
+local FALLBACK_PROVIDER_ORDER = { "anthropic", "openai-codex", "openrouter", "moonshot" }
 
 local function first_authenticated_provider()
   for _, name in ipairs(FALLBACK_PROVIDER_ORDER) do

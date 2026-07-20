@@ -33,18 +33,31 @@ local auth_storage = require("psi.auth_storage")
 
 local M = {}
 
-local PROVIDER = "anthropic"
-local API_KEY_ENV = "ANTHROPIC_API_KEY"
+-- A "flavour" bundles the provider-specific bits (endpoint, auth scheme, model
+-- defaults, record labels) so the wire machinery below can be reused by any
+-- API-compatible provider.
+local ANTHROPIC_FLAVOR = {
+  provider_name = "anthropic",
+  api_name = "anthropic-messages",
+  label = "Anthropic",
+  api_key_envs = { "ANTHROPIC_API_KEY" },
+  key_missing_msg = "ANTHROPIC_API_KEY is not set",
+  model_env = "PSI_ANTHROPIC_MODEL",
+  model_default = "claude-opus-4-8",
+  base_url_env = "PSI_ANTHROPIC_BASE_URL",
+  base_url_default = "https://api.anthropic.com/",
+  auth_header = function(api_key)
+    return "x-api-key: " .. api_key
+  end,
+  extra_headers = nil,
+  allow_bridge = true,
+}
+M.ANTHROPIC_FLAVOR = ANTHROPIC_FLAVOR
 
-local MODEL_ENV = "PSI_ANTHROPIC_MODEL"
-local MODEL_DEFAULT = "claude-opus-4-7"
-local BASE_URL_ENV = "PSI_ANTHROPIC_BASE_URL"
-local BASE_URL_DEFAULT = "https://api.anthropic.com/"
-
-local function api_url()
-  local base = os.getenv(BASE_URL_ENV) or BASE_URL_DEFAULT
+local function api_url(flavor)
+  local base = os.getenv(flavor.base_url_env) or flavor.base_url_default
   if base == "" then
-    base = BASE_URL_DEFAULT
+    base = flavor.base_url_default
   end
   if base:sub(-1) ~= "/" then
     base = base .. "/"
@@ -52,36 +65,63 @@ local function api_url()
   return base .. "v1/messages"
 end
 
-local function anthropic_headers(api_key)
-  if api_key == "bridge" and psi.amiga_bridge then
-    api_key = "bridge"
-  end
-  return {
+local function build_headers(flavor, api_key)
+  local hdrs = {
     "content-type: application/json",
     "anthropic-version: 2023-06-01",
-    "x-api-key: " .. api_key,
+    flavor.auth_header(api_key),
   }
+  if type(flavor.extra_headers) == "table" then
+    for _, h in ipairs(flavor.extra_headers) do
+      hdrs[#hdrs + 1] = h
+    end
+  end
+  return hdrs
 end
 
-local function resolve_model(m)
-  return prelude.resolve_env(m, MODEL_ENV, MODEL_DEFAULT)
-end
-
--- Effective API key, in precedence order: auth-file entry (with
--- $VAR/${VAR}/!command resolution) > ANTHROPIC_API_KEY > amiga bridge.
--- Returns nil when none are configured.
-local function resolve_api_key()
-  local key = auth_storage.resolve_api_key(PROVIDER, API_KEY_ENV)
+local function resolve_api_key(flavor)
+  -- Match pi's precedence: auth.json first, then provider-specific env vars.
+  local key = auth_storage.resolve_api_key(flavor.provider_name, nil)
   if key and key ~= "" then
     return key
   end
-  if psi.amiga_bridge_api_key then
+  for _, name in ipairs(flavor.api_key_envs) do
+    local env_key = os.getenv(name)
+    if env_key and env_key ~= "" then
+      return env_key
+    end
+  end
+  if flavor.allow_bridge and psi.amiga_bridge_api_key then
     local bridge = psi.amiga_bridge_api_key()
     if bridge and bridge ~= "" then
       return bridge
     end
   end
   return nil
+end
+
+local function resolve_model(flavor, m)
+  return prelude.resolve_env(m, flavor.model_env, flavor.model_default)
+end
+
+local function has_api_key(flavor)
+  -- Keep the route/auth gate side-effect free: do not resolve !commands here.
+  if auth_storage.has_api_key_entry(flavor.provider_name) then
+    return true
+  end
+  for _, name in ipairs(flavor.api_key_envs) do
+    local key = os.getenv(name)
+    if key and key ~= "" then
+      return true
+    end
+  end
+  if flavor.allow_bridge and psi.amiga_bridge_api_key then
+    local bridge = psi.amiga_bridge_api_key()
+    if bridge and bridge ~= "" then
+      return true
+    end
+  end
+  return false
 end
 
 -- Tool specs for the API: drop prompt_snippet + prompt_guidelines,
@@ -500,7 +540,7 @@ end
 -- so we deliberately do NOT emit synthetic results here.
 --
 -- stop_reason: "aborted" (signal abort) | "error" (network / non-2xx)
-local function save_failed_partial(state, model, stop_reason, error_message)
+local function save_failed_partial(flavor, state, model, stop_reason, error_message)
   if not state then
     return
   end
@@ -516,8 +556,8 @@ local function save_failed_partial(state, model, stop_reason, error_message)
     stop_reason = stop_reason,
     error_message = error_message,
     model = model,
-    provider = "anthropic",
-    api = "anthropic-messages",
+    provider = flavor.provider_name,
+    api = flavor.api_name,
     response_id = state.response_id,
   })
   context.record_usage(psi.session_message_count(), state.usage, model)
@@ -658,18 +698,18 @@ M.maybe_auto_compact = maybe_auto_compact
 
 local http_post_text = sched.http_post_text
 
-function M.complete_text(opts)
-  local api_key = resolve_api_key()
-  if not api_key or api_key == "" then
-    local msg = "ANTHROPIC_API_KEY is not set"
-    notice.error(msg)
-    return false, msg
+function M.complete_text(opts, flavor)
+  flavor = flavor or ANTHROPIC_FLAVOR
+  local api_key = resolve_api_key(flavor)
+  if not api_key then
+    notice.error(flavor.key_missing_msg)
+    return false, flavor.key_missing_msg
   end
   -- Same UTF-8 sanitisation as the streaming path; both fields arrive
   -- on the wire as JSON strings and Anthropic refuses any malformed
   -- UTF-8 anywhere in the body.
   local request = {
-    model = resolve_model(opts.model),
+    model = resolve_model(flavor, opts.model),
     max_tokens = opts.max_tokens or 2048,
     system = prelude.sanitize_surrogates(opts.system_prompt or ""),
     messages = prelude.as_array({
@@ -678,8 +718,8 @@ function M.complete_text(opts)
     stream = false,
   }
   local status, body = http_post_text(
-    api_url(),
-    anthropic_headers(api_key),
+    api_url(flavor),
+    build_headers(flavor, api_key),
     psi.json_encode(request),
     opts.abort_check
   )
@@ -688,7 +728,9 @@ function M.complete_text(opts)
     return false
   end
   if status < 200 or status >= 300 then
-    notice.error("Anthropic API request failed (" .. tostring(status) .. "): " .. (body or ""))
+    notice.error(
+      flavor.label .. " API request failed (" .. tostring(status) .. "): " .. (body or "")
+    )
     return false
   end
   local parsed = safe_decode(body)
@@ -704,30 +746,21 @@ function M.complete_text(opts)
   return true, table.concat(text_parts)
 end
 
-function M.has_auth()
-  if auth_storage.has_api_key(PROVIDER, API_KEY_ENV) then
-    return true
-  end
-  if psi.amiga_bridge_api_key then
-    local bridge = psi.amiga_bridge_api_key()
-    if bridge and bridge ~= "" then
-      return true
-    end
-  end
-  return false
+function M.has_auth(flavor)
+  return has_api_key(flavor or ANTHROPIC_FLAVOR)
 end
 
 -- ---------- Agent turn (streaming + tool loop) ----------
 
-function M.run_turn(opts)
-  local api_key = resolve_api_key()
-  if not api_key or api_key == "" then
-    local msg = "ANTHROPIC_API_KEY is not set"
-    notice.error(msg)
-    return false, msg
+function M.run_turn(opts, flavor)
+  flavor = flavor or ANTHROPIC_FLAVOR
+  local api_key = resolve_api_key(flavor)
+  if not api_key then
+    notice.error(flavor.key_missing_msg)
+    return false, flavor.key_missing_msg
   end
 
-  local model = resolve_model(opts.model)
+  local model = resolve_model(flavor, opts.model)
   local max_tokens = opts.max_tokens or 16384
   return provider_loop.run_turn({
     model = model,
@@ -738,10 +771,10 @@ function M.run_turn(opts)
     abort_check = opts.abort_check,
     no_auto_compact = opts.no_auto_compact,
   }, {
-    provider_name = "anthropic",
-    api_name = "anthropic-messages",
-    url = api_url(),
-    headers = anthropic_headers(api_key),
+    provider_name = flavor.provider_name,
+    api_name = flavor.api_name,
+    url = api_url(flavor),
+    headers = build_headers(flavor, api_key),
     tool_specs = api_tool_specs,
     build_messages = function(session)
       return build_api_messages(session, not image_policy.blocked())
@@ -772,7 +805,7 @@ function M.run_turn(opts)
     finalize = finalize_blocks,
     stream_error = function(state)
       if state.malformed_tool_input_error then
-        return "anthropic: " .. state.malformed_tool_input_error
+        return flavor.provider_name .. ": " .. state.malformed_tool_input_error
       end
       return nil
     end,
@@ -782,15 +815,17 @@ function M.run_turn(opts)
         stop_reason = stop_override or state.stop_reason,
         error_message = error_message,
         model = persisted_model,
-        provider = "anthropic",
-        api = "anthropic-messages",
+        provider = flavor.provider_name,
+        api = flavor.api_name,
         response_id = state.response_id,
       })
     end,
     response_id = function(state)
       return state.response_id
     end,
-    save_failed_partial = save_failed_partial,
+    save_failed_partial = function(state, partial_model, reason, emsg)
+      save_failed_partial(flavor, state, partial_model, reason, emsg)
+    end,
     classify_http_error = require("psi.providers.openai_compat").classify_http_error,
     text = state_assistant_text,
     after_iteration = function(iter_model, iter_opts)

@@ -170,7 +170,10 @@ Print the file path that defines a documented symbol
 .SH PROVIDERS
 .TP
 \fBanthropic\fR
-default model claude-opus-4-7, override via PSI_ANTHROPIC_MODEL
+default model claude-opus-4-8, override via PSI_ANTHROPIC_MODEL
+.TP
+\fBmoonshot\fR
+default model k3, override via PSI_MOONSHOT_MODEL
 .TP
 \fBollama\fR
 default model llama3.1:latest, override via PSI_OLLAMA_MODEL
@@ -183,7 +186,7 @@ default model google/gemini-3-flash-preview, override via PSI_OPENROUTER_MODEL
 .SH ENVIRONMENT
 .TP
 \fBPSI_PROVIDER\fR
-Override default provider: anthropic, ollama, openai-codex, openrouter.
+Override default provider: anthropic, moonshot, ollama, openai-codex, openrouter.
 .TP
 \fBPSI_EXTENSIONS_DIR\fR
 Colon-separated list of extension directories scanned at boot.

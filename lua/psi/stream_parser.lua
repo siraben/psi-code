@@ -42,8 +42,14 @@ end
 function M.push_sse(parser, chunk, opts)
   opts = opts or {}
   M.push_lines(parser, chunk, function(line)
-    if line:sub(1, 7) == "event: " then
-      parser.pending_event = line:sub(8)
+    if line:sub(1, 6) == "event:" then
+      -- The space after the SSE field colon is optional; tolerate both
+      -- "event: foo" and "event:foo".
+      local ev = line:sub(7)
+      if ev:sub(1, 1) == " " then
+        ev = ev:sub(2)
+      end
+      parser.pending_event = ev
     elseif line:sub(1, 6) == "data: " then
       local data = line:sub(7)
       if opts.multi_data then

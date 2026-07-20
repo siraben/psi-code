@@ -1,5 +1,5 @@
 --[==[psi-test
-expect = "Steering: steer now|Follow-up: follow later|↳ Alt-Up to edit all queued messages|session:-  model:claude-opus-4-7  msg:0  busy…"
+expect = "Steering: steer now|Follow-up: follow later|↳ Alt-Up to edit all queued messages|session:-  model:claude-opus-4-8  msg:0  busy…"
 ]==]
 local agent = require("psi.agent_session")
 local rt = require("psi.tui_runtime")
