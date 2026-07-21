@@ -248,7 +248,7 @@ end
 
 function M.names()
   local names = {}
-  for name, _ in pairs(registry) do
+  for name in pairs(registry) do
     names[#names + 1] = name
   end
   table.sort(names)

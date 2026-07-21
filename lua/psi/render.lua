@@ -34,7 +34,8 @@ end
 
 function M.register_hook(event, fn)
   hooks[event] = hooks[event] or {}
-  table.insert(hooks[event], fn)
+  local chain = hooks[event]
+  chain[#chain + 1] = fn
 end
 
 function M.run_hooks(event, payload)

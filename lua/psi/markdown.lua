@@ -19,6 +19,15 @@ local PI_HEADING = "33" -- mdHeading, theme warning/gold slot
 local PI_LINK = "34" -- mdLink, theme header/link slot
 local PI_GRAY = "38;5;242" -- mdQuote/mdHr/toolOutput, theme chrome slot
 
+local function is_inline_syntax_byte(byte)
+  return byte == 42 -- *
+    or byte == 91 -- [
+    or byte == 92 -- \
+    or byte == 95 -- _
+    or byte == 96 -- `
+    or byte == 126 -- ~
+end
+
 -- ---------- inline renderer ----------
 
 local function italic(text)
@@ -36,7 +45,7 @@ end
 local function is_escaped(text, pos)
   local count = 0
   pos = pos - 1
-  while pos >= 1 and text:sub(pos, pos) == "\\" do
+  while pos >= 1 and text:byte(pos) == 92 do
     count = count + 1
     pos = pos - 1
   end
@@ -169,9 +178,15 @@ parse_inlines = function(text, first, last)
           children = parse_inlines(text, i + #delimiter, close - 1),
         }
         i = close + #delimiter
-      else
+      elseif delimiter ~= nil then
         push_text(tokens, ch)
         i = i + 1
+      else
+        local start = i
+        repeat
+          i = i + 1
+        until i > last or is_inline_syntax_byte(text:byte(i))
+        push_text(tokens, text:sub(start, i - 1))
       end
     end
   end
@@ -307,7 +322,7 @@ function M.render_line(line, in_code_fence)
     return hit
   end
 
-  local state = { in_code_fence = in_code_fence and true or false }
+  local state = { in_code_fence = not not in_code_fence }
   local result = render_line(line, state)
 
   if cache_size >= CACHE_MAX then
@@ -345,32 +360,39 @@ end
 -- wants to rely on redraw instead.
 function M.new_stream()
   local stream = {
-    buffer = "",
+    pending = {},
     state = { in_code_fence = false },
   }
   function stream:feed(text)
     if type(text) ~= "string" or text == "" then
       return ""
     end
-    self.buffer = self.buffer .. text
     local out = {}
+    local start = 1
     while true do
-      local nl = self.buffer:find("\n", 1, true)
+      local nl = text:find("\n", start, true)
       if not nl then
         break
       end
-      local line = self.buffer:sub(1, nl - 1)
-      self.buffer = self.buffer:sub(nl + 1)
+      if nl > start then
+        self.pending[#self.pending + 1] = text:sub(start, nl - 1)
+      end
+      local line = table.concat(self.pending)
+      self.pending = {}
       out[#out + 1] = render_line(line, self.state) .. "\n"
+      start = nl + 1
+    end
+    if start <= #text then
+      self.pending[#self.pending + 1] = text:sub(start)
     end
     return table.concat(out)
   end
   function stream:flush()
-    if self.buffer == "" then
+    if #self.pending == 0 then
       return ""
     end
-    local line = self.buffer
-    self.buffer = ""
+    local line = table.concat(self.pending)
+    self.pending = {}
     return render_line(line, self.state)
   end
   return stream

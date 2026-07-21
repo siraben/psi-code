@@ -37,7 +37,7 @@ local function impl(input, meta)
     status = stream.status,
     total_bytes = stream.total_bytes,
     timeout = timeout,
-    timed_out = stream.timed_out and true or false,
+    timed_out = not not stream.timed_out,
   }
 
   local output_text = stream.output or ""

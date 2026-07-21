@@ -549,7 +549,7 @@ function M.append_custom_message(text, opts)
       role = opts.role or "user",
       content = prelude.as_array({ text_block(text or "") }),
       timestamp = unix_ms(),
-      hidden = opts.hidden and true or false,
+      hidden = not not opts.hidden,
     },
   })
   append_body("custom", text, body)
@@ -621,13 +621,22 @@ local function basename(path)
 end
 
 local function read_first_json_line(path)
-  local f = io.open(path, "r")
+  local f <close> = io.open(path, "r")
   if not f then
     return nil
   end
   local line = f:read("*l")
-  f:close()
   return prelude.safe_json_decode(line, nil)
+end
+
+local function concat_text_blocks(content, separator)
+  local parts = prelude.array(type(content) == "table" and #content or 0)
+  for _, block in ipairs(type(content) == "table" and content or {}) do
+    if type(block) == "table" and block.type == "text" and type(block.text) == "string" then
+      parts[#parts + 1] = block.text
+    end
+  end
+  return table.concat(parts, separator), #parts
 end
 
 local function entry_text(entry)
@@ -645,16 +654,11 @@ local function entry_text(entry)
   if type(content) ~= "table" then
     return nil
   end
-  local parts = {}
-  for _, block in ipairs(content) do
-    if type(block) == "table" and block.type == "text" and type(block.text) == "string" then
-      parts[#parts + 1] = block.text
-    end
-  end
-  if #parts == 0 then
+  local text, count = concat_text_blocks(content, " ")
+  if count == 0 then
     return nil
   end
-  return table.concat(parts, " ")
+  return text
 end
 
 local function parse_time_key(text)
@@ -687,7 +691,7 @@ local function add_preview_line(preview, role, text)
 end
 
 local function build_session_info(path)
-  local f = io.open(path, "r")
+  local f <close> = io.open(path, "r")
   if not f then
     return nil
   end
@@ -704,7 +708,6 @@ local function build_session_info(path)
     if type(parsed) == "table" then
       if not header then
         if parsed.type ~= "session" then
-          f:close()
           return nil
         end
         header = parsed
@@ -726,8 +729,6 @@ local function build_session_info(path)
       end
     end
   end
-  f:close()
-
   if not header then
     return nil
   end
@@ -1113,7 +1114,7 @@ local function write_session_file(path, header, messages, count)
     return false, "Failed to create session " .. tostring(path)
   end
 
-  local f, err = io.open(path, "w")
+  local f <close>, err = io.open(path, "w")
   if not f then
     return false, err
   end
@@ -1125,7 +1126,6 @@ local function write_session_file(path, header, messages, count)
       write_line(f, to_disk_entry(messages[i]))
     end
   end)
-  f:close()
   if not ok then
     return false, werr
   end
@@ -1151,7 +1151,7 @@ local function write_entry_file(path, header, entries, count)
     end
     return false, "Failed to create session " .. tostring(path)
   end
-  local f, err = io.open(path, "w")
+  local f <close>, err = io.open(path, "w")
   if not f then
     return false, err
   end
@@ -1161,7 +1161,6 @@ local function write_entry_file(path, header, entries, count)
       write_line(f, entries[i])
     end
   end)
-  f:close()
   if not ok then
     return false, werr
   end
@@ -1181,7 +1180,7 @@ local function append_entry_file(path, entries, from_idx)
     end
     return false, "Failed to append session entry"
   end
-  local f, err = io.open(path, "a")
+  local f <close>, err = io.open(path, "a")
   if not f then
     return false, err
   end
@@ -1190,7 +1189,6 @@ local function append_entry_file(path, entries, from_idx)
       write_line(f, entries[i])
     end
   end)
-  f:close()
   if not ok then
     return false, werr
   end
@@ -1389,14 +1387,7 @@ local function append_v2_message(parsed)
   last_entry_id = body.id or last_entry_id
   leaf_id = body.id or leaf_id
   local role = msg.role
-  local text = ""
-  if type(msg.content) == "table" then
-    for _, b in ipairs(msg.content) do
-      if type(b) == "table" and b.type == "text" and type(b.text) == "string" then
-        text = (text == "" and b.text) or (text .. b.text)
-      end
-    end
-  end
+  local text = concat_text_blocks(msg.content, "")
   local in_mem_role = role
   if role == "toolResult" then
     in_mem_role = "tool-result"
@@ -1462,11 +1453,7 @@ local function append_v3_custom(parsed)
   leaf_id = body.id or leaf_id
   local text = ""
   if parsed.type == "custom_message" and type(parsed.message) == "table" then
-    for _, b in ipairs(parsed.message.content or {}) do
-      if type(b) == "table" and b.type == "text" and type(b.text) == "string" then
-        text = (text == "" and b.text) or (text .. b.text)
-      end
-    end
+    text = concat_text_blocks(parsed.message.content, "")
   end
   append_body("custom", text, body)
 end
@@ -1574,7 +1561,7 @@ local function resolve_entry_id(id_or_prefix)
     return id_or_prefix
   end
   local matched
-  for id, _ in pairs(entry_by_id) do
+  for id in pairs(entry_by_id) do
     if id:sub(1, #id_or_prefix) == id_or_prefix then
       if matched then
         return nil, "ambiguous entry id: " .. id_or_prefix
@@ -1933,7 +1920,7 @@ end
 
 local function keys_of(t)
   local out = {}
-  for k, _ in pairs(t) do
+  for k in pairs(t) do
     out[#out + 1] = k
   end
   table.sort(out)

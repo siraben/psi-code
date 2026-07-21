@@ -8,6 +8,7 @@
 local agent = require("psi.agent_session")
 local context = require("psi.context")
 local session = require("psi.session_manager")
+local traceback = debug.traceback
 
 local M = {}
 local Runtime = {}
@@ -180,7 +181,7 @@ function Runtime:turn(user_text, options)
       observer = observer,
       abort_check = options.abort_check or psi.is_aborted,
     })
-  end, debug.traceback)
+  end, traceback)
 
   local payload = {
     text = ran and (reply or "") or "",
@@ -222,7 +223,7 @@ function Runtime:compact(keep_recent, options)
       reasoning_effort = self.opts.reasoning_effort,
       abort_check = options.abort_check or psi.is_aborted,
     })
-  end, debug.traceback)
+  end, traceback)
   if not ran or not ok then
     return false, summary, { crashed = not ran }
   end

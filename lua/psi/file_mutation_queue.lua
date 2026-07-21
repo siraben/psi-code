@@ -35,8 +35,10 @@ end
 -- or free the slot when nobody is queued.
 local function release(k)
   local lock = locks[k]
-  local waiter = lock and table.remove(lock.waiters, 1) or nil
+  local waiter = lock and lock.waiters[lock.head] or nil
   if waiter then
+    lock.waiters[lock.head] = nil
+    lock.head = lock.head + 1
     waiter.ready = true
   else
     locks[k] = nil
@@ -54,14 +56,15 @@ function M.with_path(path, fn)
       -- Sleep-poll our own flag: the scheduler has no wakeup primitive,
       -- and per-waiter flags keep hand-off FIFO and O(1) per release.
       local waiter = { ready = false }
-      lock.waiters[#lock.waiters + 1] = waiter
+      lock.tail = lock.tail + 1
+      lock.waiters[lock.tail] = waiter
       repeat
         psi.sched.sleep_ms(10)
       until waiter.ready
     end
     -- Non-coroutine callers cannot wait; they barge in.
   else
-    locks[k] = { waiters = {} }
+    locks[k] = { waiters = {}, head = 1, tail = 0 }
   end
   local ok, a, b, c = pcall(fn)
   release(k)

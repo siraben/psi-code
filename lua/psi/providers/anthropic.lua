@@ -261,7 +261,7 @@ local function tool_result_block(msg, images_enabled)
     type = "tool_result",
     tool_use_id = msg.toolCallId or "",
     content = tool_result_content_blocks(msg.content, images_enabled),
-    is_error = msg.isError and true or false,
+    is_error = not not msg.isError,
   }
 end
 
@@ -471,7 +471,7 @@ local function finalize_blocks(state)
   -- state.blocks is a 1-indexed table but may be sparse if Anthropic
   -- skipped indices; iterate with pairs then sort by key.
   local keys = {}
-  for k, _ in pairs(state.blocks) do
+  for k in pairs(state.blocks) do
     keys[#keys + 1] = k
   end
   table.sort(keys)

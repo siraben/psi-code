@@ -74,7 +74,7 @@ M.ToolResult = ToolResult
 
 function M.new_tool_result(ok, tool, error, extras)
   return setmetatable({
-    ok = ok and true or false,
+    ok = not not ok,
     tool = tool,
     error = type(error) == "string" and prelude.decode_utf8_lossy(error) or error, -- string or nil
     extras = prelude.decode_model_value(extras or {}),
@@ -147,7 +147,7 @@ function M.new_process_result(output, status, truncated)
   return setmetatable({
     output = prelude.decode_utf8_lossy(output or ""),
     status = status or -1,
-    truncated = truncated and true or false,
+    truncated = not not truncated,
   }, ProcessResult)
 end
 

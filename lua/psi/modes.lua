@@ -57,47 +57,49 @@ local function bootstrap_runtime(opts, options)
 end
 
 -- Build an observer whose callbacks stream rendered events to stdout.
-local function print_observer()
-  return {
-    on_assistant_text_delta = function(text)
-      fire("assistant-text", { text = text or "" })
-    end,
-    -- Route reasoning-model thinking through the render pipeline
-    -- so REPL / --agent / --print callers can see it (boot.lua
-    -- installs a default dim-prefixed renderer). Without this the
-    -- thinking stream vanishes — models like qwen3 that emit
-    -- everything in the thinking channel look like they returned
-    -- nothing at all. The TUI has its own observer.thinking_delta
-    -- path, so this only fires in non-TUI modes.
-    on_thinking_delta = function(text)
-      fire("thinking-delta", { text = text or "" })
-    end,
-    on_tool_call = function(id, name, input_json)
-      fire("tool-call", { id = id or "", tool = name or "", input = json_parse_or(input_json, {}) })
-    end,
-    on_tool_result = function(id, name, output_json)
-      local parsed = json_parse_or(output_json, nil)
-      local result
-      if parsed == nil then
-        result = output_json and { raw = output_json } or {}
-      else
-        result = parsed
-      end
-      fire("tool-result", { id = id or "", tool = name or "", result = result })
-    end,
-  }
+local PRINT_OBSERVER = {
+  on_assistant_text_delta = function(text)
+    fire("assistant-text", { text = text or "" })
+  end,
+  -- Route reasoning-model thinking through the render pipeline
+  -- so REPL / --agent / --print callers can see it (boot.lua
+  -- installs a default dim-prefixed renderer). Without this the
+  -- thinking stream vanishes — models like qwen3 that emit
+  -- everything in the thinking channel look like they returned
+  -- nothing at all. The TUI has its own observer.thinking_delta
+  -- path, so this only fires in non-TUI modes.
+  on_thinking_delta = function(text)
+    fire("thinking-delta", { text = text or "" })
+  end,
+  on_tool_call = function(id, name, input_json)
+    fire("tool-call", { id = id or "", tool = name or "", input = json_parse_or(input_json, {}) })
+  end,
+  on_tool_result = function(id, name, output_json)
+    local parsed = json_parse_or(output_json, nil)
+    local result
+    if parsed == nil then
+      result = output_json and { raw = output_json } or {}
+    else
+      result = parsed
+    end
+    fire("tool-result", { id = id or "", tool = name or "", result = result })
+  end,
+}
+
+local function fire_before_turn(payload)
+  fire("before-turn", payload)
+end
+
+local function fire_after_turn(payload)
+  fire("after-turn", payload)
 end
 
 local function run_agent_turn(runtime, user_text)
   return runtime:turn(user_text, {
-    observer = print_observer(),
+    observer = PRINT_OBSERVER,
     abort_check = psi.is_aborted,
-    before_turn = function(payload)
-      fire("before-turn", payload)
-    end,
-    after_turn = function(payload)
-      fire("after-turn", payload)
-    end,
+    before_turn = fire_before_turn,
+    after_turn = fire_after_turn,
   })
 end
 
@@ -219,11 +221,7 @@ local function handle_slash_command(runtime, line)
     return true, false
   end
   local kind = action.kind
-  if kind == "print" then
-    print(action.payload or "")
-    return true, false
-  end
-  if kind == "ansi-print" then
+  if kind == "print" or kind == "ansi-print" then
     print(action.payload or "")
     return true, false
   end
@@ -416,7 +414,7 @@ local DISPATCH = {
 
 function M.run(opts)
   opts = opts or {}
-  psi.no_context_files = opts.no_context_files and true or false
+  psi.no_context_files = not not opts.no_context_files
   if psi.prompt_templates then
     if opts.no_prompt_templates then
       psi.prompt_templates.set_enabled(false)
@@ -430,7 +428,7 @@ function M.run(opts)
     io.stderr:write("psi.modes.run: unknown mode '" .. tostring(opts.mode) .. "'\n")
     return false
   end
-  return fn(opts) and true or false
+  return not not fn(opts)
 end
 
 return M

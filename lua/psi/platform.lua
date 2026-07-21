@@ -175,25 +175,24 @@ local function normalize_windows_cmd_script(command)
   end
 
   local logical = {}
-  local pending = nil
+  local pending = {}
   for _, line in ipairs(lines) do
-    if pending ~= nil then
-      pending = pending .. line
+    if ends_with_cmd_continuation(line) then
+      pending[#pending + 1] = line:gsub("%s+$", ""):sub(1, -2)
     else
-      pending = line
-    end
-
-    if ends_with_cmd_continuation(pending) then
-      pending = pending:gsub("%s+$", ""):sub(1, -2)
-    else
-      if not is_cmd_comment_line(pending) then
-        logical[#logical + 1] = pending
+      pending[#pending + 1] = line
+      local command_line = table.concat(pending)
+      if not is_cmd_comment_line(command_line) then
+        logical[#logical + 1] = command_line
       end
-      pending = nil
+      pending = {}
     end
   end
-  if pending ~= nil and not is_cmd_comment_line(pending) then
-    logical[#logical + 1] = pending
+  if #pending > 0 then
+    local command_line = table.concat(pending)
+    if not is_cmd_comment_line(command_line) then
+      logical[#logical + 1] = command_line
+    end
   end
 
   if #logical == 0 then

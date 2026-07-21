@@ -47,14 +47,13 @@ function M.skip_assistant(message)
 end
 
 function M.text_from_content(content)
-  local text = ""
+  local parts = prelude.array(#(content or {}))
   for _, block in ipairs(content or {}) do
     if type(block) == "table" and block.type == "text" and type(block.text) == "string" then
-      local block_text = clean_text(block.text)
-      text = (text == "" and block_text) or (text .. block_text)
+      parts[#parts + 1] = clean_text(block.text)
     end
   end
-  return text
+  return table.concat(parts)
 end
 
 function M.text_from_content_with_image_placeholder(content, placeholder)

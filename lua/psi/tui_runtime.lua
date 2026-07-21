@@ -292,11 +292,11 @@ function M._live_progress.update(entry, chunk, replace)
   while pos <= #chunk do
     local start_pos, end_pos, ch = chunk:find("([\r\n])", pos)
     if not start_pos then
-      partial = partial .. chunk:sub(pos)
+      partial = M._live_progress.clip_line(partial .. chunk:sub(pos))
       break
     end
     if start_pos > pos then
-      partial = partial .. chunk:sub(pos, start_pos - 1)
+      partial = M._live_progress.clip_line(partial .. chunk:sub(pos, start_pos - 1))
     end
     if ch == "\r" then
       partial = EMPTY
@@ -4606,7 +4606,7 @@ function M.run(opts)
 
   local ok, err = runtime:bootstrap({
     choose_session = choose_session_tui,
-    always_choose = opts.resume and true or false,
+    always_choose = not not opts.resume,
     require_session_path = true,
   })
   if not ok then
@@ -4721,7 +4721,7 @@ function M._debug_bootstrap_session(opts)
   local runtime = agent_runtime.new(opts)
   local ok, err = runtime:bootstrap({
     choose_session = choose_session_tui,
-    always_choose = opts.resume and true or false,
+    always_choose = not not opts.resume,
     require_session_path = true,
   })
   return ok, err, runtime

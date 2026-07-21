@@ -2,6 +2,7 @@
 
 local M = {}
 local table_create = rawget(table, "create")
+local ARRAY_METATABLE = { __jsontype = "array" }
 
 -- ---------- strings ----------
 
@@ -415,7 +416,7 @@ function M.as_array(t)
   if existing and existing.__jsontype == "array" then
     return t
   end
-  return setmetatable(t or {}, { __jsontype = "array" })
+  return setmetatable(t or {}, ARRAY_METATABLE)
 end
 
 function M.resolve_env(explicit, env_var, default)
