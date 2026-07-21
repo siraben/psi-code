@@ -71,6 +71,15 @@ local function sanitize_output(value)
   return raw:gsub("\t", "   ")
 end
 
+local function sanitize_command(value)
+  local raw = text.strip_ansi(tostring(value or ""))
+  raw = raw:gsub("\r\n", "\n"):gsub("\r", "\n")
+  raw = raw:gsub("[%z\001-\008\011\012\014-\031\127]", function(ch)
+    return string.format("\\x%02X", ch:byte())
+  end)
+  return raw:gsub("\t", "   ")
+end
+
 local function split_lines(value)
   local cleaned = sanitize_output(value)
   if cleaned == "" then
@@ -219,7 +228,7 @@ local function path_arg(input)
 end
 
 local function format_bash_call(input)
-  local command = sanitize_output(input.command or "")
+  local command = sanitize_command(input.command or "")
   local display = command ~= "" and command or fg(FG_MUTED, "...")
   local line = fg(FG_TITLE, "$ " .. display)
   local timeout = tonumber(input.timeout)
