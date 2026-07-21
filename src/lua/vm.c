@@ -3626,6 +3626,45 @@ static int lfn_http_stream_begin(lua_State *L) {
     return 1;
 }
 
+static int lfn_http_stream_request_begin(lua_State *L) {
+    const char *method = luaL_checkstring(L, 1);
+    const char *url = luaL_checkstring(L, 2);
+    size_t body_len;
+    const char *body;
+    long timeout_ms;
+    char **headers;
+    size_t header_count;
+    const struct psi_host_context *host;
+    struct psi_http_stream *h;
+    struct psi_vm_http_stream_ud *ud;
+    int status;
+
+    luaL_checktype(L, 3, LUA_TTABLE);
+    body = luaL_optlstring(L, 4, "", &body_len);
+    timeout_ms = (long)luaL_optinteger(L, 5, 0);
+
+    if (psi_lua_collect_headers(L, 3, &headers, &header_count) != 0) {
+        return luaL_error(L, "failed to collect headers");
+    }
+
+    host = PSI_VM_HOST(L);
+    h = NULL;
+    status = psi_http_stream_request_begin(method, url, (const char *const *)headers, header_count,
+        body, body_len, timeout_ms, host ? host->abort_signal : NULL, &h);
+    psi_lua_free_headers(headers, header_count);
+
+    if (status != PSI_STATUS_OK || h == NULL) {
+        lua_pushnil(L);
+        lua_pushstring(L, "failed to start http request");
+        return 2;
+    }
+
+    ud = (struct psi_vm_http_stream_ud *)lua_newuserdata(L, sizeof(*ud));
+    ud->stream = h;
+    luaL_setmetatable(L, PSI_HTTP_STREAM_MT);
+    return 1;
+}
+
 static int lfn_http_stream_poll(lua_State *L) {
     struct psi_vm_http_stream_ud *ud;
     struct psi_http_stream *h;
@@ -3663,7 +3702,10 @@ static int lfn_http_stream_poll(lua_State *L) {
 static int lfn_http_stream_finish(lua_State *L) {
     struct psi_vm_http_stream_ud *ud;
     long status;
+    long transport_code;
     char *error_message;
+    char *content_type;
+    char *mcp_session_id;
 
     ud = (struct psi_vm_http_stream_ud *)luaL_checkudata(L, 1, PSI_HTTP_STREAM_MT);
     if (ud == NULL) {
@@ -3671,14 +3713,32 @@ static int lfn_http_stream_finish(lua_State *L) {
     }
 
     error_message = NULL;
-    status = psi_http_stream_finish_owned(&ud->stream, &error_message);
+    content_type = NULL;
+    mcp_session_id = NULL;
+    transport_code = 0l;
+    status = psi_http_stream_finish_owned_details(
+        &ud->stream, &error_message, &transport_code, &content_type, &mcp_session_id);
     lua_pushinteger(L, (lua_Integer)status);
     if (status < 0 && error_message != NULL) {
         lua_pushstring(L, error_message);
-        free(error_message);
-        return 2;
+    } else {
+        lua_pushnil(L);
     }
-    return 1;
+    free(error_message);
+    lua_newtable(L);
+    lua_pushinteger(L, (lua_Integer)transport_code);
+    lua_setfield(L, -2, "transport_code");
+    if (content_type != NULL) {
+        lua_pushstring(L, content_type);
+        lua_setfield(L, -2, "content_type");
+    }
+    if (mcp_session_id != NULL) {
+        lua_pushstring(L, mcp_session_id);
+        lua_setfield(L, -2, "mcp_session_id");
+    }
+    free(content_type);
+    free(mcp_session_id);
+    return 3;
 }
 
 /* Shared buffered HTTP request: collect headers from arg 2, call
@@ -3994,6 +4054,10 @@ static int lfn_runtime_info(lua_State *L) {
     lua_setfield(L, -2, "color");
     lua_pushboolean(L, PSI_ENABLE_MCP ? 1 : 0);
     lua_setfield(L, -2, "mcp");
+    lua_pushboolean(L, 1);
+    lua_setfield(L, -2, "mcp-http");
+    lua_pushboolean(L, PSI_ENABLE_MCP ? 1 : 0);
+    lua_setfield(L, -2, "mcp-stdio-primitives");
     lua_pushboolean(L, PSI_ENABLE_REPL_EDITLINE ? 1 : 0);
     lua_setfield(L, -2, "repl-editline");
     lua_pushboolean(L, PSI_ENABLE_TUI ? 1 : 0);
@@ -4727,7 +4791,8 @@ static void psi_vm_register_psi(lua_State *L) {
         "Create a directory and any missing parents; succeeds if the path already exists.");
     PSI_REG("mkdir_parent", lfn_mkdir_parent);
     PSI_REG_DOC("runtime_info", lfn_runtime_info,
-        "Return a table describing compiled-in capabilities (TUI, ANSI, COLOR, REPL_EDITLINE).");
+        "Return a table describing compiled-in capabilities (TUI, ANSI, COLOR, MCP HTTP, "
+        "stdio primitives, REPL_EDITLINE).");
     PSI_REG_DOC("cell_width", lfn_cell_width,
         "Return terminal display cell width for a Unicode codepoint.");
     PSI_REG_DOC("tui_text_strip_ansi", lfn_tui_text_strip_ansi,
@@ -4788,8 +4853,11 @@ static void psi_vm_register_psi(lua_State *L) {
     PSI_REG("http_post", lfn_http_post);
     PSI_REG("http_get", lfn_http_get);
     PSI_REG("http_stream_begin", lfn_http_stream_begin);
+    PSI_REG_DOC("http_stream_request_begin", lfn_http_stream_request_begin,
+        "Begin an asynchronous HTTP GET, POST, or DELETE with a per-request timeout.");
     PSI_REG("http_stream_poll", lfn_http_stream_poll);
-    PSI_REG("http_stream_finish", lfn_http_stream_finish);
+    PSI_REG_DOC("http_stream_finish", lfn_http_stream_finish,
+        "Finish an HTTP stream; returns status, transport error, and response metadata.");
     PSI_REG_DOC("tool_call", lfn_tool_call,
         "Dispatch a tool through the full before/after hook chain. Prefer this over calling "
         "tool.impl directly, which skips hook processing.");

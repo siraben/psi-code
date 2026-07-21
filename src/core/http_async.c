@@ -12,6 +12,7 @@
  */
 
 #include <pthread.h>
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
@@ -115,11 +116,18 @@ struct psi_http_stream {
 
     /* Request state — owned by the helper thread for the duration
      * of curl_easy_perform. Freed in finish. */
+    char *method;
     char *url;
     struct curl_slist *headers;
     char *body;
     size_t body_len;
+    long timeout_ms;
     const struct psi_abort_signal *abort_signal;
+
+    /* Response metadata populated by curl's header callback. The final
+     * response block wins over redirect/interim blocks. */
+    char *content_type;
+    char *mcp_session_id;
 
     /* Chunk queue, guarded by `mu`. */
     pthread_mutex_t mu;
@@ -148,8 +156,11 @@ static void psi_http_stream_free_request(struct psi_http_stream *h) {
     if (h == NULL)
         return;
     curl_slist_free_all(h->headers);
+    free(h->method);
     free(h->url);
     free(h->body);
+    free(h->content_type);
+    free(h->mcp_session_id);
     free(h);
 }
 
@@ -295,6 +306,87 @@ static size_t psi_http_stream_write_cb(void *data, size_t size, size_t nmemb, vo
     return total;
 }
 
+static int psi_http_ascii_equal_nocase(const char *left, size_t left_len, const char *right) {
+    size_t i;
+    size_t right_len;
+
+    right_len = strlen(right);
+    if (left_len != right_len)
+        return 0;
+    for (i = 0u; i < left_len; i++) {
+        unsigned char a = (unsigned char)left[i];
+        unsigned char b = (unsigned char)right[i];
+        if (tolower(a) != tolower(b))
+            return 0;
+    }
+    return 1;
+}
+
+static int psi_http_replace_header_value(char **slot, const char *value, size_t len) {
+    char *copy;
+
+    copy = (char *)malloc(len + 1u);
+    if (copy == NULL)
+        return 0;
+    memcpy(copy, value, len);
+    copy[len] = '\0';
+    free(*slot);
+    *slot = copy;
+    return 1;
+}
+
+static size_t psi_http_stream_header_cb(void *data, size_t size, size_t nmemb, void *userdata) {
+    struct psi_http_stream *h = (struct psi_http_stream *)userdata;
+    const char *line = (const char *)data;
+    size_t total;
+    size_t colon;
+    size_t start;
+    size_t end;
+    char **slot;
+
+    if (size != 0u && nmemb > ((size_t)-1) / size) {
+        psi_http_queue_push_fail(h);
+        return 0u;
+    }
+    total = size * nmemb;
+    if (total >= 5u && psi_http_ascii_equal_nocase(line, 5u, "HTTP/")) {
+        free(h->content_type);
+        h->content_type = NULL;
+        free(h->mcp_session_id);
+        h->mcp_session_id = NULL;
+        return total;
+    }
+
+    colon = 0u;
+    while (colon < total && line[colon] != ':')
+        colon++;
+    if (colon == total)
+        return total;
+    slot = NULL;
+    if (psi_http_ascii_equal_nocase(line, colon, "Content-Type")) {
+        slot = &h->content_type;
+    } else if (psi_http_ascii_equal_nocase(line, colon, "MCP-Session-Id")) {
+        slot = &h->mcp_session_id;
+    }
+    if (slot == NULL)
+        return total;
+
+    start = colon + 1u;
+    while (start < total && (line[start] == ' ' || line[start] == '\t'))
+        start++;
+    end = total;
+    while (end > start &&
+        (line[end - 1u] == '\r' || line[end - 1u] == '\n' || line[end - 1u] == ' ' ||
+            line[end - 1u] == '\t'))
+        end--;
+    if ((end > 4096u && start < end - 4096u) ||
+        !psi_http_replace_header_value(slot, line + start, end - start)) {
+        psi_http_queue_push_fail(h);
+        return 0u;
+    }
+    return total;
+}
+
 static int psi_http_stream_xferinfo(
     void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow) {
     const struct psi_abort_signal *s = (const struct psi_abort_signal *)clientp;
@@ -328,17 +420,29 @@ static void *psi_http_stream_thread(void *arg) {
 
     curl_easy_setopt(curl, CURLOPT_URL, h->url);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, h->headers);
-    curl_easy_setopt(curl, CURLOPT_POST, 1L);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, h->body);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)h->body_len);
+    if (strcmp(h->method, "POST") == 0) {
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, h->body);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)h->body_len);
+    } else {
+        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, h->method);
+        if (h->body_len > 0u) {
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, h->body);
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)h->body_len);
+        }
+    }
     h->curl_error[0] = '\0';
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, h->curl_error);
     if (psi_http_share != NULL)
         curl_easy_setopt(curl, CURLOPT_SHARE, psi_http_share);
     psi_http_configure_tls(curl);
     psi_http_configure_resilience(curl);
+    if (h->timeout_ms > 0l)
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, h->timeout_ms);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, psi_http_stream_write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)h);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, psi_http_stream_header_cb);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, (void *)h);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, psi_http_stream_xferinfo);
     /* See psi_http_build_handle in anthropic.c for the const-cast story. */
@@ -363,9 +467,9 @@ static void *psi_http_stream_thread(void *arg) {
  * Public API.
  * ------------------------------------------------------------------ */
 
-int psi_http_stream_begin(const char *url, const char *const *header_lines, size_t header_count,
-    const char *body, size_t body_len, const struct psi_abort_signal *abort_signal,
-    struct psi_http_stream **out) {
+int psi_http_stream_request_begin(const char *method, const char *url,
+    const char *const *header_lines, size_t header_count, const char *body, size_t body_len,
+    long timeout_ms, const struct psi_abort_signal *abort_signal, struct psi_http_stream **out) {
     struct psi_http_stream *h;
     size_t i;
     int rc;
@@ -373,7 +477,9 @@ int psi_http_stream_begin(const char *url, const char *const *header_lines, size
     if (out == NULL)
         return PSI_STATUS_ERROR;
     *out = NULL;
-    if (url == NULL)
+    if (method == NULL || url == NULL || timeout_ms < 0l)
+        return PSI_STATUS_ERROR;
+    if (strcmp(method, "POST") != 0 && strcmp(method, "DELETE") != 0 && strcmp(method, "GET") != 0)
         return PSI_STATUS_ERROR;
 
     if (psi_http_global_init() != PSI_STATUS_OK) {
@@ -385,6 +491,7 @@ int psi_http_stream_begin(const char *url, const char *const *header_lines, size
         return PSI_STATUS_ERROR;
     }
 
+    h->method = psi_strdup(method);
     h->url = psi_strdup(url);
     h->body_len = body_len;
     if (body != NULL && body_len > 0u) {
@@ -394,7 +501,7 @@ int psi_http_stream_begin(const char *url, const char *const *header_lines, size
     } else {
         h->body = psi_strdup("");
     }
-    if (h->url == NULL || h->body == NULL) {
+    if (h->method == NULL || h->url == NULL || h->body == NULL) {
         psi_http_stream_free_request(h);
         return PSI_STATUS_ERROR;
     }
@@ -406,6 +513,7 @@ int psi_http_stream_begin(const char *url, const char *const *header_lines, size
         }
     }
     h->abort_signal = abort_signal;
+    h->timeout_ms = timeout_ms;
     h->curl_code = CURLE_OK;
     h->curl_error[0] = '\0';
     h->http_status = 0l;
@@ -431,6 +539,13 @@ int psi_http_stream_begin(const char *url, const char *const *header_lines, size
 
     *out = h;
     return PSI_STATUS_OK;
+}
+
+int psi_http_stream_begin(const char *url, const char *const *header_lines, size_t header_count,
+    const char *body, size_t body_len, const struct psi_abort_signal *abort_signal,
+    struct psi_http_stream **out) {
+    return psi_http_stream_request_begin(
+        "POST", url, header_lines, header_count, body, body_len, 0l, abort_signal, out);
 }
 
 /* Join a detached chunk list into one buffer. On allocation failure,
@@ -541,7 +656,8 @@ int psi_http_stream_poll(
     return result;
 }
 
-static long psi_http_stream_finish_live(struct psi_http_stream *h, char **error_message) {
+static long psi_http_stream_finish_live(struct psi_http_stream *h, char **error_message,
+    long *transport_code, char **content_type, char **mcp_session_id) {
     long status;
     CURLcode code;
 
@@ -552,6 +668,16 @@ static long psi_http_stream_finish_live(struct psi_http_stream *h, char **error_
 
     status = h->http_status;
     code = h->curl_code;
+    if (transport_code != NULL)
+        *transport_code = (long)code;
+    if (content_type != NULL) {
+        *content_type = h->content_type;
+        h->content_type = NULL;
+    }
+    if (mcp_session_id != NULL) {
+        *mcp_session_id = h->mcp_session_id;
+        h->mcp_session_id = NULL;
+    }
     if (code != CURLE_OK && error_message != NULL) {
         const char *message;
         message = h->curl_error[0] != '\0' ? h->curl_error : curl_easy_strerror(code);
@@ -562,29 +688,56 @@ static long psi_http_stream_finish_live(struct psi_http_stream *h, char **error_
     pthread_cond_destroy(&h->cond);
     pthread_mutex_destroy(&h->mu);
     curl_slist_free_all(h->headers);
+    free(h->method);
     free(h->url);
     free(h->body);
+    free(h->content_type);
+    free(h->mcp_session_id);
     free(h);
 
     return (code == CURLE_OK) ? status : -1l;
 }
 
-long psi_http_stream_finish(struct psi_http_stream *h, char **error_message) {
+static long psi_http_stream_finish_details(struct psi_http_stream *h, char **error_message,
+    long *transport_code, char **content_type, char **mcp_session_id) {
     if (error_message != NULL)
         *error_message = NULL;
+    if (transport_code != NULL)
+        *transport_code = 0l;
+    if (content_type != NULL)
+        *content_type = NULL;
+    if (mcp_session_id != NULL)
+        *mcp_session_id = NULL;
     if (h == NULL)
         return -1l;
-    return psi_http_stream_finish_live(h, error_message);
+    return psi_http_stream_finish_live(
+        h, error_message, transport_code, content_type, mcp_session_id);
+}
+
+long psi_http_stream_finish(struct psi_http_stream *h, char **error_message) {
+    return psi_http_stream_finish_details(h, error_message, NULL, NULL, NULL);
 }
 
 long psi_http_stream_finish_owned(struct psi_http_stream **slot, char **error_message) {
+    return psi_http_stream_finish_owned_details(slot, error_message, NULL, NULL, NULL);
+}
+
+long psi_http_stream_finish_owned_details(struct psi_http_stream **slot, char **error_message,
+    long *transport_code, char **content_type, char **mcp_session_id) {
     struct psi_http_stream *h;
 
     if (error_message != NULL)
         *error_message = NULL;
+    if (transport_code != NULL)
+        *transport_code = 0l;
+    if (content_type != NULL)
+        *content_type = NULL;
+    if (mcp_session_id != NULL)
+        *mcp_session_id = NULL;
     if (slot == NULL || *slot == NULL)
         return 0l;
     h = *slot;
     *slot = NULL;
-    return psi_http_stream_finish_live(h, error_message);
+    return psi_http_stream_finish_live(
+        h, error_message, transport_code, content_type, mcp_session_id);
 }

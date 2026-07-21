@@ -98,6 +98,7 @@ Lua owns the runtime model:
   `lua/psi/providers/openai_codex.lua`, and `lua/psi/providers/ollama.lua`
 - cooperative scheduling in `lua/psi/sched.lua`
 - tool registry and built-in tool implementations
+- MCP JSON-RPC lifecycle, Streamable HTTP policy, and remote tool registration
 - prompt assembly, context shaping, render hooks, and event hooks
 - TUI state, rendering, and key policy
 
@@ -355,7 +356,11 @@ Current gates:
 - `COLOR`: color SGR emission
 - `MCP`: low-level stdio process primitives used by protocol clients
   (`psi.process_begin_stdio_argv`, `psi.process_try_write`, and related
-  helpers). This is not a bundled MCP bridge.
+  helpers). This is not a bundled stdio MCP client. The bundled MCP client uses
+  Streamable HTTP and the always-present libcurl boundary, independent of this
+  gate. `psi.runtime_info()` reports these separately as `mcp-http` and
+  `mcp-stdio-primitives`; the older `mcp` field remains the stdio-primitives
+  gate for compatibility.
 - `REPL_EDITLINE`: libedit-backed REPL input/history; falls back to plain
   `fgets` input when disabled
 
@@ -446,6 +451,8 @@ The tool layer owns:
 - serialization for mutation-sensitive tools when the target is known
 - portable path resolution and filesystem helpers for read/write/listing tools
 - live progress forwarding for long-running shell/process tools
+- namespaced registration of configured MCP tools through the same dispatch and
+  hook path
 
 The shell-facing tools should stream incremental progress without buffering the
 same bytes repeatedly in Lua, while still producing a final structured tool

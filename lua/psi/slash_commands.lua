@@ -752,6 +752,9 @@ local function cmd_reload()
   if type(psi.install_builtin_extensions) == "function" then
     pcall(psi.install_builtin_extensions)
   end
+  if psi.mcp and psi.mcp.reload then
+    pcall(psi.mcp.reload)
+  end
   if psi.load_user_extensions ~= false and type(psi.load_extensions) == "function" then
     local ok, err = pcall(psi.load_extensions)
     if not ok then

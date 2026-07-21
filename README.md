@@ -18,7 +18,7 @@ Haiku, *BSD, or your iPhone via [iSH](https://ish.app/).
 psi has no shortage of features, including:
 
 - support for many LLM backends, including Codex OAuth, OpenRouter, Ollama
-- integration with MCP servers
+- integration with MCP servers over Streamable HTTP
 - full session tree, forking and queue management
 - skills
 - interactive (CLI, TUI) and non-interactive use
@@ -104,7 +104,7 @@ Optional Make flags default to `1`; set them to `0` to disable the feature.
 | `TUI` | Inline terminal frontend and `psi.tui_*` host primitives |
 | `ANSI` | ANSI SGR emission and parsing. Required by `TUI`. |
 | `COLOR` | Color SGR emission. Non-color styles can still be used. |
-| `MCP` | Stdio process primitives for protocol clients. |
+| `MCP` | Low-level stdio process primitives only. The bundled MCP client is HTTP-only and does not use this gate. |
 | `REPL_EDITLINE` | libedit-backed REPL with history. Falls back to `fgets`. |
 
 Run the build-matrix check when optional dependencies or preprocessor guards
@@ -178,6 +178,33 @@ Use `--trust` or `--no-trust` to override that decision for one run.
 
 See [docs/extensions.md](docs/extensions.md).
 
+## MCP
+
+psi can discover and call tools from configured MCP servers using the
+Streamable HTTP transport. Servers are configured under `mcp.servers` in the
+normal global or project `settings.json`; discovered tools are namespaced by
+server name and enter the same hookable tool registry as built-ins.
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "build": {
+        "transport": "http",
+        "url": "http://127.0.0.1:7337/mcp",
+        "timeout_ms": 30000,
+        "headers": { "Authorization": "Bearer ${MCP_TOKEN}" }
+      }
+    }
+  }
+}
+```
+
+This is not a stdio MCP client. The `MCP` build flag exposes process primitives
+that an extension could use to build one, but psi does not bundle that protocol
+transport. See [docs/mcp.md](docs/mcp.md) for lifecycle, naming, security, and
+current transport limits.
+
 ## Sessions
 
 Sessions are append-only JSONL in pi's v3 schema: typed entries, parent
@@ -205,6 +232,7 @@ scripts/embed.c         build-time deflate of Lua sources and docs
 
 lua/boot.lua            Lua bootstrap; wires psi.* and loads extensions
 lua/psi/                tools, prompts, sessions, scheduler, markdown, TUI
+lua/psi/mcp.lua         JSON-RPC MCP client and Streamable HTTP lifecycle
 lua/psi/tools/          built-in tool implementations
 lua/psi/providers/      Anthropic, Ollama, OpenRouter, OpenAI Codex adapters
 lua/psi/extensions/     bundled extensions
@@ -213,6 +241,7 @@ docs/architecture.md    runtime model and host/runtime boundaries
 docs/portability.md     porting principles and per-OS notes
 docs/port-status.md     audit against pi-mono
 docs/extensions.md      extension API and event catalog
+docs/mcp.md             MCP Streamable HTTP configuration and scope
 docs/providers.md       provider configuration
 
 tests/                  Python harnesses for smoke, bench, and valgrind runs
