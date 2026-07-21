@@ -497,6 +497,10 @@ external extensions.
   The request is idle-only in the TUI, carries no tools, uses an explicit
   empty-transcript marker for new sessions, forwards aborts, and does not
   persist either the question or answer into the conversation.
+- `network_search` is a disabled-by-default reference tool using psi's existing
+  HTTP and credential primitives. It supports Tavily and a generic JSON endpoint
+  without MCP or another dependency. See
+  [Optional network search extension](network-search.md).
 
 ---
 
