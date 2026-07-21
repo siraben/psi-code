@@ -23,6 +23,7 @@ local M = {}
 local registry = {}
 local before_hooks = {}
 local after_hooks = {}
+local active_allowlist = nil
 
 function M.register(tool)
   for i, existing in ipairs(registry) do
@@ -32,6 +33,19 @@ function M.register(tool)
     end
   end
   registry[#registry + 1] = tool
+end
+
+function M.unregister(name)
+  for i = #registry, 1, -1 do
+    if registry[i].name == name then
+      table.remove(registry, i)
+      if active_allowlist ~= nil then
+        active_allowlist[name] = nil
+      end
+      return true
+    end
+  end
+  return false
 end
 
 function M.all()
@@ -53,8 +67,6 @@ end
 -- tools, narrowing what the LLM can call. Lets extensions / skills
 -- scope an agent to a safe subset without unregistering tools
 -- globally. Reset with M.set_active(nil).
-local active_allowlist = nil
-
 function M.set_active(names)
   if names == nil then
     active_allowlist = nil
