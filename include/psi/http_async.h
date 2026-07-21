@@ -44,6 +44,10 @@ void *psi_http_share_handle(void);
 
 struct psi_http_stream;
 
+int psi_http_stream_request_begin(const char *method, const char *url,
+    const char *const *header_lines, size_t header_count, const char *body, size_t body_len,
+    long timeout_ms, const struct psi_abort_signal *abort_signal, struct psi_http_stream **out);
+
 int psi_http_stream_begin(const char *url, const char *const *header_lines, size_t header_count,
     const char *body, size_t body_len, const struct psi_abort_signal *abort_signal,
     struct psi_http_stream **out);
@@ -76,5 +80,8 @@ long psi_http_stream_finish(struct psi_http_stream *h, char **error_message);
  * stream, and return 0 when the slot is already empty. This is for
  * owning containers such as Lua userdata finalizers. */
 long psi_http_stream_finish_owned(struct psi_http_stream **slot, char **error_message);
+/* Extended metadata variant. Returned strings are heap-owned by the caller. */
+long psi_http_stream_finish_owned_details(struct psi_http_stream **slot, char **error_message,
+    long *transport_code, char **content_type, char **mcp_session_id);
 
 #endif
