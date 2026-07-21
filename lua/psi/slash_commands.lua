@@ -24,6 +24,7 @@ local COMPACT_DEFAULT = 12
 local BUILTIN_TUI_EXTENSIONS = {
   "vim_keybindings",
   "osc52_clipboard",
+  "pull_request_status",
 }
 
 -- ---------- parsers ----------
@@ -699,6 +700,9 @@ local function cmd_reload()
     end
     if psi.tui.clear_status_hooks then
       pcall(psi.tui.clear_status_hooks)
+    end
+    if psi.tui.clear_status_pollers then
+      pcall(psi.tui.clear_status_pollers)
     end
     if psi.tui.clear_clipboard_writers then
       pcall(psi.tui.clear_clipboard_writers)

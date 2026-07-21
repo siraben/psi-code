@@ -166,20 +166,23 @@ local function handle_event(data, state, observer)
     end
   end
 
-  -- Usage arrives on a trailing chunk when stream_options.include_usage
-  -- is set. OpenRouter sometimes conflates prior cache hits with the
-  -- current response in `cached_tokens`; subtract cache_write to
-  -- isolate cache_read, matching pi-mono's handling.
+  -- Usage arrives on a trailing chunk. OpenRouter reports cache reads and
+  -- writes separately; prompt_tokens includes both, so isolate uncached input
+  -- while preserving both cache buckets for session/status accounting.
   if type(obj.usage) == "table" then
     state.usage = {
       input_tokens = obj.usage.prompt_tokens or 0,
       output_tokens = obj.usage.completion_tokens or 0,
+      cost = tonumber(obj.usage.cost),
     }
     local ptd = obj.usage.prompt_tokens_details
     if type(ptd) == "table" then
-      local cached = tonumber(ptd.cached_tokens) or 0
-      state.usage.cache_read = cached
-      state.usage.input_tokens = math.max(0, (state.usage.input_tokens or 0) - cached)
+      local cache_read = tonumber(ptd.cached_tokens) or 0
+      local cache_write = tonumber(ptd.cache_write_tokens) or 0
+      state.usage.cache_read_input_tokens = cache_read
+      state.usage.cache_creation_input_tokens = cache_write
+      state.usage.input_tokens =
+        math.max(0, (state.usage.input_tokens or 0) - cache_read - cache_write)
     end
   end
 end

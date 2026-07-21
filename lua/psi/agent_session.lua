@@ -36,8 +36,8 @@ function M.provider_for(model)
   return provider, resolved.id
 end
 
-function M.model_descriptor(fallback)
-  return providers.resolve_descriptor(M.current_model(fallback))
+function M.model_descriptor(fallback, opts)
+  return providers.resolve_descriptor(M.current_model(fallback), opts)
 end
 
 -- Runtime model switch. Extensions (or a slash command) can call

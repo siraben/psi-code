@@ -353,13 +353,37 @@ local function normalize_usage(u)
   local output = u.output_tokens or u.output or 0
   local cr = u.cache_read_input_tokens or u.cacheRead or 0
   local cw = u.cache_creation_input_tokens or u.cacheWrite or 0
-  return {
+  local normalized = {
     input = input,
     output = output,
     cacheRead = cr,
     cacheWrite = cw,
     totalTokens = input + output + cr + cw,
   }
+  local cost = u.cost
+  if type(cost) == "number" then
+    normalized.cost = {
+      input = 0,
+      output = 0,
+      cacheRead = 0,
+      cacheWrite = 0,
+      total = cost,
+    }
+  elseif type(cost) == "table" then
+    local input_cost = tonumber(cost.input) or 0
+    local output_cost = tonumber(cost.output) or 0
+    local cache_read_cost = tonumber(cost.cacheRead or cost.cache_read) or 0
+    local cache_write_cost = tonumber(cost.cacheWrite or cost.cache_write) or 0
+    normalized.cost = {
+      input = input_cost,
+      output = output_cost,
+      cacheRead = cache_read_cost,
+      cacheWrite = cache_write_cost,
+      total = tonumber(cost.total)
+        or (input_cost + output_cost + cache_read_cost + cache_write_cost),
+    }
+  end
+  return normalized
 end
 
 -- Store pi-style canonical stop reasons. Anthropic emits snake_case over

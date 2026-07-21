@@ -8,6 +8,7 @@ local ansi = require("psi.ansi")
 local context = require("psi.context")
 local keybindings = require("psi.keybindings")
 local prelude = require("psi.prelude")
+local project_metadata = require("psi.project_metadata")
 local settings = require("psi.settings_manager")
 local tui_text = require("psi.tui_text")
 
@@ -101,6 +102,66 @@ end
 -- while any extension status hook is registered.
 function M.has_status_hooks()
   return #status_hooks > 0
+end
+
+-- Pollers back status hooks whose data arrives asynchronously. A poller
+-- returns (changed, pending); the TUI calls it without blocking while pending
+-- and redraws once changed. This keeps network/process work out of render
+-- hooks while letting extensions expose cached status text.
+local status_pollers = {}
+local next_status_poller_id = 0
+
+function M.register_status_poller(fn, pending)
+  if type(fn) ~= "function" then
+    return false, "status poller must be a function"
+  end
+  next_status_poller_id = next_status_poller_id + 1
+  status_pollers[#status_pollers + 1] = {
+    id = next_status_poller_id,
+    fn = fn,
+    pending = pending ~= false,
+  }
+  return next_status_poller_id
+end
+
+function M.unregister_status_poller(id)
+  for index, poller in ipairs(status_pollers) do
+    if poller.id == id then
+      table.remove(status_pollers, index)
+      return true
+    end
+  end
+  return false
+end
+
+function M.clear_status_pollers()
+  status_pollers = {}
+end
+
+function M.status_poll_timeout()
+  for _, poller in ipairs(status_pollers) do
+    if poller.pending then
+      return 50
+    end
+  end
+  return -1
+end
+
+function M.poll_status()
+  local changed = false
+  for _, poller in ipairs(status_pollers) do
+    if poller.pending then
+      local ok, did_change, pending = pcall(poller.fn)
+      if ok then
+        changed = changed or did_change == true
+        poller.pending = pending == true
+      else
+        poller.pending = false
+        io.stderr:write("psi: TUI status poller failed: " .. tostring(did_change) .. "\n")
+      end
+    end
+  end
+  return changed
 end
 
 local command_action_handlers = {}
@@ -346,6 +407,94 @@ local function short_id(id)
   return id:sub(1, 8)
 end
 
+local function format_tokens(count)
+  count = math.max(0, tonumber(count) or 0)
+  if count < 1000 then
+    return tostring(math.floor(count))
+  elseif count < 10000 then
+    return string.format("%.1fk", count / 1000)
+  elseif count < 1000000 then
+    return string.format("%dk", math.floor((count / 1000) + 0.5))
+  elseif count < 10000000 then
+    return string.format("%.1fM", count / 1000000)
+  end
+  return string.format("%dM", math.floor((count / 1000000) + 0.5))
+end
+
+local function usage_cost(usage)
+  local cost = type(usage) == "table" and usage.cost or nil
+  if type(cost) == "number" then
+    return cost
+  elseif type(cost) == "table" then
+    return tonumber(cost.total) or 0
+  end
+  return 0
+end
+
+local function session_usage()
+  local totals = { input = 0, output = 0, cache_read = 0, cache_write = 0, cost = 0 }
+  local latest_hit = nil
+  for _, entry in ipairs(psi.session_messages()) do
+    if entry.role == "assistant" and type(entry.data) == "string" then
+      local body = prelude.safe_json_decode(entry.data, nil)
+      local message = type(body) == "table" and body.message or nil
+      local usage = type(message) == "table" and message.usage or nil
+      if type(usage) == "table" then
+        local input = tonumber(usage.input or usage.input_tokens) or 0
+        local output = tonumber(usage.output or usage.output_tokens) or 0
+        local cache_read = tonumber(usage.cacheRead or usage.cache_read_input_tokens) or 0
+        local cache_write = tonumber(usage.cacheWrite or usage.cache_creation_input_tokens) or 0
+        totals.input = totals.input + input
+        totals.output = totals.output + output
+        totals.cache_read = totals.cache_read + cache_read
+        totals.cache_write = totals.cache_write + cache_write
+        totals.cost = totals.cost + usage_cost(usage)
+        local prompt = input + cache_read + cache_write
+        if prompt > 0 then
+          latest_hit = (cache_read / prompt) * 100
+        end
+      end
+    end
+  end
+  if
+    totals.input == 0
+    and totals.output == 0
+    and totals.cache_read == 0
+    and totals.cache_write == 0
+    and totals.cost == 0
+  then
+    return nil
+  end
+  totals.latest_hit = latest_hit
+  return totals
+end
+
+local function usage_text(totals)
+  if not totals then
+    return nil
+  end
+  local parts = {}
+  if totals.input > 0 then
+    parts[#parts + 1] = "↑" .. format_tokens(totals.input)
+  end
+  if totals.output > 0 then
+    parts[#parts + 1] = "↓" .. format_tokens(totals.output)
+  end
+  if totals.cache_read > 0 then
+    parts[#parts + 1] = "R" .. format_tokens(totals.cache_read)
+  end
+  if totals.cache_write > 0 then
+    parts[#parts + 1] = "W" .. format_tokens(totals.cache_write)
+  end
+  if (totals.cache_read > 0 or totals.cache_write > 0) and totals.latest_hit ~= nil then
+    parts[#parts + 1] = string.format("CH%.1f%%", totals.latest_hit)
+  end
+  if totals.cost > 0 then
+    parts[#parts + 1] = string.format("$%.3f", totals.cost)
+  end
+  return #parts > 0 and table.concat(parts, " ") or nil
+end
+
 local function format_elapsed(total_seconds)
   local hours
   local minutes
@@ -584,6 +733,10 @@ local function workspace_model(cwd)
   local repo, worktree = split_workspace(cwd)
   local commit = build_commit()
   local right_parts = {}
+  local branch = project_metadata.git_branch(cwd)
+  if branch ~= nil and branch ~= "" then
+    right_parts[#right_parts + 1] = pair("branch", branch, true)
+  end
   if repo ~= nil and worktree ~= nil then
     right_parts[#right_parts + 1] = pair("worktree", worktree, true)
     if commit ~= "" then
@@ -604,6 +757,24 @@ local function workspace_model(cwd)
     path = tilde_path(cwd or "-"),
     right_parts = right_parts,
   }
+end
+
+local function resolve_model_status(arg)
+  local ok, agent = pcall(require, "psi.agent_session")
+  if not ok or type(agent) ~= "table" then
+    return nil, nil, tostring(arg.model or "?"), nil
+  end
+  local resolved = agent.model_descriptor(arg.model, { refresh = false })
+  local model = (resolved and resolved.id) or arg.model or "?"
+  local effort = nil
+  if type(agent.thinking_level_for) == "function" then
+    effort = agent.thinking_level_for(resolved, arg.thinking_level, arg.reasoning_effort)
+  end
+  local explicit = arg.thinking_level ~= nil or arg.reasoning_effort ~= nil
+  if not explicit and not (resolved and resolved.reasoning == true) then
+    effort = nil
+  end
+  return agent, resolved, model, effort
 end
 
 local function workspace_right(model)
@@ -696,9 +867,7 @@ function M.status_line(arg_json)
   -- extension-driven change is reflected in the footer without a
   -- restart. require() is resolved lazily to avoid a boot-time
   -- cycle (agent ↔ prompt ↔ tools ↔ tui).
-  local ok, agent = pcall(require, "psi.agent_session")
-  local resolved = ok and agent.model_descriptor(arg.model)
-  local model = (resolved and resolved.id) or arg.model or "?"
+  local agent, resolved, model, effort = resolve_model_status(arg)
   local context_window = tonumber(arg.context_window)
     or (resolved and tonumber(resolved.context_window))
   local busy = arg.busy
@@ -707,6 +876,9 @@ function M.status_line(arg_json)
   local parts = {}
   parts[#parts + 1] = "session:" .. short_id(psi.session_id())
   parts[#parts + 1] = "model:" .. model
+  if effort then
+    parts[#parts + 1] = "thinking:" .. effort
+  end
   parts[#parts + 1] = "msg:" .. tostring(psi.session_message_count())
 
   local estimate = context.estimate_context_tokens()
@@ -719,7 +891,11 @@ function M.status_line(arg_json)
   if scroll > 0 then
     parts[#parts + 1] = "scroll:" .. tostring(scroll)
   end
-  if arg.show_queue_in_status ~= false and ok and agent.pending_message_count then
+  local usage = usage_text(session_usage())
+  if usage then
+    parts[#parts + 1] = "usage:" .. usage
+  end
+  if arg.show_queue_in_status ~= false and agent and agent.pending_message_count then
     local queued = agent.pending_message_count()
     if queued > 0 then
       local preview = queue_preview_all(agent)
@@ -744,14 +920,12 @@ end
 
 function M.status_bar(arg_json)
   local arg = type(arg_json) == "table" and arg_json or prelude.safe_json_decode(arg_json, {})
-  local ok, agent = pcall(require, "psi.agent_session")
-  local resolved = ok and agent.model_descriptor(arg.model)
-  local model = (resolved and resolved.id) or arg.model or "?"
+  local _, resolved, model, effort = resolve_model_status(arg)
   local context_window = tonumber(arg.context_window)
     or (resolved and tonumber(resolved.context_window))
   local left = pair("session", short_id(psi.session_id()), true)
   local right_parts = {
-    pair("model", model, false),
+    pair("model", effort and (model .. " (" .. effort .. ")") or model, false),
     pair("messages", tostring(psi.session_message_count()), false),
   }
   local estimate = context.estimate_context_tokens()
@@ -760,6 +934,10 @@ function M.status_bar(arg_json)
     local pct = (estimate.tokens / window) * 100
     right_parts[#right_parts + 1] =
       pair("ctx", string.format("%.1f%% (%d/%d)", pct, estimate.tokens, window), false)
+  end
+  local usage = usage_text(session_usage())
+  if usage then
+    right_parts[#right_parts + 1] = pair("usage", usage, false)
   end
   for _, hook in ipairs(status_hooks) do
     local ok_hook, extra = pcall(hook.fn, arg)

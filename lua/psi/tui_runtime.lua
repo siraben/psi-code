@@ -2113,6 +2113,8 @@ function chat.footer_bar_line(state, status_arg, frame_width)
     not hooks_active
     and cache ~= nil
     and cache.model == status_arg.model
+    and cache.thinking_level == status_arg.thinking_level
+    and cache.reasoning_effort == status_arg.reasoning_effort
     and cache.session_id == session_id
     and cache.message_count == message_count
     and cache.width == frame_width
@@ -2125,6 +2127,8 @@ function chat.footer_bar_line(state, status_arg, frame_width)
   else
     state.footer_bar_cache = {
       model = status_arg.model,
+      thinking_level = status_arg.thinking_level,
+      reasoning_effort = status_arg.reasoning_effort,
       session_id = session_id,
       message_count = message_count,
       width = frame_width,
@@ -2207,6 +2211,8 @@ local function redraw(state)
     model = state.model and state.model.id or state.opts.model,
     provider = state.model and state.model.provider or nil,
     context_window = state.model and state.model.context_window or nil,
+    thinking_level = state.opts.thinking_level,
+    reasoning_effort = state.opts.reasoning_effort,
     busy = state.busy,
     busy_label = state.busy_label,
     elapsed_seconds = state.busy_started_at and (os.time() - state.busy_started_at) or 0,
@@ -2397,6 +2403,8 @@ function chat.redraw(state)
     model = state.model and state.model.id or state.opts.model,
     provider = state.model and state.model.provider or nil,
     context_window = state.model and state.model.context_window or nil,
+    thinking_level = state.opts.thinking_level,
+    reasoning_effort = state.opts.reasoning_effort,
     busy = state.busy,
     busy_label = state.busy_label,
     elapsed_seconds = state.busy_started_at and (os.time() - state.busy_started_at) or 0,
@@ -4747,9 +4755,13 @@ function M.run(opts)
     redraw(state)
 
     while state.running do
-      local event = psi.tui_poll_key(-1)
+      local poll_timeout = tui.status_poll_timeout and tui.status_poll_timeout() or -1
+      local event = psi.tui_poll_key(poll_timeout)
       if event ~= nil then
         handle_key_event(state, event)
+      end
+      if tui.poll_status and tui.poll_status() then
+        state.dirty = true
       end
       if state.dirty or (state.ui and state.ui.dirty) then
         redraw(state)

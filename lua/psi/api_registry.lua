@@ -61,7 +61,7 @@ function M.api(name)
   return apis[name]
 end
 
-function M.model(id)
+function M.model(id, opts)
   local exact = models[id]
   if exact then
     return exact
@@ -77,7 +77,7 @@ function M.model(id)
   end
 
   local ok, openrouter_models = pcall(require, "psi.providers.openrouter_models")
-  local meta = ok and openrouter_models and openrouter_models.model(slug)
+  local meta = ok and openrouter_models and openrouter_models.model(slug, opts)
   if type(meta) ~= "table" then
     return nil
   end
@@ -462,13 +462,13 @@ function M.resolve_route(model)
   return first_authenticated_provider(), model
 end
 
-function M.resolve_descriptor(model)
+function M.resolve_descriptor(model, opts)
   local spec, requested = M.resolve_route(model)
   if not spec then
     return nil
   end
   local real_model = M.resolve_model(spec.name, requested)
-  local meta = M.model(canonical_id(spec.name, real_model)) or M.model(real_model) or {}
+  local meta = M.model(canonical_id(spec.name, real_model), opts) or M.model(real_model, opts) or {}
   local out = copy_table(meta)
   out.provider = spec.name
   out.api = out.api or spec.api

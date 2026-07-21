@@ -337,6 +337,9 @@ These are part of the stable surface:
 | `psi.tui.register_status_hook(fn)` | Append a short status-bar snippet. `fn(status)` is called on every redraw (must be cheap) and returns a string or nil. Returns a hook id. Useful for tokens/sec meters, background-task indicators, etc. Suppressed while an active status message is on screen. |
 | `psi.tui.unregister_status_hook(id)` | Remove one status hook previously returned by `register_status_hook`. |
 | `psi.tui.clear_status_hooks()` | Remove registered status hooks. Mostly useful in tests. |
+| `psi.tui.register_status_poller(fn[, pending])` | Drive cached asynchronous status data without blocking redraws. While pending, `fn() -> changed, pending` is polled from the idle TUI loop; `changed=true` requests a redraw. Returns a poller id. |
+| `psi.tui.unregister_status_poller(id)` | Remove one status poller previously returned by `register_status_poller`. |
+| `psi.tui.clear_status_pollers()` | Remove registered status pollers. Mostly useful in tests and reload reset paths. |
 | `psi.tui.register_clipboard_writer(fn)` | Append a TUI clipboard writer used by yank-style editor actions. `fn(text, context)` should return `true` when it handled the write. Returns a writer id. |
 | `psi.tui.unregister_clipboard_writer(id)` | Remove one clipboard writer previously returned by `register_clipboard_writer`. |
 | `psi.tui.clear_clipboard_writers()` | Remove registered clipboard writers. Mostly useful in tests and reload reset paths. |
@@ -364,6 +367,12 @@ The built-in OSC 52 clipboard layer
 It is enabled by default so yanks update terminal clipboards, including tmux
 via DCS passthrough. Disable it with
 `"extensions": { "osc52_clipboard": { "enabled": false } }`.
+
+The built-in pull-request status layer
+(`lua/psi/extensions/pull_request_status.lua`) adds the current GitHub or
+Forgejo PR number when the checkout remote and branch can be resolved. It
+starts one bounded lookup per TUI lifetime, polls it without blocking the
+renderer, and caches the result. Set `PSI_PR_STATUS=0` to disable the lookup.
 
 Image attachments can be disabled globally with `"images": { "block_images":
 true }` in settings. When disabled, image blocks are replaced with `Image

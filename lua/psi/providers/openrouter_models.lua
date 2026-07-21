@@ -132,7 +132,7 @@ local function refresh()
   return true
 end
 
-function M.model(slug)
+function M.model(slug, opts)
   if type(slug) ~= "string" or slug == "" then
     return nil
   end
@@ -141,7 +141,11 @@ function M.model(slug)
   if meta ~= nil then
     return meta
   end
-  if not fetched and (slug == "auto" or slug:find("/", 1, true)) then
+  if
+    not fetched
+    and not (type(opts) == "table" and opts.refresh == false)
+    and (slug == "auto" or slug:find("/", 1, true))
+  then
     refresh()
     return cache and cache[slug] or nil
   end
