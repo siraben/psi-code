@@ -89,6 +89,7 @@ useful before the binary is installed. Regenerate this table from
 Lua owns the runtime model:
 
 - top-level mode dispatch in `lua/psi/modes.lua`
+- shared frontend lifecycle in `lua/psi/agent_session_runtime.lua`
 - session loading, saving, projection, and metadata in `lua/psi/session_manager.lua`
 - provider loops in `lua/psi/providers/anthropic.lua`,
   `lua/psi/providers/openai_compat.lua`, `lua/psi/providers/openrouter.lua`,
@@ -380,6 +381,25 @@ Turn/render guarantees:
 
 Extensions should be able to rely on those events without needing host-specific
 special cases.
+
+### Agent runtime facade
+
+`lua/psi/agent_session.lua` owns provider/model state and the turn,
+side-question, compaction, and tree operations. A separate small
+`lua/psi/agent_session_runtime.lua` facade owns the lifecycle common to print,
+agent, REPL, TUI, compact, and future RPC frontends:
+
+- bootstrap, session-id resolution, continue, and resume selection
+- one `session-start` per loaded or newly-created session
+- observer composition and streamed-assistant tracking around a turn
+- saving after turns and compaction
+- shutdown/start ordering when replacing a session
+- one final `session-shutdown` when the frontend exits
+
+Frontends still own their picker, rendering callbacks, input loops, status
+messages, and error presentation. This follows the responsibility split of
+pi-mono's current `AgentSessionRuntime` without copying its service graph or
+moving policy into C.
 
 ## Provider model
 

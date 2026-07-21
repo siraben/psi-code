@@ -1,7 +1,7 @@
 local agent = require("psi.agent_session")
+local agent_runtime = require("psi.agent_session_runtime")
 local ansi = require("psi.ansi")
 local commands = require("psi.slash_commands")
-local context = require("psi.context")
 local markdown = require("psi.markdown")
 local prelude = require("psi.prelude")
 local records = require("psi.records")
@@ -825,7 +825,7 @@ end
 local clear_selection
 local set_status
 
-local function new_state(opts)
+local function new_state(opts, runtime)
   local width, height = current_size()
   local viewport_height = inline_viewport_height(height)
   local caps = detect_tui_capabilities()
@@ -833,6 +833,7 @@ local function new_state(opts)
   ansi.color_enabled = caps.color
   local state = {
     opts = opts,
+    runtime = runtime,
     model = agent.model_descriptor(opts.model),
     entries = {},
     input = "",
@@ -3575,13 +3576,9 @@ local function add_nonstreamed_assistant_reply(state, reply, assistant_streamed)
 end
 
 local function run_turn(state, line)
-  local assistant_streamed = false
   local observer = {
     on_assistant_text_delta = function(text)
       observer_text_delta(state, text)
-      if type(text) == "string" and text ~= "" then
-        assistant_streamed = true
-      end
     end,
     on_tool_call = function(id, name, input_json)
       -- Match pi-mono's event ordering: assistant message_end is
@@ -3603,35 +3600,28 @@ local function run_turn(state, line)
     end,
   }
 
-  fire_turn_event(state, "before-turn", { text = line or "" })
-  local ran, ok, reply = xpcall(function()
-    return agent.run_turn({
-      user_text = line or "",
-      model = state.opts.model,
-      max_tokens = state.opts.max_tokens,
-      thinking_level = state.opts.thinking_level,
-      reasoning_effort = state.opts.reasoning_effort,
-      observer = observer,
-      abort_check = psi.is_aborted,
-    })
-  end, debug.traceback)
+  local ok, reply, result = state.runtime:turn(line, {
+    observer = observer,
+    abort_check = psi.is_aborted,
+    before_turn = function(payload)
+      fire_turn_event(state, "before-turn", payload)
+    end,
+    after_turn = function(payload, turn_ok)
+      finish_streaming_assistant(state)
+      state.streaming_thinking_index = nil
+      if turn_ok then
+        add_nonstreamed_assistant_reply(state, payload.text, payload["assistant-streamed"])
+      end
+      fire_turn_event(state, "after-turn", payload)
+    end,
+  })
 
-  finish_streaming_assistant(state)
-  state.streaming_thinking_index = nil
-
-  if not ran then
+  if result.crashed then
     local detail = reply ~= nil and reply ~= "" and tostring(reply) or "agent turn failed"
     add_entry(state, "error", detail)
     set_status(state, detail, true)
-    fire_turn_event(state, "after-turn", after_turn_payload("", false))
-    session.save()
     return false
   end
-
-  if ok then
-    add_nonstreamed_assistant_reply(state, reply, assistant_streamed)
-  end
-  fire_turn_event(state, "after-turn", after_turn_payload(reply, assistant_streamed))
 
   if not ok then
     if reply == "aborted" then
@@ -3641,13 +3631,11 @@ local function run_turn(state, line)
       add_entry(state, "error", detail)
       set_status(state, detail, true)
     end
-    session.save()
     return false
   end
 
-  local saved, err = session.save()
-  if not saved then
-    set_status(state, "failed to save session file: " .. tostring(err), true)
+  if not result.save_ok then
+    set_status(state, "failed to save session file: " .. tostring(result.save_error), true)
   else
     set_status(state, "", false)
   end
@@ -3666,21 +3654,13 @@ local function run_compact(state, keep_recent)
   set_status(state, "", false)
   redraw(state)
 
-  local ran, ok, summary = xpcall(function()
-    return agent.run_compact({
-      keep_recent = keep_recent,
-      model = state.opts.model,
-      max_tokens = state.opts.max_tokens,
-      thinking_level = state.opts.thinking_level,
-      reasoning_effort = state.opts.reasoning_effort,
-      abort_check = psi.is_aborted,
-    })
-  end, debug.traceback)
+  local ok, summary, result = state.runtime:compact(keep_recent, {
+    abort_check = psi.is_aborted,
+  })
 
-  if ran and ok then
-    local saved, err = session.save()
-    if not saved then
-      set_status(state, "failed to save compacted session: " .. tostring(err), true)
+  if ok then
+    if not result.save_ok then
+      set_status(state, "failed to save compacted session: " .. tostring(result.save_error), true)
     else
       rebuild_from_session(state)
       set_status(state, "session compacted", false)
@@ -3839,7 +3819,7 @@ local function handle_command(state, line)
       result = result or "tree navigation failed"
     end
     if ok then
-      local saved, err = session.save()
+      local saved, err = state.runtime:save()
       if not saved then
         set_status(state, "failed to save session: " .. tostring(err), true)
       else
@@ -3932,13 +3912,11 @@ local function handle_command(state, line)
   end
 
   if action.kind == "resume" then
-    local ok, err = session.load(action.payload)
+    local ok, err = state.runtime:switch_session(action.payload)
     if not ok then
       set_status(state, "resume failed: " .. tostring(err), true)
       return true
     end
-    state.opts.session_file = action.payload
-    context.reset_usage()
     rebuild_from_session(state)
     add_entry(
       state,
@@ -3959,13 +3937,11 @@ local function handle_command(state, line)
       set_status(state, "no session selected", true)
       return true
     end
-    local ok, err = session.load(selected)
+    local ok, err = state.runtime:switch_session(selected)
     if not ok then
       set_status(state, "resume failed: " .. tostring(err), true)
       return true
     end
-    state.opts.session_file = selected
-    context.reset_usage()
     rebuild_from_session(state)
     add_entry(
       state,
@@ -3982,7 +3958,7 @@ local function handle_command(state, line)
 
   if action.kind == "name" then
     session.set_display_name(action.payload)
-    session.save()
+    state.runtime:save()
     add_entry(state, "info", "name set to '" .. tostring(action.payload) .. "'")
     set_status(state, "", false)
     return true
@@ -4614,80 +4590,8 @@ choose_session_tui = function(current_infos)
   end
 end
 
--- Mirror modes.lua: a --session value with no path separator and no
--- .jsonl suffix is treated as a session id (or unique prefix) and
--- resolved against the on-disk session store. Required so the
--- `Resume with: psi --session <id>` line printed at TUI exit
--- round-trips back through this entrypoint.
-local function looks_like_session_id(value)
-  if type(value) ~= "string" or value == "" then
-    return false
-  end
-  if value:find("/", 1, true) or value:find("\\", 1, true) then
-    return false
-  end
-  if value:sub(-6) == ".jsonl" then
-    return false
-  end
-  return true
-end
-
-local function bootstrap_session(opts)
-  if opts.session_file and opts.session_file ~= "" then
-    if looks_like_session_id(opts.session_file) then
-      local resolved, find_err = session.find_session_by_id(opts.session_file, psi.cwd())
-      if not resolved then
-        return false, find_err
-      end
-      opts.session_file = resolved
-    end
-    local ok, err = session.load(opts.session_file)
-    if not ok then
-      return false, err
-    end
-    return true
-  end
-
-  if opts.continue_recent then
-    local most_recent = session.most_recent_session(psi.cwd())
-    if most_recent then
-      opts.session_file = most_recent
-      local ok, load_err = session.load(most_recent)
-      if not ok then
-        return false, load_err
-      end
-      return true
-    end
-    -- Fall through to creating a fresh session in this cwd, matching
-    -- pi-mono's --continue semantics.
-  end
-
-  if opts.resume then
-    -- Open the picker unconditionally (even with zero sessions in
-    -- this cwd) so the user can Tab to the "all sessions" scope.
-    local infos = session.list_sessions(psi.cwd())
-    local selected = choose_session_tui(infos)
-    if not selected then
-      return false, "no session selected"
-    end
-    opts.session_file = selected
-    local ok, load_err = session.load(selected)
-    if not ok then
-      return false, load_err
-    end
-    return true
-  end
-
-  local path = session.ensure_default_path()
-  if not path then
-    return false, "could not determine default session path"
-  end
-  session.announce_start()
-  return true
-end
-
 function M.run(opts)
-  agent.configure(opts)
+  local runtime = agent_runtime.new(opts)
 
   local layout_mode = chat.resolve_mode(opts)
   local alt_screen_active = layout_mode == chat.CHAT
@@ -4700,7 +4604,11 @@ function M.run(opts)
     chat.set_alt_screen(true)
   end
 
-  local ok, err = bootstrap_session(opts)
+  local ok, err = runtime:bootstrap({
+    choose_session = choose_session_tui,
+    always_choose = opts.resume and true or false,
+    require_session_path = true,
+  })
   if not ok then
     if alt_screen_active then
       chat.set_alt_screen(false)
@@ -4714,7 +4622,7 @@ function M.run(opts)
     alt_screen_active = false
   end
 
-  local state = new_state(opts)
+  local state = new_state(opts, runtime)
   state.layout_mode = layout_mode
   rebuild_from_session(state)
 
@@ -4759,7 +4667,7 @@ function M.run(opts)
 
   psi.tui_set_tick_handler(nil)
   psi.tui_set_tool_progress_handler(nil)
-  session.announce_shutdown()
+  runtime:shutdown()
 
   if state.layout_mode == chat.CHAT then
     -- Drop cursor onto a fresh line below the input box so the shell
@@ -4809,7 +4717,14 @@ function M._debug_input_lines(input, cursor, width, prefix_first, prefix_rest)
 end
 
 function M._debug_bootstrap_session(opts)
-  return bootstrap_session(opts or {})
+  opts = opts or {}
+  local runtime = agent_runtime.new(opts)
+  local ok, err = runtime:bootstrap({
+    choose_session = choose_session_tui,
+    always_choose = opts.resume and true or false,
+    require_session_path = true,
+  })
+  return ok, err, runtime
 end
 
 function M._debug_after_turn_payload(reply, assistant_streamed)
