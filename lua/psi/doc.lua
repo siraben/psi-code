@@ -154,10 +154,23 @@ local function bootstrap_providers(providers)
   for _, entry in ipairs(list) do
     if entry and type(entry.name) == "string" then
       local spec = providers.provider and providers.provider(entry.name) or {}
+      local auth = {}
+      if type(spec.auth) == "table" and type(spec.auth.oauth) == "table" then
+        auth[#auth + 1] = "OAuth via /login " .. entry.name
+      end
+      if type(spec.auth) == "table" and type(spec.auth.api_key) == "table" then
+        local env = spec.auth.api_key.env
+        local suffix = type(env) == "string" and (" or " .. env) or ""
+        auth[#auth + 1] = "API key via /login " .. entry.name .. suffix
+      end
+      if #auth == 0 then
+        auth[1] = "no login required"
+      end
       local doc = string.format(
-        "default model %s; override via %s",
+        "default model %s; override via %s; auth: %s",
         spec.default_model or "?",
-        spec.model_env or "—"
+        spec.model_env or "—",
+        table.concat(auth, ", ")
       )
       set("provider:" .. entry.name, "provider", doc, {
         source = "lua/psi/api_registry.lua",

@@ -79,6 +79,23 @@ API-key providers read their key from `~/.config/psi/auth.json` in addition to
 the environment variable, matching pi-mono's credential handling. The
 **auth-file entry takes precedence over the environment variable**.
 
+Use `/login` without arguments to choose an authentication method, then a
+provider. Provider and method names are available through Tab completion:
+
+```text
+psi> /login
+psi> /login api-key
+psi> /login anthropic <api-key-or-reference>
+psi> /login openrouter <api-key-or-reference>
+psi> /login moonshot <api-key-or-reference>
+```
+
+`/login api-key <provider> <api-key-or-reference>` is the equivalent explicit
+form. Psi does not print the submitted value after saving it. To avoid pasting a
+literal secret, set an environment variable before starting psi and store its
+reference, for example `/login anthropic $ANTHROPIC_API_KEY`. The `$...` text is
+entered inside psi, so it is stored as a reference and resolved when used.
+
 Each provider is keyed by its provider name (`anthropic`, `openrouter`, …):
 
 ```json
@@ -101,6 +118,12 @@ The `key` field is resolved at use time:
 The file is written with mode `0600` (see OpenAI Codex below). `PSI_AUTH_FILE`
 overrides its path. OpenAI Codex OAuth credentials live in the same file under
 the `openai-codex` key and are unaffected by this API-key resolution.
+
+Run `/logout` to list stored credentials, then `/logout <provider>` to remove
+one selected entry. Logout only changes `auth.json`; it does not unset
+environment variables or change provider settings. Providers configured by an
+environment variable therefore remain authenticated after their stored entry
+is removed.
 
 ## Anthropic
 
@@ -145,11 +168,13 @@ the `openai-codex` key and are unaffected by this API-key resolution.
 
 ## OpenAI Codex
 
-- Auth: `/login openai-codex`, open the printed URL, then paste the final
-  redirect URL or authorization code back with `/login openai-codex
-  <redirect-url-or-code>`. When terminal clipboard support is enabled, the auth
-  URL is also copied through OSC 52. Credentials are stored in
-  `~/.config/psi/auth.json` with mode `0600` when `chmod` is available.
+- Auth: `/login openai-codex` (or `/login oauth openai-codex`), open the printed
+  URL, then paste the final redirect URL or authorization code back with
+  `/login openai-codex <redirect-url-or-code>`. When terminal clipboard support
+  is enabled, the auth URL is also copied through OSC 52. Psi intentionally
+  retains the manual-paste completion path so OAuth works on small and headless
+  hosts without a local callback server. Credentials are stored in
+  `~/.config/psi/auth.json` with mode `0600`.
 - `PSI_AUTH_FILE`: override the credential file path.
 - `PSI_OPENAI_CODEX_MODEL`: default model when none is passed (default
   `gpt-5.5`).
@@ -171,7 +196,9 @@ the `openai-codex` key and are unaffected by this API-key resolution.
 
 ## Moonshot (Kimi For Coding)
 
-- Env: `KIMI_API_KEY` (required). Keys look like `sk-kimi-…`.
+- Auth: `KIMI_API_KEY`, or a `moonshot` api_key entry in `auth.json` (see
+  [API-key credentials](#api-key-credentials-authjson); auth file wins). Keys
+  look like `sk-kimi-…`.
 - `PSI_MOONSHOT_MODEL`: default model when none is passed (default `k3`).
   Available models: `k3` (1M context), `kimi-for-coding`,
   `kimi-for-coding-highspeed`.
@@ -209,6 +236,10 @@ psi> /login openai-codex
 psi> /login openai-codex http://localhost:1455/auth/callback?code=...&state=...
 psi> /model openai-codex/gpt-5.5
 psi> /thinking xhigh
+
+# Remove one credential stored by /login
+psi> /logout
+psi> /logout openai-codex
 
 # Ollama on a remote box
 PSI_OLLAMA_BASE_URL=http://workstation.local:11434 \

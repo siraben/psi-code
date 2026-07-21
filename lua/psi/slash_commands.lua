@@ -175,6 +175,302 @@ local function copy_auth_url(url)
   return copied and true or false
 end
 
+local AUTH_METHODS = {
+  {
+    id = "oauth",
+    type = "oauth",
+    description = "Sign in with a provider account",
+  },
+  {
+    id = "api-key",
+    type = "api_key",
+    description = "Store an API key or credential reference",
+  },
+}
+
+local AUTH_METHOD_ALIASES = {
+  oauth = "oauth",
+  account = "oauth",
+  subscription = "oauth",
+  ["api-key"] = "api_key",
+  api_key = "api_key",
+  apikey = "api_key",
+  key = "api_key",
+}
+
+local function auth_method_id(auth_type)
+  return auth_type == "api_key" and "api-key" or auth_type
+end
+
+local function auth_method_label(auth_type)
+  if auth_type == "api_key" then
+    return "API key"
+  end
+  if auth_type == "oauth" then
+    return "OAuth"
+  end
+  return "stored credential"
+end
+
+local function provider_auth_options(auth_type)
+  local registry = require("psi.api_registry")
+  local out = {}
+  for _, registered in ipairs(registry.all_providers()) do
+    local provider = registry.provider(registered.name)
+    local auth = type(provider.auth) == "table" and provider.auth or {}
+    for _, method in ipairs(AUTH_METHODS) do
+      if (not auth_type or auth_type == method.type) and type(auth[method.type]) == "table" then
+        out[#out + 1] = {
+          provider = provider.name,
+          name = provider.display_name or provider.name,
+          auth_type = method.type,
+          method = auth[method.type],
+        }
+      end
+    end
+  end
+  table.sort(out, function(a, b)
+    if a.name == b.name then
+      return a.auth_type < b.auth_type
+    end
+    return a.name < b.name
+  end)
+  return out
+end
+
+local function find_provider_auth_options(provider, auth_type)
+  local out = {}
+  for _, option in ipairs(provider_auth_options(auth_type)) do
+    if option.provider == provider then
+      out[#out + 1] = option
+    end
+  end
+  return out
+end
+
+local function provider_display_name(provider)
+  local registry = require("psi.api_registry")
+  local spec = registry.provider(provider)
+  return (spec and spec.display_name) or provider
+end
+
+local function auth_method_selection(provider_options)
+  local lines = { "Select authentication method:" }
+  for _, method in ipairs(AUTH_METHODS) do
+    local available = false
+    for _, option in ipairs(provider_options or provider_auth_options(method.type)) do
+      if option.auth_type == method.type then
+        available = true
+        break
+      end
+    end
+    if available then
+      lines[#lines + 1] = string.format("  /login %-8s  %s", method.id, method.description)
+    end
+  end
+  lines[#lines + 1] = ""
+  lines[#lines + 1] = "Choose a method or provider with Tab completion."
+  return table.concat(lines, "\n")
+end
+
+local function provider_selection(auth_type)
+  local options = provider_auth_options(auth_type)
+  if #options == 0 then
+    return "No " .. auth_method_label(auth_type) .. " providers are available."
+  end
+  local lines = { "Select " .. auth_method_label(auth_type) .. " provider:" }
+  for _, option in ipairs(options) do
+    lines[#lines + 1] =
+      string.format("  /login %s %s  %s", auth_method_id(auth_type), option.provider, option.name)
+  end
+  lines[#lines + 1] = ""
+  lines[#lines + 1] = "Use Tab to complete provider names."
+  return table.concat(lines, "\n")
+end
+
+local function api_key_login(option, input)
+  local invocation = "/login " .. option.provider .. " <api-key-or-reference>"
+  if input == "" then
+    local lines = {
+      "Configure " .. option.name .. " with an API key:",
+      "  " .. invocation,
+      "",
+      "The value may be a literal key, $VAR/${VAR}, or !shell-command.",
+      "It is stored in " .. require("psi.auth_storage").path() .. " with mode 0600.",
+    }
+    if option.method.env then
+      lines[#lines + 1] = "Without a stored key, " .. option.method.env .. " remains supported."
+    end
+    return true, table.concat(lines, "\n")
+  end
+
+  local auth_storage = require("psi.auth_storage")
+  local ok, err = auth_storage.set(option.provider, { type = "api_key", key = input })
+  if not ok then
+    return false, err
+  end
+  local lines = {
+    "Saved API key for " .. option.name .. " to " .. auth_storage.path() .. ".",
+    "The stored credential takes precedence over provider environment variables.",
+    "Use /model " .. option.provider .. "/<model> to select a model.",
+  }
+  return true, table.concat(lines, "\n")
+end
+
+local function oauth_login(option, input)
+  if type(option.method.module) ~= "string" then
+    return false, "OAuth login is not implemented for " .. option.provider
+  end
+  local oauth = require(option.method.module)
+  if input ~= "" then
+    return oauth.finish_login(input)
+  end
+
+  local flow = oauth.begin_login()
+  local copied = copy_auth_url(flow.url)
+  local lines = {
+    "Open this URL in your browser:",
+    "",
+    flow.url,
+    "",
+  }
+  if copied then
+    lines[#lines + 1] = "Copied auth URL to clipboard via OSC 52."
+    lines[#lines + 1] = ""
+  end
+  lines[#lines + 1] = "Complete sign-in in the browser, then copy the final redirect URL or code."
+  lines[#lines + 1] = "Paste it back into psi with:"
+  lines[#lines + 1] = "/login " .. option.provider .. " <redirect-url-or-code>"
+  lines[#lines + 1] = ""
+  lines[#lines + 1] = "psi uses manual paste so OAuth also works on small and headless hosts."
+  return true, table.concat(lines, "\n")
+end
+
+local function cmd_login(rest)
+  local first, tail = split_first_word(rest)
+  if first == "" then
+    return records.new_command_action("print", auth_method_selection())
+  end
+
+  local auth_type = AUTH_METHOD_ALIASES[first:lower()]
+  local provider, input
+  if auth_type then
+    provider, input = split_first_word(tail)
+    if provider == "" then
+      return records.new_command_action("print", provider_selection(auth_type))
+    end
+  else
+    provider = first
+    input = tail
+  end
+
+  local options = find_provider_auth_options(provider, auth_type)
+  if #options == 0 then
+    local registry = require("psi.api_registry")
+    local spec = registry.provider(provider)
+    if spec and next(spec.auth or {}) == nil then
+      return records.new_command_action(
+        "print",
+        provider_display_name(provider) .. " does not require login."
+      )
+    end
+    local method_text = auth_type and (" for " .. auth_method_label(auth_type)) or ""
+    return records.new_command_action(
+      "print",
+      "No login provider named '" .. provider .. "'" .. method_text .. ". Run /login to choose one."
+    )
+  end
+  if #options > 1 then
+    return records.new_command_action("print", auth_method_selection(options))
+  end
+
+  local option = options[1]
+  local ok, result
+  if option.auth_type == "api_key" then
+    ok, result = api_key_login(option, input)
+  else
+    ok, result = oauth_login(option, input)
+  end
+  return records.new_command_action(
+    "print",
+    ok and result or ("login failed: " .. tostring(result))
+  )
+end
+
+local function logout_selection()
+  local auth_storage = require("psi.auth_storage")
+  local stored, err = auth_storage.list()
+  if not stored then
+    return "Could not list stored credentials: " .. tostring(err)
+  end
+  if #stored == 0 then
+    return "No stored credentials to remove. /logout only removes auth.json entries; environment variables and settings are unchanged."
+  end
+  local lines = { "Select stored credential to remove:" }
+  for _, item in ipairs(stored) do
+    lines[#lines + 1] = string.format(
+      "  /logout %-16s  %s (%s)",
+      item.provider,
+      provider_display_name(item.provider),
+      auth_method_label(item.type)
+    )
+  end
+  lines[#lines + 1] = ""
+  lines[#lines + 1] =
+    "Only the selected auth.json entry is removed; environment variables and settings are unchanged."
+  return table.concat(lines, "\n")
+end
+
+local function cmd_logout(rest)
+  local provider, extra = split_first_word(rest)
+  if provider == "" then
+    return records.new_command_action("print", logout_selection())
+  end
+  if extra ~= "" then
+    return records.new_command_action("print", "usage: /logout <provider>")
+  end
+
+  local auth_storage = require("psi.auth_storage")
+  local stored, list_err = auth_storage.list()
+  if not stored then
+    return records.new_command_action("print", "logout failed: " .. tostring(list_err))
+  end
+  local stored_type = nil
+  for _, item in ipairs(stored) do
+    if item.provider == provider then
+      stored_type = item.type
+      break
+    end
+  end
+  if not stored_type then
+    return records.new_command_action(
+      "print",
+      "No stored credential for "
+        .. provider
+        .. ". /logout only removes auth.json entries; environment variables and settings are unchanged."
+    )
+  end
+
+  local ok, err = auth_storage.remove(provider)
+  if not ok then
+    return records.new_command_action("print", "logout failed: " .. tostring(err))
+  end
+  local verb = "Removed stored credential for "
+  if stored_type == "oauth" then
+    verb = "Removed stored OAuth credential for "
+  elseif stored_type == "api_key" then
+    verb = "Removed stored API key for "
+  end
+  return records.new_command_action(
+    "print",
+    verb
+      .. provider_display_name(provider)
+      .. " from "
+      .. auth_storage.path()
+      .. ". Environment variables and settings are unchanged."
+  )
+end
+
 local function fork_output_path()
   return session.new_session_file_path(psi.cwd and psi.cwd() or nil)
 end
@@ -882,8 +1178,13 @@ local BUILTIN_COMMANDS = {
   },
   {
     name = "login",
-    argument_hint = "<provider>",
-    description = "Authenticate an OAuth provider",
+    argument_hint = "[method|provider]",
+    description = "Configure provider authentication",
+  },
+  {
+    name = "logout",
+    argument_hint = "[provider]",
+    description = "Remove a stored provider credential",
   },
   {
     name = "copy",
@@ -1249,6 +1550,84 @@ local function static_arg_completions(values)
   end
 end
 
+local function login_arg_completions(arg, limit)
+  local prefix, token = arg:match("^(.-%s)(%S*)$")
+  if not prefix then
+    token = arg
+  end
+  local first = split_first_word(prefix or "")
+  local auth_type = AUTH_METHOD_ALIASES[tostring(first):lower()]
+  local out = {}
+  local seen = {}
+  local function append(insert, label, description, trailing)
+    if #out >= (limit or 40) or seen[insert] or not prelude.starts_with(insert, token) then
+      return
+    end
+    seen[insert] = true
+    out[#out + 1] = {
+      insert = insert,
+      label = label or insert,
+      description = description,
+      trailing = trailing or "",
+    }
+  end
+
+  if prefix then
+    if not auth_type or prefix:match("%S+%s+%S+%s") then
+      return nil, token
+    end
+    for _, option in ipairs(provider_auth_options(auth_type)) do
+      append(option.provider, option.provider, option.name, " ")
+    end
+    return out, token
+  end
+
+  for _, method in ipairs(AUTH_METHODS) do
+    append(method.id, method.id, method.description, " ")
+  end
+  local descriptions = {}
+  for _, option in ipairs(provider_auth_options()) do
+    local description = auth_method_label(option.auth_type) .. " — " .. option.name
+    if descriptions[option.provider] then
+      descriptions[option.provider] = descriptions[option.provider] .. ", " .. description
+    else
+      descriptions[option.provider] = description
+    end
+  end
+  for provider, description in pairs(descriptions) do
+    append(provider, provider, description, " ")
+  end
+  table.sort(out, function(a, b)
+    return a.insert < b.insert
+  end)
+  return out, token
+end
+
+local function logout_arg_completions(arg, limit)
+  local auth_storage = require("psi.auth_storage")
+  local stored = auth_storage.list()
+  if type(stored) ~= "table" then
+    return nil
+  end
+  local out = {}
+  for _, item in ipairs(stored) do
+    if #out >= (limit or 40) then
+      break
+    end
+    if arg == "" or prelude.starts_with(item.provider, arg) then
+      out[#out + 1] = {
+        insert = item.provider,
+        label = item.provider,
+        description = auth_method_label(item.type) .. " — " .. provider_display_name(
+          item.provider
+        ),
+        trailing = "",
+      }
+    end
+  end
+  return out
+end
+
 local PATH_ARG_COMMANDS = {
   resume = true,
   import = true,
@@ -1260,7 +1639,8 @@ local ENUM_ARG_COMPLETERS = {
   model = model_arg_completions,
   theme = theme_arg_completions,
   thinking = static_arg_completions({ "off", "minimal", "low", "medium", "high", "xhigh" }),
-  login = static_arg_completions({ "openai-codex" }),
+  login = login_arg_completions,
+  logout = logout_arg_completions,
 }
 
 function M.input_completions(input, cursor, limit, force)
@@ -1314,14 +1694,15 @@ function M.input_completions(input, cursor, limit, force)
       return { start = cursor - #token + 1, items = items }
     end
     local completer = ENUM_ARG_COMPLETERS[cmd_name]
-    if not completer or arg:find("%s") then
+    if not completer or (cmd_name ~= "login" and arg:find("%s")) then
       return nil
     end
-    local items = completer(arg, limit)
+    local items, replacement = completer(arg, limit)
     if type(items) ~= "table" or #items == 0 then
       return nil
     end
-    return { start = cursor - #arg + 1, items = items }
+    replacement = replacement or arg
+    return { start = cursor - #replacement + 1, items = items }
   end
 
   local token = before:match("(%S*)$") or ""
@@ -1467,39 +1848,10 @@ function M.handle(line)
     return cmd_theme(arg_after(line, "/theme"))
   end
   if starts_word(line, "/login") then
-    local provider, input = split_first_word(arg_after(line, "/login"))
-    if provider == "" then
-      provider = "openai-codex"
-    end
-    if provider ~= "openai-codex" then
-      return records.new_command_action("print", "unsupported OAuth provider: " .. provider)
-    end
-    local oauth = require("psi.providers.oauth_openai_codex")
-    local ok, result
-    if input ~= "" then
-      ok, result = oauth.finish_login(input)
-    else
-      local flow = oauth.begin_login()
-      local copied = copy_auth_url(flow.url)
-      ok = true
-      local lines = {
-        "Open this URL in your browser:",
-        "",
-        flow.url,
-        "",
-      }
-      if copied then
-        lines[#lines + 1] = "Copied auth URL to clipboard via OSC 52."
-        lines[#lines + 1] = ""
-      end
-      lines[#lines + 1] = "Then paste the final redirect URL or authorization code with:"
-      lines[#lines + 1] = "/login openai-codex <redirect-url-or-code>"
-      result = table.concat(lines, "\n")
-    end
-    return records.new_command_action(
-      "print",
-      ok and result or ("login failed: " .. tostring(result))
-    )
+    return cmd_login(arg_after(line, "/login"))
+  end
+  if starts_word(line, "/logout") then
+    return cmd_logout(arg_after(line, "/logout"))
   end
   if starts_word(line, "/resume") then
     local path = arg_after(line, "/resume")

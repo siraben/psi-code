@@ -38,11 +38,20 @@ local function read_all()
   if not psi.file_exists(path) then
     return {}
   end
-  local parsed = prelude.safe_json_decode(psi.read_file(path), nil)
-  if type(parsed) == "table" then
-    return parsed
+  local ok, content = pcall(psi.read_file, path)
+  if not ok or type(content) ~= "string" then
+    return nil, "could not read " .. path .. "; leaving it unchanged"
   end
-  return {}
+  local parsed = prelude.safe_json_decode(content, nil)
+  if type(parsed) ~= "table" then
+    return nil, "could not parse " .. path .. "; leaving it unchanged"
+  end
+  for provider, entry in pairs(parsed) do
+    if type(provider) ~= "string" or type(entry) ~= "table" then
+      return nil, "invalid credential data in " .. path .. "; leaving it unchanged"
+    end
+  end
+  return parsed
 end
 
 local function write_all(data)
@@ -52,7 +61,11 @@ local function write_all(data)
   end
   -- 0600 from first open + atomic rename: credentials never sit on
   -- disk world-readable, and there's no failed-chmod cleanup window.
-  local ok = psi.file_write_secure(path, psi.json_encode(data or {}))
+  local encoded_ok, encoded = pcall(psi.json_encode, data or {})
+  if not encoded_ok or type(encoded) ~= "string" then
+    return false, "could not encode credentials"
+  end
+  local ok = psi.file_write_secure(path, encoded)
   if not ok then
     return false, "could not write " .. path
   end
@@ -64,19 +77,63 @@ function M.load()
 end
 
 function M.get(provider)
-  return read_all()[provider]
+  local data, err = read_all()
+  if not data then
+    return nil, err
+  end
+  return data[provider]
 end
 
 function M.set(provider, entry)
-  local data = read_all()
+  if type(provider) ~= "string" or provider == "" or type(entry) ~= "table" then
+    return false, "provider and credential entry are required"
+  end
+  local data, err = read_all()
+  if not data then
+    return false, err
+  end
   data[provider] = entry
   return write_all(data)
 end
 
 function M.remove(provider)
-  local data = read_all()
+  if type(provider) ~= "string" or provider == "" then
+    return false, "provider is required"
+  end
+  local data, err = read_all()
+  if not data then
+    return false, err
+  end
+  local removed = data[provider]
+  if removed == nil then
+    return false, "no stored credential for " .. provider
+  end
   data[provider] = nil
-  return write_all(data)
+  local ok, write_err = write_all(data)
+  if not ok then
+    return false, write_err
+  end
+  return true, removed
+end
+
+-- List stored credential metadata without resolving API-key references or
+-- exposing secret fields. This is the source for /logout selection.
+function M.list()
+  local data, err = read_all()
+  if not data then
+    return nil, err
+  end
+  local out = {}
+  for provider, entry in pairs(data) do
+    out[#out + 1] = {
+      provider = provider,
+      type = type(entry.type) == "string" and entry.type or "unknown",
+    }
+  end
+  table.sort(out, function(a, b)
+    return a.provider < b.provider
+  end)
+  return out
 end
 
 function M.get_api_key(provider)

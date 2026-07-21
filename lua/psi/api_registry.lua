@@ -203,33 +203,54 @@ M.register_api("moonshot-messages", {
 })
 
 M.register_provider("anthropic", {
+  display_name = "Anthropic",
   api = "anthropic-messages",
   model_env = "PSI_ANTHROPIC_MODEL",
   default_model = "claude-opus-4-8",
+  auth = {
+    api_key = { env = "ANTHROPIC_API_KEY" },
+  },
 })
 
 M.register_provider("ollama", {
+  display_name = "Ollama",
   api = "ollama-chat",
   model_env = "PSI_OLLAMA_MODEL",
   default_model = "llama3.1:latest",
+  auth = {},
 })
 
 M.register_provider("openrouter", {
+  display_name = "OpenRouter",
   api = "openrouter-chat-completions",
   model_env = "PSI_OPENROUTER_MODEL",
   default_model = "google/gemini-3-flash-preview",
+  auth = {
+    api_key = { env = "OPENROUTER_API_KEY" },
+  },
 })
 
 M.register_provider("openai-codex", {
+  display_name = "OpenAI Codex",
   api = "openai-codex-responses",
   model_env = "PSI_OPENAI_CODEX_MODEL",
   default_model = "gpt-5.5",
+  auth = {
+    oauth = {
+      label = "OpenAI account",
+      module = "psi.providers.oauth_openai_codex",
+    },
+  },
 })
 
 M.register_provider("moonshot", {
+  display_name = "Moonshot (Kimi For Coding)",
   api = "moonshot-messages",
   model_env = "PSI_MOONSHOT_MODEL",
   default_model = "k3",
+  auth = {
+    api_key = { env = "KIMI_API_KEY" },
+  },
 })
 
 M.register_model("anthropic/claude-opus-4-8", {
