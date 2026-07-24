@@ -4807,7 +4807,7 @@ static const struct psi_embedded_data *psi_vm_embedded_find(const char *name) {
 }
 
 int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *output,
-    FILE *error_output, int load_extensions) {
+    FILE *error_output, int load_extensions, int interactive, int trust_override) {
     PSI_UNUSED(input);
     PSI_UNUSED(output);
     PSI_UNUSED(error_output);
@@ -4839,6 +4839,14 @@ int psi_vm_init(struct psi_vm *vm, const char *boot_file, FILE *input, FILE *out
     lua_getglobal(vm->L, "psi");
     lua_pushboolean(vm->L, load_extensions ? 1 : 0);
     lua_setfield(vm->L, -2, "load_user_extensions");
+    lua_pushboolean(vm->L, interactive ? 1 : 0);
+    lua_setfield(vm->L, -2, "interactive");
+    if (trust_override >= 0) {
+        lua_pushboolean(vm->L, trust_override);
+    } else {
+        lua_pushnil(vm->L);
+    }
+    lua_setfield(vm->L, -2, "trust_override");
     lua_pop(vm->L, 1);
 
     /* Bootstrap: use the file at boot_file if it exists (source-tree

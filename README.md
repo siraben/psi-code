@@ -172,8 +172,9 @@ Drop a Lua file in any of:
 It runs at boot with the `psi` global available. Register tools, subscribe to
 events, add slash commands, customize themes, or hook the TUI. Extensions are
 trusted local code with the same filesystem and process access as psi itself;
-review project-local extensions before starting psi, or pass `--no-extensions`
-in untrusted checkouts.
+project-local extensions load only after the workspace is trusted. Interactive
+sessions prompt once; non-interactive modes skip untrusted project resources.
+Use `--trust` or `--no-trust` to override that decision for one run.
 
 See [docs/extensions.md](docs/extensions.md).
 

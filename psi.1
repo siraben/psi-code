@@ -48,6 +48,9 @@ disable user extension discovery
 \fB\-\-no-prompt-templates\fR
 disable prompt template discovery (alias \-np)
 .TP
+\fB\-\-no-trust\fR
+never load this directory's .psi resources
+.TP
 \fB\-\-print\fR \fITEXT\fR
 run the bootstrap print\-mode handler
 .TP
@@ -68,6 +71,9 @@ print the default coding\-agent system prompt
 .TP
 \fB\-\-thinking\fR \fILEVEL\fR
 thinking level: off, minimal, low, medium, high, xhigh
+.TP
+\fB\-\-trust\fR
+trust this directory's .psi resources without prompting
 .TP
 \fB\-\-tui\fR
 run the inline interactive TUI
@@ -152,6 +158,9 @@ Show the session tree
 .TP
 \fB/reload\fR
 Reload extensions, prompt templates, and keybindings
+.TP
+\fB/trust [always|never]\fR
+Show or save this directory's .psi resource trust decision
 .TP
 \fB/rainbow\fR
 Show all 256 terminal background colors

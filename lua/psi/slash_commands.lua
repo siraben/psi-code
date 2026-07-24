@@ -681,6 +681,38 @@ local function cmd_new_session()
   return records.new_command_action("print", "new session id=" .. tostring(psi.session_id() or "-"))
 end
 
+-- /trust inspects or persists the workspace trust decision for the
+-- current directory. Applying a changed decision needs a restart:
+-- extensions only load at boot.
+local function cmd_trust(rest)
+  local trust = require("psi.trust")
+  local cwd = psi.cwd()
+  if rest == "always" or rest == "never" then
+    local ok, err = trust.remember(cwd, rest == "always")
+    if not ok then
+      return records.new_command_action("print", "could not save trust decision: " .. tostring(err))
+    end
+    return records.new_command_action(
+      "print",
+      "saved trust decision: "
+        .. (rest == "always" and "trusted" or "untrusted")
+        .. ". Restart psi for this to take effect."
+    )
+  end
+  if rest ~= "" then
+    return records.new_command_action("print", "usage: /trust [always|never]")
+  end
+  local stored = trust.stored(cwd)
+  local lines = {
+    "project trust",
+    "  directory: " .. cwd,
+    "  this session: " .. (psi.project_trusted and "trusted" or "untrusted"),
+    "  saved decision: " .. (stored == nil and "none" or (stored and "trusted" or "untrusted")),
+    "  .psi resources present: " .. (trust.has_project_resources(cwd) and "yes" or "no"),
+  }
+  return records.new_command_action("print", table.concat(lines, "\n"))
+end
+
 local function cmd_reload()
   if psi.settings and psi.settings.reload then
     pcall(psi.settings.reload)
@@ -1231,6 +1263,11 @@ local BUILTIN_COMMANDS = {
   {
     name = "reload",
     description = "Reload extensions, prompt templates, and keybindings",
+  },
+  {
+    name = "trust",
+    argument_hint = "[always|never]",
+    description = "Show or save this directory's .psi resource trust decision",
   },
   {
     name = "rainbow",
@@ -1812,6 +1849,9 @@ function M.handle(line)
   end
   if line == "/reload" then
     return cmd_reload()
+  end
+  if starts_word(line, "/trust") then
+    return cmd_trust(arg_after(line, "/trust"))
   end
   if line == "/rainbow" then
     return cmd_rainbow()

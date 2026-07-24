@@ -31,6 +31,8 @@ struct psi_cli_options {
     int load_extensions;
     int no_context_files;
     int no_prompt_templates;
+    /* -1: ask/store default, 0: --no-trust, 1: --trust */
+    int trust_override;
 };
 
 int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv);

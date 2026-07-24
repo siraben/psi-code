@@ -212,7 +212,9 @@ function M.load()
       load_from_dir(prelude.path_join(home, ".config/psi/prompts"))
     end
   end
-  load_from_dir("./.psi/prompts")
+  if psi.project_trusted then
+    load_from_dir("./.psi/prompts")
+  end
 end
 
 function M.clear()

@@ -11,6 +11,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 #include "psi/abort.h"
 #include "psi/runtime.h"
 #include "psi/session.h"
@@ -183,7 +188,11 @@ static int psi_run_via_lua(const struct psi_cli_options *options) {
         return PSI_STATUS_ERROR;
 
     psi_session_init(&session);
-    status = psi_vm_init(&vm, options->boot_file, stdin, stdout, stderr, options->load_extensions);
+    /* Only the REPL is interactive among the modes dispatched here;
+     * print/agent/eval must never block on a trust prompt. */
+    status = psi_vm_init(&vm, options->boot_file, stdin, stdout, stderr, options->load_extensions,
+        options->mode == PSI_CLI_MODE_REPL && isatty(fileno(stdin)) && isatty(fileno(stdout)),
+        options->trust_override);
     if (status != PSI_STATUS_OK) {
         psi_session_free(&session);
         return status;

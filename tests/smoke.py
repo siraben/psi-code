@@ -140,6 +140,9 @@ def _smoke_env(tmp: Path) -> dict[str, str]:
     env["XDG_STATE_HOME"] = str(state)
     env["XDG_CACHE_HOME"] = str(cache)
     env["PWD"] = str(ROOT)
+    # Tests run non-interactively against fixture checkouts; trust their
+    # project-local resources by default. Individual cases override.
+    env["PSI_TRUST"] = "always"
     return env
 
 # ---------------------------------------------------------------------------

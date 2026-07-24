@@ -73,6 +73,7 @@ useful before the binary is installed. Regenerate this table from
 | `--no-context-files` | — | disable AGENTS.md and CLAUDE.md discovery (alias -nc) |
 | `--no-extensions` | — | disable user extension discovery |
 | `--no-prompt-templates` | — | disable prompt template discovery (alias -np) |
+| `--no-trust` | — | never load this directory's .psi resources |
 | `--print` | `TEXT` | run the bootstrap print-mode handler |
 | `--prompt-template` | `FILE` | load an extra prompt template file or directory |
 | `--repl` | — | run the interactive line editor shell |
@@ -80,6 +81,7 @@ useful before the binary is installed. Regenerate this table from
 | `--session` | `FILE` | load and save a JSONL session file |
 | `--system-prompt` | — | print the default coding-agent system prompt |
 | `--thinking` | `LEVEL` | thinking level: off, minimal, low, medium, high, xhigh |
+| `--trust` | — | trust this directory's .psi resources without prompting |
 | `--tui` | — | run the inline interactive TUI |
 | `--version` | — | show version |
 <!-- @end -->

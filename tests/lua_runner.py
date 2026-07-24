@@ -65,6 +65,9 @@ def smoke_env(tmp: Path) -> dict[str, str]:
     env["XDG_STATE_HOME"] = str(state)
     env["XDG_CACHE_HOME"] = str(cache)
     env["PWD"] = str(ROOT)
+    # Tests run non-interactively against fixture checkouts; trust their
+    # project-local resources by default. Individual cases override.
+    env["PSI_TRUST"] = "always"
     return env
 
 LUA_DIR_NAME = "lua"
@@ -91,9 +94,9 @@ class FileSpec:
             return
         target.parent.mkdir(parents=True, exist_ok=True)
         if self.json_value is not None:
-            target.write_text(json.dumps(self.json_value))
+            target.write_text(_render(json.dumps(self.json_value), mapping))
         else:
-            target.write_text(self.text or "")
+            target.write_text(_render(self.text or "", mapping))
 
 
 @dataclass

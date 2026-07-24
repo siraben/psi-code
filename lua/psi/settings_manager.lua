@@ -41,7 +41,11 @@ function M.reload()
   if home and home ~= "" then
     merge(out, read_json(prelude.path_join(home, ".config/psi/settings.json")))
   end
-  merge(out, read_json(".psi/settings.json"))
+  -- Repo-local settings can reroute providers or inject terminal
+  -- sequences, so they only apply to trusted directories.
+  if psi.project_trusted then
+    merge(out, read_json(".psi/settings.json"))
+  end
   cached = out
   return cached
 end

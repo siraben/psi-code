@@ -299,7 +299,9 @@ local function load_overrides()
   if home and home ~= "" then
     merge(out, read_json(prelude.path_join(home, ".config/psi/keybindings.json")))
   end
-  merge(out, read_json(".psi/keybindings.json"))
+  if psi.project_trusted then
+    merge(out, read_json(".psi/keybindings.json"))
+  end
   return out
 end
 

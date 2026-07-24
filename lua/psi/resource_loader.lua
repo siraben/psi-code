@@ -103,7 +103,8 @@ function M.system_prompt_file()
   local cfg = config_dir()
   local cwd = psi.cwd()
   return first_existing({
-    prelude.path_join(prelude.path_join(cwd, ".psi"), "SYSTEM.md"),
+    -- Repo-controlled prompt overrides are honored only when trusted.
+    psi.project_trusted and prelude.path_join(prelude.path_join(cwd, ".psi"), "SYSTEM.md") or nil,
     cfg and prelude.path_join(cfg, "SYSTEM.md") or nil,
   })
 end
@@ -112,7 +113,8 @@ function M.append_system_prompt_file()
   local cfg = config_dir()
   local cwd = psi.cwd()
   return first_existing({
-    prelude.path_join(prelude.path_join(cwd, ".psi"), "APPEND_SYSTEM.md"),
+    psi.project_trusted and prelude.path_join(prelude.path_join(cwd, ".psi"), "APPEND_SYSTEM.md")
+      or nil,
     cfg and prelude.path_join(cfg, "APPEND_SYSTEM.md") or nil,
   })
 end

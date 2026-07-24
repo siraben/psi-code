@@ -29,6 +29,15 @@ end
 psi.prelude = require("psi.prelude")
 psi.platform = require("psi.platform")
 psi.path = require("psi.path_utils")
+
+-- Project-local resources are gated behind workspace trust; resolve it
+-- before anything reads ./.psi/* (settings, extensions, prompts).
+psi.trust = require("psi.trust")
+psi.project_trusted = psi.trust.resolve({ interactive = psi.interactive })
+if not psi.project_trusted then
+  psi.trust.notice_if_skipped()
+end
+
 psi.sched = require("psi.sched")
 psi.events = require("psi.event_bus")
 psi.ansi = require("psi.ansi")
@@ -199,7 +208,7 @@ end
 -- Extension discovery: load Lua files from, in order,
 --   $PSI_EXTENSIONS_DIR (colon-separated list)
 --   ~/.config/psi/extensions/
---   ./.psi/extensions/
+--   ./.psi/extensions/  (only when the directory is trusted)
 -- Each file is dofile'd; if it returns a function, that function is
 -- invoked with the global `psi` table. Failures are logged to stderr
 -- but never abort psi.
@@ -249,7 +258,9 @@ function psi.load_extensions()
   if home and home ~= "" then
     load_extensions_from(psi.path.join(home, ".config/psi/extensions"))
   end
-  load_extensions_from("./.psi/extensions")
+  if psi.project_trusted then
+    load_extensions_from("./.psi/extensions")
+  end
 end
 
 if psi.load_user_extensions ~= false then

@@ -13,7 +13,7 @@
 #endif
 
 enum {
-    PSI_CLI_ARGTABLE_MAX = 24
+    PSI_CLI_ARGTABLE_MAX = 26
 };
 
 struct psi_cli_argtable {
@@ -38,6 +38,8 @@ struct psi_cli_argtable {
     struct arg_lit *no_context_files;
     struct arg_lit *no_prompt_templates;
     struct arg_str *prompt_template;
+    struct arg_lit *trust;
+    struct arg_lit *no_trust;
     struct arg_end *end;
     void *table[PSI_CLI_ARGTABLE_MAX];
     size_t table_count;
@@ -93,6 +95,9 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
         arg_lit0(NULL, "no-prompt-templates", "disable prompt template discovery (alias -np)");
     args->prompt_template = arg_str0(
         NULL, "prompt-template", "FILE", "load an extra prompt template file or directory");
+    args->trust =
+        arg_lit0(NULL, "trust", "trust this directory's .psi resources without prompting");
+    args->no_trust = arg_lit0(NULL, "no-trust", "never load this directory's .psi resources");
     args->end = arg_end(20);
 
     status = psi_cli_argtable_add(args, args->help);
@@ -116,6 +121,8 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
     status |= psi_cli_argtable_add(args, args->no_context_files);
     status |= psi_cli_argtable_add(args, args->no_prompt_templates);
     status |= psi_cli_argtable_add(args, args->prompt_template);
+    status |= psi_cli_argtable_add(args, args->trust);
+    status |= psi_cli_argtable_add(args, args->no_trust);
     status |= psi_cli_argtable_add(args, args->end);
 
     if (status != PSI_STATUS_OK) {
@@ -201,6 +208,7 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     options->load_extensions = 1;
     options->no_context_files = 0;
     options->no_prompt_templates = 0;
+    options->trust_override = -1;
 
     status = PSI_STATUS_ERROR;
     if (psi_cli_build_argtable(&args) != PSI_STATUS_OK) {
@@ -287,6 +295,16 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     }
     if (args.prompt_template->count > 0) {
         options->prompt_template_file = args.prompt_template->sval[0];
+    }
+    if (args.trust->count > 0 && args.no_trust->count > 0) {
+        fprintf(stderr, "--trust and --no-trust are mutually exclusive\n");
+        goto out;
+    }
+    if (args.trust->count > 0) {
+        options->trust_override = 1;
+    }
+    if (args.no_trust->count > 0) {
+        options->trust_override = 0;
     }
     if (args.model->count > 0) {
         options->model = args.model->sval[0];
