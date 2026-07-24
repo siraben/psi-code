@@ -324,6 +324,11 @@ static int psi_vm_mkdir_parent(const char *path) {
 static const long PSI_VM_FILE_WRITE_MAX_BYTES = 16777216l;
 static const long PSI_VM_READ_FILE_MAX_BYTES = 262144l;
 
+/* Max table nesting depth for Lua->JSON conversion; mirrors cJSON's
+ * CJSON_NESTING_LIMIT so cyclic tables error out instead of exhausting
+ * the C stack. */
+#define PSI_VM_JSON_DEPTH_MAX 1000
+
 /* Host context is stored in the Lua state's extraspace so FFI primitives
  * can recover it from their lua_State* rather than a file-static. Keeps
  * the door open for multiple VMs and makes cross-thread reasoning easier:
@@ -361,7 +366,7 @@ static void psi_vm_session_mark_retained(const struct psi_session *session) {
  * cJSON <-> Lua table conversion
  * ------------------------------------------------------------------ */
 
-static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx);
+static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx, int depth);
 static void psi_vm_push_json_value(lua_State *L, const cJSON *v);
 
 #if PSI_ENABLE_TUI
@@ -474,10 +479,15 @@ static int psi_vm_table_is_array(lua_State *L, int idx) {
     return 1;
 }
 
-static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx) {
+static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx, int depth) {
     int t;
     idx = lua_absindex(L, idx);
     t = lua_type(L, idx);
+
+    /* Cycle and depth guard: recursive tables would otherwise overflow
+     * the C stack. Mirrors cJSON's CJSON_NESTING_LIMIT. */
+    if (depth <= 0)
+        return NULL;
 
     if (t == LUA_TSTRING) {
         return cJSON_CreateString(lua_tostring(L, idx));
@@ -495,6 +505,11 @@ static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx) {
         return cJSON_CreateNull();
     }
     if (t == LUA_TTABLE) {
+        /* Each recursion level pushes key/value pairs; without an
+         * explicit check the raw pushes write past the allocated Lua
+         * stack once the free reserve runs out. */
+        if (!lua_checkstack(L, 8))
+            return NULL;
         if (psi_vm_table_is_array(L, idx)) {
             cJSON *arr;
             lua_Integer n, i;
@@ -505,7 +520,7 @@ static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx) {
             for (i = 1; i <= n; i++) {
                 cJSON *item;
                 lua_rawgeti(L, idx, i);
-                item = psi_vm_lua_value_to_json(L, -1);
+                item = psi_vm_lua_value_to_json(L, -1, depth - 1);
                 lua_pop(L, 1);
                 if (item == NULL) {
                     cJSON_Delete(arr);
@@ -526,9 +541,13 @@ static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx) {
                 if (lua_type(L, -2) == LUA_TSTRING) {
                     const char *key = lua_tostring(L, -2);
                     if (key && strcmp(key, "__kind") != 0 && strcmp(key, "__jsontype") != 0) {
-                        cJSON *item = psi_vm_lua_value_to_json(L, -1);
-                        if (item != NULL)
-                            cJSON_AddItemToObject(obj, key, item);
+                        cJSON *item = psi_vm_lua_value_to_json(L, -1, depth - 1);
+                        if (item == NULL) {
+                            lua_pop(L, 2);
+                            cJSON_Delete(obj);
+                            return NULL;
+                        }
+                        cJSON_AddItemToObject(obj, key, item);
                     }
                 }
                 lua_pop(L, 1);
@@ -3266,9 +3285,9 @@ static int lfn_json_encode(lua_State *L) {
         lua_pushstring(L, "null");
         return 1;
     }
-    value = psi_vm_lua_value_to_json(L, 1);
+    value = psi_vm_lua_value_to_json(L, 1, PSI_VM_JSON_DEPTH_MAX);
     if (value == NULL) {
-        return luaL_error(L, "failed to encode value as JSON");
+        return luaL_error(L, "failed to encode value as JSON (cyclic or too deeply nested)");
     }
     encoded = cJSON_PrintUnformatted(value);
     cJSON_Delete(value);
