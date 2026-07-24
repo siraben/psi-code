@@ -37,8 +37,13 @@ end
 
 local function target()
   local configured = settings.get(CONFIG_TARGET, DEFAULT_TARGET)
-  if type(configured) == "string" and configured ~= "" then
-    return configured
+  if type(configured) == "string" then
+    -- The target is interpolated raw into an OSC 52 sequence; strip
+    -- anything that could terminate or escape the sequence.
+    local sanitized = configured:gsub("[^%w]", "")
+    if sanitized ~= "" then
+      return sanitized
+    end
   end
   return DEFAULT_TARGET
 end
