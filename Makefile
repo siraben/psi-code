@@ -135,6 +135,24 @@ LOCAL_LDFLAGS += $(if $(PSI_LIBS_PTHREAD),$(PSI_LIBS_PTHREAD),-lpthread)
 comma := ,
 LOCAL_RPATH_LDFLAGS := $(patsubst -L%,-Wl$(comma)-rpath$(comma)%,$(filter -L%,$(LOCAL_LDFLAGS)))
 
+# ---- Hardening ----
+# Each flag is probe-tested against $(CC) so non-ELF or minimal
+# toolchains (pcc, cosmocc, musl-cross) degrade gracefully instead of
+# failing the build. HARDENING=0 skips the probes entirely.
+HARDENING ?= 1
+ifeq ($(HARDENING),1)
+cc_cflag_ok = $(shell printf 'int main(void){return 0;}\n' | $(CC) $(1) -Werror -x c -c -o /dev/null - >/dev/null 2>&1 && echo yes)
+cc_ldflag_ok = $(shell printf 'int main(void){return 0;}\n' | $(CC) $(LDFLAGS) $(1) -Werror -x c - -o /dev/null >/dev/null 2>&1 && echo yes)
+# -U first: toolchains whose specs pre-define _FORTIFY_SOURCE would
+# otherwise warn on the redefinition (fatal under -Werror).
+HARDENING_CFLAGS := $(if $(filter yes,$(call cc_cflag_ok,-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2)),-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2)
+HARDENING_CFLAGS += $(if $(filter yes,$(call cc_cflag_ok,-fstack-protector-strong)),-fstack-protector-strong)
+HARDENING_CFLAGS += $(if $(filter yes,$(call cc_cflag_ok,-fPIE)),-fPIE)
+HARDENING_LDFLAGS := $(if $(filter yes,$(call cc_ldflag_ok,-pie -Wl$(comma)-z$(comma)relro$(comma)-z$(comma)now)),-pie -Wl$(comma)-z$(comma)relro$(comma)-z$(comma)now)
+BASE_CFLAGS += $(HARDENING_CFLAGS)
+LOCAL_LDFLAGS := $(HARDENING_LDFLAGS) $(LOCAL_LDFLAGS)
+endif
+
 # Cross builds: HOST_* vars must point at the build host's zlib so
 # the embed helper doesn't link against the target arch's libs.
 HOST_CFLAGS_ZLIB ?= $(shell $(HOST_PKG_CONFIG) --cflags zlib)
