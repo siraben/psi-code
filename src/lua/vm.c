@@ -2532,12 +2532,21 @@ static int psi_vm_file_append_mode(
     size_t off;
 
     (void)do_sync;
-    fd = open(path, O_WRONLY | O_CREAT | O_APPEND, mode);
-    if (fd < 0)
-        return PSI_STATUS_ERROR;
+    /* O_EXCL first: the requested mode applies only to files this call
+     * creates. Unconditionally fchmod'ing would silently rewrite the
+     * permissions of pre-existing files. */
+    fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_EXCL, mode);
+    if (fd >= 0) {
 #ifndef _WIN32
-    (void)fchmod(fd, mode);
+        (void)fchmod(fd, mode);
 #endif
+    } else if (errno == EEXIST) {
+        fd = open(path, O_WRONLY | O_APPEND);
+        if (fd < 0)
+            return PSI_STATUS_ERROR;
+    } else {
+        return PSI_STATUS_ERROR;
+    }
     off = 0u;
     while (off < len) {
         ssize_t n = write(fd, content + off, len - off);
