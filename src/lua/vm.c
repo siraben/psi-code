@@ -2302,7 +2302,10 @@ static int lfn_read_file_slice(lua_State *L) {
             nl = (const unsigned char *)memchr(read_buffer + pos, '\n', read_count - pos);
             has_nl = nl != NULL;
             span = has_nl ? (size_t)(nl - (read_buffer + pos)) + 1u : read_count - pos;
-            if (line >= offset && line < offset + limit && !truncated) {
+            /* line - offset instead of offset + limit: offset/limit are
+             * caller-controlled longs and their sum can overflow. The
+             * left clause guarantees line >= offset before subtracting. */
+            if (line >= offset && line - offset < limit && !truncated) {
                 size_t want = span;
 
                 if ((long)len >= max_bytes) {
@@ -2369,7 +2372,8 @@ static int lfn_read_file_slice(lua_State *L) {
     lua_setfield(L, -2, "offset");
     lua_pushinteger(L, limit);
     lua_setfield(L, -2, "limit");
-    if (offset + limit < total_lines) {
+    /* Overflow-free form of "offset + limit < total_lines". */
+    if (offset < total_lines && limit < total_lines - offset) {
         lua_pushinteger(L, offset + limit);
         lua_setfield(L, -2, "next_offset");
         lua_pushboolean(L, 1);
