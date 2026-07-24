@@ -2766,6 +2766,32 @@ static int lfn_file_type(lua_State *L) {
     return 1;
 }
 
+static int lfn_file_mode(lua_State *L) {
+#ifdef _WIN32
+    lua_pushnil(L);
+#else
+    const char *path = luaL_checkstring(L, 1);
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        lua_pushnil(L);
+    } else {
+        lua_pushinteger(L, (lua_Integer)(st.st_mode & 0777));
+    }
+#endif
+    return 1;
+}
+
+static int lfn_file_chmod(lua_State *L) {
+#ifdef _WIN32
+    lua_pushboolean(L, 0);
+#else
+    const char *path = luaL_checkstring(L, 1);
+    long mode = (long)luaL_checkinteger(L, 2);
+    lua_pushboolean(L, chmod(path, (mode_t)(mode & 0777)) == 0 ? 1 : 0);
+#endif
+    return 1;
+}
+
 static int lfn_list_dir(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
     DIR *dir;
@@ -4572,6 +4598,10 @@ static void psi_vm_register_psi(lua_State *L) {
         "file_exists", lfn_file_exists, "Return true when a path exists in the filesystem.");
     PSI_REG_DOC("file_type", lfn_file_type,
         "Return 'file', 'directory', 'other', or nil for the path's stat kind.");
+    PSI_REG_DOC("file_mode", lfn_file_mode,
+        "Return the path's permission bits as an integer, or nil on error/Windows.");
+    PSI_REG_DOC("file_chmod", lfn_file_chmod,
+        "Set a path's permission bits (masked to 0777); no-op false on Windows.");
     PSI_REG_DOC("list_dir", lfn_list_dir,
         "Return an array of names in a directory, excluding '.' and '..'.");
     PSI_REG_DOC("mkdir_p", lfn_mkdir_p,

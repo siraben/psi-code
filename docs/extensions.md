@@ -313,6 +313,7 @@ These are part of the stable surface:
 | `psi.tempfile_path([prefix])` | Returns a temp path under `$TMPDIR`, `$TEMP`, `$TMP`, or `/tmp`; POSIX builds create a private 0600 file when possible. The bash tool uses this for spillover when output exceeds the in-memory truncation cap. |
 | `psi.random_bytes(n)` | Returns bytes from the host secure random source, or `nil` plus an error. |
 | `psi.file_exists(path)` / `psi.file_type(path)` / `psi.list_dir(path)` | Filesystem inspection. `file_type` returns `file`, `directory`, `other`, or `nil`; `list_dir` returns names without `.` or `..`. |
+| `psi.file_mode(path)` / `psi.file_chmod(path, mode)` | Inspect or change POSIX permission bits. On Windows, `file_mode` returns `nil` and `file_chmod` returns `false`. |
 | `psi.path_join(base, name)` / `psi.path_expand(path)` / `psi.path_resolve(path)` / `psi.parent_directory(path)` | Portable path helpers. `path_expand` handles `~` and leading `@`; `path_resolve` anchors relative paths at the current working directory. |
 | `psi.mkdir_p(path)` / `psi.mkdir_parent(path)` | Recursive directory creation. |
 | `psi.current_date()` | `"YYYY-MM-DD"`. |

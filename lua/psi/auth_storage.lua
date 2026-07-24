@@ -33,11 +33,34 @@ function M.path()
   return prelude.path_join(config_dir(), "auth.json")
 end
 
+-- Credential files copied from backups or other machines can arrive
+-- group/world-readable; tighten them on read, like ssh does for keys.
+local function check_permissions(path)
+  local mode = psi.file_mode and psi.file_mode(path)
+  if type(mode) ~= "number" then
+    return
+  end
+  if mode % 64 > 0 then
+    if psi.file_chmod and psi.file_chmod(path, 384) then -- 0600
+      io.stderr:write(
+        "psi: warning: " .. path .. " was group/world-readable; permissions tightened to 0600\n"
+      )
+    else
+      io.stderr:write(
+        "psi: warning: "
+          .. path
+          .. " is group/world-readable and permissions could not be tightened\n"
+      )
+    end
+  end
+end
+
 local function read_all()
   local path = M.path()
   if not psi.file_exists(path) then
     return {}
   end
+  check_permissions(path)
   local ok, content = pcall(psi.read_file, path)
   if not ok or type(content) ~= "string" then
     return nil, "could not read " .. path .. "; leaving it unchanged"
