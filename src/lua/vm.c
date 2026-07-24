@@ -2646,6 +2646,8 @@ static int lfn_tempfile_path(lua_State *L) {
     char buffer[1024];
     long pid = 0;
     long ts;
+    int fd;
+    int attempt;
 #endif
 
     tmpdir = getenv("TMPDIR");
@@ -2686,18 +2688,34 @@ static int lfn_tempfile_path(lua_State *L) {
     lua_pushstring(L, tmpl);
 #else
     ts = (long)time(NULL);
-    counter++;
-    {
+    /* No mkstemp on Windows: generate a candidate name and create it
+     * O_EXCL so a pre-planted file cannot win the race. */
+    for (attempt = 0; attempt < 100; attempt++) {
         const char *sep = "/";
         size_t tlen = strlen(tmpdir);
+        counter++;
         if (strchr(tmpdir, '\\') != NULL || strchr(tmpdir, ':') != NULL)
             sep = "\\";
         if (tlen > 0u && (tmpdir[tlen - 1u] == '/' || tmpdir[tlen - 1u] == '\\'))
             sep = "";
         snprintf(buffer, sizeof(buffer), "%s%s%s%ld-%ld-%lu", tmpdir, sep, safe_prefix, pid, ts,
             counter);
+        fd = open(buffer, O_WRONLY | O_CREAT | O_EXCL, 0600);
+        if (fd >= 0) {
+            if (close(fd) != 0) {
+                unlink(buffer);
+                lua_pushnil(L);
+                return 1;
+            }
+            lua_pushstring(L, buffer);
+            return 1;
+        }
+        if (errno != EEXIST) {
+            lua_pushnil(L);
+            return 1;
+        }
     }
-    lua_pushstring(L, buffer);
+    lua_pushnil(L);
 #endif
     return 1;
 }
