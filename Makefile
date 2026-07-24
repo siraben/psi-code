@@ -62,7 +62,10 @@ DEPFLAGS ?= -MMD -MP
 # ---- Build outputs ----
 BUILD_DIR      = build
 TARGET         = $(BUILD_DIR)/psi
-LUA_BOOT_FILE ?= $(abspath lua/boot.lua)
+# Packagers that ship lua/ on disk can bake its boot path here (e.g.
+# make LUA_BOOT_FILE=/usr/share/psi/boot.lua). Empty means the binary
+# boots its embedded copy and never consults the filesystem.
+LUA_BOOT_FILE ?=
 # Simply-expanded so curl-config runs once per make invocation.
 CURL_SSL_BACKENDS := $(shell curl-config --ssl-backends 2>/dev/null)
 CURL_CA_BUNDLE    := $(shell curl-config --ca 2>/dev/null)
