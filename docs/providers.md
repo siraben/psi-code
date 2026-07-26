@@ -41,9 +41,11 @@ In priority order:
    prefix is stripped before being forwarded to the provider.
 2. **`PSI_PROVIDER` env var:** `anthropic` (default), `ollama`,
    `openrouter`, `openai-codex`, or `moonshot`.
-3. **Settings:** `defaults.provider` and `defaults.model` in
+3. **Settings:** `defaults.model`, or an authenticated `defaults.provider`, in
    `~/.config/psi/settings.json` or `./.psi/settings.json`.
-4. Fallback: Anthropic.
+4. **Authenticated fallback:** Anthropic, OpenAI Codex, OpenRouter, then
+   Moonshot. Ollama is excluded because it does not require credentials. If no
+   provider is authenticated, psi falls back to Anthropic.
 
 ## Streaming Retries
 

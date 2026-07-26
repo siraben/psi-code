@@ -21,7 +21,7 @@ Review-only workflow for `psi`. Do not edit code while using this skill unless t
    - pi-mono parity or porting changes: `docs/port-status.md`
    - Extension, hook, command, tool API changes: `docs/extensions.md`
    - Provider changes: `docs/providers.md`
-3. If the branch has a GitHub PR, inspect its title/body/comments when useful. Prefer the GitHub connector or `gh pr view --json title,body,comments`.
+3. If the branch has a PR, inspect its title, body, and comments with the repository host's connector or CLI.
 
 ## Review Lens
 

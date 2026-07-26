@@ -116,7 +116,7 @@ For each Codex finding, a Claude opus agent reads the actual code path, applies 
 ### Claude findings → validated by Codex
 Collect Claude findings into one prompt at `/tmp/codex-validate.md`, pipe to `codex exec -`. Codex returns VALID|REJECTED per finding.
 
-A finding survives ONLY if the cross-validator confirms it. Rejected findings move to the chain-of-thought section, NOT the final report.
+A finding survives ONLY if the cross-validator confirms it.
 
 ## Phase 4: Report
 

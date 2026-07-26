@@ -77,10 +77,6 @@ end
 
 ## Stable API surface
 
-Everything below is stable within a minor version. Experimental or internal
-helpers may exist on the `psi` global, but unlisted helpers can change without
-notice.
-
 ### Tools: `psi.tools`
 
 | API | Notes |
@@ -329,7 +325,7 @@ These are part of the stable surface:
 | `psi.tool_call(name, input)` | Dispatch a tool through the full before/after hook chain. Prefer this over calling `tool.impl` directly: `impl` skips hook processing (permissions, redaction, extension transforms). |
 | `psi.tools.cancel(reason)` | Shorthand for a failure `ToolResult` used in before-hooks to short-circuit dispatch. Example: `tools.add_before_hook(function(n, i) if n == "bash" and i.command:find("rm %-rf") then return tools.cancel("refused") end end)`. |
 | `psi.prompt.register_transformer(fn)` | Append a system-prompt rewriter. Receives the assembled prompt, returns a replacement (or `nil` to leave it). Runs after built-in assembly; transformers stack in registration order. |
-| `psi.agent.set_model(name)` / `psi.agent.current_model(fallback)` | Switch the default model at runtime (any prefix psi understands: `anthropic/`, `ollama/`, `openrouter/`, `openai-codex/`). Picked up on the *next* turn; the TUI status line reflects it immediately. Pass `nil` to clear. |
+| `psi.agent.set_model(name)` / `psi.agent.current_model(fallback)` | Switch the default model at runtime (any prefix psi understands: `anthropic/`, `ollama/`, `openrouter/`, `openai-codex/`, `moonshot/`). Picked up on the *next* turn; the TUI status line reflects it immediately. Pass `nil` to clear. |
 | `psi.agent.queue_follow_up(text)` / `queue_steering(text)` | Queue user text for the active run loop. Follow-ups run after the current task would otherwise stop; steering is injected before the next provider request. |
 | `psi.agent.queue_modes()` / `queue_mode(kind)` / `set_queue_mode(kind, mode)` | Inspect or set pi-style queue drain modes, also exposed in the TUI as `/queue set-steering-mode MODE` and `/queue set-follow-up-mode MODE`. `kind` is `steering` or `follow-up`; `mode` is `one-at-a-time` or `all`. |
 | `psi.agent.pending_messages()` / `pending_message(i)` / `replace_pending(i, text)` / `remove_pending(i)` / `clear_queue(kind)` / `clear_queues()` | Inspect and edit queued messages. TUI busy-submit queues steering, and Alt-Enter queues follow-up messages. |
@@ -424,11 +420,12 @@ below. Handlers must be fast because they run on the turn's critical path.
 
 Psi emits hyphenated event names and aliases several of them to pi-style
 underscore names (`turn_end`, `tool_execution_start`,
-`after_provider_response`, etc.) for extension code.
+`after_provider_response`, etc.) for extension code. `resources_discover`
+retains its underscore name.
 
 | Event | Firing site | Payload |
 |---|---|---|
-| `before-turn` | Before each streaming iteration in `anthropic.run_turn`. Also fires once per user prompt. | `{ text = "<user prompt>" }` (via render bridge) |
+| `before-turn` | Before the shared agent runtime starts a user turn. | `{ text = "<user prompt>" }` (via render bridge) |
 | `before-provider-request` | After context mutation and request-body assembly, before `http_stream_begin`. | `{ provider, model, body }` |
 | `after-provider-response` | Right after the assistant message is saved, before tool dispatch or auto-compaction. | `{ usage, stop_reason, response_id, model }` |
 | `assistant-text-delta` | Every streamed text chunk. High frequency. | `{ text = "<chunk>" }` |
@@ -466,9 +463,9 @@ Unsupported:
 - No `psi install` / package manager. Extensions are single-file drops.
 - No TypeScript. Lua only.
 - No stable provider registration API yet. Built-in Anthropic, Ollama,
-  OpenRouter, and OpenAI Codex providers are available through the provider
-  registry, but extension authors should treat registration internals as
-  unstable.
+  OpenRouter, OpenAI Codex, and Moonshot providers are available through the
+  provider registry, but extension authors should treat registration internals
+  as unstable.
 - No sandboxing. Extensions run with full Lua and `psi` access; trust
   the files you install.
 - No extension manifest, versioning, or compatibility checks.
@@ -485,7 +482,7 @@ Packaged Lua extensions are bundled under `lua/psi/extensions/` and
 loaded before user/project extensions. They use the same public API as
 external extensions.
 
-- `/btw <question>` asks a non-local provider a quick side question
+- `/btw <question>` asks the configured provider a quick side question
   against a transcript excerpt. The answer is rendered like command
   output and is not persisted into the conversation.
 

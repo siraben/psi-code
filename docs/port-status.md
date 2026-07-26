@@ -19,7 +19,7 @@ This file tracks `psi` against the `pi-mono` architecture it ports.
 | Compaction and summaries | `packages/coding-agent/src/core/compaction/` | Ported. Manual and dynamic token-aware auto-compaction; file-op provenance from `psi.session` feeds the compaction prompt. Compaction appends a compacted active branch without dropping sibling branches. `/tree <id> --summarize` can summarize the abandoned branch and attach a `branch_summary` entry at the destination, matching pi's absorb-back behavior in text form. Extension customization/cancel hooks are not ported. |
 | Hooks and extensions | `packages/coding-agent/src/core/skills.ts`, `src/core/extensions/` | Early-to-partial. `psi.tool_registry` exposes before/after tool-call hooks; `psi.events` is a neutral pub/sub bus; `psi.commands.register` opens slash commands to extensions; boot loads Lua files from `$PSI_EXTENSIONS_DIR`, `~/.config/psi/extensions/`, and `./.psi/extensions/`. There is no npm/git package manager, TypeScript transpile step, or sandbox. |
 | Abort / cancel plumbing | `packages/coding-agent/src/core/abort-signal.ts` | Ported. `AbortSignal` threaded through turn, compact, curl, and shell execution; transcript state ("aborted" / "error") recorded on each content block so the next turn sees a clean slate. |
-| Provider/model loop | `packages/ai/`, `packages/coding-agent/src/modes/print-mode.ts` | Partial-to-ported. Anthropic Messages, local Ollama, OpenRouter, and OpenAI Codex (Responses plus ChatGPT OAuth) share Lua provider routing and the OpenAI-compatible adapter where applicable. Extension-level provider registration and the broad pi model catalog are not ported. |
+| Provider/model loop | `packages/ai/`, `packages/coding-agent/src/modes/print-mode.ts` | Partial-to-ported. Anthropic Messages, local Ollama, OpenRouter, OpenAI Codex (Responses plus ChatGPT OAuth), and Moonshot share Lua provider routing and compatible adapters where applicable. Extension-level provider registration and the broad pi model catalog are not ported. |
 | Tool output truncation | `packages/coding-agent/src/core/tools/truncate.ts` | Ported. `lua/psi/truncate.lua` mirrors `truncateHead` / `truncateTail` / `truncateLine` (2000 lines / 50 KiB / 500 chars) with UTF-8-safe tail slicing and the `[Showing lines X-Y of Z. Full output: /tmp/...]` continuation hints. `bash` tail-truncates and spills the full payload to a temp file via `psi.file_append` + `psi.tempfile_path`; `grep` head-truncates and clips long match lines; `find` / `ls` head-truncate by bytes; `read` keeps its `offset`/`limit` paging. |
 | Markdown rendering of assistant output | `packages/tui/src/...` | Ported. Assistant output now flows through a Lua component path: markdown inline tokens are parsed before styling, paragraph blocks are wrapped after styling with ANSI-aware display width, and tables render as reusable TUI component output. C owns the shared terminal text primitives (ANSI/OSC stripping, UTF-8 cell width, clipping, padding, wrapping) and the terminal boundary receives logical line frames for differential row rendering when `--tui` is active. |
 | Concurrency model | event loop / worker threads in `packages/coding-agent/src/core/` | Ported as single-threaded + Lua coroutines. The agent turn runs inside a `psi.sched` coroutine on the one thread that owns `lua_State`; HTTP streaming (`src/core/http_async.c`) and shell execution (`src/core/process.c`) use begin/poll/finish triples so every blocking point yields cooperatively, giving the TUI main loop a chance to pump input and redraw. |
@@ -61,15 +61,10 @@ components, not more terminal redraw plumbing.
    the JSONL entry tree, switch the active leaf, and absorb the branch
    being left via branch-summary entries, but there is no dedicated TUI
    tree selector surface yet.
-3. **Branch-aware compaction.** Let compaction know about siblings
-   instead of treating the transcript as linear.
+3. **Branch-aware compaction.** Use sibling context when choosing and building
+   compactions, beyond preserving siblings in the session tree.
 4. **Extension provider registration.** The Lua provider registry exists,
    but public registration/unregistration contracts need to be frozen before
    extensions can add providers safely.
 5. **RPC mode.** JSONL over stdin/stdout reusing the same runtime
    and observer.
-
-`psi` can produce the coding-agent prompt, stream model output from Anthropic,
-Ollama, OpenRouter, and OpenAI Codex, execute host tools, run interactively,
-render a TUI with live markdown and status, and auto-compact sessions. It is
-not feature-complete relative to `pi-mono`.
