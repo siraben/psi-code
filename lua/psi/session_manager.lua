@@ -1942,6 +1942,163 @@ end
 
 M.install_file_op_hook()
 
+local function copy_range(messages, first, last)
+  local out = {}
+  for i = first, last do
+    if messages[i] then
+      out[#out + 1] = messages[i]
+    end
+  end
+  return out
+end
+
+local function add_paths(target, values)
+  for _, path in ipairs(type(values) == "table" and values or {}) do
+    if type(path) == "string" and path ~= "" then
+      target[path] = true
+    end
+  end
+end
+
+local function extract_file_ops(messages, read_files, modified_files)
+  for _, entry in ipairs(messages or {}) do
+    local body = prelude.safe_json_decode(entry.data, nil)
+    local message = type(body) == "table" and body.message or nil
+    if type(message) == "table" and message.role == "assistant" then
+      for _, block in ipairs(type(message.content) == "table" and message.content or {}) do
+        if type(block) == "table" and block.type == "toolCall" then
+          local args = type(block.arguments) == "table" and block.arguments or {}
+          local path = args.path
+          if type(path) == "string" and path ~= "" then
+            if block.name == "read" then
+              read_files[path] = true
+            elseif block.name == "write" or block.name == "edit" then
+              modified_files[path] = true
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
+local function sorted_file_ops(read_files, modified_files)
+  local read_only = {}
+  local modified = keys_of(modified_files)
+  for path in pairs(read_files) do
+    if not modified_files[path] then
+      read_only[#read_only + 1] = path
+    end
+  end
+  table.sort(read_only)
+  return read_only, modified
+end
+
+function M.message_token_estimate(message)
+  if type(message) ~= "table" then
+    return 0
+  end
+  local body = prelude.safe_json_decode(message.data, nil)
+  return estimate_tokens(message.role, message.text, body)
+end
+
+-- Select the compaction boundary before generating a summary. The returned
+-- plan is then consumed unchanged by both the prompt builder and do_compact,
+-- so boundary repair can never discard unsummarized messages.
+function M.prepare_compaction(opts)
+  opts = opts or {}
+  local messages = M.messages()
+  local total = #messages
+  if total == 0 or messages[total].role == "compaction-summary" then
+    return nil
+  end
+
+  local first_kept
+  local keep_messages = tonumber(opts.keep_recent_messages)
+  if keep_messages then
+    keep_messages = math.max(0, math.floor(keep_messages))
+    first_kept = math.max(1, total - keep_messages + 1)
+  else
+    local target = tonumber(opts.keep_recent_tokens) or 20000
+    local accumulated = 0
+    first_kept = total
+    for i = total, 1, -1 do
+      accumulated = accumulated + M.message_token_estimate(messages[i])
+      first_kept = i
+      if accumulated >= target then
+        break
+      end
+    end
+  end
+
+  local desired_first_kept = first_kept
+  while first_kept <= total and messages[first_kept].role == "tool-result" do
+    first_kept = first_kept + 1
+  end
+  if first_kept > total then
+    first_kept = desired_first_kept - 1
+    while first_kept > 1 and messages[first_kept].role == "tool-result" do
+      first_kept = first_kept - 1
+    end
+  end
+  if first_kept > total or first_kept <= 1 then
+    return nil
+  end
+
+  local compacted_count = first_kept - 1
+  local turn_start
+  if messages[first_kept].role ~= "user" then
+    for i = first_kept - 1, 1, -1 do
+      if messages[i].role == "user" then
+        turn_start = i
+        break
+      end
+    end
+  end
+
+  local history_end = compacted_count
+  local turn_prefix = {}
+  if turn_start and turn_start <= compacted_count then
+    history_end = turn_start - 1
+    turn_prefix = copy_range(messages, turn_start, compacted_count)
+  end
+
+  local previous_summary
+  local messages_to_summarize = {}
+  local read_files = {}
+  local modified_files = {}
+  for _, entry in ipairs(copy_range(messages, 1, history_end)) do
+    if entry.role == "compaction-summary" then
+      local body = prelude.safe_json_decode(entry.data, nil)
+      previous_summary = type(body) == "table" and body.summary or entry.text
+      if type(body) == "table" then
+        add_paths(read_files, body.readFiles)
+        add_paths(modified_files, body.modifiedFiles)
+      end
+    else
+      messages_to_summarize[#messages_to_summarize + 1] = entry
+    end
+  end
+  extract_file_ops(messages_to_summarize, read_files, modified_files)
+  extract_file_ops(turn_prefix, read_files, modified_files)
+  local read_list, modified_list = sorted_file_ops(read_files, modified_files)
+
+  return {
+    messages = messages,
+    total = total,
+    first_kept = first_kept,
+    compacted_count = compacted_count,
+    keep_recent = total - compacted_count,
+    messages_to_summarize = messages_to_summarize,
+    turn_prefix = turn_prefix,
+    is_split_turn = #turn_prefix > 0,
+    tail = copy_range(messages, first_kept, total),
+    previous_summary = previous_summary,
+    read_files = read_list,
+    modified_files = modified_list,
+  }
+end
+
 -- Replace the active in-memory path with [compaction-summary] + the last
 -- keep_recent messages. The durable JSONL tree is append-only: sibling
 -- branches remain in file_entries, and the compacted active path is appended
@@ -1957,42 +2114,30 @@ M.install_file_op_hook()
 --     keep_recent = <requested retention>,
 --     compacted = <messages that will be/were folded into the summary> }
 -- compaction-end additionally gets `summary = <text>`.
-function M.do_compact(keep_recent, summary_text)
-  local messages = M.messages()
-  local total = #messages
-  if keep_recent > total then
-    keep_recent = total
+function M.do_compact(plan, summary_text)
+  if type(plan) ~= "table" then
+    plan = M.prepare_compaction({ keep_recent_messages = plan })
   end
-  local compacted_count = total - keep_recent
-
-  -- Snap the compaction boundary forward past any leading tool-result
-  -- entries in the retained tail. Otherwise a cut that lands between
-  -- an assistant's toolCall and its toolResult drops the call but
-  -- keeps the result — the wire request then has a tool_result with
-  -- no matching tool_use and Anthropic rejects it with:
-  --   400 "unexpected tool_use_id found in tool_result blocks ... Each
-  --        tool_result block must have a corresponding tool_use block
-  --        in the previous message"
-  -- Mirrors pi-mono's findValidCutPoints (compaction/compaction.ts:
-  -- 299-337) which disqualifies toolResult messages as cut points.
-  while
-    compacted_count < total
-    and messages[compacted_count + 1]
-    and messages[compacted_count + 1].role == "tool-result"
-  do
-    compacted_count = compacted_count + 1
+  if not plan then
+    return false, "session is already small enough"
   end
-  local tail = prelude.drop(messages, compacted_count)
+  local messages = plan.messages
+  local total = plan.total
+  local compacted_count = plan.compacted_count
+  local keep_recent = plan.keep_recent
+  local tail = plan.tail
 
   if psi.events and psi.events.emit then
     psi.events.emit("compaction-start", {
       total = total,
       keep_recent = keep_recent,
       compacted = compacted_count,
+      reason = plan.reason,
     })
   end
 
-  local read_files, modified_files = M.pending_file_ops()
+  local read_files = plan.read_files or {}
+  local modified_files = plan.modified_files or {}
   local first_kept = tail[1]
   local first_kept_id
   if first_kept then
@@ -2017,6 +2162,7 @@ function M.do_compact(keep_recent, summary_text)
     modifiedFiles = prelude.as_array(modified_files),
     compactedCount = compacted_count,
     firstKeptEntryId = first_kept_id,
+    tokensBefore = plan.tokens_before,
   })
   for _, m in ipairs(tail) do
     local body = prelude.safe_json_decode(m.data, nil)
@@ -2037,6 +2183,7 @@ function M.do_compact(keep_recent, summary_text)
       keep_recent = keep_recent,
       compacted = compacted_count,
       summary = summary_text,
+      reason = plan.reason,
     })
   end
   return true

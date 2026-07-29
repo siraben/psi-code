@@ -209,11 +209,12 @@ end
 -- sched.proc_poll) without the caller having to know. Non-TUI
 -- modes get a trivial driver (no tick hook); the TUI installs its
 -- own tick hook so its main loop keeps redrawing.
-function M.run_turn(opts)
-  local user_text = opts.user_text or ""
-  session.append_user(user_text)
-  session.save()
-
+local function drive_turn(opts, append_user)
+  if append_user then
+    local user_text = opts.user_text or ""
+    session.append_user(user_text)
+    session.save()
+  end
   local provider, resolved = pick_provider(M.current_model(opts.model))
   local thinking_level = M.thinking_level_for(resolved, opts.thinking_level, opts.reasoning_effort)
   local system_prompt = prompt.system_prompt()
@@ -228,6 +229,14 @@ function M.run_turn(opts)
       abort_check = opts.abort_check,
     })
   end)
+end
+
+function M.run_turn(opts)
+  return drive_turn(opts, true)
+end
+
+function M.continue_turn(opts)
+  return drive_turn(opts or {}, false)
 end
 
 function M.side_question(question, opts)
@@ -262,31 +271,72 @@ end
 -- Summarize the older half of the session using a one-shot completion
 -- and rewrite the transcript in place. Returns (ok, summary_text).
 function M.run_compact(opts)
-  local keep_recent = opts.keep_recent or 12
-  local message_count = psi.session_message_count()
-  if message_count <= keep_recent + 1 then
+  opts = opts or {}
+  local plan = opts.plan
+  if not plan then
+    if opts.keep_recent ~= nil then
+      plan = session.prepare_compaction({ keep_recent_messages = opts.keep_recent })
+    else
+      plan = session.prepare_compaction({ keep_recent_tokens = context.keep_recent_tokens() })
+    end
+  end
+  if not plan then
     return true, "session is already small enough"
   end
+  plan.tokens_before = context.estimate_context_tokens().tokens
+  plan.reason = opts.reason
 
   local provider, resolved = pick_provider(M.current_model(opts.model))
   local thinking_level = M.thinking_level_for(resolved, opts.thinking_level, opts.reasoning_effort)
-  local request = prompt.compaction_request(keep_recent)
-  local ok, summary = sched.run(function()
-    return provider.complete_text({
-      system_prompt = request[1],
-      user_text = request[2],
-      model = resolved.id,
-      max_tokens = context.compaction_budget(),
-      thinking_level = thinking_level,
-      reasoning_effort = M.current_reasoning_effort(opts.reasoning_effort),
-      abort_check = opts.abort_check,
-    })
-  end)
-  if not ok then
-    return false, summary
+
+  local function complete(request, max_tokens)
+    local model_max = tonumber(resolved.max_output_tokens)
+    if model_max and model_max > 0 then
+      max_tokens = math.min(max_tokens, model_max)
+    end
+    return sched.run(function()
+      return provider.complete_text({
+        system_prompt = request[1],
+        user_text = request[2],
+        model = resolved.id,
+        max_tokens = max_tokens,
+        thinking_level = thinking_level,
+        reasoning_effort = M.current_reasoning_effort(opts.reasoning_effort),
+        abort_check = opts.abort_check,
+      })
+    end)
   end
 
-  session.do_compact(keep_recent, summary)
+  local summary
+  if plan.is_split_turn then
+    local history = plan.previous_summary or "No prior history."
+    if #plan.messages_to_summarize > 0 then
+      local ok
+      ok, history = complete(prompt.compaction_request(plan), context.compaction_budget())
+      if not ok then
+        return false, history
+      end
+    end
+    local ok, prefix = complete(prompt.turn_prefix_request(plan), context.turn_prefix_budget())
+    if not ok then
+      return false, prefix
+    end
+    summary = history .. "\n\n---\n\n**Turn Context (split turn):**\n\n" .. prefix
+  else
+    local request = prompt.compaction_request(plan)
+    local ok
+    ok, summary = complete(request, context.compaction_budget())
+    if not ok then
+      return false, summary
+    end
+  end
+
+  summary = (summary or "") .. prompt.format_file_operations(plan.read_files, plan.modified_files)
+  local compacted, err = session.do_compact(plan, summary)
+  if not compacted then
+    return false, err
+  end
+  context.reset_usage()
   return true, summary
 end
 

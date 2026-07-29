@@ -23,7 +23,7 @@ static size_t psi_calibrate_tokens(size_t pi_tokens) {
     const size_t max = (size_t)-1;
 
     /* Live OpenRouter probes across Claude, Gemini, and GPT showed chars/4
-     * is close but slightly low on average. Target a mild ~5% overestimate:
+     * runs low. Apply psi's empirical 1.105 calibration:
      *   ceil(pi_tokens * 1.105)
      * which is equivalent to ceil((221*pi_tokens) / 200).
      */

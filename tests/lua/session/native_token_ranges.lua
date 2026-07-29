@@ -1,5 +1,5 @@
 --[==[psi-test
-# Original: full == 9, tail == 4, keep == 1. Folded into single equals string.
+# Psi's calibrated pi-style heuristic: full == 9, tail == 4, keep == 1.
 expect = "9|4|1"
 ]==]
 local s = require("psi.session_manager")

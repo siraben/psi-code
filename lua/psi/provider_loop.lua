@@ -429,7 +429,6 @@ function M.run_turn(opts, cfg)
         cfg.save_failed_partial(state, model, reason, emsg)
       elseif has_partial(state, tool_calls) then
         cfg.persist(state, model, content, tool_calls, reason, emsg)
-        context.record_usage(psi.session_message_count(), state.usage, model)
         session_mod.save()
       end
       if not aborted then
@@ -442,8 +441,9 @@ function M.run_turn(opts, cfg)
       local emsg = cfg.classify_http_error(status, table.concat(raw_body), cfg.provider_name)
       if cfg.save_failed_partial then
         cfg.save_failed_partial(state, model, "error", emsg)
-      elseif has_partial(state, tool_calls) then
+      else
         cfg.persist(state, model, content, tool_calls, "error", emsg)
+        session_mod.save()
       end
       io.stderr:write(emsg .. "\n")
       return false, emsg
@@ -451,20 +451,18 @@ function M.run_turn(opts, cfg)
 
     if stream_error then
       cfg.persist(state, model, content, tool_calls, "error", stream_error)
-      context.record_usage(psi.session_message_count(), state.usage, model)
       session_mod.save()
       io.stderr:write(stream_error .. "\n")
       return false, stream_error
     end
 
     cfg.persist(state, model, content, tool_calls)
-    context.record_usage(psi.session_message_count(), state.usage, model)
+    context.record_usage(psi.session_message_count(), state.usage, model, cfg.provider_name)
     session_mod.save()
     emit_after_response(cfg, state, model)
 
     local text = cfg.text(state)
     if #tool_calls == 0 then
-      cfg.after_iteration(model, opts)
       if append_queued_steering(observer) == 0 and append_queued_follow_ups(observer) == 0 then
         emit_turn_end(text, model)
         return true, text
@@ -474,7 +472,6 @@ function M.run_turn(opts, cfg)
       if not results then
         return false, err
       end
-      cfg.after_iteration(model, opts)
       if transform.all_results_terminate(results) then
         if append_queued_steering(observer) == 0 and append_queued_follow_ups(observer) == 0 then
           emit_turn_end(text, model)

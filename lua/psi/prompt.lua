@@ -212,28 +212,147 @@ local SUMMARIZATION_INSTRUCTIONS = table.concat({
   "Keep each section concise. Preserve exact file paths, function names, and error messages.",
 })
 
-local function build_compaction_transcript(keep_recent)
-  local messages = session.messages()
-  local total = #messages
-  local to_drop = total - keep_recent
-  local head = to_drop > 0 and prelude.take(messages, to_drop) or {}
-  local buf = {}
-  for _, m in ipairs(head) do
-    buf[#buf + 1] = session.role_prefix(m) .. m.text .. "\n"
+local UPDATE_SUMMARIZATION_INSTRUCTIONS = table.concat({
+  "Update the previous summary with the new conversation messages. ",
+  "Preserve important information from the previous summary while adding new progress, ",
+  "decisions, constraints, and next steps.\n\n",
+  SUMMARIZATION_INSTRUCTIONS,
+})
+
+local TURN_PREFIX_INSTRUCTIONS = table.concat({
+  "This is the PREFIX of a turn that was too large to keep. ",
+  "The SUFFIX (recent work) is retained.\n\n",
+  "Summarize the prefix to provide context for the retained suffix:\n\n",
+  "## Original Request\n",
+  "[What did the user ask for in this turn?]\n\n",
+  "## Early Progress\n",
+  "- [Key decisions and work done in the prefix]\n\n",
+  "## Context for Suffix\n",
+  "- [Information needed to understand the kept suffix]\n\n",
+  "Be concise. Focus on what's needed to understand the kept suffix.",
+})
+
+local function safe_json(value)
+  local ok, encoded = pcall(psi.json_encode, value)
+  return ok and encoded or "[unserializable]"
+end
+
+local function content_text(content)
+  local out = {}
+  if type(content) == "string" then
+    return content
   end
-  return table.concat(buf)
+  for _, block in ipairs(type(content) == "table" and content or {}) do
+    if type(block) == "table" and block.type == "text" and type(block.text) == "string" then
+      out[#out + 1] = block.text
+    end
+  end
+  return table.concat(out)
+end
+
+local function serialize_compaction_messages(messages)
+  local buf = {}
+  for _, entry in ipairs(messages or {}) do
+    local body = prelude.safe_json_decode(entry.data, nil)
+    local message = type(body) == "table" and body.message or nil
+    if type(message) ~= "table" then
+      if entry.text and entry.text ~= "" then
+        buf[#buf + 1] = session.role_prefix(entry) .. entry.text
+      end
+    elseif message.role == "user" then
+      local text = content_text(message.content)
+      if text ~= "" then
+        buf[#buf + 1] = "[User]: " .. text
+      end
+    elseif message.role == "assistant" then
+      local thinking = {}
+      local tool_summaries = {}
+      local text = {}
+      for _, block in ipairs(type(message.content) == "table" and message.content or {}) do
+        if block.type == "thinking" and type(block.thinking) == "string" then
+          thinking[#thinking + 1] = block.thinking
+        elseif block.type == "text" and type(block.text) == "string" then
+          text[#text + 1] = block.text
+        elseif block.type == "toolCall" then
+          local args = {}
+          for key, value in pairs(type(block.arguments) == "table" and block.arguments or {}) do
+            args[#args + 1] = tostring(key) .. "=" .. safe_json(value)
+          end
+          table.sort(args)
+          tool_summaries[#tool_summaries + 1] = tostring(block.name or "")
+            .. "("
+            .. table.concat(args, ", ")
+            .. ")"
+        end
+      end
+      if #thinking > 0 then
+        buf[#buf + 1] = "[Assistant thinking]: " .. table.concat(thinking, "\n")
+      end
+      if #text > 0 then
+        buf[#buf + 1] = "[Assistant]: " .. table.concat(text)
+      end
+      if #tool_summaries > 0 then
+        buf[#buf + 1] = "[Assistant tool calls]: " .. table.concat(tool_summaries, "; ")
+      end
+    elseif message.role == "toolResult" then
+      local text = content_text(message.content)
+      if #text > 2000 then
+        text = text:sub(1, 2000)
+          .. "\n\n[... "
+          .. tostring(#content_text(message.content) - 2000)
+          .. " more characters truncated]"
+      end
+      if text ~= "" then
+        buf[#buf + 1] = "[Tool result]: " .. text
+      end
+    end
+  end
+  return table.concat(buf, "\n\n")
 end
 
 -- Returns {system_prompt, user_prompt} used by the Anthropic compaction call.
 -- User message wraps the transcript in <conversation> tags and appends
 -- the structured-summary instructions, mirroring pi's generateSummary.
-function M.compaction_request(keep_recent)
-  local transcript = build_compaction_transcript(keep_recent)
-  local user_prompt = "<conversation>\n"
-    .. transcript
-    .. "\n</conversation>\n\n"
-    .. SUMMARIZATION_INSTRUCTIONS
+function M.compaction_request(plan)
+  if type(plan) ~= "table" then
+    plan = session.prepare_compaction({ keep_recent_messages = plan })
+  end
+  plan = plan or {}
+  local transcript = serialize_compaction_messages(plan.messages_to_summarize)
+  local previous = plan.previous_summary
+  local instructions = previous and UPDATE_SUMMARIZATION_INSTRUCTIONS or SUMMARIZATION_INSTRUCTIONS
+  local user_prompt = "<conversation>\n" .. transcript .. "\n</conversation>\n\n"
+  if previous and previous ~= "" then
+    user_prompt = user_prompt .. "<previous-summary>\n" .. previous .. "\n</previous-summary>\n\n"
+  end
+  user_prompt = user_prompt .. instructions
   return { COMPACTION_SYSTEM, user_prompt }
+end
+
+function M.turn_prefix_request(plan)
+  local transcript = serialize_compaction_messages(type(plan) == "table" and plan.turn_prefix or {})
+  return {
+    COMPACTION_SYSTEM,
+    "<conversation>\n" .. transcript .. "\n</conversation>\n\n" .. TURN_PREFIX_INSTRUCTIONS,
+  }
+end
+
+function M.format_file_operations(read_files, modified_files)
+  local sections = {}
+  if type(read_files) == "table" and #read_files > 0 then
+    sections[#sections + 1] = "<read-files>\n"
+      .. table.concat(read_files, "\n")
+      .. "\n</read-files>"
+  end
+  if type(modified_files) == "table" and #modified_files > 0 then
+    sections[#sections + 1] = "<modified-files>\n"
+      .. table.concat(modified_files, "\n")
+      .. "\n</modified-files>"
+  end
+  if #sections == 0 then
+    return ""
+  end
+  return "\n\n" .. table.concat(sections, "\n\n")
 end
 
 local BRANCH_SUMMARY_PREAMBLE = table.concat({

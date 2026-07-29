@@ -685,12 +685,6 @@ function M.run_turn(opts)
     has_partial = function(state, tool_calls)
       return state_text(state) ~= "" or #tool_calls > 0
     end,
-    after_iteration = function(turn_model, turn_opts)
-      local ok, anthropic = pcall(require, "psi.providers.anthropic")
-      if ok and anthropic and anthropic.maybe_auto_compact then
-        anthropic.maybe_auto_compact(turn_model, turn_opts)
-      end
-    end,
   })
 end
 

@@ -290,7 +290,7 @@ M.register_model("openrouter/google/gemini-3-flash-preview", {
 M.register_model("openai-codex/gpt-5.6-terra", {
   provider = "openai-codex",
   api = "openai-codex-responses",
-  context_window = 372000,
+  context_window = 272000,
   max_output_tokens = 128000,
   reasoning = true,
   supports_tool_use = true,
@@ -300,7 +300,7 @@ M.register_model("openai-codex/gpt-5.6-terra", {
 M.register_model("openai-codex/gpt-5.6-sol", {
   provider = "openai-codex",
   api = "openai-codex-responses",
-  context_window = 372000,
+  context_window = 272000,
   max_output_tokens = 128000,
   reasoning = true,
   supports_tool_use = true,
@@ -310,7 +310,7 @@ M.register_model("openai-codex/gpt-5.6-sol", {
 M.register_model("openai-codex/gpt-5.6-luna", {
   provider = "openai-codex",
   api = "openai-codex-responses",
-  context_window = 372000,
+  context_window = 272000,
   max_output_tokens = 128000,
   reasoning = true,
   supports_tool_use = true,

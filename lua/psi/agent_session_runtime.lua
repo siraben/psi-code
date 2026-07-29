@@ -7,6 +7,7 @@
 
 local agent = require("psi.agent_session")
 local context = require("psi.context")
+local notice = require("psi.notice")
 local session = require("psi.session_manager")
 local traceback = debug.traceback
 
@@ -74,6 +75,7 @@ function Runtime:_load(path)
   self.started = true
   self.closed = false
   self.opts.session_file = path
+  context.reset_usage()
   return true
 end
 
@@ -171,8 +173,8 @@ function Runtime:turn(user_text, options)
     options.before_turn({ text = text })
   end
 
-  local ran, ok, reply = xpcall(function()
-    return agent.run_turn({
+  local function turn_options()
+    return {
       user_text = text,
       model = self.opts.model,
       max_tokens = self.opts.max_tokens,
@@ -180,7 +182,66 @@ function Runtime:turn(user_text, options)
       reasoning_effort = self.opts.reasoning_effort,
       observer = observer,
       abort_check = options.abort_check or psi.is_aborted,
+    }
+  end
+
+  local function auto_compact(reason, descriptor)
+    local estimate = context.estimate_context_tokens()
+    notice.info(
+      string.format(
+        "psi: auto-compacting (%s, context ~%d tokens, threshold %d)",
+        reason,
+        estimate.tokens,
+        context.context_window(descriptor) - context.reserve_tokens()
+      )
+    )
+    local compact_ok, compact_summary = agent.run_compact({
+      model = self.opts.model,
+      thinking_level = self.opts.thinking_level,
+      reasoning_effort = self.opts.reasoning_effort,
+      abort_check = options.abort_check or psi.is_aborted,
+      reason = reason,
     })
+    if not compact_ok then
+      notice.error("psi: auto-compaction failed: " .. tostring(compact_summary))
+      return false
+    end
+    session.save()
+    return true
+  end
+
+  local ran, ok, reply = xpcall(function()
+    local descriptor = agent.model_descriptor(self.opts.model)
+    local over = context.should_compact(descriptor)
+    if over then
+      auto_compact("threshold", descriptor)
+    end
+
+    local turn_ok, turn_reply = agent.run_turn(turn_options())
+    descriptor = agent.model_descriptor(self.opts.model)
+    if
+      not turn_ok
+      and context.auto_compact_enabled()
+      and context.is_overflow_error(tostring(turn_reply or ""))
+      and auto_compact("overflow", descriptor)
+    then
+      local retry_options = turn_options()
+      retry_options.user_text = nil
+      turn_ok, turn_reply = agent.continue_turn(retry_options)
+    end
+
+    if turn_ok and context.auto_compact_enabled() then
+      descriptor = agent.model_descriptor(self.opts.model)
+      if context.usage_exceeds_window(descriptor) then
+        auto_compact("overflow", descriptor)
+      else
+        local should = context.should_compact(descriptor)
+        if should then
+          auto_compact("threshold", descriptor)
+        end
+      end
+    end
+    return turn_ok, turn_reply
   end, traceback)
 
   local payload = {
@@ -222,6 +283,7 @@ function Runtime:compact(keep_recent, options)
       thinking_level = self.opts.thinking_level,
       reasoning_effort = self.opts.reasoning_effort,
       abort_check = options.abort_check or psi.is_aborted,
+      reason = options.reason or "manual",
     })
   end, traceback)
   if not ran or not ok then
@@ -249,7 +311,6 @@ function Runtime:switch_session(path)
   if not ok then
     return false, load_err
   end
-  context.reset_usage()
   return true
 end
 

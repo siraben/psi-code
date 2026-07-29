@@ -19,7 +19,6 @@
 --
 -- Session transcript is read and written via psi.session_* primitives.
 
-local context = require("psi.context")
 local prelude = require("psi.prelude")
 local provider_loop = require("psi.provider_loop")
 local sched = require("psi.sched")
@@ -560,7 +559,6 @@ local function save_failed_partial(flavor, state, model, stop_reason, error_mess
     api = flavor.api_name,
     response_id = state.response_id,
   })
-  context.record_usage(psi.session_message_count(), state.usage, model)
   session_mod.save()
 end
 
@@ -647,52 +645,6 @@ local function mark_last_message_cache(messages)
   end
   return messages
 end
-
--- ---------- Auto-compaction (threshold check on usage) ----------
-
-local AUTO_COMPACT_ENV = "PSI_AUTO_COMPACT"
-
-local function auto_compact_enabled()
-  local v = os.getenv(AUTO_COMPACT_ENV)
-  return v ~= "0" and v ~= "false"
-end
-
-local function maybe_auto_compact(model, opts)
-  if opts and opts.no_auto_compact then
-    return
-  end
-  if not auto_compact_enabled() then
-    return
-  end
-  local over, est = context.should_compact(model)
-  if not over then
-    return
-  end
-  notice.info(
-    string.format(
-      "psi: auto-compacting (context ~%d tokens, threshold %d)",
-      est.tokens,
-      context.context_window(model) - context.reserve_tokens()
-    )
-  )
-  -- Lazy require to avoid a load-time cycle with psi.agent.
-  local keep = context.keep_recent_messages(context.keep_recent_tokens())
-  local ok, summary = require("psi.agent_session").run_compact({
-    keep_recent = keep,
-    model = model,
-  })
-  if not ok then
-    notice.error("psi: auto-compaction failed")
-  else
-    context.reset_usage()
-    session_mod.save()
-    if summary and summary ~= "" then
-      notice.info("psi: compacted; kept " .. tostring(keep) .. " recent messages")
-    end
-  end
-end
-
-M.maybe_auto_compact = maybe_auto_compact
 
 -- ---------- One-shot completion (non-streaming) ----------
 
@@ -828,9 +780,6 @@ function M.run_turn(opts, flavor)
     end,
     classify_http_error = require("psi.providers.openai_compat").classify_http_error,
     text = state_assistant_text,
-    after_iteration = function(iter_model, iter_opts)
-      maybe_auto_compact(iter_model, iter_opts)
-    end,
   })
 end
 

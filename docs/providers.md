@@ -61,6 +61,33 @@ request because provider streams are not resumable at that point.
   (default `1000`).
 - `PSI_HTTP_MAX_RETRY_DELAY_MS`: cap for retry sleep (default `60000`).
 
+## Context compaction
+
+Automatic compaction is shared by every provider and runs at two safe
+boundaries: before a new user prompt is appended and after a complete agent
+turn. The default threshold is `contextWindow - 16384`; compaction retains
+approximately 20000 recent tokens. Provider context-overflow errors trigger one
+compact-and-retry attempt. Message shapes follow pi's estimator, while psi keeps
+its empirically calibrated 1.105 multiplier because chars/4 ran low in live
+Claude, Gemini, and GPT probes.
+
+Configure the policy in `~/.config/psi/settings.json` or
+`./.psi/settings.json`:
+
+```json
+{
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 16384,
+    "keepRecentTokens": 20000
+  }
+}
+```
+
+`PSI_AUTO_COMPACT=0` disables automatic compaction for one process and
+`PSI_AUTO_COMPACT=1` forces it on. Manual `--compact N` and `/compact N`
+continue to interpret `N` as a recent-message count.
+
 ## HTTP Timeouts
 
 All provider HTTP calls share curl-level stall protection. The defaults

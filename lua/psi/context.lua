@@ -7,8 +7,9 @@
 --   - should_compact(model): base+tail > window - reserve
 --   - compaction_budget() / turn_prefix_budget(): 0.8 / 0.5 * reserve
 --
--- Uses psi.providers model metadata when available, with a conservative
--- fallback for unknown/custom models.
+-- Uses psi.api_registry model metadata when available, with a conservative
+-- fallback for unknown/custom models. Runtime callers should pass either a
+-- resolved descriptor or both the bare model id and provider name.
 
 local M = {}
 
@@ -53,7 +54,17 @@ end
 -- `usage` is the Anthropic usage object; fields may be nil/absent.
 -- `model` is optional; passed through so the C-side usage mirror can
 -- also remember the context-window limit for display.
-function M.record_usage(message_index, usage, model)
+local function compaction_setting(name, default)
+  local ok, settings = pcall(require, "psi.settings_manager")
+  local value = ok and settings and settings.get("compaction." .. name, nil) or nil
+  value = tonumber(value)
+  if value == nil or value < 0 then
+    return default
+  end
+  return math.floor(value)
+end
+
+function M.record_usage(message_index, usage, model, provider)
   if type(usage) ~= "table" or type(message_index) ~= "number" then
     return
   end
@@ -62,9 +73,16 @@ function M.record_usage(message_index, usage, model)
   local cr = usage.cache_read_input_tokens or 0
   local cw = usage.cache_creation_input_tokens or 0
   local total = input + output + cr + cw
-  last_usage = { message_index = message_index, total = total }
+  last_usage = {
+    message_index = message_index,
+    total = total,
+    input = input,
+    output = output,
+    cache_read = cr,
+    cache_write = cw,
+  }
   if psi.set_usage then
-    psi.set_usage(input, output, cr, cw, total, M.context_window(model))
+    psi.set_usage(input, output, cr, cw, total, M.context_window(model, provider))
   end
 end
 
@@ -99,13 +117,21 @@ function M.estimate_context_tokens()
   }
 end
 
-function M.context_window(model)
+function M.context_window(model, provider)
+  if type(model) == "table" then
+    if type(model.context_window) == "number" then
+      return model.context_window
+    end
+    provider = model.provider or provider
+    model = model.id or model.model or model.ref
+  end
   if not model or model == "" then
     return DEFAULT_CONTEXT_WINDOW
   end
   local ok, providers = pcall(require, "psi.api_registry")
   if ok and providers then
-    local meta = providers.model(model)
+    local canonical = provider and provider ~= "" and (provider .. "/" .. model) or model
+    local meta = providers.model(canonical) or providers.model(model)
     if type(meta) == "table" and type(meta.context_window) == "number" then
       return meta.context_window
     end
@@ -114,24 +140,41 @@ function M.context_window(model)
 end
 
 function M.reserve_tokens()
-  return DEFAULT_RESERVE_TOKENS
+  return compaction_setting("reserveTokens", DEFAULT_RESERVE_TOKENS)
 end
 function M.keep_recent_tokens()
-  return DEFAULT_KEEP_RECENT_TOKENS
+  return compaction_setting("keepRecentTokens", DEFAULT_KEEP_RECENT_TOKENS)
 end
 
-function M.should_compact(model)
+function M.auto_compact_enabled()
+  local env = os.getenv("PSI_AUTO_COMPACT")
+  if env == "0" or env == "false" then
+    return false
+  elseif env == "1" or env == "true" then
+    return true
+  end
+  local ok, settings = pcall(require, "psi.settings_manager")
+  if ok and settings then
+    return settings.get("compaction.enabled", true) ~= false
+  end
+  return true
+end
+
+function M.should_compact(model, provider)
+  if not M.auto_compact_enabled() then
+    return false, M.estimate_context_tokens()
+  end
   local est = M.estimate_context_tokens()
-  local threshold = M.context_window(model) - DEFAULT_RESERVE_TOKENS
+  local threshold = M.context_window(model, provider) - M.reserve_tokens()
   return est.tokens > threshold, est
 end
 
 -- Output-token budgets for summarization calls (mirrors pi's 0.8 / 0.5).
 function M.compaction_budget()
-  return math.floor(0.8 * DEFAULT_RESERVE_TOKENS)
+  return math.floor(0.8 * M.reserve_tokens())
 end
 function M.turn_prefix_budget()
-  return math.floor(0.5 * DEFAULT_RESERVE_TOKENS)
+  return math.floor(0.5 * M.reserve_tokens())
 end
 
 -- Walk the session from the tail, accumulating estimated tokens; return the
@@ -158,6 +201,66 @@ function M.keep_recent_messages(target_tokens)
     count = count + 1
   end
   return count
+end
+
+local OVERFLOW_PATTERNS = {
+  "prompt is too long",
+  "request_too_large",
+  "input is too long for requested model",
+  "exceeds the context window",
+  "maximum context length",
+  "input token count",
+  "maximum prompt length",
+  "reduce the length of the messages",
+  "maximum allowed input length",
+  "longer than the model's context length",
+  "exceeds the available context size",
+  "greater than the context length",
+  "context window exceeds limit",
+  "exceeded model token limit",
+  "too large for model with",
+  "configured context size",
+  "model_context_window_exceeded",
+  "prompt too long",
+  "range of input length should be",
+  "context_length_exceeded",
+  "context length exceeded",
+  "too many tokens",
+  "token limit exceeded",
+}
+
+local NON_OVERFLOW_PATTERNS = {
+  "rate limit",
+  "too many requests",
+  "throttling error",
+  "service unavailable",
+}
+
+function M.is_overflow_error(message)
+  if type(message) ~= "string" or message == "" then
+    return false
+  end
+  local lower = message:lower()
+  for _, pattern in ipairs(NON_OVERFLOW_PATTERNS) do
+    if lower:find(pattern, 1, true) then
+      return false
+    end
+  end
+  for _, pattern in ipairs(OVERFLOW_PATTERNS) do
+    if lower:find(pattern, 1, true) then
+      return true
+    end
+  end
+  return lower:match("^400%s+status code%s+%(no body%)") ~= nil
+    or lower:match("^413%s+status code%s+%(no body%)") ~= nil
+end
+
+function M.usage_exceeds_window(model, provider)
+  if not last_usage then
+    return false
+  end
+  local input = (last_usage.input or 0) + (last_usage.cache_read or 0)
+  return input > M.context_window(model, provider)
 end
 
 return M
