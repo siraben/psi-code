@@ -29,6 +29,7 @@ end
 psi.prelude = require("psi.prelude")
 psi.platform = require("psi.platform")
 psi.path = require("psi.path_utils")
+psi.notice = require("psi.notice")
 
 -- Project-local resources are gated behind workspace trust; resolve it
 -- before anything reads ./.psi/* (settings, extensions, prompts).
@@ -86,18 +87,16 @@ psi.doc.bootstrap(psi)
 local function load_packaged_extension(module_name)
   local ok, ext = pcall(require, module_name)
   if not ok then
-    io.stderr:write(
-      "psi: packaged extension " .. module_name .. " failed to load: " .. tostring(ext) .. "\n"
+    psi.notice.error(
+      "psi: packaged extension " .. module_name .. " failed to load: " .. tostring(ext),
+      { source = "extension-loader" }
     )
   elseif type(ext) == "function" then
     local inv_ok, inv_err = pcall(ext, psi)
     if not inv_ok then
-      io.stderr:write(
-        "psi: packaged extension "
-          .. module_name
-          .. " failed during init: "
-          .. tostring(inv_err)
-          .. "\n"
+      psi.notice.error(
+        "psi: packaged extension " .. module_name .. " failed during init: " .. tostring(inv_err),
+        { source = "extension-loader" }
       )
     end
   end
@@ -235,12 +234,16 @@ local function load_extensions_from(dir)
     local path = psi.path.join(dir, name)
     local ok, ext = pcall(dofile, path)
     if not ok then
-      io.stderr:write("psi: extension " .. path .. " failed to load: " .. tostring(ext) .. "\n")
+      psi.notice.error(
+        "psi: extension " .. path .. " failed to load: " .. tostring(ext),
+        { source = "extension-loader" }
+      )
     elseif type(ext) == "function" then
       local inv_ok, inv_err = pcall(ext, psi)
       if not inv_ok then
-        io.stderr:write(
-          "psi: extension " .. path .. " failed during init: " .. tostring(inv_err) .. "\n"
+        psi.notice.error(
+          "psi: extension " .. path .. " failed during init: " .. tostring(inv_err),
+          { source = "extension-loader" }
         )
       end
     end

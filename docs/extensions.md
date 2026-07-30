@@ -62,7 +62,9 @@ return function(psi)
 
   -- subscribe to a lifecycle event
   psi.events.on("turn-end", function(payload)
-    io.stderr:write(("[hello] turn ended, %d chars\n"):format(#(payload.text or "")))
+    psi.notice.info(
+      ("[hello] turn ended, %d chars"):format(#(payload.text or "")),
+      { source = "hello-extension" })
   end)
 
   -- add a slash command
@@ -134,7 +136,7 @@ end
 | `psi.events.handlers(event)` | Introspection; shallow copy. |
 
 Semantics: synchronous dispatch in registration order, handler return
-values ignored, errors swallowed per handler with a stderr log line.
+values ignored, errors swallowed per handler with a structured diagnostic.
 Designed so adding a subscriber never interferes with rendering or
 session state.
 
@@ -289,13 +291,20 @@ piped through the hook chain in TUI (streamed tokens go straight to
 the assistant-entry renderer); use the `assistant-text-delta` event
 via `psi.events.on` if you need per-delta visibility.
 
-**Do not use `io.stderr:write` from a hook running during a TUI turn.** During a
-turn, the TUI redirects stderr to `$XDG_STATE_HOME/psi/debug.log` (default
-`~/.local/state/psi/debug.log`) so provider/curl output cannot corrupt the ANSI
-TUI. Bytes written during the turn go to the log, not the transcript. To show
-text in the transcript, return it from a render hook. To show text in the status
-bar, register a `psi.tui.register_status_hook`. For diagnostics, tail the log in
-another pane:
+**Do not write directly to stdout or stderr while the TUI is active.** The TUI
+is the sole terminal writer. It quarantines unstructured stdout and stderr for
+its whole active lifetime in `$XDG_STATE_HOME/psi/debug.log` (default
+`~/.local/state/psi/debug.log`, mode `0600`) so extension, provider, or library
+output cannot invalidate the renderer's cursor state. Quarantined bytes are
+preserved in the log, not shown in the transcript.
+
+Use `psi.notice.info(text)`, `psi.notice.warn(text)`, or
+`psi.notice.error(text)` for user-visible diagnostics. The TUI turns those into
+transcript entries and coalesces the repaint; non-TUI frontends write them to
+stderr. The notice sink is frontend infrastructure rather than an event
+subscriber, so it remains attached across `/reload`. Return normal render-hook
+output from the hook, or register a `psi.tui.register_status_hook` for short
+status text. To inspect quarantined output in another pane:
 
 ```sh
 tail -F ~/.local/state/psi/debug.log
@@ -447,10 +456,11 @@ Subscribe pattern:
 
 ```lua
 psi.events.on("after-provider-response", function(p)
-  io.stderr:write(("turn cost: in=%d out=%d cacheRead=%d\n"):format(
+  psi.notice.info(("turn cost: in=%d out=%d cacheRead=%d"):format(
     p.usage.input_tokens or 0,
     p.usage.output_tokens or 0,
-    p.usage.cache_read_input_tokens or 0))
+    p.usage.cache_read_input_tokens or 0),
+    { source = "usage-extension" })
 end)
 ```
 

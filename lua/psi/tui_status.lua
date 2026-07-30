@@ -7,6 +7,7 @@
 local ansi = require("psi.ansi")
 local context = require("psi.context")
 local keybindings = require("psi.keybindings")
+local notice = require("psi.notice")
 local prelude = require("psi.prelude")
 local settings = require("psi.settings_manager")
 local tui_text = require("psi.tui_text")
@@ -127,7 +128,10 @@ function M.handle_command_action(action_value, action_context)
   end
   local ok, handled = pcall(handler, action_value.payload, action_context or {})
   if not ok then
-    io.stderr:write("psi: TUI command action handler failed: " .. tostring(handled) .. "\n")
+    notice.error(
+      "psi: TUI command action handler failed: " .. tostring(handled),
+      { source = "tui-extension" }
+    )
     return true
   end
   return handled ~= false
@@ -151,7 +155,10 @@ function M.run_startup_hooks(startup_context)
   for name, fn in pairs(startup_hooks) do
     local ok, err = pcall(fn, startup_context or {})
     if not ok then
-      io.stderr:write("psi: TUI startup hook " .. name .. " failed: " .. tostring(err) .. "\n")
+      notice.error(
+        "psi: TUI startup hook " .. name .. " failed: " .. tostring(err),
+        { source = "tui-extension" }
+      )
     end
   end
 end
@@ -193,7 +200,10 @@ function M.write_clipboard(text, clipboard_context)
       return true
     end
     if not ok then
-      io.stderr:write("psi: TUI clipboard writer failed: " .. tostring(handled) .. "\n")
+      notice.error(
+        "psi: TUI clipboard writer failed: " .. tostring(handled),
+        { source = "tui-extension" }
+      )
     end
   end
   return false
@@ -216,7 +226,10 @@ function M.handle_key(arg)
       return result
     end
     if not ok then
-      io.stderr:write("psi: TUI key handler failed: " .. tostring(result) .. "\n")
+      notice.error(
+        "psi: TUI key handler failed: " .. tostring(result),
+        { source = "tui-extension" }
+      )
     end
   end
 

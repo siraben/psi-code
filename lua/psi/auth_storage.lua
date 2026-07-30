@@ -14,6 +14,7 @@
 
 local prelude = require("psi.prelude")
 local credential = require("psi.credential")
+local notice = require("psi.notice")
 
 local M = {}
 
@@ -42,14 +43,16 @@ local function check_permissions(path)
   end
   if mode % 64 > 0 then
     if psi.file_chmod and psi.file_chmod(path, 384) then -- 0600
-      io.stderr:write(
-        "psi: warning: " .. path .. " was group/world-readable; permissions tightened to 0600\n"
+      notice.warn(
+        "psi: warning: " .. path .. " was group/world-readable; permissions tightened to 0600",
+        { source = "auth-storage", code = "insecure-auth-permissions" }
       )
     else
-      io.stderr:write(
+      notice.warn(
         "psi: warning: "
           .. path
-          .. " is group/world-readable and permissions could not be tightened\n"
+          .. " is group/world-readable and permissions could not be tightened",
+        { source = "auth-storage", code = "insecure-auth-permissions" }
       )
     end
   end

@@ -23,6 +23,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -229,7 +230,7 @@ def _pty_screen_text(raw: bytes, cols: int, rows: int) -> str:
     stream.feed(raw.decode("utf-8", "replace"))
     return "\n".join(screen.display)
 
-def run_pty(cmd: list[str], scenario: list[tuple[str, float]],
+def run_pty(cmd: list[str], scenario: list[tuple[object, float]],
             env_extra: dict | None = None, idle_drain: float = 2.0,
             cwd: Path | None = None, cols: int = DEFAULT_PTY_COLS,
             rows: int = DEFAULT_PTY_ROWS) -> PtyOutput:
@@ -283,7 +284,9 @@ def run_pty(cmd: list[str], scenario: list[tuple[str, float]],
     try:
         for data, delay in scenario:
             drain(delay)
-            if data:
+            if callable(data):
+                data(child)
+            elif data:
                 child.send(data)
         drain(idle_drain)
         timed_out = child.isalive()
@@ -345,6 +348,214 @@ def t_tui_default(psi: Psi):
     )
     raw.assert_clean_exit()
     assert_bytes_contains(raw, b"xterm 256 background swatches", "bare psi did not launch TUI")
+
+
+@test("mode/tui_auth_permission_warning_owned")
+def t_tui_auth_permission_warning_owned(psi: Psi):
+    project = psi.tmp / "tui-auth-warning"
+    project.mkdir()
+    auth_file = project / "auth.json"
+    auth_file.write_text("{}")
+    auth_file.chmod(0o644)
+
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [
+            (b"", 0.8),
+            (b"draft remains intact", 0.8),
+            (b"\x15/quit\r", 0.8),
+        ],
+        cwd=project,
+        rows=32,
+        env_extra={
+            "PSI_AUTH_FILE": "auth.json",
+            "PSI_TUI_INLINE_MAX_ROWS": "24",
+            "NO_COLOR": "1",
+        },
+        idle_drain=1.0,
+    )
+    raw.assert_clean_exit()
+    assert_equals(auth_file.stat().st_mode & 0o777, 0o600, "auth mode")
+    assert_contains(
+        raw.screen_text,
+        "psi: warning: auth.json was group/world-readable; permissions tightened to 0600",
+        "structured auth warning",
+    )
+    assert_bytes_contains(raw, b"draft remains intact", "draft was not rendered")
+    assert_equals(
+        raw.count(b"psi: warning: auth.json was group/world-readable"),
+        1,
+        "auth warning render count",
+    )
+    warning_line = next(
+        (line for line in raw.screen_text.splitlines() if "psi: warning: auth.json" in line),
+        "",
+    )
+    assert_not_contains(warning_line, "draft remains intact", "warning/input row separation")
+
+
+@test("mode/tui_extension_stdio_is_quarantined")
+def t_tui_extension_stdio_is_quarantined(psi: Psi):
+    project = psi.tmp / "tui-noisy-extension"
+    extension_dir = project / ".psi" / "extensions"
+    extension_dir.mkdir(parents=True)
+    (extension_dir / "noisy.lua").write_text(
+        "return function(psi)\n"
+        "  psi.commands.register('noisy', function()\n"
+        "    print('RAW_STDOUT_SENTINEL')\n"
+        "    io.stderr:write('RAW_STDERR_SENTINEL\\n')\n"
+        "    psi.log('RAW_LOG_SENTINEL')\n"
+        "    return psi.records.new_command_action('print', 'noise handled')\n"
+        "  end)\n"
+        "end\n"
+    )
+    state = psi.tmp / "tui-noisy-state"
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [(b"", 0.8), (b"/noisy\r", 0.8), (b"/quit\r", 0.8)],
+        cwd=project,
+        env_extra={"XDG_STATE_HOME": str(state), "NO_COLOR": "1"},
+        idle_drain=1.0,
+    )
+    raw.assert_clean_exit()
+    assert_bytes_contains(raw, b"noise handled", "structured command output")
+    assert_bytes_not_contains(raw, b"RAW_STDOUT_SENTINEL", "raw extension stdout leaked")
+    assert_bytes_not_contains(raw, b"RAW_STDERR_SENTINEL", "raw extension stderr leaked")
+    assert_bytes_not_contains(raw, b"RAW_LOG_SENTINEL", "psi.log leaked")
+    debug_log = state / "psi" / "debug.log"
+    assert_true(debug_log.exists(), "TUI debug log was not created")
+    logged = debug_log.read_text()
+    assert_contains(logged, "RAW_STDOUT_SENTINEL", "quarantined stdout")
+    assert_contains(logged, "RAW_STDERR_SENTINEL", "quarantined stderr")
+    assert_contains(logged, "RAW_LOG_SENTINEL", "quarantined psi.log")
+    assert_equals(debug_log.stat().st_mode & 0o777, 0o600, "debug log mode")
+
+
+@test("mode/tui_chat_auth_permission_warning_owned")
+def t_tui_chat_auth_permission_warning_owned(psi: Psi):
+    project = psi.tmp / "tui-chat-auth-warning"
+    project.mkdir()
+    auth_file = project / "auth.json"
+    auth_file.write_text("{}")
+    auth_file.chmod(0o644)
+    raw = run_pty(
+        [psi.binary, "--chat"],
+        [(b"", 0.8), (b"chat draft intact", 0.8), (b"\x15/quit\r", 0.8)],
+        cwd=project,
+        rows=32,
+        env_extra={"PSI_AUTH_FILE": "auth.json", "NO_COLOR": "1"},
+        idle_drain=1.0,
+    )
+    raw.assert_clean_exit()
+    assert_contains(
+        raw.screen_text,
+        "psi: warning: auth.json was group/world-readable; permissions tightened to 0600",
+        "chat structured auth warning",
+    )
+    assert_bytes_contains(raw, b"chat draft intact", "chat draft was not rendered")
+
+
+@test("mode/tui_notice_survives_reload")
+def t_tui_notice_survives_reload(psi: Psi):
+    project = psi.tmp / "tui-reload-notice"
+    extension_dir = project / ".psi" / "extensions"
+    extension_dir.mkdir(parents=True)
+    (extension_dir / "notice.lua").write_text(
+        "return function(psi)\n"
+        "  psi.commands.register('emit-notice', function()\n"
+        "    psi.notice.warn('RELOAD_NOTICE_SENTINEL')\n"
+        "    return psi.records.new_command_action('print', 'notice emitted')\n"
+        "  end)\n"
+        "end\n"
+    )
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [
+            (b"", 0.8),
+            (b"/reload\r", 0.8),
+            (b"/emit-notice\r", 0.8),
+            (b"/quit\r", 0.8),
+        ],
+        cwd=project,
+        rows=32,
+        env_extra={"PSI_TUI_INLINE_MAX_ROWS": "24", "NO_COLOR": "1"},
+        idle_drain=1.0,
+    )
+    raw.assert_clean_exit()
+    assert_contains(raw.screen_text, "RELOAD_NOTICE_SENTINEL", "notice after /reload")
+    assert_bytes_contains(raw, b"notice emitted", "reloaded command result")
+
+
+@test("mode/tui_external_editor_releases_and_reanchors")
+def t_tui_external_editor_releases_and_reanchors(psi: Psi):
+    editor = psi.tmp / "fake-editor"
+    editor.write_text(
+        "#!/bin/sh\n"
+        "printf 'EDITOR_STDOUT_SENTINEL\\n'\n"
+        "printf 'EDITOR_STDERR_SENTINEL\\n' >&2\n"
+        "printf 'edited prompt' > \"$1\"\n"
+    )
+    editor.chmod(0o755)
+    for args, layout in ((["--tui"], "frame"), (["--chat"], "chat")):
+        state = psi.tmp / f"tui-editor-state-{layout}"
+        raw = run_pty(
+            [psi.binary, *args],
+            [
+                (b"", 0.8),
+                (b"original prompt", 0.5),
+                (b"\x07", 1.0),
+                (b"\x15/quit\r", 0.8),
+            ],
+            rows=40,
+            env_extra={
+                "EDITOR": str(editor),
+                "XDG_STATE_HOME": str(state),
+                "PSI_TUI_INLINE_MAX_ROWS": "24",
+                "NO_COLOR": "1",
+            },
+            idle_drain=1.0,
+        )
+        raw.assert_clean_exit()
+        assert_bytes_contains(raw, b"EDITOR_STDOUT_SENTINEL", f"{layout} editor stdout boundary")
+        assert_bytes_contains(raw, b"EDITOR_STDERR_SENTINEL", f"{layout} editor stderr boundary")
+        assert_bytes_contains(raw, b"edited prompt", f"{layout} editor result was not repainted")
+        assert_contains(raw.screen_text, "EDITOR_STDOUT_SENTINEL", f"{layout} editor scrollback")
+        assert_contains(raw.screen_text, "EDITOR_STDERR_SENTINEL", f"{layout} editor stderr scrollback")
+        debug_log = state / "psi" / "debug.log"
+        logged = debug_log.read_text() if debug_log.exists() else ""
+        assert_not_contains(
+            logged, "EDITOR_STDOUT_SENTINEL", f"{layout} editor stdout was quarantined"
+        )
+        assert_not_contains(
+            logged, "EDITOR_STDERR_SENTINEL", f"{layout} editor stderr was quarantined"
+        )
+
+
+@test("mode/tui_suspend_resumes_and_reanchors")
+def t_tui_suspend_resumes_and_reanchors(psi: Psi):
+    def resume(child: pexpect.spawn) -> None:
+        os.kill(child.pid, signal.SIGCONT)
+
+    for args, layout in ((["--tui"], "frame"), (["--chat"], "chat")):
+        raw = run_pty(
+            [psi.binary, *args],
+            [
+                (b"", 0.8),
+                (b"suspend draft", 0.5),
+                (b"\x1a", 0.5),
+                (resume, 0.5),
+                (b"", 0.8),
+                (b"\x15/quit\r", 0.8),
+            ],
+            rows=32,
+            env_extra={"PSI_TUI_INLINE_MAX_ROWS": "24", "NO_COLOR": "1"},
+            idle_drain=1.0,
+        )
+        raw.assert_clean_exit()
+        assert_true(
+            raw.count(b"suspend draft") >= 2,
+            f"{layout} suspend did not repaint the preserved draft",
+        )
 
 @test("mode/tui_rainbow_after_normal_insert")
 def t_tui_rainbow_after_normal_insert(psi: Psi):
@@ -1095,7 +1306,7 @@ return table.concat({
   tostring(d.first_line_width)
 }, "|")
 """)
-    assert_equals(out, "1|0|1|false|0|true|1|0|0|0|0|1|true|diff|80",
+    assert_equals(out, "1|0|1|false|0|true|1|0|0|0|0|1|true|diff|79",
                   "stable-size redraw uses changed-row diff output")
 
 
@@ -1113,17 +1324,14 @@ return table.concat({lines[1], lines[2], tostring(cursor.row), tostring(cursor.c
 def t_tui_renderer_full_redraw_clears_rows(psi: Psi):
     out = psi.eval(r"""
 local r = require("psi.tui_renderer")
-local old_frame = psi.tui_render_frame
-local old_write = psi.stdout_write
-local frame
-psi.tui_render_frame = function(f) frame = f end
-psi.stdout_write = function() end
+local old_write = psi.tui_write
+local writes = {}
+psi.tui_write = function(text) writes[#writes + 1] = text or "" end
 local renderer = r.new()
 renderer:render({lines={"abcdef"}, width=10, height=1})
 renderer:render({lines={"x"}, width=10, height=1, force_full=true})
-psi.tui_render_frame = old_frame
-psi.stdout_write = old_write
-return tostring((frame or ""):find("\27[2K", 1, true) ~= nil)
+psi.tui_write = old_write
+return tostring((writes[2] or ""):find("\27[2K", 1, true) ~= nil)
 """)
     assert_equals(out, "true", "full redraw should clear rows before shorter lines")
 
@@ -1132,44 +1340,41 @@ return tostring((frame or ""):find("\27[2K", 1, true) ~= nil)
 def t_tui_renderer_moves_cursor_without_line_changes(psi: Psi):
     out = psi.eval(r"""
 local r = require("psi.tui_renderer")
-local old_frame = psi.tui_render_frame
-local old_write = psi.stdout_write
+local old_write = psi.tui_write
 local writes = {}
-psi.tui_render_frame = function() end
-psi.stdout_write = function(text) writes[#writes + 1] = text or "" end
+psi.tui_write = function(text) writes[#writes + 1] = text or "" end
 local renderer = r.new()
 renderer:render({lines={"abc"}, width=10, height=1, cursor={row=1, col=1, visible=true}})
 renderer:render({lines={"abc"}, width=10, height=1, cursor={row=1, col=3, visible=true}})
-psi.tui_render_frame = old_frame
-psi.stdout_write = old_write
+psi.tui_write = old_write
 return table.concat({
   renderer.last_mode,
   tostring(#writes),
-  tostring((writes[1] or ""):find("\27[1;3H", 1, true) ~= nil)
+  tostring((writes[2] or ""):find("\27[3G", 1, true) ~= nil),
+  tostring((writes[2] or ""):find("\27[2K", 1, true) == nil)
 }, "|")
 """)
-    assert_equals(out, "diff|1|true", "cursor-only redraw should move hardware cursor")
+    assert_equals(out, "diff|2|true|true", "cursor-only redraw should move hardware cursor")
 
 
 @test("tui/renderer_applies_cursor_marker_and_resets")
 def t_tui_renderer_applies_cursor_marker_and_resets(psi: Psi):
     out = psi.eval(r"""
 local r = require("psi.tui_renderer")
-local old_frame = psi.tui_render_frame
-local old_write = psi.stdout_write
-local frame, row, col, visible
-psi.tui_render_frame = function(f, r0, c0, v0) frame, row, col, visible = f, r0, c0, v0 end
-psi.stdout_write = function() end
+local old_write = psi.tui_write
+local writes = {}
+psi.tui_write = function(text) writes[#writes + 1] = text or "" end
 r.new():render({lines={"ab" .. r.cursor_marker() .. "cd"}, width=10, height=1, cursor={visible=true}})
-psi.tui_render_frame = old_frame
-psi.stdout_write = old_write
+psi.tui_write = old_write
+local frame = writes[1] or ""
 return table.concat({
   tostring(frame:find(r.cursor_marker(), 1, true) == nil),
   tostring(frame:find("\27]8;;\7", 1, true) ~= nil),
-  tostring(row), tostring(col), tostring(visible)
+  tostring(frame:find("\27[3G", 1, true) ~= nil),
+  tostring(frame:find("\27[?25h", 1, true) ~= nil)
 }, "|")
 """)
-    assert_equals(out, "true|true|1|3|true",
+    assert_equals(out, "true|true|true|true",
                   "renderer strips marker, appends line reset, and uses marker cursor")
 
 
@@ -1177,17 +1382,14 @@ return table.concat({
 def t_tui_renderer_uses_discrete_dirty_ranges(psi: Psi):
     out = psi.eval(r"""
 local r = require("psi.tui_renderer")
-local old_frame = psi.tui_render_frame
-local old_write = psi.stdout_write
+local old_write = psi.tui_write
 local writes = {}
-psi.tui_render_frame = function() end
-psi.stdout_write = function(text) writes[#writes + 1] = text or "" end
+psi.tui_write = function(text) writes[#writes + 1] = text or "" end
 local renderer = r.new()
 renderer:render({lines={"a", "b", "c", "d"}, width=10, height=4})
 renderer:render({lines={"x", "b", "y", "d"}, width=10, height=4})
-psi.tui_render_frame = old_frame
-psi.stdout_write = old_write
-local out = writes[1] or ""
+psi.tui_write = old_write
+local out = writes[2] or ""
 local ranges = renderer.last_changed_ranges
 return table.concat({
   renderer.last_mode,
@@ -1196,34 +1398,66 @@ return table.concat({
   tostring(ranges[1] and ranges[1].last),
   tostring(ranges[2] and ranges[2].first),
   tostring(ranges[2] and ranges[2].last),
-  tostring(out:find("\27[1;1H", 1, true) ~= nil),
-  tostring(out:find("\27[2;1H", 1, true) == nil),
-  tostring(out:find("\27[3;1H", 1, true) ~= nil)
+  tostring(out:find("\27[2B", 1, true) ~= nil),
+  tostring(select(2, out:gsub("\27%[2K", "")) == 2),
+  tostring(out:find("\27%[%d+;%d+H") == nil)
 }, "|")
 """)
     assert_equals(out, "diff|2|1|1|3|3|true|true|true",
                   "renderer should emit discrete dirty row ranges")
 
 
-@test("tui/renderer_offsets_viewport_top")
-def t_tui_renderer_offsets_viewport_top(psi: Psi):
+@test("tui/renderer_first_paint_is_relative")
+def t_tui_renderer_first_paint_is_relative(psi: Psi):
     out = psi.eval(r"""
 local r = require("psi.tui_renderer")
-local old_frame = psi.tui_render_frame
-local old_write = psi.stdout_write
-local frame, row, col
-psi.tui_render_frame = function(f, r0, c0) frame, row, col = f, r0, c0 end
-psi.stdout_write = function() end
-r.new():render({lines={"abc"}, width=10, height=1, top=9, cursor={row=1, col=2, visible=true}})
-psi.tui_render_frame = old_frame
-psi.stdout_write = old_write
+local old_write = psi.tui_write
+local writes = {}
+psi.tui_write = function(text) writes[#writes + 1] = text or "" end
+r.new():render({lines={"abc", "def"}, width=10, height=2, top=9, cursor={row=1, col=2, visible=true}})
+psi.tui_write = old_write
+local frame = writes[1] or ""
 return table.concat({
-  tostring((frame or ""):find("\27[9;1H", 1, true) ~= nil),
-  tostring(row),
-  tostring(col)
+  tostring(frame:find("\27%[%d+;%d+H") == nil),
+  tostring(frame:find("\r\27[J", 1, true) ~= nil),
+  tostring(frame:find("\r\n", 1, true) ~= nil)
 }, "|")
 """)
-    assert_equals(out, "true|9|2", "renderer should offset local frame rows by viewport top")
+    assert_equals(out, "true|true|true", "first paint should anchor at the current cursor")
+
+
+@test("tui/renderer_forced_full_preserves_anchor")
+def t_tui_renderer_forced_full_preserves_anchor(psi: Psi):
+    out = psi.eval(r"""
+local r = require("psi.tui_renderer")
+local old_write = psi.tui_write
+local writes = {}
+psi.tui_write = function(text) writes[#writes + 1] = text or "" end
+local renderer = r.new()
+local frame = {
+  lines = {"one", "two", "three"},
+  width = 10,
+  height = 3,
+  cursor = {row=3, col=1, visible=true},
+}
+renderer:render(frame)
+frame.force_full = true
+renderer:render(frame)
+r.reset(renderer, "external-owner")
+frame.force_full = false
+renderer:render(frame)
+psi.tui_write = old_write
+return table.concat({
+  tostring((writes[2] or ""):find("\27[2A\r", 1, true) ~= nil),
+  tostring((writes[3] or ""):find("\27[2A\r", 1, true) == nil),
+  tostring((writes[3] or ""):find("\r\27[J", 1, true) ~= nil)
+}, "|")
+""")
+    assert_equals(
+        out,
+        "true|true|true",
+        "forced repaint should keep the anchor while external reset reanchors",
+    )
 
 
 @test("tui/hardware_cursor_uses_input_marker")

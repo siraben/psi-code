@@ -774,6 +774,9 @@ local function entry_prefixes(entry)
   if kind == "error" then
     return "error: ", EMPTY
   end
+  if kind == "warning" then
+    return EMPTY, EMPTY
+  end
   if kind == "compaction" then
     return "— ", EMPTY
   end
@@ -844,7 +847,8 @@ local function new_state(opts, runtime)
     clipboard = "",
     pending_key = nil,
     block_edit = nil,
-    force_physical_clear = false,
+    force_full_redraw = false,
+    reanchor_renderer = false,
     busy = false,
     busy_label = nil,
     busy_phase = 0,
@@ -862,7 +866,7 @@ local function new_state(opts, runtime)
     height = viewport_height,
     terminal_height = height,
     ui = tui_app.new(),
-    renderer = tui_renderer.new({ line_primitive = true }),
+    renderer = tui_renderer.new(),
     input_layout = default_input_layout(viewport_height),
     tui_caps = caps,
     streaming_assistant_index = nil,
@@ -1941,6 +1945,9 @@ local function style_line(line)
   if line.kind == "error" then
     return ansi.bold(ansi.red(line.text))
   end
+  if line.kind == "warning" then
+    return ansi.yellow(line.text)
+  end
   if line.kind == "ansi" then
     return line.text
   end
@@ -2136,7 +2143,20 @@ function chat.footer_bar_line(state, status_arg, frame_width)
 end
 
 local function redraw(state)
+  if type(state.flush_notices) == "function" then
+    state.flush_notices()
+  end
   if state.layout_mode == chat.CHAT then
+    if state.reanchor_renderer then
+      -- The shell/editor left the cursor at a location unrelated to our old
+      -- live region. Forget that anchor and let chat.redraw start at the
+      -- current cursor, preserving all external output above it.
+      state.chat_first_paint = false
+      state.chat_cursor_offset = 0
+      state.chat_live_rows = 0
+    end
+    state.force_full_redraw = false
+    state.reanchor_renderer = false
     return chat.redraw(state)
   end
   local terminal_width, terminal_height = current_size()
@@ -2155,14 +2175,19 @@ local function redraw(state)
 
   state.scroll_offset = clamp(state.scroll_offset, 0, max_scroll)
 
-  if state.force_physical_clear then
-    psi.tui_clear(true)
-    tui_renderer.reset(state.renderer)
+  if state.reanchor_renderer then
+    -- External terminal owners (suspend/editor) invalidate our hardware
+    -- cursor, but their output belongs in scrollback. Re-anchor the
+    -- cursor-relative renderer instead of clearing the physical screen.
+    tui_renderer.reset(state.renderer, "external-owner")
     if state.ui and type(state.ui.request_render) == "function" then
       state.ui:request_render(true)
     end
   end
-  frame_width = math.max(1, state.width)
+  -- Keep one physical column unused. Writing exactly terminal width leaves
+  -- many terminals in pending-wrap state, so the following CRLF can advance
+  -- two rows and invalidate relative cursor accounting.
+  frame_width = math.max(1, state.width - FRAME_WIDTH_MARGIN)
   cwd = psi.cwd() or "."
   local ws_cache = state.workspace_bar_cache
   if ws_cache == nil or ws_cache.cwd ~= cwd or ws_cache.width ~= frame_width then
@@ -2277,15 +2302,13 @@ local function redraw(state)
 
   local frame_lines = state.ui:render(frame_width, math.max(1, state.height or 1))
   local frame_height = #frame_lines
-  local viewport_top = math.max(1, (state.terminal_height or state.height) - frame_height + 1)
-  local force_full = state.force_physical_clear
+  local force_full = state.force_full_redraw or state.reanchor_renderer
   if state.ui and type(state.ui.consume_force_full) == "function" then
     force_full = force_full or state.ui:consume_force_full()
   end
   state.renderer = state.renderer:render({
     width = frame_width,
     height = frame_height,
-    top = viewport_top,
     lines = frame_lines,
     cursor = {
       row = cursor_row,
@@ -2294,7 +2317,8 @@ local function redraw(state)
     },
     force_full = force_full,
   })
-  state.force_physical_clear = false
+  state.force_full_redraw = false
+  state.reanchor_renderer = false
   if state.ui and type(state.ui.consume_dirty) == "function" then
     state.ui:consume_dirty()
   end
@@ -2741,7 +2765,7 @@ local function clear_buffer(state)
   state.block_edit = nil
   state.editor_mode = "insert"
   state.pending_key = nil
-  state.force_physical_clear = true
+  state.force_full_redraw = true
   state.dirty = true
 end
 
@@ -3337,7 +3361,7 @@ local function open_external_editor(state)
   set_status(state, "editing in " .. editor, false)
   redraw(state)
   local status, err = psi.tui_external_editor(path, editor)
-  state.force_physical_clear = true
+  state.reanchor_renderer = true
   if status == nil then
     set_status(state, tostring(err or "external editor failed"), true)
     state.dirty = true
@@ -4048,6 +4072,8 @@ local function submit(state, queue_kind)
   set_status(state, "", false)
   redraw(state)
   local turn_ok = run_turn(state, line)
+  finish_streaming_assistant(state)
+  state.streaming_thinking_index = nil
   state.busy = false
   state.busy_kind = nil
   state.busy_label = nil
@@ -4056,7 +4082,7 @@ local function submit(state, queue_kind)
   state.busy_next_frame_at = nil
   state.busy_started_at = nil
   if not turn_ok then
-    state.force_physical_clear = true
+    state.force_full_redraw = true
   end
   state.dirty = true
 end
@@ -4213,7 +4239,7 @@ local function apply_action(state, action, arg)
     return
   end
   if action == "redraw" then
-    state.force_physical_clear = true
+    state.force_full_redraw = true
     state.dirty = true
     return
   end
@@ -4231,6 +4257,7 @@ local function apply_action(state, action, arg)
   end
   if action == "suspend" then
     psi.tui_suspend()
+    state.reanchor_renderer = true
     state.dirty = true
     return
   end
@@ -4591,6 +4618,51 @@ choose_session_tui = function(current_infos)
 end
 
 function M.run(opts)
+  local notice = require("psi.notice")
+  local pending_notices = notice.new_queue()
+  local state = nil
+
+  local function queue_notice(record)
+    pending_notices:push(record)
+  end
+
+  local function can_append_notice()
+    return state ~= nil
+      and not state.busy
+      and state.streaming_assistant_index == nil
+      and state.streaming_thinking_index == nil
+  end
+
+  local function append_notice(record)
+    local kind = record.level == "error" and "error"
+      or (record.level == "warn" and "warning" or "info")
+    add_entry(state, kind, record.text)
+  end
+
+  local function flush_notices()
+    if not can_append_notice() then
+      return
+    end
+    local queued, overflow = pending_notices:drain()
+    for _, record in ipairs(queued) do
+      append_notice(record)
+    end
+    if overflow then
+      append_notice({
+        level = "warn",
+        text = "psi: warning: additional diagnostics were suppressed",
+      })
+    end
+  end
+
+  local notice_token = notice.set_sink(function(record)
+    queue_notice(record)
+    if state ~= nil then
+      -- The owner loop coalesces any burst into its next render. Never
+      -- re-enter rendering from a diagnostic callback.
+      state.dirty = true
+    end
+  end)
   local runtime = agent_runtime.new(opts)
 
   local layout_mode = chat.resolve_mode(opts)
@@ -4613,7 +4685,12 @@ function M.run(opts)
     if alt_screen_active then
       chat.set_alt_screen(false)
     end
-    io.stderr:write("failed to load session file: " .. tostring(err) .. "\n")
+    notice.clear_sink(notice_token)
+    if type(psi.tui_write) == "function" then
+      psi.tui_write("\rfailed to load session file: " .. tostring(err) .. "\r\n")
+    else
+      io.stderr:write("failed to load session file: " .. tostring(err) .. "\n")
+    end
     return false
   end
 
@@ -4622,28 +4699,11 @@ function M.run(opts)
     alt_screen_active = false
   end
 
-  local state = new_state(opts, runtime)
+  state = new_state(opts, runtime)
   state.layout_mode = layout_mode
+  state.flush_notices = flush_notices
   rebuild_from_session(state)
-
-  -- Direct provider writes corrupt the alt-screen paint; this subscriber
-  -- also disables psi.notice's io.stderr fallback while the TUI runs.
-  if psi.events and psi.events.on then
-    psi.events.on("notice", function(payload)
-      if type(payload) ~= "table" then
-        return
-      end
-      local text = tostring(payload.text or "")
-      if text == "" then
-        return
-      end
-      local is_error = payload.level == "error" or payload.level == "warn"
-      add_entry(state, is_error and "error" or "info", text)
-      if state.running then
-        redraw(state)
-      end
-    end)
-  end
+  flush_notices()
 
   local success, runtime_err = xpcall(function()
     psi.tui_set_tick_handler(function()
@@ -4668,19 +4728,35 @@ function M.run(opts)
   psi.tui_set_tick_handler(nil)
   psi.tui_set_tool_progress_handler(nil)
   runtime:shutdown()
+  -- Teardown diagnostics still belong to the transcript. Close any mutable
+  -- suffix before draining so chat mode cannot commit a streaming entry
+  -- underneath a later notice, and no queued record is silently discarded.
+  state.busy = false
+  finish_streaming_assistant(state)
+  state.streaming_thinking_index = nil
+  if not success then
+    notice.error("TUI runtime error: " .. tostring(runtime_err), { source = "tui-runtime" })
+  end
+  flush_notices()
+  if state.dirty or (state.ui and state.ui.dirty) then
+    redraw(state)
+  end
+  notice.clear_sink(notice_token)
 
   if state.layout_mode == chat.CHAT then
     -- Drop cursor onto a fresh line below the input box so the shell
     -- prompt comes back without overwriting our last paint.
     if type(psi.tui_write) == "function" then
-      psi.tui_write("\27[0m\27[?25h\n")
+      psi.tui_write("\27[0m\27[?25h\r\n")
     end
-  elseif alt_screen_active then
+  else
+    tui_renderer.finish(state.renderer)
+  end
+  if alt_screen_active then
     chat.set_alt_screen(false)
   end
 
   if not success then
-    io.stderr:write("TUI runtime error: " .. tostring(runtime_err) .. "\n")
     return false
   end
   return true
@@ -4886,7 +4962,8 @@ function M._debug_busy_animation_frames(times)
       clipboard = "",
       pending_key = nil,
       block_edit = nil,
-      force_physical_clear = false,
+      force_full_redraw = false,
+      reanchor_renderer = false,
       busy = true,
       busy_label = "thinking",
       busy_phase = 0,
@@ -4986,7 +5063,8 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     clipboard_writers_disabled = debug_options.clipboard_writers ~= true,
     pending_key = nil,
     block_edit = nil,
-    force_physical_clear = false,
+    force_full_redraw = false,
+    reanchor_renderer = false,
     busy = not not debug_options.busy,
     busy_kind = debug_options.busy_kind or (debug_options.busy and "agent" or nil),
     running = true,
@@ -5051,7 +5129,8 @@ function M._debug_consume_queued_preview(input, queued_text)
     pending_key = nil,
     queue_nav_index = 1,
     block_edit = nil,
-    force_physical_clear = false,
+    force_full_redraw = false,
+    reanchor_renderer = false,
     busy = true,
     running = true,
     scroll_offset = 0,
@@ -5163,6 +5242,7 @@ function M._debug_redraw_counts(input, debug_options)
     "tui_render_lines",
     "tui_set_cursor",
     "tui_refresh",
+    "tui_write",
     "stdout_write",
     "cwd",
     "session_id",
@@ -5271,6 +5351,9 @@ function M._debug_redraw_counts(input, debug_options)
   psi.stdout_write = function(text)
     calls.writes[#calls.writes + 1] = text or ""
   end
+  psi.tui_write = function(text)
+    calls.writes[#calls.writes + 1] = text or ""
+  end
   psi.tui_set_cursor = function()
     calls.cursor_sets = calls.cursor_sets + 1
   end
@@ -5300,7 +5383,8 @@ function M._debug_redraw_counts(input, debug_options)
       clipboard = "",
       pending_key = nil,
       block_edit = nil,
-      force_physical_clear = false,
+      force_full_redraw = false,
+      reanchor_renderer = false,
       busy = true,
       busy_label = "working",
       busy_phase = 1,
@@ -5316,7 +5400,7 @@ function M._debug_redraw_counts(input, debug_options)
       width = debug_width,
       height = inline_viewport_height(debug_height),
       terminal_height = debug_height,
-      renderer = tui_renderer.new({ line_primitive = true }),
+      renderer = tui_renderer.new(),
       input_layout = default_input_layout(inline_viewport_height(debug_height)),
       tui_caps = { raw_ansi = false },
       streaming_assistant_index = nil,
@@ -5333,14 +5417,14 @@ function M._debug_redraw_counts(input, debug_options)
     refresh_input_layout(state)
     redraw(state)
     local rows = layout_rows(state)
-    local first_frames = #calls.frames
-    local first_frame = calls.frames[1] and calls.frames[1].frame or ""
+    local first_frames = state.renderer and state.renderer.full_redraws or 0
+    local first_frame = calls.writes[1] or ""
     local first_line_width = 0
-    if calls.line_frames[1] and calls.line_frames[1].lines then
-      first_line_width = tui_text.visible_width(calls.line_frames[1].lines[1] or "")
+    if state.renderer and state.renderer.previous_lines then
+      first_line_width = tui_text.visible_width(state.renderer.previous_lines[1] or "")
     end
-    local first_visible = calls.frames[1] and calls.frames[1].visible or false
-    local first_col = calls.frames[1] and calls.frames[1].col or nil
+    local first_visible = state.renderer and state.renderer.previous_cursor_visible or false
+    local first_col = state.renderer and state.renderer.previous_cursor_col or nil
     reset_calls()
     state.busy_tick = 1
     state.dirty = true
@@ -5363,12 +5447,13 @@ function M._debug_redraw_counts(input, debug_options)
     state.busy_tick = 2
     state.dirty = true
     redraw(state)
-    local stale_clears = 0
+    local stale_clears
     local stale_frame = calls.frames[1] and calls.frames[1].frame or ""
     local stale_write = calls.writes[1] or ""
     local stale_output = stale_frame ~= "" and stale_frame or stale_write
     local stale_top = calls.line_frames[1] and tonumber(calls.line_frames[1].top) or 1
     local line_clears = stale_output:find("\27%[2K", 1, false) ~= nil and 1 or 0
+    stale_clears = line_clears
     for row = rows.transcript_start, rows.input_start_row - 1 do
       local physical_row = stale_top + row - 1
       stale_clears = stale_clears

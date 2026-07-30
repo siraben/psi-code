@@ -39,5 +39,6 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv);
 void psi_cli_usage(const char *program_name);
 int psi_run_tui_mode(const struct psi_cli_options *options);
 int psi_run_print_mode_dispatch(const struct psi_cli_options *options);
+void psi_tui_write_terminal(const char *text, size_t length);
 
 #endif

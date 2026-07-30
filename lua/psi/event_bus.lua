@@ -9,6 +9,7 @@
 -- swallowed per handler with a stderr log line so one bad subscriber
 -- cannot take down an agent turn.
 
+local notice = require("psi.notice")
 local M = {}
 
 -- handlers[event] = { fn1, fn2, ... }
@@ -83,8 +84,9 @@ function M.emit(event, payload)
   for i = 1, n do
     local ok, err = pcall(snapshot[i], payload)
     if not ok then
-      io.stderr:write(
-        "psi.events: handler for '" .. tostring(event) .. "' failed: " .. tostring(err) .. "\n"
+      notice.error(
+        "psi.events: handler for '" .. tostring(event) .. "' failed: " .. tostring(err),
+        { source = "event-bus" }
       )
     end
   end

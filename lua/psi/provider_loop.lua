@@ -7,6 +7,7 @@
 
 local context = require("psi.context")
 local control = require("psi.agent_control")
+local notice = require("psi.notice")
 local prelude = require("psi.prelude")
 local transform = require("psi.transform_messages")
 local session_mod = require("psi.session_manager")
@@ -377,7 +378,7 @@ function M.run_turn(opts, cfg)
         if cfg.save_failed_partial then
           cfg.save_failed_partial(state, model, "error", emsg)
         end
-        io.stderr:write(cfg.provider_name .. ": " .. emsg .. "\n")
+        notice.error(cfg.provider_name .. ": " .. emsg, { source = "provider-loop" })
         return false, emsg
       end
 
@@ -432,7 +433,7 @@ function M.run_turn(opts, cfg)
         session_mod.save()
       end
       if not aborted then
-        io.stderr:write(cfg.provider_name .. ": " .. emsg .. "\n")
+        notice.error(cfg.provider_name .. ": " .. emsg, { source = "provider-loop" })
       end
       return false, aborted and reason or emsg
     end
@@ -445,14 +446,14 @@ function M.run_turn(opts, cfg)
         cfg.persist(state, model, content, tool_calls, "error", emsg)
         session_mod.save()
       end
-      io.stderr:write(emsg .. "\n")
+      notice.error(emsg, { source = "provider-loop" })
       return false, emsg
     end
 
     if stream_error then
       cfg.persist(state, model, content, tool_calls, "error", stream_error)
       session_mod.save()
-      io.stderr:write(stream_error .. "\n")
+      notice.error(stream_error, { source = "provider-loop" })
       return false, stream_error
     end
 

@@ -89,7 +89,14 @@ function M.write_osc52(text, context)
   if not context.force and #encoded > max_bytes() then
     return false, "osc52 payload too large"
   end
-  psi.stdout_write(osc52_sequence_from_encoded(encoded, context.env))
+  local sequence = osc52_sequence_from_encoded(encoded, context.env)
+  if type(psi.tui_write) == "function" then
+    local ok = pcall(psi.tui_write, sequence)
+    if ok then
+      return true, "osc52"
+    end
+  end
+  psi.stdout_write(sequence)
   return true, "osc52"
 end
 

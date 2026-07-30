@@ -17,6 +17,7 @@
 -- and resumes. Same Lua code, two drivers.
 
 local M = {}
+local notice = require("psi.notice")
 local prelude = require("psi.prelude")
 
 -- The TUI (or any other host) can install a per-resume hook that
@@ -96,7 +97,7 @@ function M.run(fn, ...)
     if tick_hook ~= nil then
       local ok_tick, tick_err = pcall(tick_hook, req)
       if not ok_tick then
-        io.stderr:write("psi.sched tick hook error: " .. tostring(tick_err) .. "\n")
+        notice.error("psi.sched tick hook error: " .. tostring(tick_err), { source = "scheduler" })
       end
     end
     local resolver = M.resolvers[req.kind]

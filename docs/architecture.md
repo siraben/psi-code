@@ -215,13 +215,12 @@ Lua owns:
 C owns only the terminal boundary:
 
 - raw terminal bootstrap and teardown
+- a private terminal descriptor used only by TUI rendering
+- whole-lifetime stdout/stderr quarantine for unstructured writes
 - key normalization from terminal escape sequences to semantic keys
 - ANSI/OSC stripping, UTF-8 cluster measurement, cell-width clipping,
   padding, and ANSI-aware wrapping primitives
-- line drawing primitives
-- line-frame differential rendering primitives
-- cursor visibility/placement primitives
-- screen clear/refresh primitives
+- legacy absolute line/cursor primitives used by contained alt-screen surfaces
 - terminal size queries
 - suspend support
 
@@ -234,7 +233,9 @@ C owns only the terminal boundary:
 - `lua/psi/tui_app.lua` owns the pi-style TUI controller layer: root
   children, focus, render requests, overlay layout, and overlay compositing
 - `lua/psi/tui_renderer.lua` owns logical frame normalization, cursor extraction,
-  and the choice between full and differential frame rendering
+  terminal-relative cursor accounting, and full/differential frame rendering
+- `lua/psi/notice.lua` owns structured operational diagnostics and the explicit
+  active-frontend sink
 - `lua/psi/tui_component.lua` and `lua/psi/tui_components/*` own composable
   layout/rendering surfaces such as transcript markdown and chrome
 - `lua/psi/tui_status.lua` exposes TUI hook/status/key APIs, while
@@ -243,9 +244,9 @@ C owns only the terminal boundary:
 - `lua/psi/tui_layout.lua` owns layout policy such as prefixes, footer text,
   and row caps
 
-The rule is simple: C reports terminal facts, implements terminal text math, and
-writes terminal bytes. Lua decides what the interface means and what the screen
-should say.
+The rule is simple: one renderer owns terminal bytes while active. C reports
+terminal facts, implements terminal text math, and enforces that ownership.
+Lua decides what the interface means and what the screen should say.
 
 ### TUI rendering path
 
@@ -259,12 +260,25 @@ Rendering policy:
 - The runtime mutates persistent components and asks `tui_app` for one final
   composed frame. Overlays are rendered separately, positioned by anchor or
   row/column options, and spliced into the base frame by terminal columns.
-- Use raw ANSI line drawing when ANSI is compiled in, the terminal is not
-  `dumb`, and `psi.tui_draw_raw_line` is available. Logical frames may carry a
-  viewport top row; C maps local rows and cursor positions onto physical
-  terminal rows before writing.
+- The first inline paint anchors at the terminal's current cursor. Later paints
+  use relative movement from the renderer's tracked hardware row, so startup
+  output stays above the live region and terminal scrolling remains natural.
+- Complete output batches use synchronized-output markers. Frame lines stay one
+  cell narrower than the terminal to avoid pending-wrap cursor drift.
+- Lua owns the previous-frame cache and emits only changed logical rows.
 - Fall back to plain-text frames when ANSI or color is disabled by the
   runtime policy.
+
+Operational messages use `psi.notice`. Before the TUI state exists, its
+explicit sink buffers a bounded FIFO. Once attached, notices become transcript
+entries and only mark the UI dirty; the event loop coalesces repaint work.
+Notices emitted during a mutable streaming entry wait until that entry is
+finished so chat-style scrollback never commits a still-changing entry.
+
+Unexpected direct stdout/stderr writes are not renderer input. While the TUI
+owns the terminal, the host redirects them to the protected state debug log.
+Suspend and external-editor boundaries release stdio and raw mode together,
+then reclaim them and force a cursor-relative repaint on return.
 
 C owns only the low-level terminal effects. The Lua TUI is ANSI-terminal
 backed, so a no-ANSI build disables TUI support rather than exposing a

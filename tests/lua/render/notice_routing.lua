@@ -1,26 +1,30 @@
 --[==[psi-test
-expect = "info:hello|error:boom|nosink"
+expect = "info:hello|error:boom|stale-safe|nosink"
 ]==]
--- notice.emit must emit the "notice" event when subscribed and fall
--- back to io.stderr only when unsubscribed.
+-- The terminal-owning frontend uses an explicit sink rather than an event
+-- subscriber, so /reload cannot silently detach it.
 local notice = require("psi.notice")
 
 local seen = {}
-psi.events.on("notice", function(payload)
+local token = notice.set_sink(function(payload)
   seen[#seen + 1] = tostring(payload.level) .. ":" .. tostring(payload.text)
 end)
 
 notice.info("hello")
 notice.error("boom")
 
--- With the subscriber removed, notice must NOT emit a further event.
-psi.events.off("notice", nil) -- no-op guard; explicit removal below
-local handlers = psi.events.handlers("notice")
-for _, fn in ipairs(handlers) do
-  psi.events.off("notice", fn)
-end
+psi.events.clear()
+notice.clear_sink(token)
 local before = #seen
-notice.info("dropped-from-event") -- goes to stderr fallback, not the bus
+notice.info("dropped-from-sink") -- goes to stderr fallback
 local no_sink = (#seen == before) and "nosink" or "leaked"
+
+local old = notice.set_sink(function() end)
+local current = notice.set_sink(function(payload)
+  seen[#seen + 1] = payload.text
+end)
+notice.clear_sink(old)
+notice.info("stale-safe")
+notice.clear_sink(current)
 
 return table.concat(seen, "|") .. "|" .. no_sink

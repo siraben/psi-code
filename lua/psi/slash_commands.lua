@@ -12,6 +12,7 @@
 -- are consulted last, after built-ins.
 
 local records = require("psi.records")
+local notice = require("psi.notice")
 local prelude = require("psi.prelude")
 local keybindings = require("psi.keybindings")
 local session = require("psi.session_manager")
@@ -1814,7 +1815,10 @@ local function dispatch_registered(line)
   end
   local ok, result = pcall(command.handler, rest or "", line)
   if not ok then
-    io.stderr:write("psi.commands: /" .. first .. " failed: " .. tostring(result) .. "\n")
+    notice.error(
+      "psi.commands: /" .. first .. " failed: " .. tostring(result),
+      { source = "slash-command" }
+    )
     return records.new_command_action("print", "command /" .. first .. " failed")
   end
   return result

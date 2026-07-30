@@ -1,6 +1,7 @@
 /* psi Lua 5.5 VM and FFI bridge. */
 
 #include <ctype.h>
+#include <stdarg.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -659,13 +660,46 @@ static void psi_vm_set_registry_callback(lua_State *L, int *ref_slot, int arg_in
 
 #endif
 
+static int psi_vm_emit_tui_callback_error(lua_State *L, const char *label, const char *detail) {
+    struct psi_host_context *host = PSI_VM_HOST(L);
+    struct psi_vm *vm = host != NULL ? host->vm : NULL;
+    char message[2048];
+    int stack_top;
+
+    if (vm == NULL || !vm->tui_active) {
+        return 0;
+    }
+    snprintf(message, sizeof(message), "Lua error in %s: %s", label,
+        detail != NULL ? detail : "<unknown>");
+    stack_top = lua_gettop(L);
+    lua_getglobal(L, "psi");
+    if (lua_type(L, -1) == LUA_TTABLE) {
+        lua_getfield(L, -1, "notice");
+        if (lua_type(L, -1) == LUA_TTABLE) {
+            lua_getfield(L, -1, "error");
+            if (lua_type(L, -1) == LUA_TFUNCTION) {
+                lua_pushstring(L, message);
+                if (lua_pcall(L, 1, 0, 0) == LUA_OK) {
+                    lua_settop(L, stack_top);
+                    return 1;
+                }
+            }
+        }
+    }
+    lua_settop(L, stack_top);
+    return 0;
+}
+
 static void psi_vm_invoke_registry_callback0(lua_State *L, int ref, const char *label) {
     if (ref == PSI_VM_NOREF) {
         return;
     }
     lua_rawgeti(L, LUA_REGISTRYINDEX, ref);
     if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        fprintf(stderr, "Lua error in %s: %s\n", label, lua_tostring(L, -1));
+        const char *detail = lua_tostring(L, -1);
+        if (!psi_vm_emit_tui_callback_error(L, label, detail)) {
+            fprintf(stderr, "Lua error in %s: %s\n", label, detail);
+        }
         lua_pop(L, 1);
     }
 }
@@ -679,15 +713,18 @@ static void psi_vm_invoke_registry_callback2(lua_State *L, int ref, const char *
     lua_pushlstring(L, a != NULL ? a : "", a_len);
     lua_pushlstring(L, b != NULL ? b : "", b_len);
     if (lua_pcall(L, 2, 0, 0) != LUA_OK) {
-        fprintf(stderr, "Lua error in %s: %s\n", label, lua_tostring(L, -1));
+        const char *detail = lua_tostring(L, -1);
+        if (!psi_vm_emit_tui_callback_error(L, label, detail)) {
+            fprintf(stderr, "Lua error in %s: %s\n", label, detail);
+        }
         lua_pop(L, 1);
     }
 }
 
 #if PSI_ENABLE_TUI
 
-extern void psi_tui_suspend_terminal(void);
-extern void psi_tui_resume_terminal(void);
+extern int psi_tui_suspend_terminal(void);
+extern int psi_tui_resume_terminal(void);
 
 static int psi_vm_tui_frame_active = 0;
 static char **psi_vm_tui_previous_lines = NULL;
@@ -734,18 +771,46 @@ static int psi_vm_tui_read_byte(int timeout_ms) {
 
 static void psi_vm_tui_write(const char *text) {
     if (text != NULL) {
-        fputs(text, stdout);
+        psi_tui_write_terminal(text, strlen(text));
     }
 }
 
+static void psi_vm_tui_printf(const char *format, ...) {
+    char stack_buffer[1024];
+    char *buffer;
+    int length;
+    va_list args;
+
+    va_start(args, format);
+    length = vsnprintf(stack_buffer, sizeof(stack_buffer), format, args);
+    va_end(args);
+    if (length < 0) {
+        return;
+    }
+    if ((size_t)length < sizeof(stack_buffer)) {
+        psi_tui_write_terminal(stack_buffer, (size_t)length);
+        return;
+    }
+    buffer = (char *)malloc((size_t)length + 1u);
+    if (buffer == NULL) {
+        return;
+    }
+    va_start(args, format);
+    vsnprintf(buffer, (size_t)length + 1u, format, args);
+    va_end(args);
+    psi_tui_write_terminal(buffer, (size_t)length);
+    free(buffer);
+}
+
 static void psi_vm_tui_draw_raw_line(long row, const char *text) {
-    printf("\033[%ld;%dH%s%s%s", row, PSI_VM_TUI_FIRST_TERMINAL_CELL, PSI_VM_TUI_CLEAR_LINE,
-        text != NULL ? text : "", PSI_VM_TUI_RESET_STYLE);
+    psi_vm_tui_printf("\033[%ld;%dH%s%s%s", row, PSI_VM_TUI_FIRST_TERMINAL_CELL,
+        PSI_VM_TUI_CLEAR_LINE, text != NULL ? text : "", PSI_VM_TUI_RESET_STYLE);
 }
 
 static void psi_vm_tui_draw_frame_line(long row, const char *text) {
-    printf("\033[%ld;%dH%s%s%s%s", row, PSI_VM_TUI_FIRST_TERMINAL_CELL, PSI_VM_TUI_CLEAR_LINE,
-        text != NULL ? text : "", PSI_VM_TUI_RESET_STYLE, PSI_VM_TUI_CLOSE_OSC8);
+    psi_vm_tui_printf("\033[%ld;%dH%s%s%s%s", row, PSI_VM_TUI_FIRST_TERMINAL_CELL,
+        PSI_VM_TUI_CLEAR_LINE, text != NULL ? text : "", PSI_VM_TUI_RESET_STYLE,
+        PSI_VM_TUI_CLOSE_OSC8);
 }
 
 static int psi_vm_tui_is_csi_final(int ch) {
@@ -776,13 +841,15 @@ static int psi_vm_tui_escape_sequence_complete(const char *buffer, size_t length
     return 1;
 }
 
-static void psi_vm_tui_suspend(void) {
+static int psi_vm_tui_suspend(void) {
     struct sigaction dfl;
     struct sigaction prev;
     sigset_t mask;
     sigset_t prev_mask;
 
-    psi_tui_suspend_terminal();
+    if (psi_tui_suspend_terminal() != PSI_STATUS_OK) {
+        return PSI_STATUS_ERROR;
+    }
     memset(&dfl, 0, sizeof(dfl));
     dfl.sa_handler = SIG_DFL;
     sigemptyset(&dfl.sa_mask);
@@ -793,7 +860,7 @@ static void psi_vm_tui_suspend(void) {
     kill(getpid(), SIGTSTP);
     sigprocmask(SIG_SETMASK, &prev_mask, NULL);
     sigaction(SIGTSTP, &prev, NULL);
-    psi_tui_resume_terminal();
+    return psi_tui_resume_terminal();
 }
 
 static int psi_vm_tui_collect_escape_sequence(
@@ -3997,7 +4064,7 @@ static int lfn_tui_size(lua_State *L) {
     int width = PSI_VM_TUI_DEFAULT_WIDTH;
 
     psi_vm_require_tui(L);
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
+    if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) == 0) {
         if (ws.ws_col > 0) {
             width = (int)ws.ws_col;
         }
@@ -4087,14 +4154,13 @@ static int lfn_tui_render_frame(lua_State *L) {
         col = PSI_VM_TUI_FIRST_TERMINAL_CELL;
     }
     if (visible) {
-        printf("%s%s%s%s\033[%ld;%ldH%s%s", PSI_VM_TUI_SYNC_BEGIN, PSI_VM_TUI_CURSOR_HIDE, frame,
-            PSI_VM_TUI_RESET_STYLE, (long)row, (long)col, PSI_VM_TUI_CURSOR_SHOW,
-            PSI_VM_TUI_SYNC_END);
+        psi_vm_tui_printf("%s%s%s%s\033[%ld;%ldH%s%s", PSI_VM_TUI_SYNC_BEGIN,
+            PSI_VM_TUI_CURSOR_HIDE, frame, PSI_VM_TUI_RESET_STYLE, (long)row, (long)col,
+            PSI_VM_TUI_CURSOR_SHOW, PSI_VM_TUI_SYNC_END);
     } else {
-        printf("%s%s%s%s%s", PSI_VM_TUI_SYNC_BEGIN, PSI_VM_TUI_CURSOR_HIDE, frame,
+        psi_vm_tui_printf("%s%s%s%s%s", PSI_VM_TUI_SYNC_BEGIN, PSI_VM_TUI_CURSOR_HIDE, frame,
             PSI_VM_TUI_RESET_STYLE, PSI_VM_TUI_SYNC_END);
     }
-    fflush(stdout);
     psi_vm_tui_frame_active = 0;
     return 0;
 }
@@ -4212,7 +4278,7 @@ static int lfn_tui_render_lines(lua_State *L) {
             (psi_vm_tui_previous_top != top || psi_vm_tui_previous_line_count != line_count)) {
             /* Clear rows that belonged to the previous viewport before drawing the new one. */
             for (i = 0u; i < psi_vm_tui_previous_line_count; i++) {
-                printf("\033[%ld;%dH%s", psi_vm_tui_previous_top + (long)i,
+                psi_vm_tui_printf("\033[%ld;%dH%s", psi_vm_tui_previous_top + (long)i,
                     PSI_VM_TUI_FIRST_TERMINAL_CELL, PSI_VM_TUI_CLEAR_LINE);
             }
         }
@@ -4230,12 +4296,12 @@ static int lfn_tui_render_lines(lua_State *L) {
             }
         }
         if (cursor_visible) {
-            printf("\033[%ld;%ldH%s", physical_cursor_row, cursor_col, PSI_VM_TUI_CURSOR_SHOW);
+            psi_vm_tui_printf(
+                "\033[%ld;%ldH%s", physical_cursor_row, cursor_col, PSI_VM_TUI_CURSOR_SHOW);
         } else {
             psi_vm_tui_write(PSI_VM_TUI_CURSOR_HIDE);
         }
         psi_vm_tui_write(PSI_VM_TUI_SYNC_END);
-        fflush(stdout);
     }
 
     if (reuse) {
@@ -4269,8 +4335,8 @@ static int lfn_tui_set_cursor(lua_State *L) {
         psi_vm_tui_write(PSI_VM_TUI_SYNC_BEGIN);
         psi_vm_tui_frame_active = 1;
     }
-    printf("%s\033[%ld;%ldH", visible ? PSI_VM_TUI_CURSOR_SHOW : PSI_VM_TUI_CURSOR_HIDE, (long)row,
-        (long)col);
+    psi_vm_tui_printf("%s\033[%ld;%ldH", visible ? PSI_VM_TUI_CURSOR_SHOW : PSI_VM_TUI_CURSOR_HIDE,
+        (long)row, (long)col);
     return 0;
 }
 
@@ -4280,13 +4346,14 @@ static int lfn_tui_refresh(lua_State *L) {
         psi_vm_tui_write(PSI_VM_TUI_SYNC_END);
         psi_vm_tui_frame_active = 0;
     }
-    fflush(stdout);
     return 0;
 }
 
 static int lfn_tui_suspend(lua_State *L) {
     psi_vm_require_tui(L);
-    psi_vm_tui_suspend();
+    if (psi_vm_tui_suspend() != PSI_STATUS_OK) {
+        return luaL_error(L, "failed to restore TUI terminal ownership after suspend");
+    }
     return 0;
 }
 
@@ -4363,9 +4430,15 @@ static int lfn_tui_external_editor(lua_State *L) {
     memcpy(command + editor_len + 1u, quoted_path, path_len + 1u);
     free(quoted_path);
 
-    psi_tui_suspend_terminal();
+    if (psi_tui_suspend_terminal() != PSI_STATUS_OK) {
+        free(command);
+        return luaL_error(L, "failed to release TUI terminal ownership");
+    }
     status = system(command);
-    psi_tui_resume_terminal();
+    if (psi_tui_resume_terminal() != PSI_STATUS_OK) {
+        free(command);
+        return luaL_error(L, "failed to reclaim TUI terminal ownership");
+    }
     free(command);
     psi_vm_tui_reset_render_cache();
 
@@ -4379,10 +4452,10 @@ static int lfn_tui_external_editor(lua_State *L) {
  * native scrollback and to position the sticky input box with relative
  * cursor moves. Frame mode keeps using tui_render_frame for atomic repaints. */
 static int lfn_tui_write(lua_State *L) {
-    const char *text = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : "";
+    size_t length = 0u;
+    const char *text = lua_type(L, 1) == LUA_TSTRING ? lua_tolstring(L, 1, &length) : "";
     psi_vm_require_tui(L);
-    psi_vm_tui_write(text);
-    fflush(stdout);
+    psi_tui_write_terminal(text, length);
     return 0;
 }
 
@@ -4574,8 +4647,8 @@ static void psi_vm_register_psi(lua_State *L) {
     } while (0)
 
     PSI_REG_DOC("version", lfn_version, "Return psi's version string.");
-    PSI_REG_DOC(
-        "log", lfn_log, "Append one line to the host debug log ($XDG_STATE_HOME/psi/debug.log).");
+    PSI_REG_DOC("log", lfn_log,
+        "Write one diagnostic line to stderr (quarantined in the TUI debug log while active).");
     PSI_REG("session_message_count", lfn_session_message_count);
     PSI_REG_DOC("read_file", lfn_read_file,
         "Read a file off disk. Returns text on success, nil + error string on failure.");

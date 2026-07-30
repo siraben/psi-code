@@ -54,6 +54,26 @@ local function absolute_frame(lines, top)
   return table.concat(frame)
 end
 
+local function move_to_row(out, from_row, to_row)
+  from_row = math.max(1, tonumber(from_row) or 1)
+  to_row = math.max(1, tonumber(to_row) or 1)
+  if to_row < from_row then
+    out[#out + 1] = CSI .. tostring(from_row - to_row) .. "A"
+  elseif to_row > from_row then
+    out[#out + 1] = CSI .. tostring(to_row - from_row) .. "B"
+  end
+  out[#out + 1] = "\r"
+  return to_row
+end
+
+local function finish_relative_frame(out, current_row, cursor)
+  current_row = move_to_row(out, current_row, cursor.row)
+  out[#out + 1] = CSI .. tostring(cursor.col) .. "G"
+  out[#out + 1] = cursor.visible and SHOW_CURSOR or HIDE_CURSOR
+  out[#out + 1] = SYNC_END
+  return current_row
+end
+
 local function find_changed_ranges(previous, next_lines)
   local ranges = {}
   local first
@@ -115,14 +135,53 @@ local function normalize_frame(frame)
 end
 
 function Backend:can_diff()
-  return (self.use_line_primitive and type(psi.tui_render_lines) == "function")
+  return type(psi.tui_write) == "function"
+    or (self.use_line_primitive and type(psi.tui_render_lines) == "function")
     or type(psi.stdout_write) == "function"
+end
+
+function Backend:reset()
+  self.cursor_row = nil
+  self.height = nil
+end
+
+function Backend:finish()
+  if self.cursor_row == nil or type(psi.tui_write) ~= "function" then
+    return
+  end
+  local out = { RESET, SHOW_CURSOR }
+  move_to_row(out, self.cursor_row, self.height or self.cursor_row)
+  out[#out + 1] = "\r\n"
+  psi.tui_write(table.concat(out))
+  self.cursor_row = nil
+  self.height = nil
 end
 
 function Backend:render_full(frame)
   local cursor = frame.cursor
 
-  if self.use_line_primitive and type(psi.tui_render_lines) == "function" then
+  if not self.use_line_primitive and type(psi.tui_write) == "function" then
+    local out = { SYNC_BEGIN, HIDE_CURSOR }
+    local current_row = self.cursor_row
+    if current_row ~= nil then
+      current_row = move_to_row(out, current_row, 1)
+    else
+      current_row = 1
+      out[#out + 1] = "\r"
+    end
+    out[#out + 1] = CSI .. "J"
+    for row, line in ipairs(frame.lines) do
+      out[#out + 1] = CSI .. "2K"
+      out[#out + 1] = line
+      if row < #frame.lines then
+        out[#out + 1] = "\r\n"
+        current_row = current_row + 1
+      end
+    end
+    self.cursor_row = finish_relative_frame(out, current_row, cursor)
+    self.height = frame.height
+    psi.tui_write(table.concat(out))
+  elseif self.use_line_primitive and type(psi.tui_render_lines) == "function" then
     psi.tui_render_lines(frame.lines, cursor.row, cursor.col, cursor.visible, true, frame.top)
   elseif type(psi.tui_render_frame) == "function" then
     psi.tui_render_frame(
@@ -143,6 +202,22 @@ end
 
 function Backend:render_diff(frame, ranges)
   local cursor = frame.cursor
+
+  if not self.use_line_primitive and type(psi.tui_write) == "function" then
+    local out = { SYNC_BEGIN, HIDE_CURSOR }
+    local current_row = self.cursor_row or 1
+    for _, range in ipairs(ranges) do
+      for row = range.first, range.last do
+        current_row = move_to_row(out, current_row, row)
+        out[#out + 1] = CSI .. "2K"
+        out[#out + 1] = frame.lines[row] or ""
+      end
+    end
+    self.cursor_row = finish_relative_frame(out, current_row, cursor)
+    self.height = frame.height
+    psi.tui_write(table.concat(out))
+    return
+  end
 
   if self.use_line_primitive and type(psi.tui_render_lines) == "function" then
     psi.tui_render_lines(frame.lines, cursor.row, cursor.col, cursor.visible, false, frame.top)
@@ -200,6 +275,9 @@ function Renderer:reset(reason)
   self.last_changed_ranges = {}
   self.last_mode = nil
   self.last_full_reason = reason
+  if type(self.backend.reset) == "function" then
+    self.backend:reset()
+  end
 end
 
 function Renderer:render(frame)
@@ -280,6 +358,16 @@ end
 function M.reset(renderer, reason)
   if type(renderer) == "table" and type(renderer.reset) == "function" then
     renderer:reset(reason)
+  end
+end
+
+function M.finish(renderer)
+  if
+    type(renderer) == "table"
+    and type(renderer.backend) == "table"
+    and type(renderer.backend.finish) == "function"
+  then
+    renderer.backend:finish()
   end
 end
 
