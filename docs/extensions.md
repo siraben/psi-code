@@ -374,6 +374,14 @@ It is enabled by default so yanks update terminal clipboards, including tmux
 via DCS passthrough. Disable it with
 `"extensions": { "osc52_clipboard": { "enabled": false } }`.
 
+The bundled goal layer (`lua/psi/extensions/goal.lua`) owns `/goal`. Use
+`/goal set <objective>` (or `/goal <objective>`) to attach a persistent
+objective to the current session. The active goal appears in the TUI status
+bar and is appended to the system prompt on subsequent turns. `/goal complete`
+stops prompt injection while retaining the completed objective in session
+history; `/goal clear` removes it. Goal state uses custom session entries, so
+it survives resume and compaction without becoming a user transcript message.
+
 Image attachments can be disabled globally with `"images": { "block_images":
 true }` in settings. When disabled, image blocks are replaced with `Image
 reading is disabled.` before provider requests, and the read tool omits image
