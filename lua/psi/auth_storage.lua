@@ -15,6 +15,7 @@
 local prelude = require("psi.prelude")
 local credential = require("psi.credential")
 local notice = require("psi.notice")
+local platform = require("psi.platform")
 
 local M = {}
 
@@ -37,6 +38,12 @@ end
 -- Credential files copied from backups or other machines can arrive
 -- group/world-readable; tighten them on read, like ssh does for keys.
 local function check_permissions(path)
+  -- POSIX mode bits do not describe Windows ACLs. Cosmopolitan fat binaries
+  -- still expose synthesized mode bits on Windows, which otherwise makes a
+  -- private NTFS file look group/world-readable and produces a false warning.
+  if platform.is_windows() then
+    return
+  end
   local mode = psi.file_mode and psi.file_mode(path)
   if type(mode) ~= "number" then
     return
