@@ -67,10 +67,12 @@ psi.tui_layout = require("psi.tui_layout")
 psi.extensions = psi.extensions or {}
 psi.extensions.osc52_clipboard = require("psi.extensions.osc52_clipboard")
 psi.extensions.vim_keybindings = require("psi.extensions.vim_keybindings")
+psi.extensions.goal = require("psi.extensions.goal")
 
 function psi.install_builtin_extensions()
   psi.extensions.osc52_clipboard.register(psi)
   psi.extensions.vim_keybindings.register(psi)
+  psi.extensions.goal.register(psi)
 end
 
 psi.install_builtin_extensions()
