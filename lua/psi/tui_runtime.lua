@@ -2668,7 +2668,8 @@ local function move_line(state, delta)
   local target_line = clamp(line + delta, 1, line_count(state.input))
   local line_start = line_start_for(state.input, target_line)
   local _, line_finish = line_bounds(state.input, line_start)
-  state.cursor = math.min(line_start + col, line_finish)
+  state.cursor =
+    tui_text.grapheme_index_at_or_before(state.input, math.min(line_start + col, line_finish))
   state.dirty = true
 end
 
@@ -2869,7 +2870,7 @@ local function char_selection_range(state)
   local start = math.min(anchor, state.cursor)
   local finish = math.max(anchor, state.cursor)
   if start == finish and start < #state.input then
-    finish = finish + 1
+    finish = tui_text.next_grapheme_index(state.input, finish)
   end
   return start, finish
 end
@@ -3039,8 +3040,9 @@ function render_input_text_with_cursor(state, line, draw_cursor)
   local cell
   local after
   if offset < #text then
-    cell = sanitize_terminal_text(text:sub(offset + 1, offset + 1), false)
-    after = sanitize_terminal_text(text:sub(offset + 2), false)
+    local next_offset = tui_text.next_grapheme_index(text, offset)
+    cell = sanitize_terminal_text(text:sub(offset + 1, next_offset), false)
+    after = sanitize_terminal_text(text:sub(next_offset + 1), false)
   else
     cell = " "
     after = ""
@@ -3070,8 +3072,9 @@ local function delete_backward(state)
     return
   end
   clear_busy_input_error(state)
-  state.input = state.input:sub(1, state.cursor - 1) .. state.input:sub(state.cursor + 1)
-  state.cursor = state.cursor - 1
+  local previous = tui_text.previous_grapheme_index(state.input, state.cursor)
+  state.input = state.input:sub(1, previous) .. state.input:sub(state.cursor + 1)
+  state.cursor = previous
   state.dirty = true
 end
 
@@ -3081,7 +3084,8 @@ local function delete_forward(state)
     return
   end
   clear_busy_input_error(state)
-  state.input = state.input:sub(1, state.cursor) .. state.input:sub(state.cursor + 2)
+  local next_index = tui_text.next_grapheme_index(state.input, state.cursor)
+  state.input = state.input:sub(1, state.cursor) .. state.input:sub(next_index + 1)
   state.dirty = true
 end
 
@@ -4149,14 +4153,14 @@ local function apply_action(state, action, arg)
   end
   if action == "move-left" then
     if state.cursor > 0 then
-      state.cursor = state.cursor - 1
+      state.cursor = tui_text.previous_grapheme_index(state.input, state.cursor)
     end
     state.dirty = true
     return
   end
   if action == "move-right" then
     if state.cursor < #state.input then
-      state.cursor = state.cursor + 1
+      state.cursor = tui_text.next_grapheme_index(state.input, state.cursor)
     end
     state.dirty = true
     return
@@ -4300,7 +4304,7 @@ local function apply_action(state, action, arg)
   end
   if action == "vim-append" then
     if state.cursor < #state.input then
-      state.cursor = state.cursor + 1
+      state.cursor = tui_text.next_grapheme_index(state.input, state.cursor)
     end
     set_insert_mode(state)
     return

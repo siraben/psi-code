@@ -240,6 +240,56 @@ local function next_cluster(text, i)
   return text:sub(start, i - 1), width, i, cp
 end
 
+-- Editor cursors are byte offsets so slicing stays cheap, but every movement
+-- must land on a grapheme boundary. Reuse the same cluster segmentation as
+-- width/wrapping, including combining marks, ZWJ emoji, and flags.
+function M.next_grapheme_index(text, cursor)
+  text = tostring(text or EMPTY)
+  cursor = math.max(0, math.min(#text, tonumber(cursor) or 0))
+  local i = 1
+  while i <= #text do
+    local _, _, after = next_cluster(text, i)
+    local boundary = after - 1
+    if boundary > cursor then
+      return boundary
+    end
+    i = after
+  end
+  return #text
+end
+
+function M.previous_grapheme_index(text, cursor)
+  text = tostring(text or EMPTY)
+  cursor = math.max(0, math.min(#text, tonumber(cursor) or 0))
+  local i = 1
+  while i <= #text do
+    local start = i - 1
+    local _, _, after = next_cluster(text, i)
+    if after - 1 >= cursor then
+      return start
+    end
+    i = after
+  end
+  return #text
+end
+
+function M.grapheme_index_at_or_before(text, cursor)
+  text = tostring(text or EMPTY)
+  cursor = math.max(0, math.min(#text, tonumber(cursor) or 0))
+  local boundary = 0
+  local i = 1
+  while i <= #text do
+    local _, _, after = next_cluster(text, i)
+    local next_boundary = after - 1
+    if next_boundary > cursor then
+      return boundary
+    end
+    boundary = next_boundary
+    i = after
+  end
+  return #text
+end
+
 function M.visible_width(text)
   if host_visible_width then
     return host_visible_width(text)
