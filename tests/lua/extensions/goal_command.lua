@@ -1,33 +1,36 @@
 --[==[psi-test
-expect = "set|prompt|status|resume|completed|hidden|cleared"
+expect = "start|active|resume|edit|complete|cleared|tools"
 ]==]
 local commands = require("psi.slash_commands")
-local prompt = require("psi.prompt")
 local session = require("psi.session_manager")
 local tui = require("psi.tui_status")
 
 local path = TMP .. "/goal-command.jsonl"
 psi.session_set_path(path)
 
-local set = commands.handle("/goal set Ship café support")
-local injected = prompt.system_prompt():find("<active_goal>\nShip café support", 1, true) ~= nil
+local start = commands.handle("/goal Ship café support")
 local status = tui.status_line({ model = "m", busy = false, scroll = 0 })
+commands.handle("/goal pause")
+local resume = commands.handle("/goal resume")
+local edit = commands.handle("/goal edit Ship complete café support")
 
-psi.session_clear()
-session.reset_entry_chain()
-assert(session.load(path))
-local resumed = commands.handle("/goal")
-local completed = commands.handle("/goal complete")
-local hidden = prompt.system_prompt():find("<active_goal>", 1, true) == nil
+local completed = psi.tool_call("update_goal", { status = "complete" })
+psi.events.emit("tool-results-persisted", { count = 1 })
+local summary = commands.handle("/goal")
 commands.handle("/goal clear")
-local cleared = commands.handle("/goal show")
+local cleared = commands.handle("/goal")
+
+local tools = psi.tools.find("create_goal")
+  and psi.tools.find("get_goal")
+  and psi.tools.find("update_goal")
 
 return table.concat({
-  set.payload:find("goal set", 1, true) and "set" or "bad",
-  injected and "prompt" or "bad",
-  status:find("goal:Ship café support", 1, true) and "status" or "bad",
-  resumed.payload == "goal (active): Ship café support" and "resume" or "bad",
-  completed.payload:find("goal completed", 1, true) and "completed" or "bad",
-  hidden and "hidden" or "bad",
-  cleared.payload == "no goal set" and "cleared" or "bad",
+  start.kind == "expand" and start.payload == "Ship café support" and "start" or "bad",
+  status:find("Pursuing goal", 1, true) and "active" or "bad",
+  resume.kind == "expand" and "resume" or "bad",
+  edit.kind == "expand" and edit.payload:find("Ship complete café support", 1, true) and "edit"
+    or "bad",
+  completed.ok and summary.payload:find("Goal complete", 1, true) and "complete" or "bad",
+  cleared.payload:find("No goal is currently set", 1, true) and "cleared" or "bad",
+  tools and "tools" or "bad",
 }, "|")

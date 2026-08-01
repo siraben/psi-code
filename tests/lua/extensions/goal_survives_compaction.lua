@@ -1,5 +1,5 @@
 --[==[psi-test
-expect = "true|true|goal (active): Finish the migration"
+expect = "true|true|true"
 ]==]
 local commands = require("psi.slash_commands")
 local session = require("psi.session_manager")
@@ -19,5 +19,9 @@ assert(session.save(path))
 psi.session_clear()
 session.reset_entry_chain()
 local loaded = session.load(path)
-local goal = commands.handle("/goal show")
-return table.concat({ tostring(compacted), tostring(loaded), goal.payload }, "|")
+local goal = commands.handle("/goal")
+return table.concat({
+  tostring(compacted),
+  tostring(loaded),
+  tostring(goal.payload:find("Objective: Finish the migration", 1, true) ~= nil),
+}, "|")
