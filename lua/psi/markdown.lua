@@ -19,6 +19,9 @@ local PI_HEADING = "33" -- mdHeading, theme warning/gold slot
 local PI_LINK = "34" -- mdLink, theme header/link slot
 local PI_GRAY = "38;5;242" -- mdQuote/mdHr/toolOutput, theme chrome slot
 
+local RESET = string.char(27) .. "[0m"
+local RESET_PATTERN = string.char(27) .. "%[0m"
+
 local function is_inline_syntax_byte(byte)
   return byte == 42 -- *
     or byte == 91 -- [
@@ -233,6 +236,25 @@ M.render_inline = render_inline
 
 -- ---------- line-level renderer ----------
 
+local function render_heading(text, level)
+  local function apply(value)
+    value = ansi.bold(value)
+    if level == 1 then
+      value = underline(value)
+    end
+    return ansi.color(PI_HEADING, value)
+  end
+
+  -- Inline spans emit a full SGR reset. Restore the heading's color and
+  -- emphasis after each one so text following code, links, or emphasis keeps
+  -- the heading style, matching pi's heading-specific inline style context.
+  local restore = apply(""):gsub(RESET_PATTERN, "")
+  if restore ~= "" then
+    text = text:gsub(RESET_PATTERN, RESET .. restore)
+  end
+  return apply(text)
+end
+
 local function render_line(line, state)
   -- Code fence toggles: ``` or ~~~ at line start, optionally with lang.
   local fence = line:match("^%s*(```+)") or line:match("^%s*(~~~+)")
@@ -247,14 +269,9 @@ local function render_line(line, state)
   -- Headers: # ... ######
   local hashes, rest = line:match("^(#+)%s+(.*)$")
   if hashes and #hashes <= 6 then
-    local body = render_inline(rest)
-    if #hashes == 1 then
-      return ansi.bold(ansi.color(PI_HEADING, "# " .. body))
-    elseif #hashes == 2 then
-      return ansi.bold(ansi.color(PI_HEADING, "## " .. body))
-    else
-      return ansi.color(PI_HEADING, string.rep("#", #hashes) .. " " .. body)
-    end
+    local level = #hashes
+    local prefix = level >= 3 and (hashes .. " ") or ""
+    return render_heading(prefix .. render_inline(rest), level)
   end
 
   -- Horizontal rule
