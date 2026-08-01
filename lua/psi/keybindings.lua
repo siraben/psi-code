@@ -166,6 +166,12 @@ local DEFINITIONS = {
     description = "Open external editor",
   },
   {
+    id = "app.tools.expand",
+    section = "Other",
+    default_keys = { "ctrl-o" },
+    description = "Toggle tool output",
+  },
+  {
     id = "app.exit",
     section = "Other",
     default_keys = { "ctrl-d" },

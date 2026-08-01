@@ -1276,15 +1276,15 @@ def t_tui_busy_status(psi: Psi):
         "--eval",
         'local ansi = require("psi.ansi")\n'
         + 'ansi.color_enabled = true\n'
-        + 'return require("psi.tui_status").render_busy_status("working", 2, 4)',
+        + 'return require("psi.tui_status").render_busy_status("working", 2, 4, 5)',
     ).stdout.rstrip("\n")
     plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
     assert_equals(
         plain,
-        "working (0:04  • Esc to interrupt) ...",
-        "busy status renders selected label, hint, and animated dots",
+        "⠴ working...",
+        "busy status renders Pi's stable label and braille frame",
     )
-    assert_contains(out, "\x1b[38;2;0;215;255m", "busy label has a subtle shimmer")
+    assert_contains(out, "\x1b[38;2;138;190;183m", "busy spinner uses the accent color")
 
 
 @test("tui/differential_redraw_uses_changed_rows")
@@ -1480,19 +1480,19 @@ def t_tui_hardware_cursor_uses_input_marker(psi: Psi):
 @test("tui/show_thinking_config")
 def t_tui_show_thinking_config(psi: Psi):
     default_out = psi.eval('return require("psi.tui_status").show_thinking()')
-    assert_equals(default_out, "0", "thinking hidden by default in TUI")
+    assert_equals(default_out, "1", "thinking visible by default in TUI")
 
     project = psi.tmp / "thinking-config-project"
     (project / ".psi").mkdir(parents=True, exist_ok=True)
     (project / ".psi" / "settings.json").write_text(
-        json.dumps({"tui": {"show_thinking": True}})
+        json.dumps({"tui": {"show_thinking": False}})
     )
     out = psi.run(
         "--eval",
         'return require("psi.tui_status").show_thinking()',
         cwd=project,
     ).stdout.strip()
-    assert_equals(out, "1", "project setting enables thinking in TUI")
+    assert_equals(out, "0", "project setting hides thinking in TUI")
 
 
 @test("session/list_sessions_includes_preview")

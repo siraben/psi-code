@@ -247,12 +247,12 @@ local function format_read_call(input)
   return fg(FG_TITLE, "read") .. " " .. shown
 end
 
-local function format_write_call(input)
+local function format_write_call(input, expanded)
   local raw = path_arg(input)
   local header = fg(FG_TITLE, "write")
     .. " "
     .. (raw and fg(FG_ACCENT, shorten_path(raw)) or fg(FG_MUTED, "..."))
-  local body = preview_head(input.content or input.text, PREVIEW_WRITE)
+  local body = preview_head(input.content or input.text, expanded and math.huge or PREVIEW_WRITE)
   if body == "" then
     return header
   end
@@ -357,10 +357,18 @@ local function format_generic_call(tool, input)
   if raw then
     return fg(FG_TITLE, tool or "tool") .. " " .. fg(FG_ACCENT, shorten_path(raw))
   end
-  return fg(FG_TITLE, tool or "tool")
+  local header = fg(FG_TITLE, tool or "tool")
+  local encoded = type(psi) == "table"
+      and type(psi.json_encode) == "function"
+      and psi.json_encode(input or {})
+    or ""
+  if encoded ~= "" and encoded ~= "{}" then
+    return header .. "\n\n" .. muted_line(encoded)
+  end
+  return header
 end
 
-local function format_call(tool, input, frame)
+local function format_call(tool, input, frame, expanded)
   if tool == "bash" then
     return format_bash_call(input)
   end
@@ -368,7 +376,7 @@ local function format_call(tool, input, frame)
     return format_read_call(input)
   end
   if tool == "write" then
-    return format_write_call(input)
+    return format_write_call(input, expanded)
   end
   if tool == "edit" then
     return format_edit_call(input, frame)
@@ -402,7 +410,7 @@ local function append_tail_preview(lines, value, limit)
   end
 end
 
-local function append_elapsed(lines, frame)
+local function append_elapsed(lines, frame, is_partial)
   if not frame or not frame.started_ms then
     return
   end
@@ -410,28 +418,29 @@ local function append_elapsed(lines, frame)
   if type(now) ~= "number" or now < frame.started_ms then
     return
   end
-  lines[#lines + 1] = dim_line(string.format("Took %.1fs", (now - frame.started_ms) / 1000))
+  local label = is_partial and "Elapsed" or "Took"
+  lines[#lines + 1] = dim_line(string.format("%s %.1fs", label, (now - frame.started_ms) / 1000))
 end
 
-local function format_bash_result(result, frame)
+local function format_bash_result(result, frame, expanded, is_partial)
   local lines = {}
-  append_tail_preview(lines, result:get("output"), PREVIEW_BASH)
+  append_tail_preview(lines, result:get("output"), expanded and math.huge or PREVIEW_BASH)
   for _, warning in ipairs(result_warning_lines(result)) do
     lines[#lines + 1] = warning
   end
-  append_elapsed(lines, frame)
+  append_elapsed(lines, frame, is_partial)
   if not result.ok and #lines == 0 then
     lines[#lines + 1] = fg(FG_ERROR, "bash failed: " .. tostring(result.error or "unknown error"))
   end
   return table.concat(lines, "\n")
 end
 
-local function format_read_result(result)
+local function format_read_result(result, expanded)
   if not result.ok then
     return fg(FG_ERROR, "read failed: " .. tostring(result.error or "unknown error"))
   end
   local lines = {}
-  append_preview(lines, result:get("text"), PREVIEW_READ)
+  append_preview(lines, result:get("text"), expanded and math.huge or PREVIEW_READ)
   for _, warning in ipairs(result_warning_lines(result)) do
     lines[#lines + 1] = warning
   end
@@ -441,11 +450,11 @@ local function format_read_result(result)
   return table.concat(lines, "\n")
 end
 
-local function format_search_result(tool, result)
+local function format_search_result(tool, result, expanded)
   if not result.ok then
     return fg(FG_ERROR, tool .. " failed: " .. tostring(result.error or "unknown error"))
   end
-  local limit = tool == "grep" and PREVIEW_GREP or PREVIEW_LIST
+  local limit = expanded and math.huge or (tool == "grep" and PREVIEW_GREP or PREVIEW_LIST)
   local lines = {}
   append_preview(lines, result:get("output"), limit)
   for _, warning in ipairs(result_warning_lines(result)) do
@@ -489,7 +498,7 @@ local function format_edit_result(result, frame)
   )
 end
 
-local function format_lua_result(result)
+local function format_lua_result(result, expanded)
   if not result.ok then
     return fg(FG_ERROR, "lua failed: " .. tostring(result.error or "unknown error"))
   end
@@ -497,10 +506,10 @@ local function format_lua_result(result)
   if type(value) ~= "string" or value == "" then
     return dim_line("(no result)")
   end
-  return preview_head(value, PREVIEW_GENERIC)
+  return preview_head(value, expanded and math.huge or PREVIEW_GENERIC)
 end
 
-local function format_generic_result(tool, result)
+local function format_generic_result(tool, result, expanded)
   if not result.ok then
     return fg(
       FG_ERROR,
@@ -511,18 +520,18 @@ local function format_generic_result(tool, result)
   if type(value) ~= "string" or value == "" then
     return dim_line("(ok)")
   end
-  return preview_head(value, PREVIEW_GENERIC)
+  return preview_head(value, expanded and math.huge or PREVIEW_GENERIC)
 end
 
-local function format_result(tool, result, frame)
+local function format_result(tool, result, frame, expanded, is_partial)
   if tool == "bash" then
-    return format_bash_result(result, frame)
+    return format_bash_result(result, frame, expanded, is_partial)
   end
   if tool == "read" then
-    return format_read_result(result)
+    return format_read_result(result, expanded)
   end
   if tool == "grep" or tool == "find" or tool == "ls" then
-    return format_search_result(tool, result)
+    return format_search_result(tool, result, expanded)
   end
   if tool == "write" then
     return format_write_result(result)
@@ -531,9 +540,9 @@ local function format_result(tool, result, frame)
     return format_edit_result(result, frame)
   end
   if tool == "lua" then
-    return format_lua_result(result)
+    return format_lua_result(result, expanded)
   end
-  return format_generic_result(tool, result)
+  return format_generic_result(tool, result, expanded)
 end
 
 local ToolExecution = {}
@@ -557,15 +566,17 @@ local function update_display(self)
     and cache.input == self.input
     and cache.frame == self.frame
     and cache.before_text == (self.frame and self.frame.before_text or nil)
+    and cache.expanded == self.expanded
   then
     call_text, call_bg = cache.text, cache.bg
   else
-    call_text, call_bg = format_call(self.tool, self.input, self.frame)
+    call_text, call_bg = format_call(self.tool, self.input, self.frame, self.expanded)
     self.call_cache = {
       tool = self.tool,
       input = self.input,
       frame = self.frame,
       before_text = self.frame and self.frame.before_text or nil,
+      expanded = self.expanded,
       text = call_text,
       bg = call_bg,
     }
@@ -573,7 +584,8 @@ local function update_display(self)
   self.box:set_bg_fn(bg_fn(component_bg_code(self, call_bg)))
   self.call_text:set_text(call_text or "")
   if self.result ~= nil then
-    local result_text = format_result(self.tool, self.result, self.frame)
+    local result_text =
+      format_result(self.tool, self.result, self.frame, self.expanded, self.is_partial)
     self.result_text:set_text(
       result_text ~= nil and result_text ~= "" and ("\n" .. result_text) or ""
     )
@@ -595,6 +607,16 @@ function ToolExecution:set_result(result, is_partial)
   update_display(self)
 end
 
+function ToolExecution:set_expanded(expanded)
+  expanded = not not expanded
+  if self.expanded == expanded then
+    return
+  end
+  self.expanded = expanded
+  self.call_cache = nil
+  update_display(self)
+end
+
 function ToolExecution:render(width)
   return self.box:render(width)
 end
@@ -613,6 +635,7 @@ function M.new(opts)
     frame = opts.frame,
     result = opts.result,
     is_partial = not not opts.is_partial,
+    expanded = not not opts.expanded,
     box = component.box(1, 1, bg_fn(M.BG_PENDING)),
     call_text = component.text("", 0, 0),
     result_text = component.text("", 0, 0),
@@ -630,7 +653,7 @@ function M.render_call(tool, input, frame)
 end
 
 function M.render_result(tool, result, frame)
-  local body = format_result(tool, result, frame)
+  local body = format_result(tool, result, frame, false, false)
   local bg = result.ok and M.BG_SUCCESS or M.BG_ERROR
   if body == nil or body == "" then
     if not result.ok then

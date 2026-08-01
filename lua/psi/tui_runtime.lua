@@ -41,7 +41,7 @@ local PROMPT_RESERVED_ROWS = 6
 local FRAME_WIDTH_MARGIN = 1
 
 local TUI_CONST = {
-  busy_animation_interval_ms = 600,
+  busy_animation_interval_ms = 80,
   busy_redraw_min_interval_ms = 33,
   byte_bel = 7,
   byte_backslash = 92,
@@ -888,6 +888,7 @@ local function new_state(opts, runtime)
     command_completion_index = 1,
     command_completion_input = nil,
     command_completion_items = nil,
+    tools_expanded = false,
     dirty = true,
     layout_mode = chat.resolve_mode(opts),
     chat_committed_entry_count = 0,
@@ -1404,6 +1405,7 @@ local function new_tool_execution_component(tool_call_id, tool_name, input, opts
     tool = payload.tool,
     input = payload.input,
     frame = payload.id ~= "" and render.lookup_frame(payload.id) or nil,
+    expanded = opts.expanded,
   })
 end
 
@@ -1822,7 +1824,7 @@ local function add_session_entry(state, msg)
                 block.id,
                 block.name,
                 block.arguments or {},
-                { capture = false }
+                { capture = false, expanded = state.tools_expanded }
               ),
               block.name,
               false,
@@ -1924,7 +1926,7 @@ local function style_line(line)
     return markdown.render_line(line.text, line.in_code_fence)
   end
   if line.kind == "thinking" then
-    return ansi.dim(line.text)
+    return ansi.italic(ansi.dim(line.text))
   end
   if line.kind == "user" then
     return ansi.bold(ansi.cyan(line.text))
@@ -3139,18 +3141,30 @@ end
 local function kill_to_end(state)
   clear_busy_input_error(state)
   exit_history_browse(state)
-  state.input = state.input:sub(1, state.cursor)
+  local _, finish = line_bounds(state.input, state.cursor)
+  if state.cursor < finish then
+    state.input = state.input:sub(1, state.cursor) .. state.input:sub(finish + 1)
+  elseif finish < #state.input then
+    state.input = state.input:sub(1, finish) .. state.input:sub(finish + 2)
+  end
   state.dirty = true
 end
 
 local function kill_to_start(state)
   exit_history_browse(state)
-  if state.cursor == 0 then
+  local start = line_bounds(state.input, state.cursor)
+  if state.cursor == start then
+    if start > 0 then
+      clear_busy_input_error(state)
+      state.input = state.input:sub(1, start - 1) .. state.input:sub(state.cursor + 1)
+      state.cursor = start - 1
+      state.dirty = true
+    end
     return
   end
   clear_busy_input_error(state)
-  state.input = state.input:sub(state.cursor + 1)
-  state.cursor = 0
+  state.input = state.input:sub(1, start) .. state.input:sub(state.cursor + 1)
+  state.cursor = start
   state.dirty = true
 end
 
@@ -3430,7 +3444,12 @@ local function observer_tool_call(state, tool_call_id, tool_name, input_json)
   add_component_entry(
     state,
     "tool_execution",
-    new_tool_execution_component(tool_call_id, tool_name, input, { capture = false }),
+    new_tool_execution_component(
+      tool_call_id,
+      tool_name,
+      input,
+      { capture = false, expanded = state.tools_expanded }
+    ),
     tool_name,
     false,
     tool_call_id
@@ -4143,13 +4162,11 @@ local function apply_action(state, action, arg)
     return
   end
   if action == "move-home" then
-    state.cursor = 0
-    state.dirty = true
+    move_line_start(state, false)
     return
   end
   if action == "move-end" then
-    state.cursor = #state.input
-    state.dirty = true
+    move_line_end(state)
     return
   end
   if action == "move-line-start" then
@@ -4237,6 +4254,24 @@ local function apply_action(state, action, arg)
   end
   if action == "redraw" then
     state.force_full_redraw = true
+    state.dirty = true
+    return
+  end
+  if action == "toggle-tools" then
+    state.tools_expanded = not state.tools_expanded
+    for _, entry in ipairs(state.entries) do
+      if entry.component and type(entry.component.set_expanded) == "function" then
+        entry.component:set_expanded(state.tools_expanded)
+        entry.render_cache_width = nil
+        entry.render_cache_lines = nil
+      end
+    end
+    invalidate_render_totals(state)
+    set_status(
+      state,
+      "Tool output: " .. (state.tools_expanded and "expanded" or "collapsed"),
+      false
+    )
     state.dirty = true
     return
   end
@@ -4371,6 +4406,16 @@ local function handle_key_event(state, event)
     return
   end
   if #completions > 0 then
+    if event.key == "escape" then
+      state.command_completion_force = nil
+      state.command_completion_force_input = nil
+      state.command_completion_input = nil
+      state.command_completion_items = nil
+      state.command_completion_start = nil
+      state.command_completion_index = 1
+      state.dirty = true
+      return
+    end
     if event.key == "up" then
       state.command_completion_index = (state.command_completion_index or 1) - 1
       if state.command_completion_index < 1 then
@@ -4387,9 +4432,14 @@ local function handle_key_event(state, event)
       state.dirty = true
       return
     end
-    if (event.key == "tab" or event.key == "right") and state.cursor == #state.input then
+    if
+      (event.key == "tab" or event.key == "right" or event.key == "enter")
+      and state.cursor == #state.input
+    then
       if accept_command_completion(state) then
-        return
+        if event.key ~= "enter" then
+          return
+        end
       end
     end
     if event.key == "tab" then
@@ -4965,7 +5015,7 @@ function M._debug_busy_animation_frames(times)
       busy_label = "thinking",
       busy_phase = 0,
       busy_tick = 0,
-      busy_next_frame_at = 600,
+      busy_next_frame_at = TUI_CONST.busy_animation_interval_ms,
       busy_started_at = os.time(),
       running = true,
       scroll_offset = 0,
@@ -5108,6 +5158,10 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     block_edit = state.block_edit,
     scroll_offset = state.scroll_offset,
     status_text = state.status_text,
+    tools_expanded = state.tools_expanded,
+    last_entry_kind = state.entries[#state.entries] and state.entries[#state.entries].kind or nil,
+    last_entry_text = state.entries[#state.entries] and entry_text(state.entries[#state.entries])
+      or nil,
     rendered = rendered,
   }
 end

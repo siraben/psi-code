@@ -14,18 +14,19 @@ local tui_text = require("psi.tui_text")
 
 local M = {}
 local BAR_SPLIT = string.char(31)
-local busy_rng_seeded = false
 local enabled_setting
 
-local DEFAULT_BUSY_LABELS = {
-  { label = "working", weight = 1 },
-  { label = "thinking", weight = 1 },
-  { label = "reading", weight = 1 },
-  { label = "writing", weight = 1 },
-  { label = "editing", weight = 1 },
-  { label = "checking", weight = 1 },
-  { label = "running", weight = 1 },
-  { label = "reviewing", weight = 1 },
+local BUSY_FRAMES = {
+  "⠋",
+  "⠙",
+  "⠹",
+  "⠸",
+  "⠼",
+  "⠴",
+  "⠦",
+  "⠧",
+  "⠇",
+  "⠏",
 }
 
 local function action(name, arg)
@@ -335,6 +336,9 @@ function M.handle_key(arg)
   if keybindings.matches(key, "app.redraw") then
     return action("redraw")
   end
+  if keybindings.matches(key, "app.tools.expand") then
+    return action("toggle-tools")
+  end
   if keybindings.matches(key, "app.suspend") then
     return action("suspend")
   end
@@ -408,56 +412,12 @@ local function accent(text)
   return ansi.color("36", tostring(text or ""))
 end
 
-local function utf8_chars(text)
-  local chars = {}
-  text = tostring(text or "")
-  for ch in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
-    chars[#chars + 1] = ch
-  end
-  return chars
-end
-
-local function shimmer_text(text, phase)
-  if not enabled_setting("tui.busy_glisten", "PSI_BUSY_GLISTEN", true) then
-    return accent(text)
-  end
-
-  local chars = utf8_chars(text)
-  if #chars == 0 then
-    return ""
-  end
-
-  local sweep = ((tonumber(phase) or 0) % (#chars + 4)) - 1
-  local out = {}
-  for index, ch in ipairs(chars) do
-    local distance = math.abs(index - sweep)
-    if distance == 0 then
-      out[#out + 1] = ansi.bold(ansi.color("96", ch))
-    elseif distance == 1 then
-      out[#out + 1] = ansi.color("96", ch)
-    else
-      out[#out + 1] = accent(ch)
-    end
-  end
-  return table.concat(out)
-end
-
 local function sep()
   return label("  •  ")
 end
 
 local function pair(key, val, use_accent)
   return label(key) .. " " .. ((use_accent and accent or value)(val))
-end
-
-local function seed_busy_rng()
-  if busy_rng_seeded then
-    return
-  end
-  math.randomseed(os.time(), math.floor((os.clock() % 1) * 1000000))
-  math.random()
-  math.random()
-  busy_rng_seeded = true
 end
 
 local function configured_busy_labels()
@@ -477,25 +437,6 @@ local function configured_busy_labels()
     end
   end
   return nil
-end
-
-local function default_busy_label()
-  local total = 0
-  for _, entry in ipairs(DEFAULT_BUSY_LABELS) do
-    total = total + (tonumber(entry.weight) or 0)
-  end
-  if total <= 0 then
-    return "working"
-  end
-  local roll = math.random(total)
-  local cumulative = 0
-  for _, entry in ipairs(DEFAULT_BUSY_LABELS) do
-    cumulative = cumulative + entry.weight
-    if roll <= cumulative then
-      return entry.label
-    end
-  end
-  return DEFAULT_BUSY_LABELS[#DEFAULT_BUSY_LABELS].label
 end
 
 enabled_setting = function(path, env_name, default_value)
@@ -822,30 +763,24 @@ function M.workspace_bar_for_width(cwd, width)
 end
 
 function M.render_busy_status(label_text, phase, elapsed_seconds, glisten_phase)
-  local text = tostring(label_text or "working")
-  local dots = ({ ".", "..", "..." })[((tonumber(phase) or 0) % 3) + 1]
-  return shimmer_text(text, glisten_phase or phase)
-    .. label(
-      " ("
-        .. format_elapsed(elapsed_seconds)
-        .. "  • "
-        .. keybindings.display("app.interrupt")
-        .. " to interrupt)"
-    )
-    .. accent(" " .. dots)
+  local text = tostring(label_text or "Working")
+  if text:sub(-3) ~= "..." then
+    text = text .. "..."
+  end
+  local index = ((tonumber(glisten_phase) or tonumber(phase) or 0) % #BUSY_FRAMES) + 1
+  return accent(BUSY_FRAMES[index]) .. " " .. label(text)
 end
 
 function M.pick_busy_status()
   local labels = configured_busy_labels()
-  seed_busy_rng()
   if labels == nil then
-    return default_busy_label()
+    return "Working"
   end
-  return labels[math.random(#labels)]
+  return labels[1]
 end
 
 function M.show_thinking()
-  return enabled_setting("tui.show_thinking", "PSI_SHOW_THINKING", false) and "1" or "0"
+  return enabled_setting("tui.show_thinking", "PSI_SHOW_THINKING", true) and "1" or "0"
 end
 
 return M

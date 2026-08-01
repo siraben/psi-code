@@ -1258,10 +1258,6 @@ local BUILTIN_COMMANDS = {
     description = "Show the session tree",
   },
   {
-    name = "tree",
-    description = "Show the session tree",
-  },
-  {
     name = "reload",
     description = "Reload extensions, prompt templates, and keybindings",
   },
