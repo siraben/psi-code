@@ -201,7 +201,8 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     options->thinking_level = NULL;
     options->layout_mode = NULL;
     options->prompt_template_file = NULL;
-    options->max_tokens = 16384l;
+    /* Zero means no CLI override; Lua resolves the selected model's limit. */
+    options->max_tokens = 0l;
     options->keep_recent = 12l;
     options->resume = 0;
     options->continue_recent = 0;
@@ -318,11 +319,10 @@ int psi_cli_parse(struct psi_cli_options *options, int argc, char **argv) {
     }
     if (args.max_tokens->count > 0) {
         options->max_tokens = (long)args.max_tokens->ival[0];
-    }
-
-    if (options->max_tokens <= 0l) {
-        fprintf(stderr, "invalid value for --max-tokens\n");
-        goto out;
+        if (options->max_tokens <= 0l) {
+            fprintf(stderr, "invalid value for --max-tokens\n");
+            goto out;
+        }
     }
     if (options->keep_recent < 0l) {
         fprintf(stderr, "invalid value for --compact\n");

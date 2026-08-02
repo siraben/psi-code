@@ -218,6 +218,18 @@ local SIDE_QUESTION_SYSTEM = table.concat({
 -- sched.proc_poll) without the caller having to know. Non-TUI
 -- modes get a trivial driver (no tick hook); the TUI installs its
 -- own tick hook so its main loop keeps redrawing.
+local function turn_max_tokens(resolved, requested)
+  local requested_tokens = tonumber(requested)
+  if requested_tokens and requested_tokens > 0 then
+    return math.floor(requested_tokens)
+  end
+  local model_tokens = tonumber(resolved and resolved.max_output_tokens)
+  if model_tokens and model_tokens > 0 then
+    return math.floor(model_tokens)
+  end
+  return nil
+end
+
 local function drive_turn(opts, append_user)
   if append_user then
     local user_text = opts.user_text or ""
@@ -231,7 +243,7 @@ local function drive_turn(opts, append_user)
     return provider.run_turn({
       system_prompt = system_prompt,
       model = resolved.id,
-      max_tokens = opts.max_tokens,
+      max_tokens = turn_max_tokens(resolved, opts.max_tokens),
       thinking_level = thinking_level,
       reasoning_effort = M.current_reasoning_effort(opts.reasoning_effort),
       observer = opts.observer,

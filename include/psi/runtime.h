@@ -24,6 +24,7 @@ struct psi_cli_options {
     const char *thinking_level;
     const char *layout_mode;
     const char *prompt_template_file;
+    /* Zero selects the model's advertised output limit. */
     long max_tokens;
     long keep_recent;
     int resume;

@@ -5315,8 +5315,10 @@ int psi_vm_run_lua_mode(
         lua_pushboolean(vm->L, 1);
         lua_setfield(vm->L, -2, "no_prompt_templates");
     }
-    lua_pushinteger(vm->L, (lua_Integer)options->max_tokens);
-    lua_setfield(vm->L, -2, "max_tokens");
+    if (options->max_tokens > 0l) {
+        lua_pushinteger(vm->L, (lua_Integer)options->max_tokens);
+        lua_setfield(vm->L, -2, "max_tokens");
+    }
     lua_pushinteger(vm->L, (lua_Integer)options->keep_recent);
     lua_setfield(vm->L, -2, "keep_recent");
 
