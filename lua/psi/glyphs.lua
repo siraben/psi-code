@@ -26,6 +26,19 @@ local GLYPHS = {
   radio_on = { "◉", "(*)" },
   radio_off = { "○", "( )" },
   dot = { "•", "*" },
+  -- Table borders. The ASCII forms are all one column wide, like the box
+  -- drawing they replace, so column arithmetic is unaffected.
+  box_h = { "─", "-" },
+  box_v = { "│", "|" },
+  box_tl = { "┌", "+" },
+  box_tm = { "┬", "+" },
+  box_tr = { "┐", "+" },
+  box_ml = { "├", "+" },
+  box_mm = { "┼", "+" },
+  box_mr = { "┤", "+" },
+  box_bl = { "└", "+" },
+  box_bm = { "┴", "+" },
+  box_br = { "┘", "+" },
 }
 
 local SPINNERS = {
