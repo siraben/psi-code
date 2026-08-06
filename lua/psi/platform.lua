@@ -23,6 +23,28 @@ local function env_bool(name)
   return nil
 end
 
+-- Whether the terminal's charset can represent non-ASCII output.
+--
+-- This is independent of ANSI support: a terminal can honour CSI sequences
+-- perfectly while running under a non-UTF-8 locale, in which case multi-byte
+-- glyphs arrive as mojibake or missing-glyph boxes. POSIX locale precedence
+-- applies, so the first variable that is set decides.
+function M.unicode_supported()
+  local override = env_bool("PSI_UNICODE")
+  if override ~= nil then
+    return override
+  end
+  for _, name in ipairs({ "LC_ALL", "LC_CTYPE", "LANG" }) do
+    local value = env_lower(name)
+    if value ~= "" then
+      return value:match("utf%-?8") ~= nil
+    end
+  end
+  -- Windows consoles are not described by the POSIX locale variables; the
+  -- host console API decides, and modern ones render UTF-8.
+  return M.is_windows()
+end
+
 local function runtime_cwd()
   if type(psi) == "table" and type(psi.runtime_info) == "function" then
     local ok, info = pcall(psi.runtime_info)

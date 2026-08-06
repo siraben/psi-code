@@ -2,6 +2,7 @@ local agent = require("psi.agent_session")
 local agent_runtime = require("psi.agent_session_runtime")
 local ansi = require("psi.ansi")
 local commands = require("psi.slash_commands")
+local glyphs = require("psi.glyphs")
 local markdown = require("psi.markdown")
 local prelude = require("psi.prelude")
 local records = require("psi.records")
@@ -434,7 +435,9 @@ local function pending_queue_lines(width, max_rows)
   if ok and keybindings and type(keybindings.display) == "function" then
     key_text = keybindings.display("tui.queue.restore")
   end
-  local hint = ansi.dim(fit_text("↳ " .. key_text .. " to edit all queued messages", width))
+  local hint = ansi.dim(
+    fit_text(glyphs.arrow_return .. " " .. key_text .. " to edit all queued messages", width)
+  )
 
   if max_rows == nil or max_rows >= (#message_lines + 2) then
     local out = { "" }
@@ -589,10 +592,16 @@ local function detect_tui_capabilities()
 
   local raw_ansi_ok = ansi_ok and type(psi.tui_draw_raw_line) == "function"
 
+  -- Charset support is probed separately from ANSI: the locale decides
+  -- whether multi-byte glyphs survive, not the terminal type.
+  local unicode_ok = platform.unicode_supported()
+  glyphs.set_enabled(unicode_ok)
+
   return {
     ansi = ansi_ok,
     color = color_ok,
     raw_ansi = raw_ansi_ok,
+    unicode = unicode_ok,
     term = term,
   }
 end
@@ -952,7 +961,7 @@ local function entry_prefixes(entry)
     return EMPTY, EMPTY
   end
   if kind == "compaction" then
-    return "— ", EMPTY
+    return glyphs.dash .. " ", EMPTY
   end
   return EMPTY, EMPTY
 end
@@ -2349,11 +2358,11 @@ end
 
 local function style_input_border(state, width)
   if state.input and state.input:sub(1, 1) == "!" then
-    return ansi.color("bash-mode", string.rep("─", math.max(0, width)))
+    return ansi.color("bash-mode", string.rep(glyphs.hrule, math.max(0, width)))
   end
   return chat.theme.thinking_border(
     chat.current_thinking_level(state),
-    string.rep("─", math.max(0, width))
+    string.rep(glyphs.hrule, math.max(0, width))
   )
 end
 
@@ -2709,7 +2718,7 @@ function chat.redraw(state)
       out[#out + 1] = "\27[0m\r\n"
     end
     if entry.kind == "tool_result" and (not next_entry or next_entry.kind ~= "tool_result") then
-      out[#out + 1] = ansi.yellow("╰─")
+      out[#out + 1] = ansi.yellow(glyphs.corner_up)
       out[#out + 1] = "\27[0m\r\n"
     end
     state.chat_committed_entry_count = idx
@@ -2728,7 +2737,7 @@ function chat.redraw(state)
       live_lines[#live_lines + 1] = style_line(line)
     end
     if entry.kind == "tool_result" then
-      live_lines[#live_lines + 1] = ansi.yellow("╰─")
+      live_lines[#live_lines + 1] = ansi.yellow(glyphs.corner_up)
     end
   end
 
@@ -5783,9 +5792,11 @@ local function draw_resume_picker(infos, selected, offset, scope)
 
   local scope_label
   if scope == "all" then
-    scope_label = ansi.dim("○ Current Folder | ") .. ansi.bold(ansi.cyan("◉ All"))
+    scope_label = ansi.dim(glyphs.radio_off .. " Current Folder | ")
+      .. ansi.bold(ansi.cyan(glyphs.radio_on .. " All"))
   else
-    scope_label = ansi.bold(ansi.cyan("◉ Current Folder")) .. ansi.dim(" | ○ All")
+    scope_label = ansi.bold(ansi.cyan(glyphs.radio_on .. " Current Folder"))
+      .. ansi.dim(" | " .. glyphs.radio_off .. " All")
   end
 
   psi.tui_clear()
@@ -5817,7 +5828,9 @@ local function draw_resume_picker(infos, selected, offset, scope)
       end
     end
     if split then
-      text = text .. ansi.dim("│ ") .. resume_preview_line(selected_info, row, right_width)
+      text = text
+        .. ansi.dim(glyphs.quote_bar)
+        .. resume_preview_line(selected_info, row, right_width)
     end
     psi.tui_draw_line(list_start + row, text)
   end
