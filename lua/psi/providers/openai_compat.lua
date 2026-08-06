@@ -37,6 +37,7 @@
 --   cfg.include_response_id  bool      if true, pass state.response_id to
 --                                      session.append_assistant (OpenRouter).
 
+local glyphs = require("psi.glyphs")
 local prelude = require("psi.prelude")
 local provider_loop = require("psi.provider_loop")
 local sched = require("psi.sched")
@@ -108,23 +109,23 @@ function M.classify_http_error(status, body, provider_name)
   if status == 401 or status == 403 then
     hint = "check your API key"
   elseif status == 429 then
-    hint = "rate limited — retry after a moment or switch model"
+    hint = "rate limited " .. glyphs.dash .. " retry after a moment or switch model"
   elseif status == 404 then
-    hint = "model or endpoint not found — check the model slug"
+    hint = "model or endpoint not found " .. glyphs.dash .. " check the model slug"
   elseif status == 413 then
-    hint = "request too large — context or output may need trimming"
+    hint = "request too large " .. glyphs.dash .. " context or output may need trimming"
   elseif status == 529 or status == 503 then
-    hint = "provider is overloaded — try again shortly"
+    hint = "provider is overloaded " .. glyphs.dash .. " try again shortly"
   elseif status >= 500 then
-    hint = "provider-side error — retry or check status page"
+    hint = "provider-side error " .. glyphs.dash .. " retry or check status page"
   end
 
   local parts = { string.format("%s request failed (%d)", provider_name, status) }
   if hint then
-    parts[#parts + 1] = "— " .. hint
+    parts[#parts + 1] = glyphs.dash .. " " .. hint
   end
   if detail then
-    parts[#parts + 1] = "— " .. detail
+    parts[#parts + 1] = glyphs.dash .. " " .. detail
   end
   return table.concat(parts, " ")
 end
