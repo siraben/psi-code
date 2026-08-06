@@ -11,6 +11,7 @@
 -- Extension-registered commands (psi.commands.register(name, handler))
 -- are consulted last, after built-ins.
 
+local glyphs = require("psi.glyphs")
 local records = require("psi.records")
 local notice = require("psi.notice")
 local prelude = require("psi.prelude")
@@ -591,7 +592,7 @@ local function render_markdown_session()
       local stop = msg.stopReason or "-"
       add(
         string.format(
-          "## Assistant — %s (stop=%s, in=%d out=%d)",
+          "## Assistant " .. glyphs.dash .. " %s (stop=%s, in=%d out=%d)",
           model,
           stop,
           u.input or 0,
@@ -1641,7 +1642,11 @@ local function login_arg_completions(arg, limit)
   end
   local descriptions = {}
   for _, option in ipairs(provider_auth_options()) do
-    local description = auth_method_label(option.auth_type) .. " — " .. option.name
+    local description = auth_method_label(option.auth_type)
+      .. " "
+      .. glyphs.dash
+      .. " "
+      .. option.name
     if descriptions[option.provider] then
       descriptions[option.provider] = descriptions[option.provider] .. ", " .. description
     else
@@ -1672,9 +1677,11 @@ local function logout_arg_completions(arg, limit)
       out[#out + 1] = {
         insert = item.provider,
         label = item.provider,
-        description = auth_method_label(item.type) .. " — " .. provider_display_name(
-          item.provider
-        ),
+        description = auth_method_label(item.type)
+          .. " "
+          .. glyphs.dash
+          .. " "
+          .. provider_display_name(item.provider),
         trailing = "",
       }
     end
