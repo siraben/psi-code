@@ -3,6 +3,7 @@
 expect = "⠴ working...|true"
 ]==]
 local ansi = require("psi.ansi")
+ansi.enabled = true
 ansi.color_enabled = true
 local rendered = require("psi.tui_status").render_busy_status("working", 2, 4, 5)
 local plain = (rendered:gsub("\27%[[%d;]*m", ""))

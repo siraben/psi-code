@@ -1,6 +1,9 @@
 --[==[psi-test
 expect = "normal|14|beta|alpha betabeta gamma|-|a\nb|0|normal|  aa!\nbb|  xaa|aa\nx\nbb|aa\nx\nbb|0||insert|true|line|true|xaa\nxbb\ncc|aax\nbbx\ncc|abort"
 ]==]
+local ansi = require("psi.ansi")
+ansi.enabled = true
+ansi.color_enabled = true
 local rt = require("psi.tui_runtime")
 local tui = require("psi.tui_status")
 require("psi.extensions.vim_keybindings").enable(psi)
