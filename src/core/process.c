@@ -1291,8 +1291,30 @@ int psi_process_finish(
             chunk = NULL;
         }
         if (!h->reaped) {
-            WaitForSingleObject(h->nt_process, PSI_NT_WAIT_FOREVER);
-            h->reaped = 1;
+            uint32_t waited_ms;
+            waited_ms = 0u;
+            /* The child can outlive its stdout stream; never wait
+             * forever without watching the abort signal, so Ctrl-C
+             * still unwinds a wedged tool call. Once aborted, cap the
+             * extra wait at PSI_PROCESS_ABORT_WAIT_LIMIT_MS. */
+            for (;;) {
+                if (WaitForSingleObject(h->nt_process, (uint32_t)PSI_PROCESS_POLL_DELAY_MS) !=
+                    kNtWaitTimeout) {
+                    h->reaped = 1;
+                    break;
+                }
+                if (!h->aborted && psi_abort_signal_is_triggered(h->abort_signal)) {
+                    h->aborted = 1;
+                    psi_process_windows_terminate_tree(h, (uint32_t)PSI_PROCESS_ABORT_EXIT_STATUS);
+                }
+                if (h->aborted) {
+                    waited_ms += (uint32_t)PSI_PROCESS_POLL_DELAY_MS;
+                    if (waited_ms >= (uint32_t)PSI_PROCESS_ABORT_WAIT_LIMIT_MS) {
+                        h->reaped = 1; /* best-effort; OS cleans up */
+                        break;
+                    }
+                }
+            }
         }
         while (psi_process_poll(h, 0, &chunk, &chunk_len) == 1) {
             free(chunk);
@@ -1341,45 +1363,66 @@ int psi_process_finish(
     }
 #endif
 
+    /* Close our ends of the child's pipes unconditionally. The old
+     * code skipped this when poll() had already reaped the child,
+     * leaking both fds for every tool call that ended via reap. */
+    if (h->stdin_fd >= 0) {
+        close(h->stdin_fd);
+        h->stdin_fd = -1;
+    }
+    close(h->pipe_fd);
+
     if (!h->reaped) {
-        if (h->stdin_fd >= 0) {
-            close(h->stdin_fd);
-            h->stdin_fd = -1;
-        }
-        close(h->pipe_fd);
-        /* On abort, poll for up to 500ms then escalate to SIGKILL,
-         * capping abort latency at ~1.5s for SIGTERM-ignoring trees. */
-        if (h->aborted) {
-            int waited_ms;
-            int sigkilled;
-            sigkilled = 0;
-            for (waited_ms = 0; waited_ms < PSI_PROCESS_ABORT_WAIT_LIMIT_MS;
-                waited_ms += PSI_PROCESS_POLL_DELAY_MS) {
-                pid_t r;
-                struct timespec delay;
-                r = waitpid(h->child_pid, &h->wait_status, WNOHANG);
-                if (r == h->child_pid) {
-                    h->reaped = 1;
-                    break;
-                }
-                if (r < 0) {
-                    h->reaped = 1; /* ECHILD: already harvested */
-                    break;
-                }
+        int waited_ms;
+        int sigkilled;
+
+        waited_ms = 0;
+        sigkilled = 0;
+        /* EOF on the pipe is not proof of exit: a daemonizing child,
+         * or one blocked on /dev/tty, can outlive its output stream.
+         * Never sit in an uninterruptible waitpid here — poll with
+         * WNOHANG and keep watching the abort signal so Ctrl-C always
+         * unwinds a wedged tool call (pi-mono parity: abort kills the
+         * tree and the turn unwinds promptly). Once aborted, poll for
+         * up to 500ms then escalate to SIGKILL, capping abort latency
+         * at ~1.5s for SIGTERM-ignoring trees. */
+        for (;;) {
+            pid_t r;
+            struct timespec delay;
+            r = waitpid(h->child_pid, &h->wait_status, WNOHANG);
+            if (r == h->child_pid) {
+                h->reaped = 1;
+                break;
+            }
+            if (r < 0) {
+                h->reaped = 1; /* ECHILD: already harvested */
+                break;
+            }
+            if (!h->aborted && psi_abort_signal_is_triggered(h->abort_signal)) {
+                h->aborted = 1;
+                kill(-h->child_pid, SIGTERM);
+            }
+            if (h->aborted) {
                 if (!sigkilled && waited_ms >= PSI_PROCESS_ABORT_ESCALATE_MS) {
                     kill(-h->child_pid, SIGKILL);
                     sigkilled = 1;
                 }
-                delay.tv_sec = 0;
-                delay.tv_nsec = PSI_PROCESS_POLL_DELAY_NS;
-                nanosleep(&delay, NULL);
+                if (waited_ms >= PSI_PROCESS_ABORT_WAIT_LIMIT_MS) {
+                    /* SIGKILL delivered but the child still hasn't
+                     * been collected (e.g. D-state): one final
+                     * blocking wait as the last resort, matching the
+                     * previous best-effort semantics. */
+                    if (waitpid(h->child_pid, &h->wait_status, 0) < 0) {
+                        /* Best-effort: carry on with whatever we have. */
+                    }
+                    h->reaped = 1;
+                    break;
+                }
             }
-        }
-        if (!h->reaped) {
-            if (waitpid(h->child_pid, &h->wait_status, 0) < 0) {
-                /* Best-effort: carry on with whatever we have. */
-            }
-            h->reaped = 1;
+            delay.tv_sec = 0;
+            delay.tv_nsec = PSI_PROCESS_POLL_DELAY_NS;
+            nanosleep(&delay, NULL);
+            waited_ms += PSI_PROCESS_POLL_DELAY_MS;
         }
     }
 
