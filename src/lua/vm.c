@@ -948,6 +948,14 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
     if (strcmp(sequence, "[3~") == 0) {
         return "delete";
     }
+    /* Bracketed paste markers (ESC[200~ / ESC[201~): Lua buffers the bytes
+     * between them into one editor buffer (pi parity). */
+    if (strcmp(sequence, "[200~") == 0) {
+        return "paste-start";
+    }
+    if (strcmp(sequence, "[201~") == 0) {
+        return "paste-end";
+    }
     if (strcmp(sequence, "[5~") == 0) {
         return "page-up";
     }

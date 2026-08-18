@@ -1881,6 +1881,30 @@ def t_tui_input_box_background(psi: Psi):
     assert_bytes_contains(raw, b"\x1b[38;2;95;135;255m",
                           "pi-style input border color did not reach rendered output")
 
+@test("mode/tui_bracketed_paste")
+def t_tui_bracketed_paste(psi: Psi):
+    # pi parity: ESC[200~ ... ESC[201~ lands in the editor as one multi-line
+    # buffer; the embedded newlines must not submit per line.
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [
+            (b"", 1.0),
+            (b"\x1b[200~paste alpha\rpaste beta\x1b[201~", 1.0),
+            (b"\x03", 0.5),  # ctrl-c: clear the buffer before quitting
+            (b"/quit\r", 1.0),
+        ],
+        env_extra={"XDG_STATE_HOME": str(psi.tmp / "state-tui-paste")},
+    )
+    raw.assert_clean_exit()
+    assert_bytes_contains(raw, b"\x1b[?2004h", "TUI should enable bracketed paste")
+    assert_bytes_contains(raw, b"\x1b[?2004l", "TUI should disable bracketed paste on exit")
+    assert_bytes_contains(raw, b"paste alpha", "first pasted line should reach the editor")
+    assert_bytes_contains(raw, b"paste beta", "second pasted line should reach the editor")
+    assert_true(
+        "ANTHROPIC_API_KEY" not in raw.screen_text,
+        "bracketed paste must not submit each line as its own message",
+    )
+
 @test("mode/tui_lf_submit")
 def t_tui_lf_submit(psi: Psi):
     raw = run_pty(

@@ -42,9 +42,13 @@ static struct psi_tui_stdio_guard psi_tui_guard = {0, -1, -1, -1};
 
 #define PSI_TUI_ENABLE_MOUSE "\033[?1000h\033[?1006h"
 #define PSI_TUI_DISABLE_MOUSE "\033[?1006l\033[?1000l"
-#define PSI_TUI_ENTER_SEQ "\033[?1049h" PSI_TUI_ENABLE_MOUSE "\033[?25h\033[2J\033[H"
-#define PSI_TUI_LEAVE_SEQ PSI_TUI_DISABLE_MOUSE "\033[?2026l\033[0m\033[?25h\033[?1049l"
-#define PSI_TUI_LEAVE_INLINE_SEQ "\033[?2026l\033[0m\033[?25h"
+#define PSI_TUI_ENABLE_BRACKETED_PASTE "\033[?2004h"
+#define PSI_TUI_DISABLE_BRACKETED_PASTE "\033[?2004l"
+#define PSI_TUI_ENTER_SEQ                                                                          \
+    "\033[?1049h" PSI_TUI_ENABLE_MOUSE PSI_TUI_ENABLE_BRACKETED_PASTE "\033[?25h\033[2J\033[H"
+#define PSI_TUI_LEAVE_SEQ                                                                          \
+    PSI_TUI_DISABLE_BRACKETED_PASTE PSI_TUI_DISABLE_MOUSE "\033[?2026l\033[0m\033[?25h\033[?1049l"
+#define PSI_TUI_LEAVE_INLINE_SEQ PSI_TUI_DISABLE_BRACKETED_PASTE "\033[?2026l\033[0m\033[?25h"
 
 static void psi_tui_close_on_exec(int fd) {
     int flags;
@@ -269,6 +273,9 @@ static int psi_tui_enter_terminal(void) {
         perror("tcsetattr");
         return PSI_STATUS_ERROR;
     }
+    /* Enabled at the terminal boundary so inline chat mode (no alt screen) is covered. */
+    fputs(PSI_TUI_ENABLE_BRACKETED_PASTE, stdout);
+    fflush(stdout);
     return PSI_STATUS_OK;
 }
 
@@ -314,8 +321,10 @@ int psi_tui_resume_terminal(void) {
     }
     if (psi_tui_alt_screen_active) {
         fputs(PSI_TUI_ENTER_SEQ, stdout);
-        fflush(stdout);
+    } else {
+        fputs(PSI_TUI_ENABLE_BRACKETED_PASTE, stdout);
     }
+    fflush(stdout);
     return psi_tui_stdio_guard_begin();
 }
 

@@ -82,9 +82,9 @@ end
 function chat.set_alt_screen(enter)
   if type(psi.tui_write) == "function" then
     if enter then
-      psi.tui_write("\27[?1049h\27[?1000h\27[?1006h\27[?25h\27[2J\27[H")
+      psi.tui_write("\27[?1049h\27[?1000h\27[?1006h\27[?2004h\27[?25h\27[2J\27[H")
     else
-      psi.tui_write("\27[?1006l\27[?1000l\27[?2026l\27[0m\27[?25h\27[?1049l")
+      psi.tui_write("\27[?2004l\27[?1006l\27[?1000l\27[?2026l\27[0m\27[?25h\27[?1049l")
     end
   end
   if type(psi.tui_set_alt_screen_active) == "function" then
@@ -4365,6 +4365,35 @@ local function handle_key_event(state, event)
   if event.key == "resize" then
     state.dirty = true
     return
+  end
+  -- Bracketed paste (pi parity): buffer chunks literally, insert as one buffer on paste-end.
+  if event.key == "paste-start" then
+    state.paste_chunks = {}
+    return
+  end
+  if state.paste_chunks ~= nil then
+    if event.key == "paste-end" then
+      local pasted = table.concat(state.paste_chunks)
+      state.paste_chunks = nil
+      if pasted ~= "" then
+        insert_text(state, pasted)
+      end
+      return
+    end
+    if event.key == "enter" then
+      state.paste_chunks[#state.paste_chunks + 1] = "\n"
+      return
+    end
+    if event.key == "text" and type(event.text) == "string" and event.text ~= "" then
+      state.paste_chunks[#state.paste_chunks + 1] = event.text
+      return
+    end
+    -- Dropped end marker: flush what arrived, then handle this key normally.
+    local pasted = table.concat(state.paste_chunks)
+    state.paste_chunks = nil
+    if pasted ~= "" then
+      insert_text(state, pasted)
+    end
   end
   if state.ui and type(state.ui.dispatch_key) == "function" and state.ui:dispatch_key(event) then
     state.dirty = true
