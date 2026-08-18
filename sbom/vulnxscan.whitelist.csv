@@ -34,3 +34,4 @@
 "CVE-2026-4437","glibc","Accepted runtime risk for dynamic glibc until nixpkgs triage completes; NixOS tracker suggestion https://tracker.security.nixos.org/suggestions/by-id/3977/ has no published nixpkgs issue yet."
 "CVE-2026-4046","glibc","Accepted runtime risk for dynamic glibc until nixpkgs publishes a tracker issue; no NixOS/nixpkgs issue found on 2026-05-25."
 "CVE-2025-15281","glibc","Accepted as stale scanner hit for this nixpkgs line; NIXPKGS-2026-0072 / https://github.com/NixOS/nixpkgs/issues/482394 is closed completed."
+"CVE-2026-67215","cjson","Not applicable: the vulnerability is in cJSONUtils_ApplyPatches/cJSONUtils_ApplyPatchesCaseSensitive (RFC 6902 JSON Patch); psi links only libcjson core (-lcjson, never -lcjson_utils) and no source references cJSONUtils or ApplyPatches, so there is no patch-application path. The parser nesting limit (CJSON_NESTING_LIMIT 1000) used by psi is unaffected."
