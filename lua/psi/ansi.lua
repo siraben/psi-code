@@ -154,6 +154,11 @@ function M.autodetect()
   if info.color == false then
     M.color_enabled = false
   end
+  -- Plain output when stdout is not a terminal (pi print-mode parity); the force flags below still win.
+  if type(psi) == "table" and type(psi.stdout_is_tty) == "function" and not psi.stdout_is_tty() then
+    M.enabled = false
+    M.color_enabled = false
+  end
   local no_color = os.getenv("NO_COLOR") ~= nil and os.getenv("NO_COLOR") ~= ""
   if no_color then
     M.color_enabled = false

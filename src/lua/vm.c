@@ -20,6 +20,8 @@
 #include <limits.h>
 #ifndef _WIN32
 #include <unistd.h>
+#else
+#include <io.h>
 #endif
 #include <sys/time.h>
 #if PSI_ENABLE_TUI
@@ -4585,6 +4587,16 @@ static int lfn_stdout_write(lua_State *L) {
     return 0;
 }
 
+/* psi.stdout_is_tty() -> boolean: true when stdout is a terminal. */
+static int lfn_stdout_is_tty(lua_State *L) {
+#ifdef _WIN32
+    lua_pushboolean(L, _isatty(_fileno(stdout)));
+#else
+    lua_pushboolean(L, isatty(fileno(stdout)));
+#endif
+    return 1;
+}
+
 /* psi.tool_call(name, input) -> result alist, via psi.tools.dispatch_alist. */
 static int lfn_tool_call(lua_State *L) {
     luaL_checkstring(L, 1);
@@ -4778,6 +4790,7 @@ static void psi_vm_register_psi(lua_State *L) {
         "Returns nil on EOF.");
     PSI_REG("add_history", lfn_add_history);
     PSI_REG("stdout_write", lfn_stdout_write);
+    PSI_REG("stdout_is_tty", lfn_stdout_is_tty);
     PSI_REG("sleep_ms", lfn_sleep_ms);
     PSI_REG("host_tick", lfn_host_tick);
     PSI_REG("tool_progress", lfn_tool_progress);
