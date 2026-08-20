@@ -1,5 +1,5 @@
 --[==[psi-test
-expect = "first\nsecond\nthird|18|1|alpha\nbeta\ngamma|abX\nY|5|hi|1"
+expect = "first\nsecond\nthird|18|1|alpha\nbeta\ngamma|abX\nY|5|abZ|2|a\nb\nc    de|11"
 ]==]
 local agent = require("psi.agent_session")
 local rt = require("psi.tui_runtime")
@@ -40,11 +40,34 @@ local spliced = rt._debug_edit_keys("ab", 2, {
   { key = "paste-end" },
 }, false)
 
--- A dropped end marker flushes what arrived and leaves the editor usable.
-local unterminated = rt._debug_edit_keys("", 0, {
+-- Decoder-produced semantic keys within a paste are filtered rather than
+-- executing editor actions against the surrounding input.
+local controls = rt._debug_edit_keys("Z", 0, {
   { key = "paste-start" },
-  { key = "text", text = "hi" },
+  { key = "text", text = "a" },
+  { key = "delete" },
   { key = "left" },
+  { key = "escape" },
+  { key = "alt-d" },
+  { key = "text", text = "b" },
+  { key = "paste-end" },
+}, false)
+
+-- Preserve raw line endings until paste-end, normalize CRLF/lone CR once,
+-- expand tabs, and filter pasted control keys instead of executing them.
+local normalized = rt._debug_edit_keys("", 0, {
+  { key = "paste-start" },
+  { key = "text", text = "a" },
+  { key = "enter", text = "\r" },
+  { key = "enter", text = "\n" },
+  { key = "text", text = "b" },
+  { key = "enter", text = "\r" },
+  { key = "text", text = "c" },
+  { key = "tab", text = "\t" },
+  { key = "text", text = "d" },
+  { key = "ctrl-c" },
+  { key = "text", text = "e" },
+  { key = "paste-end" },
 }, false)
 
 agent.clear_queues()
@@ -56,6 +79,8 @@ return table.concat({
   tostring(queued and queued.text),
   spliced.input,
   tostring(spliced.cursor),
-  unterminated.input,
-  tostring(unterminated.cursor),
+  controls.input,
+  tostring(controls.cursor),
+  normalized.input,
+  tostring(normalized.cursor),
 }, "|")

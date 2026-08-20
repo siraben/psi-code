@@ -1095,8 +1095,16 @@ static int psi_vm_tui_normalize_key(
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "backspace");
         return 1;
     }
+    if (ch == '\t') {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "tab");
+        event->text[0] = '\t';
+        event->text[1] = '\0';
+        return 1;
+    }
     if (ch == '\r' || ch == '\n') {
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "enter");
+        event->text[0] = (char)ch;
+        event->text[1] = '\0';
         return 1;
     }
     if (ch >= PSI_VM_TUI_CONTROL_MIN && ch <= PSI_VM_TUI_CONTROL_MAX) {
@@ -1402,6 +1410,10 @@ static int psi_vm_text_is_regional_indicator(unsigned long cp) {
     return psi_vm_text_in_range(cp, 0x1f1e6u, 0x1f1ffu);
 }
 
+static int psi_vm_text_is_emoji_modifier(unsigned long cp) {
+    return psi_vm_text_in_range(cp, 0x1f3fbu, 0x1f3ffu);
+}
+
 static int psi_vm_text_is_control(unsigned long cp) {
     return cp < PSI_VM_TEXT_CODEPOINT_C0_CONTROL_MAX ||
         psi_vm_text_in_range(
@@ -1432,29 +1444,25 @@ static int psi_vm_text_is_zero_width_cluster_modifier(unsigned long cp) {
         psi_vm_text_is_control(cp)) {
         return 0;
     }
-    return psi_wcwidth((int)cp) == PSI_VM_TEXT_WIDTH_ZERO;
+    return psi_vm_text_is_emoji_modifier(cp) || psi_wcwidth((int)cp) == PSI_VM_TEXT_WIDTH_ZERO;
 }
 
 static void psi_vm_text_next_cluster(
     const char *text, size_t len, size_t i, size_t *next_i, int *cluster_width) {
-    size_t start;
     size_t after;
     unsigned long cp;
     int width;
     int saw_zwj;
 
-    start = i;
     cp = psi_vm_text_decode_utf8(text, len, i, &after);
     width = psi_vm_text_codepoint_width(cp);
     if (psi_vm_text_is_regional_indicator(cp)) {
         size_t after2;
         unsigned long cp2;
+        width = PSI_VM_TEXT_WIDTH_WIDE;
         cp2 = psi_vm_text_decode_utf8(text, len, after, &after2);
         if (psi_vm_text_is_regional_indicator(cp2)) {
-            *next_i = after2;
-            *cluster_width = 2;
-            PSI_UNUSED(start);
-            return;
+            after = after2;
         }
     }
 

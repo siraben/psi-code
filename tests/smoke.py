@@ -1905,6 +1905,25 @@ def t_tui_bracketed_paste(psi: Psi):
         "bracketed paste must not submit each line as its own message",
     )
 
+
+@test("mode/tui_tab_completion")
+def t_tui_tab_completion(psi: Psi):
+    # Exercise the host key decoder, not a synthetic Lua {key="tab"} event.
+    # Tab must complete /he to /help before Left moves the cursor. Enter alone
+    # can also accept a painted suggestion, but after Left it submits the
+    # existing buffer: /help with a decoded Tab, unknown /he without one.
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [(b"", 0.5), (b"/he\t\x1b[D\r", 0.75), (b"/quit\r", 1.0)],
+        env_extra={"XDG_STATE_HOME": str(psi.tmp / "state-tui-tab-completion")},
+    )
+    raw.assert_clean_exit()
+    assert_bytes_contains(
+        raw,
+        b"extensions:",
+        "physical Tab did not reach slash-command completion",
+    )
+
 @test("mode/tui_lf_submit")
 def t_tui_lf_submit(psi: Psi):
     raw = run_pty(

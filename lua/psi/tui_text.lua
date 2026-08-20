@@ -158,7 +158,11 @@ local function is_variation_selector(cp)
 end
 
 local function is_regional_indicator(cp)
-  return in_range(cp, 0x1f1e6, 0x1f1ff)
+  return cp ~= nil and in_range(cp, 0x1f1e6, 0x1f1ff)
+end
+
+local function is_emoji_modifier(cp)
+  return cp ~= nil and in_range(cp, 0x1f3fb, 0x1f3ff)
 end
 
 local function is_wide(cp)
@@ -202,7 +206,10 @@ local function codepoint_width(cp)
 end
 
 local function is_zero_width_cluster_modifier(cp)
-  return cp ~= 0x200d and not is_control(cp) and codepoint_width(cp) == 0
+  return cp ~= nil
+    and cp ~= 0x200d
+    and not is_control(cp)
+    and (is_emoji_modifier(cp) or codepoint_width(cp) == 0)
 end
 
 local function next_cluster(text, i)
@@ -212,9 +219,10 @@ local function next_cluster(text, i)
   local saw_zwj = false
 
   if is_regional_indicator(cp) then
+    width = math.max(width, 2)
     local cp2, next2 = decode_utf8(text, next_i)
     if is_regional_indicator(cp2) then
-      return text:sub(start, next2 - 1), 2, next2, cp
+      next_i = next2
     end
   end
 

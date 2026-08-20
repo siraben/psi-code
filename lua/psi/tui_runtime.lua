@@ -586,7 +586,7 @@ local function input_next_chunk_end(input, chunk_start, line_end, width)
     return line_end
   end
   if limit <= 0 then
-    limit = 1
+    limit = tui_text.next_grapheme_index(remaining, 0)
   end
   limit = math.min(line_end, chunk_start + limit)
   return input_wrap_break(input, chunk_start, limit, line_end) or limit
@@ -666,11 +666,15 @@ function chat.derive_input_cursor(state, input, lines)
   local cursor = state.cursor
   for i = 1, #lines do
     local line = lines[i]
-    if line.gap_start ~= nil and i > 1 and cursor > line.gap_start and cursor <= line.start then
+    if line.gap_start ~= nil and i > 1 and cursor >= line.gap_start and cursor < line.start then
       local prev = lines[i - 1]
       return i - 1, display_width(input:sub(prev.start + 1, prev.start + prev.len))
     end
-    if cursor >= line.start and cursor <= line.start + line.len then
+    local finish = line.start + line.len
+    local next_line = lines[i + 1]
+    local soft_wrap = next_line ~= nil
+      and (next_line.start == finish or next_line.gap_start == finish)
+    if cursor >= line.start and (cursor < finish or (not soft_wrap and cursor <= finish)) then
       return i, display_width(input:sub(line.start + 1, cursor))
     end
   end
@@ -881,10 +885,14 @@ local function new_state(opts, runtime)
     prompt_history = {},
     history_index = nil,
     history_draft = "",
+    history_draft_cursor = 0,
     history_search_active = false,
     history_search_query = "",
     history_search_draft = "",
     history_search_index = nil,
+    editor_preferred_col = nil,
+    editor_snapped_col = nil,
+    editor_gap_anchor = nil,
     command_completion_index = 1,
     command_completion_input = nil,
     command_completion_items = nil,
@@ -926,6 +934,7 @@ local function history_seed_from_session(state)
   end
   state.history_index = nil
   state.history_draft = ""
+  state.history_draft_cursor = 0
   state.history_search_active = false
   state.history_search_query = ""
   state.history_search_draft = ""
@@ -942,6 +951,7 @@ end
 local function exit_history_browse(state)
   state.history_index = nil
   state.history_draft = ""
+  state.history_draft_cursor = 0
   reset_history_search(state)
 end
 
@@ -967,12 +977,16 @@ local function history_up(state)
   end
   if state.history_index == nil then
     state.history_draft = state.input or ""
+    state.history_draft_cursor = state.cursor or #state.history_draft
     state.history_index = #state.prompt_history
   elseif state.history_index > 1 then
     state.history_index = state.history_index - 1
   end
   state.input = state.prompt_history[state.history_index] or state.input
-  state.cursor = #state.input
+  state.cursor = 0
+  state.editor_preferred_col = nil
+  state.editor_snapped_col = nil
+  state.editor_gap_anchor = nil
   state.dirty = true
   return true
 end
@@ -987,9 +1001,19 @@ local function history_down(state)
   else
     state.history_index = nil
     state.input = state.history_draft or ""
+    state.cursor = clamp(tonumber(state.history_draft_cursor) or #state.input, 0, #state.input)
     state.history_draft = ""
+    state.history_draft_cursor = 0
+    state.editor_preferred_col = nil
+    state.editor_snapped_col = nil
+    state.editor_gap_anchor = nil
+    state.dirty = true
+    return true
   end
   state.cursor = #state.input
+  state.editor_preferred_col = nil
+  state.editor_snapped_col = nil
+  state.editor_gap_anchor = nil
   state.dirty = true
   return true
 end
@@ -2566,26 +2590,124 @@ function M._is_punctuation_byte(b)
     or b == 126
 end
 
+function M._word_codepoint(text, start)
+  local ok, cp = pcall(utf8.codepoint, text, start + 1)
+  return ok and cp or nil
+end
+
+function M._is_unicode_space(cp)
+  return cp == 0x09
+    or cp == 0x20
+    or cp == 0x00a0
+    or cp == 0x1680
+    or (cp ~= nil and cp >= 0x2000 and cp <= 0x200a)
+    or cp == 0x2028
+    or cp == 0x2029
+    or cp == 0x202f
+    or cp == 0x205f
+    or cp == 0x3000
+end
+
+function M._is_cjk_word_cluster(cp)
+  return cp ~= nil
+    and (
+      (cp >= 0x3400 and cp <= 0x9fff)
+      or (cp >= 0xf900 and cp <= 0xfaff)
+      or (cp >= 0x3040 and cp <= 0x30ff)
+      or (cp >= 0xac00 and cp <= 0xd7af)
+      or (cp >= 0x20000 and cp <= 0x3134f)
+    )
+end
+
+function M._is_unicode_punctuation(cp)
+  return cp ~= nil
+    and (
+      (cp >= 0x2000 and cp <= 0x206f)
+      or (cp >= 0x2e00 and cp <= 0x2e7f)
+      or (cp >= 0x3001 and cp <= 0x303f)
+      or (cp >= 0xfe10 and cp <= 0xfe1f)
+      or (cp >= 0xfe30 and cp <= 0xfe6f)
+      or (cp >= 0xff01 and cp <= 0xff0f)
+      or (cp >= 0xff1a and cp <= 0xff20)
+      or (cp >= 0xff3b and cp <= 0xff40)
+      or (cp >= 0xff5b and cp <= 0xff65)
+    )
+end
+
+function M._is_unicode_symbol(cp)
+  return cp ~= nil
+    and (
+      (cp >= 0x20a0 and cp <= 0x20cf)
+      or (cp >= 0x2100 and cp <= 0x214f)
+      or (cp >= 0x2190 and cp <= 0x2bff)
+      or (cp >= 0x1f000 and cp <= 0x1faff)
+    )
+end
+
+function M._word_cluster_class(text, start)
+  local cp = M._word_codepoint(text, start)
+  if M._is_unicode_space(cp) then
+    return "space"
+  end
+  if cp ~= nil and cp < 0x80 and M._is_punctuation_byte(cp) then
+    return "punctuation"
+  end
+  if M._is_unicode_punctuation(cp) then
+    return "punctuation"
+  end
+  if M._is_unicode_symbol(cp) then
+    return "symbol"
+  end
+  if M._is_cjk_word_cluster(cp) then
+    return "cjk"
+  end
+  return "word"
+end
+
+function M._cjk_run_length_before(text, finish)
+  local run = 0
+  local pos = 0
+  while pos < finish do
+    if M._word_cluster_class(text, pos) == "cjk" then
+      run = run + 1
+    else
+      run = 0
+    end
+    pos = tui_text.next_grapheme_index(text, pos)
+  end
+  return run
+end
+
 function M._word_backward_pos(text, cursor)
   text = text or ""
   local pos = clamp(tonumber(cursor) or 0, 0, #(text or ""))
   while pos > 0 do
-    local b = byte_at(text, pos - 1)
-    if b == nil or not is_space_byte(b) then
+    local start = tui_text.previous_grapheme_index(text, pos)
+    if M._word_cluster_class(text, start) ~= "space" then
       break
     end
-    pos = pos - 1
+    pos = start
   end
   if pos == 0 then
     return pos
   end
-  local punctuation = M._is_punctuation_byte(byte_at(text, pos - 1))
+  local start = tui_text.previous_grapheme_index(text, pos)
+  local class = M._word_cluster_class(text, start)
+  if class == "cjk" then
+    if M._cjk_run_length_before(text, pos) % 2 == 0 and start > 0 then
+      local prior = tui_text.previous_grapheme_index(text, start)
+      if M._word_cluster_class(text, prior) == "cjk" then
+        return prior
+      end
+    end
+    return start
+  end
   while pos > 0 do
-    local b = byte_at(text, pos - 1)
-    if b == nil or is_space_byte(b) or M._is_punctuation_byte(b) ~= punctuation then
+    start = tui_text.previous_grapheme_index(text, pos)
+    if M._word_cluster_class(text, start) ~= class then
       break
     end
-    pos = pos - 1
+    pos = start
   end
   return pos
 end
@@ -2594,22 +2716,29 @@ function M._word_forward_pos(text, cursor)
   text = text or ""
   local pos = clamp(tonumber(cursor) or 0, 0, #(text or ""))
   while pos < #text do
-    local b = byte_at(text, pos)
-    if b == nil or not is_space_byte(b) then
+    if M._word_cluster_class(text, pos) ~= "space" then
       break
     end
-    pos = pos + 1
+    pos = tui_text.next_grapheme_index(text, pos)
   end
   if pos >= #text then
     return pos
   end
-  local punctuation = M._is_punctuation_byte(byte_at(text, pos))
+  local class = M._word_cluster_class(text, pos)
+  if class == "cjk" then
+    local finish = tui_text.next_grapheme_index(text, pos)
+    if M._cjk_run_length_before(text, pos) % 2 == 0 and finish < #text then
+      if M._word_cluster_class(text, finish) == "cjk" then
+        finish = tui_text.next_grapheme_index(text, finish)
+      end
+    end
+    return finish
+  end
   while pos < #text do
-    local b = byte_at(text, pos)
-    if b == nil or is_space_byte(b) or M._is_punctuation_byte(b) ~= punctuation then
+    if M._word_cluster_class(text, pos) ~= class then
       break
     end
-    pos = pos + 1
+    pos = tui_text.next_grapheme_index(text, pos)
   end
   return pos
 end
@@ -2670,7 +2799,87 @@ local function move_line(state, delta)
   local _, line_finish = line_bounds(state.input, line_start)
   state.cursor =
     tui_text.grapheme_index_at_or_before(state.input, math.min(line_start + col, line_finish))
+  state.editor_preferred_col = nil
+  state.editor_snapped_col = nil
+  state.editor_gap_anchor = nil
   state.dirty = true
+end
+
+function chat.visual_line_max_col(input, lines, index)
+  local line = lines[index]
+  if line == nil then
+    return 0
+  end
+  local text = input:sub(line.start + 1, line.start + line.len)
+  local next_line = lines[index + 1]
+  local finish = line.start + line.len
+  local contiguous_wrap = next_line ~= nil
+    and next_line.start == finish
+    and next_line.gap_start == nil
+  if contiguous_wrap and #text > 0 then
+    local last_start = tui_text.previous_grapheme_index(text, #text)
+    return display_width(text:sub(1, last_start))
+  end
+  return display_width(text)
+end
+
+function chat.vertical_move_col(state, current_col, source_max, target_max)
+  local preferred = state.editor_preferred_col
+  local cursor_in_middle = current_col < source_max
+  local target_too_short = target_max < current_col
+  if preferred == nil or cursor_in_middle then
+    if target_too_short then
+      state.editor_preferred_col = current_col
+      return target_max
+    end
+    state.editor_preferred_col = nil
+    return current_col
+  end
+  if target_too_short or target_max < preferred then
+    return target_max
+  end
+  state.editor_preferred_col = nil
+  return preferred
+end
+
+function chat.move_visual_line(state, delta)
+  local input = state.input or ""
+  local lines, current_line, current_col = build_input_lines(state)
+  if state.editor_gap_anchor == nil then
+    local next_line = lines[current_line + 1]
+    if
+      next_line ~= nil
+      and next_line.gap_start ~= nil
+      and state.cursor >= next_line.gap_start
+      and state.cursor < next_line.start
+    then
+      state.editor_gap_anchor = { line = current_line, cursor = state.cursor }
+    end
+  end
+  if state.editor_snapped_col ~= nil then
+    current_col = state.editor_snapped_col
+  end
+  local target_line = current_line + delta
+  if target_line < 1 or target_line > #lines then
+    return false
+  end
+  local source_max = chat.visual_line_max_col(input, lines, current_line)
+  local target_max = chat.visual_line_max_col(input, lines, target_line)
+  local target_col = chat.vertical_move_col(state, current_col, source_max, target_max)
+  local target = lines[target_line]
+  local target_text = input:sub(target.start + 1, target.start + target.len)
+  local offset = tui_text.byte_index_for_width(target_text, target_col)
+  if state.editor_gap_anchor ~= nil and state.editor_gap_anchor.line == target_line then
+    state.cursor = state.editor_gap_anchor.cursor
+    state.editor_snapped_col = nil
+    state.dirty = true
+    return true
+  end
+  state.cursor = target.start + offset
+  local actual_col = display_width(target_text:sub(1, offset))
+  state.editor_snapped_col = actual_col < target_col and target_col or nil
+  state.dirty = true
+  return true
 end
 
 local function move_line_start(state, first_nonblank)
@@ -2685,12 +2894,18 @@ local function move_line_start(state, first_nonblank)
     end
   end
   state.cursor = start
+  state.editor_preferred_col = nil
+  state.editor_snapped_col = nil
+  state.editor_gap_anchor = nil
   state.dirty = true
 end
 
 local function move_line_end(state)
   local _, finish = line_bounds(state.input, state.cursor)
   state.cursor = finish
+  state.editor_preferred_col = nil
+  state.editor_snapped_col = nil
+  state.editor_gap_anchor = nil
   state.dirty = true
 end
 
@@ -2700,9 +2915,10 @@ function chat.editor_arrow_up(state)
     return false
   end
   local input = state.input or ""
-  local line, col = line_col_at(input, state.cursor)
-  if line > 1 then
-    move_line(state, -1)
+  local _, visual_line = build_input_lines(state)
+  local _, col = line_col_at(input, state.cursor)
+  if visual_line > 1 then
+    chat.move_visual_line(state, -1)
     return true
   end
   if input == "" or col == 0 or state.history_index ~= nil then
@@ -2721,9 +2937,9 @@ function chat.editor_arrow_down(state)
     return false
   end
   local input = state.input or ""
-  local line = line_col_at(input, state.cursor)
-  if line < line_count(input) then
-    move_line(state, 1)
+  local lines, visual_line = build_input_lines(state)
+  if visual_line < #lines then
+    chat.move_visual_line(state, 1)
     return true
   end
   if state.history_index ~= nil then
@@ -3094,10 +3310,17 @@ local function delete_word_backward(state)
   if state.cursor == 0 then
     return
   end
-  local start = M._word_backward_pos(state.input, state.cursor)
+  local line_start, line_finish = line_bounds(state.input, state.cursor)
   clear_busy_input_error(state)
-  state.input = state.input:sub(1, start) .. state.input:sub(state.cursor + 1)
-  state.cursor = start
+  if state.cursor == line_start then
+    state.input = state.input:sub(1, line_start - 1) .. state.input:sub(line_start + 1)
+    state.cursor = line_start - 1
+  else
+    local line = state.input:sub(line_start + 1, line_finish)
+    local start = line_start + M._word_backward_pos(line, state.cursor - line_start)
+    state.input = state.input:sub(1, start) .. state.input:sub(state.cursor + 1)
+    state.cursor = start
+  end
   state.dirty = true
 end
 
@@ -3106,19 +3329,37 @@ local function delete_word_forward(state)
   if state.cursor >= #state.input then
     return
   end
-  local finish = M._word_forward_pos(state.input, state.cursor)
+  local line_start, line_finish = line_bounds(state.input, state.cursor)
   clear_busy_input_error(state)
-  state.input = state.input:sub(1, state.cursor) .. state.input:sub(finish + 1)
+  if state.cursor == line_finish then
+    state.input = state.input:sub(1, line_finish) .. state.input:sub(line_finish + 2)
+  else
+    local line = state.input:sub(line_start + 1, line_finish)
+    local finish = line_start + M._word_forward_pos(line, state.cursor - line_start)
+    state.input = state.input:sub(1, state.cursor) .. state.input:sub(finish + 1)
+  end
   state.dirty = true
 end
 
 local function move_word_backward(state)
-  state.cursor = M._word_backward_pos(state.input, state.cursor)
+  local line_start, line_finish = line_bounds(state.input, state.cursor)
+  if state.cursor == line_start and line_start > 0 then
+    state.cursor = line_start - 1
+  else
+    local line = state.input:sub(line_start + 1, line_finish)
+    state.cursor = line_start + M._word_backward_pos(line, state.cursor - line_start)
+  end
   state.dirty = true
 end
 
 local function move_word_forward(state)
-  state.cursor = M._word_forward_pos(state.input, state.cursor)
+  local line_start, line_finish = line_bounds(state.input, state.cursor)
+  if state.cursor == line_finish and line_finish < #state.input then
+    state.cursor = line_finish + 1
+  else
+    local line = state.input:sub(line_start + 1, line_finish)
+    state.cursor = line_start + M._word_forward_pos(line, state.cursor - line_start)
+  end
   state.dirty = true
 end
 
@@ -4358,6 +4599,10 @@ local function apply_action(state, action, arg)
   end
 end
 
+function chat.normalize_pasted_text(text)
+  return tostring(text or ""):gsub("\r\n", "\n"):gsub("\r", "\n"):gsub("\t", "    ")
+end
+
 local function handle_key_event(state, event)
   if type(event) ~= "table" or type(event.key) ~= "string" then
     return
@@ -4366,6 +4611,11 @@ local function handle_key_event(state, event)
     state.dirty = true
     return
   end
+  if event.key ~= "up" and event.key ~= "down" then
+    state.editor_preferred_col = nil
+    state.editor_snapped_col = nil
+    state.editor_gap_anchor = nil
+  end
   -- Bracketed paste (pi parity): buffer chunks literally, insert as one buffer on paste-end.
   if event.key == "paste-start" then
     state.paste_chunks = {}
@@ -4373,7 +4623,7 @@ local function handle_key_event(state, event)
   end
   if state.paste_chunks ~= nil then
     if event.key == "paste-end" then
-      local pasted = table.concat(state.paste_chunks)
+      local pasted = chat.normalize_pasted_text(table.concat(state.paste_chunks))
       state.paste_chunks = nil
       if pasted ~= "" then
         insert_text(state, pasted)
@@ -4381,19 +4631,22 @@ local function handle_key_event(state, event)
       return
     end
     if event.key == "enter" then
-      state.paste_chunks[#state.paste_chunks + 1] = "\n"
+      local raw = event.text
+      state.paste_chunks[#state.paste_chunks + 1] = raw == "\r" and "\r"
+        or (raw == "\n" and "\n" or "\n")
+      return
+    end
+    if event.key == "tab" then
+      state.paste_chunks[#state.paste_chunks + 1] = "\t"
       return
     end
     if event.key == "text" and type(event.text) == "string" and event.text ~= "" then
       state.paste_chunks[#state.paste_chunks + 1] = event.text
       return
     end
-    -- Dropped end marker: flush what arrived, then handle this key normally.
-    local pasted = table.concat(state.paste_chunks)
-    state.paste_chunks = nil
-    if pasted ~= "" then
-      insert_text(state, pasted)
-    end
+    -- Terminal decoders may classify control bytes inside a paste as semantic
+    -- navigation/editing keys. They are paste data, never editor commands.
+    return
   end
   if state.ui and type(state.ui.dispatch_key) == "function" and state.ui:dispatch_key(event) then
     state.dirty = true
@@ -5152,15 +5405,19 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     prompt_history = {},
     history_index = nil,
     history_draft = "",
+    history_draft_cursor = 0,
     history_search_active = false,
     history_search_query = "",
     history_search_draft = "",
     history_search_index = nil,
+    editor_preferred_col = nil,
+    editor_snapped_col = nil,
+    editor_gap_anchor = nil,
     status_text = debug_options.status_text,
     status_is_error = not not debug_options.status_is_error,
-    width = 80,
-    height = 24,
-    input_layout = default_input_layout(24),
+    width = tonumber(debug_options.width) or 80,
+    height = tonumber(debug_options.height) or 24,
+    input_layout = default_input_layout(tonumber(debug_options.height) or 24),
     dirty = false,
   }
   if apply_startup_hooks and tui.run_startup_hooks then
@@ -5191,6 +5448,8 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     block_edit = state.block_edit,
     scroll_offset = state.scroll_offset,
     status_text = state.status_text,
+    editor_preferred_col = state.editor_preferred_col,
+    editor_snapped_col = state.editor_snapped_col,
     tools_expanded = state.tools_expanded,
     last_entry_kind = state.entries[#state.entries] and state.entries[#state.entries].kind or nil,
     last_entry_text = state.entries[#state.entries] and entry_text(state.entries[#state.entries])
@@ -5235,23 +5494,29 @@ function M._debug_consume_queued_preview(input, queued_text)
   }
 end
 
-function M._debug_history_sequence(history, keys, input)
+function M._debug_history_sequence(history, keys, input, cursor)
   local state = {
     prompt_history = history or {},
     history_index = nil,
     history_draft = "",
+    history_draft_cursor = 0,
     history_search_active = false,
     history_search_query = "",
     history_search_draft = "",
     history_search_index = nil,
+    editor_preferred_col = nil,
+    editor_snapped_col = nil,
+    editor_gap_anchor = nil,
     input = input or "",
-    cursor = #(input or ""),
+    cursor = clamp(tonumber(cursor) or #(input or ""), 0, #(input or "")),
     busy = false,
     editor_mode = "insert",
     selection_anchor = nil,
     pending_key = nil,
     scroll_offset = 0,
+    width = 80,
     height = 24,
+    input_layout = default_input_layout(24),
     status_text = nil,
     status_is_error = false,
     dirty = false,
