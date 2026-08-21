@@ -9,4 +9,4 @@ for _, it in ipairs(r.items) do
     found = true
   end
 end
-return tostring(found and r.start == 1)
+return tostring(found and r.start == 1 and r.kind == "command")

@@ -7,4 +7,6 @@ local seen = {}
 for _, it in ipairs(r.items) do
   seen[it.insert] = true
 end
-return tostring(seen["pi-dark"] and seen["pi-light"] and true) .. "|" .. tostring(r.start)
+return tostring(seen["pi-dark"] and seen["pi-light"] and r.kind == "argument")
+  .. "|"
+  .. tostring(r.start)

@@ -12,4 +12,4 @@ local out = {}
 for _, it in ipairs(r.items) do
   out[#out + 1] = it.insert
 end
-return table.concat(out, "|")
+return table.concat(out, "|") .. (r.kind == "path" and "" or "|wrong-kind")

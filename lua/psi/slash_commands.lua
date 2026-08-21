@@ -1520,7 +1520,7 @@ local function path_completions(token, limit)
       out[#out + 1] = {
         insert = dir .. name .. (is_dir and "/" or ""),
         label = name .. (is_dir and "/" or ""),
-        trailing = is_dir and "" or " ",
+        trailing = "",
       }
     end
   end
@@ -1713,7 +1713,7 @@ function M.input_completions(input, cursor, limit, force)
         trailing = (c.argument_hint and c.argument_hint ~= "") and " " or "",
       }
     end
-    return { start = 1, items = items }
+    return { start = 1, kind = "command", prefix = before, items = items }
   end
 
   local cmd_name, sep = before:match("^/(%S+)(%s+)")
@@ -1725,7 +1725,12 @@ function M.input_completions(input, cursor, limit, force)
       if type(items) ~= "table" or #items == 0 then
         return nil
       end
-      return { start = cursor - #token + 1, items = items }
+      return {
+        start = cursor - #token + 1,
+        kind = "argument",
+        prefix = token,
+        items = items,
+      }
     end
     local completer = ENUM_ARG_COMPLETERS[cmd_name]
     if not completer or (cmd_name ~= "login" and arg:find("%s")) then
@@ -1736,7 +1741,12 @@ function M.input_completions(input, cursor, limit, force)
       return nil
     end
     replacement = replacement or arg
-    return { start = cursor - #replacement + 1, items = items }
+    return {
+      start = cursor - #replacement + 1,
+      kind = "argument",
+      prefix = replacement,
+      items = items,
+    }
   end
 
   local token = before:match("(%S*)$") or ""
@@ -1750,7 +1760,12 @@ function M.input_completions(input, cursor, limit, force)
   if type(items) ~= "table" or #items == 0 then
     return nil
   end
-  return { start = cursor - #token + 1, items = items }
+  return {
+    start = cursor - #token + 1,
+    kind = "path",
+    prefix = token,
+    items = items,
+  }
 end
 
 local function command_invocation(cmd)

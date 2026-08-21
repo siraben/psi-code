@@ -690,35 +690,83 @@ local function build_input_lines(state)
 end
 
 local function active_command_completions(state)
-  if state.busy or state.cursor ~= #(state.input or "") then
+  if state.busy then
     state.command_completion_index = 1
     state.command_completion_input = nil
+    state.command_completion_cursor = nil
     state.command_completion_items = nil
     state.command_completion_start = nil
+    state.command_completion_kind = nil
+    state.command_completion_prefix = nil
     return {}
+  end
+  if state.command_completion_suppressed_input ~= nil then
+    if state.command_completion_suppressed_input == state.input then
+      return {}
+    end
+    state.command_completion_suppressed_input = nil
+  end
+  if
+    state.command_completion_force == true
+    and (
+      state.command_completion_force_input ~= state.input
+      or state.command_completion_force_cursor ~= state.cursor
+    )
+  then
+    state.command_completion_force = nil
+    state.command_completion_force_input = nil
+    state.command_completion_force_cursor = nil
   end
   local force = state.command_completion_force == true
     and state.command_completion_force_input == state.input
+    and state.command_completion_force_cursor == state.cursor
   if
     state.command_completion_input == state.input
+    and state.command_completion_cursor == state.cursor
     and state.command_completion_force_cached == force
     and state.command_completion_items
   then
     return state.command_completion_items
   end
-  if state.command_completion_input ~= state.input then
+  local changed = (
+    state.command_completion_input ~= state.input
+    or state.command_completion_cursor ~= state.cursor
+    or state.command_completion_force_cached ~= force
+  )
+  if changed then
     state.command_completion_index = 1
   end
 
   local result = commands.input_completions(state.input, state.cursor, 32, force)
   local items = (result and result.items) or {}
   state.command_completion_input = state.input
+  state.command_completion_cursor = state.cursor
   state.command_completion_force_cached = force
   state.command_completion_items = items
   state.command_completion_start = result and result.start or nil
+  state.command_completion_kind = result and result.kind or nil
+  state.command_completion_prefix = result and result.prefix or nil
   if #items == 0 then
     state.command_completion_index = 1
     return items
+  end
+  if changed and state.command_completion_prefix ~= nil then
+    local prefix = state.command_completion_prefix
+    local prefix_match = nil
+    for i, item in ipairs(items) do
+      local insert = tostring(item.insert or "")
+      if insert == prefix then
+        state.command_completion_index = i
+        prefix_match = nil
+        break
+      end
+      if prefix_match == nil and insert:sub(1, #prefix) == prefix then
+        prefix_match = i
+      end
+    end
+    if prefix_match ~= nil then
+      state.command_completion_index = prefix_match
+    end
   end
   state.command_completion_index = clamp(state.command_completion_index or 1, 1, #items)
   return items
@@ -732,14 +780,25 @@ local function accept_command_completion(state)
   end
   local start = state.command_completion_start or 1
   local before = state.input:sub(1, start - 1)
-  state.input = before .. tostring(item.insert or "") .. (item.trailing or "")
-  state.cursor = #state.input
+  local after = state.input:sub(state.cursor + 1)
+  local replacement = tostring(item.insert or "") .. (item.trailing or "")
+  local kind = state.command_completion_kind
+  state.input = before .. replacement .. after
+  state.cursor = #before + #replacement
   state.command_completion_input = nil
+  state.command_completion_cursor = nil
   state.command_completion_items = nil
+  state.command_completion_start = nil
+  state.command_completion_kind = nil
+  state.command_completion_prefix = nil
   state.command_completion_force = nil
   state.command_completion_force_input = nil
+  state.command_completion_force_cursor = nil
+  -- Pi closes the picker after accepting an item. Do not immediately reopen
+  -- it just because the user moves within the unchanged accepted text.
+  state.command_completion_suppressed_input = state.input
   state.dirty = true
-  return true
+  return true, kind
 end
 
 local function format_command_completion(item, selected, width)
@@ -895,7 +954,9 @@ local function new_state(opts, runtime)
     editor_gap_anchor = nil,
     command_completion_index = 1,
     command_completion_input = nil,
+    command_completion_cursor = nil,
     command_completion_items = nil,
+    command_completion_suppressed_input = nil,
     tools_expanded = false,
     dirty = true,
     layout_mode = chat.resolve_mode(opts),
@@ -4676,17 +4737,12 @@ local function handle_key_event(state, event)
   end
 
   local completions = active_command_completions(state)
-  if
-    #completions == 0
-    and event.key == "tab"
-    and not state.busy
-    and state.cursor == #(state.input or "")
-  then
+  if #completions == 0 and event.key == "tab" and not state.busy then
     state.command_completion_force = true
     state.command_completion_force_input = state.input
+    state.command_completion_force_cursor = state.cursor
     completions = active_command_completions(state)
     if #completions > 0 then
-      state.command_completion_index = 1
       state.dirty = true
     end
     return
@@ -4695,10 +4751,15 @@ local function handle_key_event(state, event)
     if event.key == "escape" then
       state.command_completion_force = nil
       state.command_completion_force_input = nil
+      state.command_completion_force_cursor = nil
       state.command_completion_input = nil
+      state.command_completion_cursor = nil
       state.command_completion_items = nil
       state.command_completion_start = nil
+      state.command_completion_kind = nil
+      state.command_completion_prefix = nil
       state.command_completion_index = 1
+      state.command_completion_suppressed_input = state.input
       state.dirty = true
       return
     end
@@ -4718,12 +4779,10 @@ local function handle_key_event(state, event)
       state.dirty = true
       return
     end
-    if
-      (event.key == "tab" or event.key == "right" or event.key == "enter")
-      and state.cursor == #state.input
-    then
-      if accept_command_completion(state) then
-        if event.key ~= "enter" then
+    if event.key == "tab" or event.key == "right" or event.key == "enter" then
+      local accepted, kind = accept_command_completion(state)
+      if accepted then
+        if event.key ~= "enter" or kind ~= "command" then
           return
         end
       end
