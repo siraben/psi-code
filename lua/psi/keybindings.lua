@@ -34,6 +34,12 @@ local DEFINITIONS = {
     description = "Reverse-search prompt history",
   },
   {
+    id = "app.clipboard.paste",
+    section = "Editing",
+    default_keys = { "ctrl-v" },
+    description = "Paste text from system clipboard",
+  },
+  {
     id = "tui.editor.cursorLeft",
     section = "Navigation",
     default_keys = { "left", "ctrl-b" },

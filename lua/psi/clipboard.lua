@@ -2,6 +2,7 @@
 
 local settings = require("psi.settings_manager")
 local base64 = require("psi.base64")
+local platform = require("psi.platform")
 
 local M = {}
 
@@ -14,6 +15,7 @@ local DEFAULT_ENABLED = true
 local DEFAULT_TARGET = "c"
 local DEFAULT_TMUX_PASSTHROUGH = true
 local DEFAULT_MAX_BYTES = 100000
+local DEFAULT_READ_TIMEOUT_MS = 5000
 
 local ENV_TMUX = "TMUX"
 
@@ -30,6 +32,137 @@ local CLIPBOARD_CMDS = {
   { name = "wl-copy", cmd = "wl-copy" },
   { name = "xsel", cmd = "xsel --clipboard --input" },
 }
+
+local READ_CLIPBOARD_CMDS = {
+  termux = { name = "termux-clipboard-get", argv = { "termux-clipboard-get" } },
+  wayland = {
+    name = "wl-paste",
+    argv = { "wl-paste", "--no-newline", "--type", "text" },
+  },
+  xclip = {
+    name = "xclip",
+    argv = { "xclip", "-selection", "clipboard", "-out" },
+  },
+  xsel = {
+    name = "xsel",
+    argv = { "xsel", "--clipboard", "--output" },
+  },
+  macos = { name = "pbpaste", argv = { "pbpaste" } },
+  windows = {
+    name = "powershell",
+    argv = {
+      "powershell.exe",
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); "
+        .. "$text = Get-Clipboard -Raw -Format Text; "
+        .. "if ($null -ne $text) { [Console]::Out.Write($text) }",
+    },
+  },
+}
+
+local function context_env(context, name)
+  if type(context.env) == "table" then
+    return context.env[name]
+  end
+  return os.getenv(name)
+end
+
+local function env_nonempty(context, name)
+  local value = context_env(context, name)
+  return value ~= nil and value ~= ""
+end
+
+local function read_backends(context)
+  local backends = {}
+  local windows = context.is_windows
+  if windows == nil then
+    windows = platform.is_windows()
+  end
+  if windows then
+    return { READ_CLIPBOARD_CMDS.windows }
+  end
+  if env_nonempty(context, "TERMUX_VERSION") then
+    backends[#backends + 1] = READ_CLIPBOARD_CMDS.termux
+  end
+  if env_nonempty(context, "WAYLAND_DISPLAY") then
+    backends[#backends + 1] = READ_CLIPBOARD_CMDS.wayland
+  end
+  if env_nonempty(context, "DISPLAY") then
+    backends[#backends + 1] = READ_CLIPBOARD_CMDS.xclip
+    backends[#backends + 1] = READ_CLIPBOARD_CMDS.xsel
+  end
+  -- Feature detection keeps macOS out of platform-condition branches:
+  -- pbpaste succeeds there and simply fails on hosts where it is absent.
+  backends[#backends + 1] = READ_CLIPBOARD_CMDS.macos
+  return backends
+end
+
+local function default_read_runner(argv, context)
+  if
+    type(psi.time_ms) == "function"
+    and context.deadline_ms ~= nil
+    and psi.time_ms() >= context.deadline_ms
+  then
+    return { status = -1, output = "", truncated = false }
+  end
+  if
+    type(psi.process_begin_argv) == "function"
+    and type(psi.process_poll) == "function"
+    and type(psi.process_finish) == "function"
+    and type(psi.process_terminate) == "function"
+    and type(psi.time_ms) == "function"
+  then
+    local handle = psi.process_begin_argv(argv)
+    if handle == nil then
+      return { status = -1, output = "", truncated = false }
+    end
+    local timeout_ms = tonumber(context.timeout_ms) or DEFAULT_READ_TIMEOUT_MS
+    local deadline = context.deadline_ms or (psi.time_ms() + math.max(1, timeout_ms))
+    while true do
+      local remaining = deadline - psi.time_ms()
+      if remaining <= 0 then
+        pcall(psi.process_terminate, handle)
+        pcall(psi.process_finish, handle)
+        return { status = -1, output = "", truncated = false }
+      end
+      local ok, _, done = pcall(psi.process_poll, handle, math.min(50, remaining))
+      if not ok then
+        pcall(psi.process_terminate, handle)
+        pcall(psi.process_finish, handle)
+        return { status = -1, output = "", truncated = false }
+      end
+      if done then
+        local finish_ok, result = pcall(psi.process_finish, handle)
+        if finish_ok and type(result) == "table" then
+          return result
+        end
+        return { status = -1, output = "", truncated = false }
+      end
+    end
+  end
+  if type(psi.process_run_argv) == "function" then
+    return psi.process_run_argv(argv)
+  end
+  return { status = -1, output = "", truncated = false }
+end
+
+local function run_read_backend(backend, context)
+  local runner = context.run_argv or default_read_runner
+  if type(runner) ~= "function" then
+    return false
+  end
+  local ok, result = pcall(runner, backend.argv, context)
+  if not ok or type(result) ~= "table" or tonumber(result.status) ~= 0 then
+    return false
+  end
+  if result.truncated == true then
+    return true, nil, "clipboard text too large"
+  end
+  local text = tostring(result.output or "")
+  return true, text ~= "" and text or nil
+end
 
 local function enabled()
   return settings.get(CONFIG_ENABLED, DEFAULT_ENABLED) ~= false
@@ -115,6 +248,24 @@ function M.write_system(text)
     end
   end
   return false, "clipboard unavailable"
+end
+
+-- Read plain text from the system clipboard. The first backend that runs
+-- successfully owns the result, including an empty clipboard; this prevents a
+-- successful empty Wayland read from falling back to stale X11 clipboard data.
+function M.read_system(context)
+  context = type(context) == "table" and context or {}
+  if type(psi.time_ms) == "function" and context.deadline_ms == nil then
+    local timeout_ms = tonumber(context.timeout_ms) or DEFAULT_READ_TIMEOUT_MS
+    context.deadline_ms = psi.time_ms() + math.max(1, timeout_ms)
+  end
+  for _, backend in ipairs(read_backends(context)) do
+    local available, text, err = run_read_backend(backend, context)
+    if available then
+      return text, backend.name, err
+    end
+  end
+  return nil, "clipboard unavailable"
 end
 
 function M.write(text, context)
