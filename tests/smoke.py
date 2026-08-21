@@ -1935,6 +1935,40 @@ def t_tui_system_clipboard_paste(psi: Psi):
     )
 
 
+@test("mode/tui_system_clipboard_image_paste")
+def t_tui_system_clipboard_image_paste(psi: Psi):
+    clipboard_bin = psi.tmp / "clipboard-image-bin"
+    clipboard_tmp = psi.tmp / "clipboard-image-tmp"
+    clipboard_bin.mkdir()
+    clipboard_tmp.mkdir()
+    osascript = clipboard_bin / "osascript"
+    osascript.write_text(
+        "#!/bin/sh\n"
+        "for output_path do :; done\n"
+        "printf '\\211PNG\\r\\n\\032\\n\\000\\000\\000\\015IHDR' > \"$output_path\"\n"
+        "printf 'ok\\n'\n"
+    )
+    osascript.chmod(0o755)
+
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [(b"", 0.5), (b"image: \x16", 0.75), (b"\x03", 0.25), (b"/quit\r", 1.0)],
+        env_extra={
+            "PATH": str(clipboard_bin) + os.pathsep + psi.env["PATH"],
+            "TMPDIR": str(clipboard_tmp),
+            "XDG_STATE_HOME": str(psi.tmp / "state-tui-system-clipboard-image"),
+        },
+    )
+    raw.assert_clean_exit()
+    assert_bytes_contains(raw, b"image:", "clipboard image paste lost surrounding input")
+    assert_bytes_contains(
+        raw,
+        b"image-tmp/psi-clipboard-",
+        "physical Ctrl-V did not insert the clipboard image temp path",
+    )
+    assert_bytes_contains(raw, b".png", "clipboard image path did not use its detected suffix")
+
+
 @test("mode/tui_tab_completion")
 def t_tui_tab_completion(psi: Psi):
     # Exercise the host key decoder, not a synthetic Lua {key="tab"} event.

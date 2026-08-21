@@ -37,7 +37,7 @@ local DEFINITIONS = {
     id = "app.clipboard.paste",
     section = "Editing",
     default_keys = { "ctrl-v" },
-    description = "Paste text from system clipboard",
+    description = "Paste image or text from system clipboard",
   },
   {
     id = "tui.editor.cursorLeft",
