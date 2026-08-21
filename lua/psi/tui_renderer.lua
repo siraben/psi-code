@@ -112,6 +112,10 @@ local function normalize_frame(frame)
   local marker_found = false
   for row = 1, height do
     local line = tostring(raw_lines[row] or "")
+    -- Components return one physical line per array element. Guard that
+    -- contract here so an extension or future component cannot smuggle a
+    -- cursor-moving CR (or an unexpected LF) into the terminal backend.
+    line = line:gsub("\r\n", " "):gsub("[\r\n]", " ")
     if not marker_found then
       local start_pos, end_pos = line:find(CURSOR_MARKER, 1, true)
       if start_pos ~= nil then
