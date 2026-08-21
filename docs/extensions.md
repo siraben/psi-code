@@ -212,6 +212,13 @@ psi> /apropos transcript               # everything matching a pattern
 
 Source of truth: `DEFINITIONS` in `lua/psi/keybindings.lua`.
 
+`app.clipboard.paste` defaults to Ctrl-V and inserts plain text from the
+system clipboard through Termux, Wayland, X11, macOS, or Windows PowerShell
+backends when available. It is best-effort and leaves the editor unchanged
+when clipboard access is unavailable. Vim normal/visual mode retains Ctrl-V
+for visual-block selection. Clipboard image attachment is a separate,
+currently unsupported action.
+
 **CommandAction** (from `psi.records.new_command_action(kind, payload)`):
 ```lua
 { kind = "print", payload = "..." }
