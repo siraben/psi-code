@@ -2,6 +2,7 @@ local agent = require("psi.agent_session")
 local agent_runtime = require("psi.agent_session_runtime")
 local ansi = require("psi.ansi")
 local clipboard = require("psi.clipboard")
+clipboard.image = require("psi.clipboard_image")
 local commands = require("psi.slash_commands")
 local markdown = require("psi.markdown")
 local prelude = require("psi.prelude")
@@ -4550,6 +4551,12 @@ local function apply_action(state, action, arg)
     return
   end
   if action == "clipboard-paste" then
+    local image_reader = state.clipboard_image_reader or clipboard.image.read_system
+    local image_ok, image_path = pcall(image_reader)
+    if image_ok and type(image_path) == "string" and image_path ~= "" then
+      insert_text(state, image_path)
+      return
+    end
     local reader = state.clipboard_reader or clipboard.read_system
     local ok, text = pcall(reader)
     if ok and type(text) == "string" and text ~= "" then
@@ -5779,6 +5786,9 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     selection_anchor = nil,
     selection_kind = nil,
     clipboard = "",
+    clipboard_image_reader = debug_options.clipboard_image_reader or function()
+      return nil
+    end,
     clipboard_reader = debug_options.clipboard_reader,
     clipboard_writers_disabled = debug_options.clipboard_writers ~= true,
     pending_key = nil,

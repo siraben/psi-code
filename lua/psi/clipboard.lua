@@ -148,13 +148,25 @@ local function default_read_runner(argv, context)
   return { status = -1, output = "", truncated = false }
 end
 
-local function run_read_backend(backend, context)
+-- Shared bounded process runner for clipboard readers. Image backends use it
+-- for type discovery and for helpers that write binary data to a temp file;
+-- keeping this here makes image and text fallback obey the same timeout model.
+function M._run_read_command(argv, context)
+  context = type(context) == "table" and context or {}
   local runner = context.run_argv or default_read_runner
   if type(runner) ~= "function" then
-    return false
+    return { status = -1, output = "", truncated = false }
   end
-  local ok, result = pcall(runner, backend.argv, context)
-  if not ok or type(result) ~= "table" or tonumber(result.status) ~= 0 then
+  local ok, result = pcall(runner, argv, context)
+  if not ok or type(result) ~= "table" then
+    return { status = -1, output = "", truncated = false }
+  end
+  return result
+end
+
+local function run_read_backend(backend, context)
+  local result = M._run_read_command(backend.argv, context)
+  if tonumber(result.status) ~= 0 then
     return false
   end
   if result.truncated == true then
