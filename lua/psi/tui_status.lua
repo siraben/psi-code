@@ -357,6 +357,15 @@ function M.handle_key(arg)
   if keybindings.matches(key, "tui.editor.deleteToLineStart") then
     return action("kill-start")
   end
+  if keybindings.matches(key, "tui.editor.yank") then
+    return action("yank")
+  end
+  if keybindings.matches(key, "tui.editor.yankPop") then
+    return action("yank-pop")
+  end
+  if keybindings.matches(key, "tui.editor.undo") then
+    return action("undo")
+  end
   if keybindings.matches(key, "tui.input.clear") then
     return action("clear-buffer")
   end

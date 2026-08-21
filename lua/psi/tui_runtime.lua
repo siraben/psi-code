@@ -69,6 +69,78 @@ local TUI_CONST = {
 -- additional helpers must live on this table, not as top-level locals.
 local chat = { FRAME = "frame", CHAT = "chat" }
 
+function chat.editor_push_undo(state)
+  state.editor_undo_stack = state.editor_undo_stack or {}
+  state.editor_undo_stack[#state.editor_undo_stack + 1] = {
+    input = state.input or "",
+    cursor = tonumber(state.cursor) or 0,
+    editor_mode = state.editor_mode or "insert",
+    selection_anchor = state.selection_anchor,
+    selection_kind = state.selection_kind,
+  }
+end
+
+function chat.editor_clear_undo(state)
+  state.editor_undo_stack = {}
+  state.editor_last_action = nil
+end
+
+function chat.editor_push_kill(state, text, prepend, accumulate)
+  text = tostring(text or "")
+  if text == "" then
+    return
+  end
+  state.editor_kill_ring = state.editor_kill_ring or {}
+  local last = #state.editor_kill_ring
+  if accumulate and last > 0 then
+    if prepend then
+      state.editor_kill_ring[last] = text .. state.editor_kill_ring[last]
+    else
+      state.editor_kill_ring[last] = state.editor_kill_ring[last] .. text
+    end
+  else
+    state.editor_kill_ring[last + 1] = text
+  end
+end
+
+function chat.editor_reset_completion(state)
+  state.command_completion_input = nil
+  state.command_completion_items = nil
+  state.command_completion_force = nil
+  state.command_completion_force_input = nil
+  state.command_completion_start = nil
+  state.command_completion_index = 1
+end
+
+function chat.editor_undo(state)
+  local stack = state.editor_undo_stack or {}
+  local snapshot = table.remove(stack)
+  if snapshot == nil then
+    return false
+  end
+  state.input = snapshot.input or ""
+  state.cursor = math.max(0, math.min(tonumber(snapshot.cursor) or 0, #state.input))
+  state.editor_mode = snapshot.editor_mode or "insert"
+  state.selection_anchor = snapshot.selection_anchor
+  state.selection_kind = snapshot.selection_kind
+  state.block_edit = nil
+  state.pending_key = nil
+  state.editor_last_action = nil
+  state.history_index = nil
+  state.history_draft = ""
+  state.history_draft_cursor = 0
+  state.history_search_active = false
+  state.history_search_query = ""
+  state.history_search_draft = ""
+  state.history_search_index = nil
+  state.editor_preferred_col = nil
+  state.editor_snapped_col = nil
+  state.editor_gap_anchor = nil
+  chat.editor_reset_completion(state)
+  state.dirty = true
+  return true
+end
+
 function chat.resolve_mode(opts)
   local explicit = opts and opts.layout_mode
   if explicit == chat.CHAT or explicit == chat.FRAME then
@@ -800,6 +872,8 @@ local function accept_command_completion(state)
   end
   local start = state.command_completion_start or 1
   local before = state.input:sub(1, start - 1)
+  chat.editor_push_undo(state)
+  state.editor_last_action = nil
   local after = state.input:sub(state.cursor + 1)
   local replacement = tostring(item.insert or "") .. (item.trailing or "")
   local kind = state.command_completion_kind
@@ -972,6 +1046,9 @@ local function new_state(opts, runtime)
     editor_preferred_col = nil,
     editor_snapped_col = nil,
     editor_gap_anchor = nil,
+    editor_undo_stack = {},
+    editor_kill_ring = {},
+    editor_last_action = nil,
     command_completion_index = 1,
     command_completion_input = nil,
     command_completion_cursor = nil,
@@ -1057,12 +1134,15 @@ local function history_up(state)
     return false
   end
   if state.history_index == nil then
+    chat.editor_push_undo(state)
+    state.editor_last_action = nil
     state.history_draft = state.input or ""
     state.history_draft_cursor = state.cursor or #state.history_draft
     state.history_index = #state.prompt_history
   elseif state.history_index > 1 then
     state.history_index = state.history_index - 1
   end
+  state.editor_last_action = nil
   state.input = state.prompt_history[state.history_index] or state.input
   state.cursor = 0
   state.editor_preferred_col = nil
@@ -1076,6 +1156,7 @@ local function history_down(state)
   if state.history_index == nil then
     return false
   end
+  state.editor_last_action = nil
   if state.history_index < #state.prompt_history then
     state.history_index = state.history_index + 1
     state.input = state.prompt_history[state.history_index] or ""
@@ -2974,6 +3055,7 @@ function chat.vertical_move_col(state, current_col, source_max, target_max)
 end
 
 function chat.move_visual_line(state, delta)
+  state.editor_last_action = nil
   local input = state.input or ""
   local lines, current_line, current_col = build_input_lines(state)
   if state.editor_gap_anchor == nil then
@@ -3014,6 +3096,7 @@ function chat.move_visual_line(state, delta)
 end
 
 local function move_line_start(state, first_nonblank)
+  state.editor_last_action = nil
   local start, finish = line_bounds(state.input, state.cursor)
   if first_nonblank then
     while start < finish do
@@ -3032,6 +3115,7 @@ local function move_line_start(state, first_nonblank)
 end
 
 local function move_line_end(state)
+  state.editor_last_action = nil
   local _, finish = line_bounds(state.input, state.cursor)
   state.cursor = finish
   state.editor_preferred_col = nil
@@ -3095,6 +3179,8 @@ end
 
 local function open_line(state, above)
   clear_busy_input_error(state)
+  chat.editor_push_undo(state)
+  state.editor_last_action = nil
   local start, finish = line_bounds(state.input, state.cursor)
   if above then
     state.input = state.input:sub(1, start) .. "\n" .. state.input:sub(start + 1)
@@ -3107,6 +3193,10 @@ local function open_line(state, above)
 end
 
 local function clear_buffer(state)
+  if state.input ~= "" then
+    chat.editor_push_undo(state)
+  end
+  state.editor_last_action = nil
   clear_busy_input_error(state)
   state.input = ""
   state.cursor = 0
@@ -3405,10 +3495,22 @@ function render_input_text_with_cursor(state, line, draw_cursor)
     .. style_input_text(after)
 end
 
-local function insert_text(state, text)
+local function insert_text(state, text, atomic)
+  text = tostring(text or "")
+  if text == "" then
+    return
+  end
   clear_busy_input_error(state)
   exit_history_browse(state)
   text = tui_text.normalize_line_endings(text)
+  if atomic or text == "\n" or text:match("^%s+$") or state.editor_last_action ~= "type-word" then
+    chat.editor_push_undo(state)
+  end
+  if atomic or text == "\n" then
+    state.editor_last_action = nil
+  else
+    state.editor_last_action = "type-word"
+  end
   state.input = state.input:sub(1, state.cursor) .. text .. state.input:sub(state.cursor + 1)
   state.cursor = state.cursor + #text
   state.dirty = true
@@ -3416,10 +3518,12 @@ end
 
 local function delete_backward(state)
   exit_history_browse(state)
+  state.editor_last_action = nil
   if state.cursor == 0 or #state.input == 0 then
     return
   end
   clear_busy_input_error(state)
+  chat.editor_push_undo(state)
   local previous = tui_text.previous_grapheme_index(state.input, state.cursor)
   state.input = state.input:sub(1, previous) .. state.input:sub(state.cursor + 1)
   state.cursor = previous
@@ -3428,10 +3532,12 @@ end
 
 local function delete_forward(state)
   exit_history_browse(state)
+  state.editor_last_action = nil
   if state.cursor >= #state.input then
     return
   end
   clear_busy_input_error(state)
+  chat.editor_push_undo(state)
   local next_index = tui_text.next_grapheme_index(state.input, state.cursor)
   state.input = state.input:sub(1, state.cursor) .. state.input:sub(next_index + 1)
   state.dirty = true
@@ -3443,16 +3549,23 @@ local function delete_word_backward(state)
     return
   end
   local line_start, line_finish = line_bounds(state.input, state.cursor)
+  local was_kill = state.editor_last_action == "kill"
   clear_busy_input_error(state)
+  chat.editor_push_undo(state)
+  local deleted
   if state.cursor == line_start then
+    deleted = "\n"
     state.input = state.input:sub(1, line_start - 1) .. state.input:sub(line_start + 1)
     state.cursor = line_start - 1
   else
     local line = state.input:sub(line_start + 1, line_finish)
     local start = line_start + M._word_backward_pos(line, state.cursor - line_start)
+    deleted = state.input:sub(start + 1, state.cursor)
     state.input = state.input:sub(1, start) .. state.input:sub(state.cursor + 1)
     state.cursor = start
   end
+  chat.editor_push_kill(state, deleted, true, was_kill)
+  state.editor_last_action = "kill"
   state.dirty = true
 end
 
@@ -3462,18 +3575,26 @@ local function delete_word_forward(state)
     return
   end
   local line_start, line_finish = line_bounds(state.input, state.cursor)
+  local was_kill = state.editor_last_action == "kill"
   clear_busy_input_error(state)
+  chat.editor_push_undo(state)
+  local deleted
   if state.cursor == line_finish then
+    deleted = "\n"
     state.input = state.input:sub(1, line_finish) .. state.input:sub(line_finish + 2)
   else
     local line = state.input:sub(line_start + 1, line_finish)
     local finish = line_start + M._word_forward_pos(line, state.cursor - line_start)
+    deleted = state.input:sub(state.cursor + 1, finish)
     state.input = state.input:sub(1, state.cursor) .. state.input:sub(finish + 1)
   end
+  chat.editor_push_kill(state, deleted, false, was_kill)
+  state.editor_last_action = "kill"
   state.dirty = true
 end
 
 local function move_word_backward(state)
+  state.editor_last_action = nil
   local line_start, line_finish = line_bounds(state.input, state.cursor)
   if state.cursor == line_start and line_start > 0 then
     state.cursor = line_start - 1
@@ -3485,6 +3606,7 @@ local function move_word_backward(state)
 end
 
 local function move_word_forward(state)
+  state.editor_last_action = nil
   local line_start, line_finish = line_bounds(state.input, state.cursor)
   if state.cursor == line_finish and line_finish < #state.input then
     state.cursor = line_finish + 1
@@ -3496,6 +3618,7 @@ local function move_word_forward(state)
 end
 
 local function move_word_start_forward(state)
+  state.editor_last_action = nil
   local pos = state.cursor
   while pos < #state.input do
     local b = byte_at(state.input, pos)
@@ -3516,14 +3639,24 @@ local function move_word_start_forward(state)
 end
 
 local function kill_to_end(state)
-  clear_busy_input_error(state)
   exit_history_browse(state)
   local _, finish = line_bounds(state.input, state.cursor)
+  local deleted
   if state.cursor < finish then
+    deleted = state.input:sub(state.cursor + 1, finish)
+    clear_busy_input_error(state)
+    chat.editor_push_undo(state)
     state.input = state.input:sub(1, state.cursor) .. state.input:sub(finish + 1)
   elseif finish < #state.input then
+    deleted = "\n"
+    clear_busy_input_error(state)
+    chat.editor_push_undo(state)
     state.input = state.input:sub(1, finish) .. state.input:sub(finish + 2)
+  else
+    return
   end
+  chat.editor_push_kill(state, deleted, false, state.editor_last_action == "kill")
+  state.editor_last_action = "kill"
   state.dirty = true
 end
 
@@ -3533,6 +3666,9 @@ local function kill_to_start(state)
   if state.cursor == start then
     if start > 0 then
       clear_busy_input_error(state)
+      chat.editor_push_undo(state)
+      chat.editor_push_kill(state, "\n", true, state.editor_last_action == "kill")
+      state.editor_last_action = "kill"
       state.input = state.input:sub(1, start - 1) .. state.input:sub(state.cursor + 1)
       state.cursor = start - 1
       state.dirty = true
@@ -3540,9 +3676,53 @@ local function kill_to_start(state)
     return
   end
   clear_busy_input_error(state)
+  chat.editor_push_undo(state)
+  local deleted = state.input:sub(start + 1, state.cursor)
+  chat.editor_push_kill(state, deleted, true, state.editor_last_action == "kill")
+  state.editor_last_action = "kill"
   state.input = state.input:sub(1, start) .. state.input:sub(state.cursor + 1)
   state.cursor = start
   state.dirty = true
+end
+
+function chat.editor_yank(state)
+  local ring = state.editor_kill_ring or {}
+  local text = ring[#ring]
+  if type(text) ~= "string" or text == "" then
+    state.editor_last_action = nil
+    return false
+  end
+  clear_busy_input_error(state)
+  exit_history_browse(state)
+  chat.editor_push_undo(state)
+  state.input = state.input:sub(1, state.cursor) .. text .. state.input:sub(state.cursor + 1)
+  state.cursor = state.cursor + #text
+  state.editor_last_action = "yank"
+  state.dirty = true
+  return true
+end
+
+function chat.editor_yank_pop(state)
+  local ring = state.editor_kill_ring or {}
+  if state.editor_last_action ~= "yank" or #ring <= 1 then
+    return false
+  end
+  local previous = ring[#ring]
+  local start = state.cursor - #previous
+  if start < 0 or state.input:sub(start + 1, state.cursor) ~= previous then
+    state.editor_last_action = nil
+    return false
+  end
+  chat.editor_push_undo(state)
+  state.input = state.input:sub(1, start) .. state.input:sub(state.cursor + 1)
+  state.cursor = start
+  table.insert(ring, 1, table.remove(ring))
+  local text = ring[#ring]
+  state.input = state.input:sub(1, state.cursor) .. text .. state.input:sub(state.cursor + 1)
+  state.cursor = state.cursor + #text
+  state.editor_last_action = "yank"
+  state.dirty = true
+  return true
 end
 
 local function compact_status_text(text, max_len)
@@ -3806,6 +3986,10 @@ local function open_external_editor(state)
   end)
   state.reanchor_renderer = not not result.reanchor
   if result.status == "complete" then
+    if result.content ~= state.input then
+      chat.editor_push_undo(state)
+    end
+    state.editor_last_action = nil
     state.input = result.content
     state.cursor = #state.input
     clear_selection(state)
@@ -4456,6 +4640,7 @@ local function submit(state, queue_kind)
   state.editor_mode = "insert"
   state.pending_key = nil
   exit_history_browse(state)
+  chat.editor_clear_undo(state)
 
   if state.busy then
     if state.busy_kind ~= "agent" then
@@ -4545,6 +4730,16 @@ local function apply_action(state, action, arg)
   if action ~= "vim-pending" then
     state.pending_key = nil
   end
+  if
+    action ~= "insert"
+    and action ~= "delete-word-backward"
+    and action ~= "delete-word-forward"
+    and action ~= "kill-end"
+    and action ~= "kill-start"
+    and action ~= "yank-pop"
+  then
+    state.editor_last_action = nil
+  end
   if action == "insert" then
     if state.editor_mode == "visual" then
       clear_selection(state)
@@ -4582,6 +4777,7 @@ local function apply_action(state, action, arg)
     return
   end
   if action == "move-left" then
+    state.editor_last_action = nil
     if state.cursor > 0 then
       state.cursor = tui_text.previous_grapheme_index(state.input, state.cursor)
     end
@@ -4589,6 +4785,7 @@ local function apply_action(state, action, arg)
     return
   end
   if action == "move-right" then
+    state.editor_last_action = nil
     if state.cursor < #state.input then
       state.cursor = tui_text.next_grapheme_index(state.input, state.cursor)
     end
@@ -4641,6 +4838,18 @@ local function apply_action(state, action, arg)
   end
   if action == "kill-start" then
     kill_to_start(state)
+    return
+  end
+  if action == "yank" then
+    chat.editor_yank(state)
+    return
+  end
+  if action == "yank-pop" then
+    chat.editor_yank_pop(state)
+    return
+  end
+  if action == "undo" then
+    chat.editor_undo(state)
     return
   end
   if action == "clear-buffer" then
@@ -4754,6 +4963,7 @@ local function apply_action(state, action, arg)
     return
   end
   if action == "vim-append" then
+    state.editor_last_action = nil
     if state.cursor < #state.input then
       state.cursor = tui_text.next_grapheme_index(state.input, state.cursor)
     end
@@ -4801,7 +5011,7 @@ local function apply_action(state, action, arg)
   end
   if action == "vim-paste" then
     if state.clipboard ~= nil and state.clipboard ~= "" then
-      insert_text(state, state.clipboard)
+      insert_text(state, state.clipboard, true)
     else
       set_status(state, "clipboard empty", true)
     end
@@ -4836,7 +5046,7 @@ local function handle_key_event(state, event)
       local pasted = chat.normalize_pasted_text(table.concat(state.paste_chunks))
       state.paste_chunks = nil
       if pasted ~= "" then
-        insert_text(state, pasted)
+        insert_text(state, pasted, true)
       end
       return
     end
@@ -5780,7 +5990,7 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     busy_kind = debug_options.busy_kind or (debug_options.busy and "agent" or nil),
     running = true,
     scroll_offset = 0,
-    prompt_history = {},
+    prompt_history = debug_options.prompt_history or {},
     history_index = nil,
     history_draft = "",
     history_draft_cursor = 0,
@@ -5791,6 +6001,9 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     editor_preferred_col = nil,
     editor_snapped_col = nil,
     editor_gap_anchor = nil,
+    editor_undo_stack = {},
+    editor_kill_ring = {},
+    editor_last_action = nil,
     status_text = debug_options.status_text,
     status_is_error = not not debug_options.status_is_error,
     show_thinking = debug_options.show_thinking ~= false,
@@ -5829,6 +6042,9 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     status_text = state.status_text,
     editor_preferred_col = state.editor_preferred_col,
     editor_snapped_col = state.editor_snapped_col,
+    editor_undo_count = #(state.editor_undo_stack or {}),
+    editor_kill_ring = state.editor_kill_ring,
+    editor_last_action = state.editor_last_action,
     tools_expanded = state.tools_expanded,
     show_thinking = state.show_thinking,
     last_entry_kind = state.entries[#state.entries] and state.entries[#state.entries].kind or nil,
