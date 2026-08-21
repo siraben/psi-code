@@ -921,6 +921,9 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
     if (strcmp(sequence, "d") == 0 || strcmp(sequence, "D") == 0) {
         return "alt-d";
     }
+    if (strcmp(sequence, "y") == 0 || strcmp(sequence, "Y") == 0) {
+        return "alt-y";
+    }
     if (strcmp(sequence, "\b") == 0 || strcmp(sequence, "\177") == 0) {
         return "alt-backspace";
     }
@@ -1026,6 +1029,11 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
             return "alt-enter";
         }
         return "shift-enter";
+    }
+    /* Kitty CSI-u encoding for Ctrl-Minus, pi's default undo binding. */
+    if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 && final == 'u' &&
+        first == 45u && second == PSI_VM_TUI_MODIFIER_CTRL) {
+        return "ctrl--";
     }
     return NULL;
 }

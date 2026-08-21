@@ -1924,6 +1924,29 @@ def t_tui_tab_completion(psi: Psi):
         "physical Tab did not reach slash-command completion",
     )
 
+
+@test("mode/tui_undo_kill_ring")
+def t_tui_undo_kill_ring(psi: Psi):
+    # Exercise the host decoder for Kitty Ctrl-Minus and traditional Alt-Y,
+    # then prove undo and kill-ring cycling restored a completable /he prompt.
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [
+            (b"", 0.5),
+            (b"/he\t\x1b[45;5u", 0.25),  # complete, then undo to /he
+            (b"\x15/foo\x15", 0.25),     # kill /he, then separately kill /foo
+            (b"\x19\x1by\t\x1b[D\r", 0.75),  # yank /foo, cycle to /he, complete
+            (b"/quit\r", 1.0),
+        ],
+        env_extra={"XDG_STATE_HOME": str(psi.tmp / "state-tui-undo-kill-ring")},
+    )
+    raw.assert_clean_exit()
+    assert_bytes_contains(
+        raw,
+        b"extensions:",
+        "decoded undo/yank/yank-pop did not restore and submit /help",
+    )
+
 @test("mode/tui_lf_submit")
 def t_tui_lf_submit(psi: Psi):
     raw = run_pty(
