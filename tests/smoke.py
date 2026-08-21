@@ -2084,6 +2084,32 @@ def t_tui_bracketed_paste(psi: Psi):
     )
 
 
+@test("mode/tui_large_paste_marker")
+def t_tui_large_paste_marker(psi: Psi):
+    payload = b"\r".join(f"large line {index}".encode() for index in range(1, 12))
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [
+            (b"", 1.0),
+            (b"\x1b[200~" + payload + b"\x1b[201~", 1.0),
+            (b"\x03", 0.5),
+            (b"/quit\r", 1.0),
+        ],
+        env_extra={"XDG_STATE_HOME": str(psi.tmp / "state-tui-large-paste")},
+    )
+    raw.assert_clean_exit()
+    assert_bytes_contains(
+        raw,
+        b"[paste #1 +11 lines]",
+        "large bracketed paste should render as one compact marker",
+    )
+    assert_bytes_not_contains(
+        raw,
+        b"large line 11",
+        "large bracketed paste content should stay out of the rendered editor",
+    )
+
+
 @test("mode/tui_tab_completion")
 def t_tui_tab_completion(psi: Psi):
     # Exercise the host key decoder, not a synthetic Lua {key="tab"} event.
