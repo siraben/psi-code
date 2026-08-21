@@ -1186,6 +1186,7 @@ static int lfn_log(lua_State *L) {
 #define PSI_VM_TEXT_CODEPOINT_C0_CONTROL_MAX 0x20u
 #define PSI_VM_TEXT_CODEPOINT_DELETE 0x7fu
 #define PSI_VM_TEXT_CODEPOINT_C1_CONTROL_MAX 0x9fu
+#define PSI_VM_TEXT_CODEPOINT_ZERO_WIDTH_NON_JOINER 0x200cu
 #define PSI_VM_TEXT_CODEPOINT_ZERO_WIDTH_JOINER 0x200du
 #define PSI_VM_TEXT_UNICODE_MAX 0x10ffffu
 #define PSI_VM_TEXT_WIDTH_ZERO 0
@@ -1414,6 +1415,84 @@ static int psi_vm_text_is_emoji_modifier(unsigned long cp) {
     return psi_vm_text_in_range(cp, 0x1f3fbu, 0x1f3ffu);
 }
 
+/* Unicode 17 Indic_Conjunct_Break=Linker. Keep this table in sync with
+ * lua/psi/tui_text.lua: the Lua editor and the C rendering primitives must
+ * agree on every byte boundary. */
+static int psi_vm_text_is_indic_linker(unsigned long cp) {
+    switch (cp) {
+    case 0x094du:
+    case 0x09cdu:
+    case 0x0acdu:
+    case 0x0b4du:
+    case 0x0c4du:
+    case 0x0d4du:
+    case 0x1039u:
+    case 0x17d2u:
+    case 0x1a60u:
+    case 0x1b44u:
+    case 0x1babu:
+    case 0xa9c0u:
+    case 0xaaf6u:
+    case 0x10a3fu:
+    case 0x11133u:
+    case 0x113d0u:
+    case 0x1193eu:
+    case 0x11a47u:
+    case 0x11a99u:
+    case 0x11f42u:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static int psi_vm_text_is_indic_consonant(unsigned long cp) {
+    if (cp < 0x0915u || cp > 0x11f33u) {
+        return 0;
+    }
+    return psi_vm_text_in_range(cp, 0x0915u, 0x0939u) ||
+        psi_vm_text_in_range(cp, 0x0958u, 0x095fu) || psi_vm_text_in_range(cp, 0x0978u, 0x097fu) ||
+        psi_vm_text_in_range(cp, 0x0995u, 0x09a8u) || psi_vm_text_in_range(cp, 0x09aau, 0x09b0u) ||
+        cp == 0x09b2u || psi_vm_text_in_range(cp, 0x09b6u, 0x09b9u) ||
+        psi_vm_text_in_range(cp, 0x09dcu, 0x09ddu) || cp == 0x09dfu ||
+        psi_vm_text_in_range(cp, 0x09f0u, 0x09f1u) || psi_vm_text_in_range(cp, 0x0a95u, 0x0aa8u) ||
+        psi_vm_text_in_range(cp, 0x0aaau, 0x0ab0u) || psi_vm_text_in_range(cp, 0x0ab2u, 0x0ab3u) ||
+        psi_vm_text_in_range(cp, 0x0ab5u, 0x0ab9u) || cp == 0x0af9u ||
+        psi_vm_text_in_range(cp, 0x0b15u, 0x0b28u) || psi_vm_text_in_range(cp, 0x0b2au, 0x0b30u) ||
+        psi_vm_text_in_range(cp, 0x0b32u, 0x0b33u) || psi_vm_text_in_range(cp, 0x0b35u, 0x0b39u) ||
+        psi_vm_text_in_range(cp, 0x0b5cu, 0x0b5du) || cp == 0x0b5fu || cp == 0x0b71u ||
+        psi_vm_text_in_range(cp, 0x0c15u, 0x0c28u) || psi_vm_text_in_range(cp, 0x0c2au, 0x0c39u) ||
+        psi_vm_text_in_range(cp, 0x0c58u, 0x0c5au) || psi_vm_text_in_range(cp, 0x0d15u, 0x0d3au) ||
+        psi_vm_text_in_range(cp, 0x1000u, 0x102au) || cp == 0x103fu ||
+        psi_vm_text_in_range(cp, 0x1050u, 0x1055u) || psi_vm_text_in_range(cp, 0x105au, 0x105du) ||
+        cp == 0x1061u || psi_vm_text_in_range(cp, 0x1065u, 0x1066u) ||
+        psi_vm_text_in_range(cp, 0x106eu, 0x1070u) || psi_vm_text_in_range(cp, 0x1075u, 0x1081u) ||
+        cp == 0x108eu || psi_vm_text_in_range(cp, 0x1780u, 0x17b3u) ||
+        psi_vm_text_in_range(cp, 0x1a20u, 0x1a54u) || psi_vm_text_in_range(cp, 0x1b0bu, 0x1b0cu) ||
+        psi_vm_text_in_range(cp, 0x1b13u, 0x1b33u) || psi_vm_text_in_range(cp, 0x1b45u, 0x1b4cu) ||
+        psi_vm_text_in_range(cp, 0x1b83u, 0x1ba0u) || psi_vm_text_in_range(cp, 0x1baeu, 0x1bafu) ||
+        psi_vm_text_in_range(cp, 0x1bbbu, 0x1bbdu) || psi_vm_text_in_range(cp, 0xa989u, 0xa98bu) ||
+        psi_vm_text_in_range(cp, 0xa98fu, 0xa9b2u) || psi_vm_text_in_range(cp, 0xa9e0u, 0xa9e4u) ||
+        psi_vm_text_in_range(cp, 0xa9e7u, 0xa9efu) || psi_vm_text_in_range(cp, 0xa9fau, 0xa9feu) ||
+        psi_vm_text_in_range(cp, 0xaa60u, 0xaa6fu) || psi_vm_text_in_range(cp, 0xaa71u, 0xaa73u) ||
+        cp == 0xaa7au || psi_vm_text_in_range(cp, 0xaa7eu, 0xaa7fu) ||
+        psi_vm_text_in_range(cp, 0xaae0u, 0xaaeau) || psi_vm_text_in_range(cp, 0xabc0u, 0xabdau) ||
+        cp == 0x10a00u || psi_vm_text_in_range(cp, 0x10a10u, 0x10a13u) ||
+        psi_vm_text_in_range(cp, 0x10a15u, 0x10a17u) ||
+        psi_vm_text_in_range(cp, 0x10a19u, 0x10a35u) ||
+        psi_vm_text_in_range(cp, 0x11103u, 0x11126u) || cp == 0x11144u || cp == 0x11147u ||
+        psi_vm_text_in_range(cp, 0x11380u, 0x11389u) || cp == 0x1138bu || cp == 0x1138eu ||
+        psi_vm_text_in_range(cp, 0x11390u, 0x113b5u) ||
+        psi_vm_text_in_range(cp, 0x11900u, 0x11906u) || cp == 0x11909u ||
+        psi_vm_text_in_range(cp, 0x1190cu, 0x11913u) ||
+        psi_vm_text_in_range(cp, 0x11915u, 0x11916u) ||
+        psi_vm_text_in_range(cp, 0x11918u, 0x1192fu) || cp == 0x11a00u ||
+        psi_vm_text_in_range(cp, 0x11a0bu, 0x11a32u) || cp == 0x11a50u ||
+        psi_vm_text_in_range(cp, 0x11a5cu, 0x11a83u) ||
+        psi_vm_text_in_range(cp, 0x11f04u, 0x11f10u) ||
+        psi_vm_text_in_range(cp, 0x11f12u, 0x11f33u);
+}
+
 static int psi_vm_text_is_control(unsigned long cp) {
     return cp < PSI_VM_TEXT_CODEPOINT_C0_CONTROL_MAX ||
         psi_vm_text_in_range(
@@ -1451,11 +1530,15 @@ static void psi_vm_text_next_cluster(
     const char *text, size_t len, size_t i, size_t *next_i, int *cluster_width) {
     size_t after;
     unsigned long cp;
+    int cluster_is_indic;
+    int indic_linker_pending;
     int width;
     int saw_zwj;
 
     cp = psi_vm_text_decode_utf8(text, len, i, &after);
     width = psi_vm_text_codepoint_width(cp);
+    cluster_is_indic = psi_vm_text_is_indic_consonant(cp);
+    indic_linker_pending = 0;
     if (psi_vm_text_is_regional_indicator(cp)) {
         size_t after2;
         unsigned long cp2;
@@ -1472,10 +1555,26 @@ static void psi_vm_text_next_cluster(
         unsigned long next_cp;
         size_t next_after;
         next_cp = psi_vm_text_decode_utf8(text, len, i, &next_after);
-        if (psi_vm_text_is_zero_width_cluster_modifier(next_cp)) {
+        if (cluster_is_indic && psi_vm_text_is_indic_linker(next_cp)) {
+            indic_linker_pending = 1;
+            i = next_after;
+        } else if (next_cp == PSI_VM_TEXT_CODEPOINT_ZERO_WIDTH_NON_JOINER) {
+            indic_linker_pending = 0;
+            saw_zwj = 0;
+            i = next_after;
+        } else if (psi_vm_text_is_zero_width_cluster_modifier(next_cp)) {
             i = next_after;
         } else if (next_cp == PSI_VM_TEXT_CODEPOINT_ZERO_WIDTH_JOINER) {
-            saw_zwj = 1;
+            /* ZWJ is an InCB extender, but without a preceding linker it does
+             * not join two Indic consonants (GB9c). */
+            if (!cluster_is_indic) {
+                saw_zwj = 1;
+            }
+            i = next_after;
+        } else if (cluster_is_indic && indic_linker_pending &&
+            psi_vm_text_is_indic_consonant(next_cp)) {
+            width += psi_vm_text_codepoint_width(next_cp);
+            indic_linker_pending = 0;
             i = next_after;
         } else if (saw_zwj) {
             int next_width;
