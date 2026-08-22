@@ -17,10 +17,10 @@
 | #219 | Atomic large-paste markers | PARTIAL | 3 should_fix, 1 nit |
 | #220 | Indic conjunct graphemes | PARTIAL | 1 should_fix |
 | #221 | CR-safe rendering | PARTIAL | 1 should_fix |
-| #222 | Clipboard image paste | PARTIAL | ≥1 should_fix (+2 pending validation) |
+| #222 | Clipboard image paste | PARTIAL | 3 should_fix |
 | #223 | Lua fallback wrapping | PARTIAL | 1 should_fix |
 
-Cross-validation outcome: **every finding from both models survived** (17 confirmed; one severity downgraded should_fix→nit on #219; one factual aside corrected inside #223's validated finding).
+Cross-validation outcome: **every finding from both models survived** (19 confirmed; one severity downgraded should_fix→nit on #219; one factual aside corrected inside #223's validated finding; #222's unbounded-write defect confirmed latent until the sibling `$args[0]` fix lands).
 
 ## The five findings that most affect merge order
 
