@@ -131,6 +131,29 @@ class AuditDatabaseTest(unittest.TestCase):
 
 
 class FormattingTest(unittest.TestCase):
+    def test_pull_normalization_removes_volatile_embedded_repo_fields(self) -> None:
+        payload = {
+            "id": 4,
+            "base": {
+                "ref": "master",
+                "repo": {
+                    "id": 1,
+                    "full_name": "source/repo",
+                    "default_branch": "master",
+                    "updated_at": "later",
+                    "size": 99,
+                },
+            },
+            "head": {"ref": "topic", "repo": {"id": 1, "size": 99}},
+        }
+        normalized = sync.normalize_pull_payload(payload)
+        self.assertEqual(
+            normalized["base"]["repo"],
+            {"id": 1, "full_name": "source/repo", "default_branch": "master"},
+        )
+        self.assertEqual(normalized["head"]["repo"], {"id": 1})
+        self.assertEqual(payload["base"]["repo"]["size"], 99)
+
     def test_provenance_is_machine_readable(self) -> None:
         payload = {
             "number": 7,
@@ -158,6 +181,102 @@ class FormattingTest(unittest.TestCase):
         desired = sync.desired_pull(payload, "source/repo")
         self.assertEqual(desired["state"], "closed")
         self.assertNotIn("base", desired)
+
+    def test_current_provenance_markers_are_bootstrap_readable(self) -> None:
+        self.assertEqual(
+            sync.ISSUE_MARKER.search(
+                "<!-- forgejo-sync:issue:source/repo:81 -->"
+            ).group(1),
+            "81",
+        )
+        self.assertEqual(
+            sync.PULL_MARKER.search(
+                "<!-- forgejo-sync:pull:source/repo:225 -->"
+            ).group(1),
+            "225",
+        )
+
+
+class BootstrapMappingTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.temporary.name)
+        self.database = sync.AuditDatabase(
+            self.root / "audit.sqlite3", ROOT / "migrations" / "forgejo-github-sync"
+        )
+
+    def tearDown(self) -> None:
+        self.database.close()
+        self.temporary.cleanup()
+
+    def test_open_replacement_supersedes_merged_pull_mapping(self) -> None:
+        old = sync.entity(
+            "pull",
+            1536,
+            {
+                "id": 1536,
+                "number": 202,
+                "title": "Persistent goals",
+                "body": "original",
+                "state": "closed",
+                "merged": True,
+                "html_url": "https://forgejo.example/pulls/202",
+                "base": {"ref": "master"},
+            },
+            source_index=202,
+        )
+        replacement = sync.entity(
+            "pull",
+            1586,
+            {
+                "id": 1586,
+                "number": 225,
+                "title": "Persistent goals",
+                "body": "Replacement for Forgejo PR #202.",
+                "state": "open",
+                "merged": False,
+                "html_url": "https://forgejo.example/pulls/225",
+                "base": {"ref": "master"},
+            },
+            source_index=225,
+        )
+        run_id = self.database.start_run("source/repo", "target/repo", "snapshot")
+        self.database.record_snapshot(run_id, {old.key: old, replacement.key: replacement})
+        self.database.finish_run(run_id, "completed")
+        self.database.save_mapping(
+            old.key, "pull", 202, "pull", target_number=55, target_id=55
+        )
+
+        class Target:
+            @staticmethod
+            def repo_path(suffix):
+                return f"/repos/target/repo{suffix}"
+
+            @staticmethod
+            def pages(path):
+                if "/issues?" in path:
+                    return []
+                if "/pulls?" in path:
+                    return [
+                        {
+                            "id": 55,
+                            "number": 55,
+                            "title": "Persistent goals",
+                            "body": "Imported from Forgejo PR #202",
+                            "state": "open",
+                            "html_url": "https://github.example/pulls/55",
+                        }
+                    ]
+                if "/issues/55/comments?" in path:
+                    return []
+                raise AssertionError(f"unexpected target path: {path}")
+
+        sync.bootstrap_mappings(self.database, Target(), "source/repo")
+        self.assertIsNone(self.database.mapping(old.key))
+        mapping = self.database.mapping(replacement.key)
+        self.assertIsNotNone(mapping)
+        self.assertEqual(mapping["target_number"], 55)
+        self.assertEqual(mapping["source_index"], 225)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ ledger before the target is changed.
 from __future__ import annotations
 
 import argparse
+import copy
 import concurrent.futures
 import dataclasses
 import datetime as dt
@@ -27,8 +28,17 @@ from collections.abc import Sequence
 from typing import Any
 
 PAGE_SIZE = 50
-ISSUE_MARKER = re.compile(r"Imported from Forgejo issue #(\d+)", re.IGNORECASE)
-PULL_MARKER = re.compile(r"Imported from Forgejo PR #(\d+)", re.IGNORECASE)
+ISSUE_MARKER = re.compile(
+    r"(?:Imported from Forgejo issue #|forgejo-sync:issue:[^:\s>]+:)(\d+)",
+    re.IGNORECASE,
+)
+PULL_MARKER = re.compile(
+    r"(?:Imported from Forgejo PR #|forgejo-sync:pull:[^:\s>]+:)(\d+)",
+    re.IGNORECASE,
+)
+PULL_REPLACEMENT_MARKER = re.compile(
+    r"Replacement for Forgejo PR #(\d+)", re.IGNORECASE
+)
 COMMENT_MARKER = re.compile(r"forgejo-sync:comment:(\d+)")
 
 
@@ -183,6 +193,32 @@ def stable_event_id(payload: dict[str, Any]) -> str:
     return sha256_text(canonical_json(identity))
 
 
+def normalize_pull_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Remove duplicated volatile repository expansions from a PR payload.
+
+    Forgejo embeds the complete repository object under both base and head.
+    Repository size and updated_at changes would otherwise manufacture two
+    changes in every PR; the complete repository is already its own entity.
+    """
+    normalized = copy.deepcopy(payload)
+    stable_repo_fields = (
+        "id",
+        "full_name",
+        "html_url",
+        "default_branch",
+        "object_format_name",
+    )
+    for side in ("base", "head"):
+        reference = normalized.get(side)
+        if not isinstance(reference, dict) or not isinstance(reference.get("repo"), dict):
+            continue
+        repository = reference["repo"]
+        reference["repo"] = {
+            key: repository.get(key) for key in stable_repo_fields if key in repository
+        }
+    return normalized
+
+
 def add_unique(destination: dict[str, EntitySnapshot], item: EntitySnapshot) -> None:
     previous = destination.get(item.key)
     if previous is not None and previous.content_sha256 != item.content_sha256:
@@ -224,7 +260,7 @@ def hydrate_pull(
     client: ForgejoClient, summary: dict[str, Any]
 ) -> list[EntitySnapshot]:
     number = int(summary["number"])
-    detail = client.get(client.repo_path(f"/pulls/{number}"))
+    detail = normalize_pull_payload(client.get(client.repo_path(f"/pulls/{number}")))
     pull = entity("pull", detail["id"], detail, source_index=number)
     result = [pull]
     for comment in client.pages(client.repo_path(f"/issues/{number}/comments?")):
@@ -801,6 +837,16 @@ def bootstrap_mappings(
 ) -> None:
     source_issues = {int(row["source_index"]): row for row in database.heads("issue")}
     source_pulls = {int(row["source_index"]): row for row in database.heads("pull")}
+    replacement_pulls: dict[int, sqlite3.Row] = {}
+    for row in source_pulls.values():
+        payload = json.loads(row["payload_json"])
+        marker = PULL_REPLACEMENT_MARKER.search(payload.get("body") or "")
+        if (
+            marker is not None
+            and payload.get("state") == "open"
+            and not payload.get("merged")
+        ):
+            replacement_pulls[int(marker.group(1))] = row
     target_issues = github.pages(github.repo_path("/issues?state=all"))
     for target in target_issues:
         if "pull_request" in target:
@@ -845,12 +891,19 @@ def bootstrap_mappings(
         body = target.get("body") or ""
         match = PULL_MARKER.search(body)
         source_index = int(match.group(1)) if match else int(target["number"])
-        source = source_pulls.get(source_index)
+        source = replacement_pulls.get(source_index) or source_pulls.get(source_index)
         if source is None:
             continue
+        source_index = int(source["source_index"])
         source_payload = json.loads(source["payload_json"])
         if not match and source_payload.get("title") != target.get("title"):
             continue
+        database.connection.execute(
+            "DELETE FROM target_mappings "
+            "WHERE target_kind='pull' AND target_number=? AND entity_key<>?",
+            (int(target["number"]), source["entity_key"]),
+        )
+        database.connection.commit()
         database.save_mapping(
             source["entity_key"],
             "pull",
