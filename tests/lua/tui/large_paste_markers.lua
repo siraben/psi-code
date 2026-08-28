@@ -1,5 +1,5 @@
 --[==[psi-test
-expect = "inline-lines|[paste #1 +11 lines]|inline-chars|[paste #1 1001 chars]|true|true|0|21|ab|1||before |7| [paste #1 1001 chars]|true|1|paste #1 1001 chars]|1|0|true|true"
+expect = "inline-lines|[paste #1 +11 lines]|inline-chars|[paste #1 1001 chars]|true|true|0|21|ab|1||before |7| [paste #1 1001 chars]|true|1|paste #1 1001 chars]|1|0|true|true|true|true|true"
 ]==]
 local agent = require("psi.agent_session")
 local rt = require("psi.tui_runtime")
@@ -62,6 +62,26 @@ for _, line in ipairs(wrapped.rendered) do
   end
 end
 
+local completion_tail = paste("/he ", 4, string.rep("c", 1001), {
+  { key = "home" },
+  { key = "right" },
+  { key = "right" },
+  { key = "right" },
+  { key = "tab" },
+})
+local narrow = paste("top\n", 4, string.rep("n", 1001), {
+  { key = "home" },
+  { key = "up" },
+  { key = "down" },
+  { key = "right" },
+}, { width = 12 })
+local narrow_whole = false
+for _, line in ipairs(narrow.rendered) do
+  if line:find("[paste #1 1001 chars]", 1, true) ~= nil then
+    narrow_whole = true
+  end
+end
+
 agent.clear_queues()
 local submitted_text = "alpha\n" .. string.rep("s", 1001)
 paste("", 0, submitted_text, { { key = "enter" } }, { busy = true, busy_kind = "agent" })
@@ -90,4 +110,10 @@ return table.concat({
   tostring(agent.pending_message_count()),
   tostring(queued ~= nil and queued.text == submitted_text),
   tostring(wrapped_whole),
+  tostring(
+    completion_tail.paste_count == 1
+      and completion_tail.expanded_input:sub(-1001) == string.rep("c", 1001)
+  ),
+  tostring(narrow_whole),
+  tostring(narrow.cursor == #narrow.input),
 }, "|")

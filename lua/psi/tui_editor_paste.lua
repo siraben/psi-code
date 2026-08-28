@@ -21,9 +21,15 @@ local function valid_suffix(suffix)
   return suffix:match("^%+%d+ lines$") ~= nil or suffix:match("^%d+ chars$") ~= nil
 end
 
-local function character_count(text)
-  local count = utf8.len(text)
-  return count or #text
+local function utf16_length(text)
+  local ok, count = pcall(function()
+    local units = 0
+    for _, codepoint in utf8.codes(text) do
+      units = units + (codepoint > 0xffff and 2 or 1)
+    end
+    return units
+  end)
+  return ok and count or #text
 end
 
 local function line_count(text)
@@ -64,7 +70,7 @@ end
 function M.compact(state, text)
   text = tostring(text or "")
   local lines = line_count(text)
-  local chars = character_count(text)
+  local chars = utf16_length(text)
   if lines <= MAX_INLINE_LINES and chars <= MAX_INLINE_CHARS then
     return text, false
   end
