@@ -9,8 +9,8 @@ ledger before the target is changed.
 from __future__ import annotations
 
 import argparse
-import copy
 import concurrent.futures
+import copy
 import dataclasses
 import datetime as dt
 import fcntl
