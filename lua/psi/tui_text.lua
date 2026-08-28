@@ -154,7 +154,7 @@ local function is_combining(cp)
     or in_range(cp, 0x05c4, 0x05c5)
     or cp == 0x05c7
     or in_range(cp, 0x0610, 0x061a)
-    or in_range(cp, 0x064b, 0x065f)
+    or in_range(cp, 0x064b, 0x065e)
     or cp == 0x0670
     or in_range(cp, 0x06d6, 0x06dc)
     or in_range(cp, 0x06df, 0x06e4)
