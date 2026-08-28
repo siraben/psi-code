@@ -1,10 +1,14 @@
 --[==[psi-test
-expect = "wl-paste|image/png|true|true|xclip|image/jpeg|true|osascript|image/jpeg|true|powershell|image/gif|true|true|true|true|png|jpg|nil"
+expect = "wl-paste|image/png|true|true|xclip|image/jpeg|true|osascript|image/jpeg|true|powershell|image/gif|true|true|true|true|png|jpg|nil|true|true|true"
 ]==]
 local image = require("psi.clipboard_image")
 
-local png = string.char(0x89) .. "PNG\r\n" .. string.char(0x1a) .. "\n"
-  .. string.char(0, 0, 0, 13) .. "IHDR"
+local png = string.char(0x89)
+  .. "PNG\r\n"
+  .. string.char(0x1a)
+  .. "\n"
+  .. string.char(0, 0, 0, 13)
+  .. "IHDR"
 local jpg = string.char(0xff, 0xd8, 0xff, 0xdb)
 local gif = "GIF89a"
 
@@ -26,7 +30,7 @@ local way_path, way_backend, way_mime = image.read_system({
   end,
   run_image_backend = function(backend, path)
     secure_mode = psi.file_mode(path) == 384
-    if backend.kind == "wayland" and backend.mime == "image/png" then
+    if backend.kind == "wayland" and backend.mime == "image/png; charset=binary" then
       psi.file_write(path, png)
       return { status = 0, output = "" }
     end
@@ -87,6 +91,17 @@ local win_path, win_backend, win_mime = image.read_system({
   end,
 })
 
+local powershell_argv
+image.read_system({
+  env = {},
+  is_windows = true,
+  run_argv = function(argv)
+    powershell_argv = argv
+    return { status = 1, output = "" }
+  end,
+})
+local powershell_script = powershell_argv and powershell_argv[#powershell_argv] or ""
+
 local termux_calls = 0
 local termux_path = image.read_system({
   env = { TERMUX_VERSION = "1" },
@@ -142,6 +157,12 @@ local result = table.concat({
   tostring(image.extension_for_mime("IMAGE/PNG; charset=binary")),
   tostring(image.extension_for_mime("image/jpeg")),
   tostring(image.extension_for_mime("image/bmp")),
+  tostring(powershell_argv ~= nil and powershell_argv[#powershell_argv - 1] == "-Command"),
+  tostring(powershell_script:find("$path = '", 1, true) ~= nil),
+  tostring(
+    powershell_script:find("MemoryStream", 1, true) ~= nil
+      and powershell_script:find("$stream.Length -gt 16777216", 1, true) ~= nil
+  ),
 }, "|")
 
 cleanup(way_path)
