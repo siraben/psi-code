@@ -5,7 +5,7 @@ the GitHub restoration on 2026-08-28.
 
 - `issues.json`: 40 issues, including bodies, original authors/timestamps, and
   37 comments.
-- `pull-requests.json`: 185 pull requests, including bodies, refs, merge state,
+- `pull-requests.json`: 186 pull requests, including bodies, refs, merge state,
   23 conversation comments, and 18 reviews.
 - `labels.json`, `milestones.json`, and `releases.json`: the remaining tracker
   metadata (there were no milestones or releases at capture time).

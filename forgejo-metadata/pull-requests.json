@@ -4687,5 +4687,28 @@
     "closedAt": null,
     "reviews": [],
     "comments": []
+  },
+  {
+    "id": 1587,
+    "index": 226,
+    "title": "Audit one-way Forgejo-to-GitHub publication",
+    "state": "open",
+    "created": "2026-08-28T00:26:00-04:00",
+    "updated": "2026-08-28T00:26:00-04:00",
+    "labels": [],
+    "user": "siraben",
+    "body": "## Summary\n\n- make Forgejo the sole ingestion source for the psi-code publication mirror\n- snapshot every issue, PR, comment, review, timeline event, and Git ref wholesale on each run\n- deduplicate immutable canonical JSON versions by SHA-256 while retaining every observation and tombstone\n- record every GitHub mutation as append-only planned/succeeded/failed/skipped events\n- persist source-to-target mappings so normal daily runs never need GitHub as a data source\n- add atomic, checksummed external-drive backups and a persistent daily systemd timer\n\n## Consistency behavior\n\nForgejo-owned branches and tags are force-published to GitHub. GitHub-only legacy refs are retained. Issues, open PRs, ordinary comments, and review content are published with provenance. Source deletions become explicit target tombstones while prior content remains queryable in the ledger. Historical closed PRs without a GitHub counterpart are archived in the ledger rather than recreated inaccurately.\n\n## Validation\n\n- two complete source-only snapshots: 1,646 entities each, identical manifest hash\n- second snapshot: zero new versions and zero changes\n- unit coverage for revision deduplication, deletion recovery, append-only triggers, and backup integrity\n- Ruff format/lint and Python bytecode compilation\n- systemd unit verification and SQLite integrity checks",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/pulls/226",
+    "base": "master",
+    "head": "siraben/forgejo-github-sync-audit",
+    "headSha": "0eb9f6f0bc7b05011c377f6b2a1650159492242c",
+    "diffUrl": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/pulls/226.diff",
+    "mergeable": true,
+    "hasMerged": false,
+    "mergedAt": null,
+    "closedAt": null,
+    "reviews": [],
+    "comments": []
   }
 ]

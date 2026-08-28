@@ -43,6 +43,7 @@ f77dc394fcc2b628421e52221a965febd4677ead	refs/heads/review/parity-batch-2026-08-
 19dc9f84299a8d7d8782cc2f61b233b466167c46	refs/heads/siraben/combined-hotfix-stack
 d6ed573dbe97f57884e6c3e108d60d2de7264598	refs/heads/siraben/editor-undo-kill-ring
 9f88a90b6946ed1bdbdf256810484f767a06782a	refs/heads/siraben/external-editor-cleanup
+0eb9f6f0bc7b05011c377f6b2a1650159492242c	refs/heads/siraben/forgejo-github-sync-audit
 c66a7c53b108d3bae20838c17b9705a6b232f975	refs/heads/siraben/issue-11-network-search
 d3325b2e4916058e0e804e7ba64f364569fdd03c	refs/heads/siraben/issue-111-metadata
 cf863dc44c769607c8d4bd3969664faa410fffcd	refs/heads/siraben/issue-119-mcp-http
