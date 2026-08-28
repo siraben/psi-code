@@ -27,10 +27,12 @@ failed, or skipped events. `target_mappings` relates stable Forgejo IDs to the
 different issue and PR numbers assigned by GitHub. Database triggers reject
 updates and deletes of versions, observations, and action events.
 
-The external-drive deployment writes the live ledger to
-`/mnt/siraben-ext/forgejo-github-sync/audit.sqlite3`. Every successful run also
-creates an atomic gzip backup and SHA-256 sidecar under `backups/`; no automatic
-retention deletes old backups.
+The hot ledger lives at
+`~/.local/state/psi-code-forgejo-sync/audit.sqlite3`, avoiding synchronous WAL
+latency on the external Btrfs volume. Every successful run creates an atomic
+gzip backup and SHA-256 sidecar under
+`/mnt/siraben-ext/forgejo-github-sync/backups/`; no automatic retention deletes
+old backups.
 
 Useful queries:
 

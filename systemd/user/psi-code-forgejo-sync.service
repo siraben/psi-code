@@ -8,7 +8,7 @@ ConditionPathIsMountPoint=/mnt/siraben-ext
 Type=oneshot
 WorkingDirectory=%h/psi-coding-agent
 Environment=PATH=%h/.nix-profile/bin:/run/current-system/sw/bin:/usr/bin:/bin
-ExecStart=/run/current-system/sw/bin/python3 %h/psi-coding-agent/scripts/forgejo_github_sync.py sync --database /mnt/siraben-ext/forgejo-github-sync/audit.sqlite3 --backup-dir /mnt/siraben-ext/forgejo-github-sync/backups
+ExecStart=/run/current-system/sw/bin/python3 %h/psi-coding-agent/scripts/forgejo_github_sync.py sync --database %h/.local/state/psi-code-forgejo-sync/audit.sqlite3 --backup-dir /mnt/siraben-ext/forgejo-github-sync/backups
 TimeoutStartSec=4h
 UMask=0077
 Nice=10
