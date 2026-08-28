@@ -337,6 +337,7 @@ local function next_cluster(text, i)
   local cp, next_i = decode_utf8(text, i)
   local width = codepoint_width(cp)
   local cluster_is_indic = is_indic_consonant(cp)
+  local indic_chain_valid = cluster_is_indic
   local indic_linker_pending = false
   local saw_zwj = false
 
@@ -354,10 +355,11 @@ local function next_cluster(text, i)
     if next_cp == nil then
       break
     end
-    if cluster_is_indic and is_indic_linker(next_cp) then
+    if indic_chain_valid and is_indic_linker(next_cp) then
       indic_linker_pending = true
       i = after
     elseif next_cp == 0x200c then
+      indic_chain_valid = false
       indic_linker_pending = false
       saw_zwj = false
       i = after
@@ -369,7 +371,7 @@ local function next_cluster(text, i)
         saw_zwj = true
       end
       i = after
-    elseif cluster_is_indic and indic_linker_pending and is_indic_consonant(next_cp) then
+    elseif indic_chain_valid and indic_linker_pending and is_indic_consonant(next_cp) then
       width = width + codepoint_width(next_cp)
       indic_linker_pending = false
       i = after
