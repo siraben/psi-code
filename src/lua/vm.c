@@ -593,6 +593,7 @@ static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx, int depth) {
 #define PSI_VM_TUI_CONTROL_MIN 1
 #define PSI_VM_TUI_CONTROL_MAX 26
 #define PSI_VM_TUI_CONTROL_A_OFFSET 1
+#define PSI_VM_TUI_CONTROL_UNDERSCORE 31
 #define PSI_VM_TUI_CSI_PRIMARY_PARAM 1u
 #define PSI_VM_TUI_MODIFIER_SHIFT 2u
 #define PSI_VM_TUI_MODIFIER_ALT_SHIFT 4u
@@ -921,6 +922,9 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
     if (strcmp(sequence, "d") == 0 || strcmp(sequence, "D") == 0) {
         return "alt-d";
     }
+    if (strcmp(sequence, "y") == 0 || strcmp(sequence, "Y") == 0) {
+        return "alt-y";
+    }
     if (strcmp(sequence, "\b") == 0 || strcmp(sequence, "\177") == 0) {
         return "alt-backspace";
     }
@@ -1027,6 +1031,11 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
         }
         return "shift-enter";
     }
+    /* Kitty CSI-u encoding for Ctrl-Minus, pi's default undo binding. */
+    if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 && final == 'u' &&
+        first == 45u && second == PSI_VM_TUI_MODIFIER_CTRL) {
+        return "ctrl--";
+    }
     return NULL;
 }
 
@@ -1105,6 +1114,10 @@ static int psi_vm_tui_normalize_key(
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "enter");
         event->text[0] = (char)ch;
         event->text[1] = '\0';
+        return 1;
+    }
+    if (ch == PSI_VM_TUI_CONTROL_UNDERSCORE) {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "ctrl--");
         return 1;
     }
     if (ch >= PSI_VM_TUI_CONTROL_MIN && ch <= PSI_VM_TUI_CONTROL_MAX) {
