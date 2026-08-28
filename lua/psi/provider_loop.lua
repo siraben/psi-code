@@ -170,6 +170,10 @@ local function append_queued_follow_ups(observer)
   return control.append_follow_ups(queued_user_observer(observer, "follow-up"))
 end
 
+local function append_internal_follow_ups()
+  return control.append_internal_follow_ups()
+end
+
 local function normalize_tool_result(tc, r)
   if r and r.ok and r.values and r.values.n > 0 then
     return r.values[1]
@@ -316,6 +320,9 @@ local function dispatch_tools(tool_calls, observer, abort_check, cfg, model)
     )
   end
   session_mod.save()
+  if psi.events then
+    psi.events.emit("tool-results-persisted", { count = #tool_calls })
+  end
   return results
 end
 
@@ -464,7 +471,11 @@ function M.run_turn(opts, cfg)
 
     local text = cfg.text(state)
     if #tool_calls == 0 then
-      if append_queued_steering(observer) == 0 and append_queued_follow_ups(observer) == 0 then
+      if
+        append_queued_steering(observer) == 0
+        and append_queued_follow_ups(observer) == 0
+        and append_internal_follow_ups() == 0
+      then
         emit_turn_end(text, model)
         return true, text
       end
@@ -474,7 +485,11 @@ function M.run_turn(opts, cfg)
         return false, err
       end
       if transform.all_results_terminate(results) then
-        if append_queued_steering(observer) == 0 and append_queued_follow_ups(observer) == 0 then
+        if
+          append_queued_steering(observer) == 0
+          and append_queued_follow_ups(observer) == 0
+          and append_internal_follow_ups() == 0
+        then
           emit_turn_end(text, model)
           return true, text
         end
