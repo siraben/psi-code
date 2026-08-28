@@ -10,13 +10,6 @@ local M = {}
 local ENTRY_NAME = "psi.goal"
 local MAX_OBJECTIVE_CHARS = 4000
 local TERMINAL = { complete = true }
-local STOPPED = {
-  paused = true,
-  blocked = true,
-  usage_limited = true,
-  budget_limited = true,
-  complete = true,
-}
 
 local cached_key = nil
 local cached_goal = nil
@@ -24,7 +17,6 @@ local status_hook_id = nil
 local compaction_goal = nil
 local pending_tool_goal = nil
 local pending_usage = 0
-local continuation_queued = false
 local sync_status_hook
 
 local function trim(psi, value)
@@ -244,7 +236,6 @@ local function update_goal_tool(psi, input)
   end
   current = account_pending_usage(current)
   pending_tool_goal = transition(current, status)
-  continuation_queued = false
   psi.agent.clear_internal_follow_ups()
   return tool_response(psi, "update_goal", pending_tool_goal, status == "complete")
 end
@@ -445,7 +436,6 @@ local function command_handler(psi, rest)
       return print_action(psi, "No goal to clear")
     end
     psi.agent.clear_internal_follow_ups()
-    continuation_queued = false
     return save_transition(psi, { cleared = true, updated_at = os.time() }, "Goal cleared")
   end
   if verb == "pause" and tail == "" then
@@ -456,7 +446,6 @@ local function command_handler(psi, rest)
       return print_action(psi, goal_summary(current))
     end
     psi.agent.clear_internal_follow_ups()
-    continuation_queued = false
     return save_transition(psi, transition(current, "paused"), "Goal paused")
   end
   if verb == "resume" and tail == "" then
@@ -529,7 +518,6 @@ function M.register(psi)
   end
   pending_tool_goal = nil
   pending_usage = 0
-  continuation_queued = false
 
   register_tools(psi)
   psi.commands.register("goal", {
@@ -545,11 +533,9 @@ function M.register(psi)
     cached_goal = nil
     pending_tool_goal = nil
     pending_usage = 0
-    continuation_queued = false
     sync_status_hook(psi)
   end)
   psi.events.on("after-provider-response", function(payload)
-    continuation_queued = false
     local goal = read_goal(psi)
     if not goal or goal.status ~= "active" then
       return
@@ -559,13 +545,8 @@ function M.register(psi)
       return
     end
     goal = persist_accounting(psi)
-    if
-      goal
-      and goal.status == "active"
-      and psi.agent.pending_message_count() == 0
-      and psi.agent.queue_internal_follow_up(continuation_prompt(goal))
-    then
-      continuation_queued = true
+    if goal and goal.status == "active" and psi.agent.pending_message_count() == 0 then
+      psi.agent.queue_internal_follow_up(continuation_prompt(goal))
     end
   end)
   psi.events.on("tool-results-persisted", function()
