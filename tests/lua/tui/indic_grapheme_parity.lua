@@ -35,12 +35,14 @@ end
 local devanagari_zwj = "क्‍ष"
 local devanagari_chain = "क्ष्ण"
 local devanagari_zwnj = "क्‌ष"
+local devanagari_zwnj_relink = "क्‌्‍ष"
 local bare_zwj = "क‍ष"
 local controls = text.next_grapheme_index(devanagari_zwj, 0) == #devanagari_zwj
   and text.visible_width(devanagari_zwj) == 2
   and text.next_grapheme_index(devanagari_chain, 0) == #devanagari_chain
   and text.visible_width(devanagari_chain) == 3
   and text.next_grapheme_index(devanagari_zwnj, 0) == #"क्‌"
+  and text.next_grapheme_index(devanagari_zwnj_relink, 0) == #"क्‌्‍"
   and text.next_grapheme_index(bare_zwj, 0) == #"क‍"
 
 local corpus = {
@@ -50,6 +52,7 @@ local corpus = {
   devanagari_zwj,
   devanagari_chain,
   devanagari_zwnj,
+  devanagari_zwnj_relink,
   bare_zwj,
 }
 for _, unit in ipairs(conjuncts) do
