@@ -27,7 +27,8 @@ Security model: extensions are trusted local code. They run with the same
 filesystem, process, network, and credential access as psi itself.
 Project-local `./.psi/extensions/` files load only when the directory is
 trusted: psi prompts once in interactive sessions and stores the decision
-in `~/.config/psi/trust.json` (see `SECURITY.md`). Non-interactive modes
+in `~/.config/psi/trust.json` (see the
+[security policy](../SECURITY.md)). Non-interactive modes
 skip untrusted project extensions by default; `--trust` / `--no-trust`
 (or `PSI_TRUST=always|never`) override, and `--no-extensions` disables
 extension discovery entirely.
@@ -89,7 +90,9 @@ end
 | `psi.tools.add_before_hook(fn)` | `fn(name, input) -> ToolResult\|nil`. Returning non-nil short-circuits dispatch. |
 | `psi.tools.add_after_hook(fn)` | `fn(name, input, result) -> ToolResult\|nil`. Returning non-nil replaces the result. |
 
-**Tool record shape** (from `lua/psi/records.lua`):
+#### Tool record shape
+
+The shape comes from `lua/psi/records.lua`:
 
 ```lua
 {
@@ -109,7 +112,9 @@ end
 }
 ```
 
-**`ToolResult`** (from `psi.records.new_tool_result(ok, tool, error, extras)`):
+#### `ToolResult`
+
+Create this record with `psi.records.new_tool_result(ok, tool, error, extras)`:
 
 ```lua
 {
@@ -120,7 +125,10 @@ end
 }
 ```
 
-**Input validators** (from `psi.tool_registry`):
+#### Input validators
+
+The `psi.tool_registry` module provides:
+
 - `psi.tool_registry.require_string(input, field)`
 - `psi.tool_registry.optional_string(input, field, default)`
 - `psi.tool_registry.optional_number(input, field, default)`
@@ -154,7 +162,7 @@ session state.
 Built-in commands take precedence over registered ones, so extensions cannot
 shadow them. The list is not reproduced here; psi can describe it at runtime:
 
-```
+```text
 psi> /help                # short list of all commands
 psi> /apropos session     # search descriptions for a substring
 psi> /describe /fork      # full docstring + argument hint + source
@@ -195,7 +203,7 @@ Users can override defaults in `~/.config/psi/keybindings.json` or
 For the live default action map, run `/hotkeys` in the TUI or query the
 registry by id:
 
-```
+```text
 psi> /hotkeys                          # full Navigation/Editing/Other table
 psi> /describe tui.input.submit        # one action
 psi> /apropos transcript               # everything matching a pattern
@@ -265,7 +273,7 @@ end
 ### Render hooks: `psi.render.register_hook(event, fn)`
 
 Use render hooks when an extension needs to change terminal output rather than
-just observe events. Handlers receive a payload table and return one of:
+only observe events. Handlers receive a payload table and return one of:
 
 - `nil` / `false`: contribute nothing (observer-style).
 - a `"string"`: appended to the running render in registration order.
@@ -291,7 +299,7 @@ piped through the hook chain in TUI (streamed tokens go straight to
 the assistant-entry renderer); use the `assistant-text-delta` event
 via `psi.events.on` if you need per-delta visibility.
 
-**Do not write directly to stdout or stderr while the TUI is active.** The TUI
+Do not write directly to stdout or stderr while the TUI is active. The TUI
 is the sole terminal writer. It quarantines unstructured stdout and stderr for
 its whole active lifetime in `$XDG_STATE_HOME/psi/debug.log` (default
 `~/.local/state/psi/debug.log`, mode `0600`) so extension, provider, or library
@@ -427,7 +435,7 @@ stable as well.
 Every event fires synchronously from the agent turn loop, in the order defined
 below. Handlers must be fast because they run on the turn's critical path.
 
-Psi emits hyphenated event names and aliases several of them to pi-style
+psi emits hyphenated event names and aliases several of them to pi-style
 underscore names (`turn_end`, `tool_execution_start`,
 `after_provider_response`, etc.) for extension code. `resources_discover`
 retains its underscore name.
