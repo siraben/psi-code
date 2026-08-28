@@ -934,6 +934,9 @@ local function new_state(opts, runtime)
     streaming_assistant_index = nil,
     streaming_thinking_index = nil,
     queue_nav_index = nil,
+    queue_nav_id = nil,
+    queue_nav_draft = nil,
+    queue_nav_draft_cursor = nil,
     entries_version = 0,
     total_cache_width = nil,
     total_cache_version = nil,
@@ -3525,6 +3528,22 @@ local function busy_command_action(line)
   return nil
 end
 
+function chat.reset_queue_navigation(state, restore_draft)
+  local draft = state.queue_nav_draft
+  local draft_cursor = state.queue_nav_draft_cursor
+  state.queue_nav_index = nil
+  state.queue_nav_id = nil
+  state.queue_nav_draft = nil
+  state.queue_nav_draft_cursor = nil
+  if restore_draft and draft ~= nil then
+    state.input = draft
+    state.cursor = clamp(tonumber(draft_cursor) or #draft, 0, #draft)
+    clear_selection(state)
+    state.block_edit = nil
+    state.editor_mode = "insert"
+  end
+end
+
 local function queue_current_input(state, line, kind)
   local count = agent.pending_message_count()
   if
@@ -3533,7 +3552,7 @@ local function queue_current_input(state, line, kind)
     and state.queue_nav_index <= count
   then
     if agent.replace_pending(state.queue_nav_index, line) then
-      state.queue_nav_index = nil
+      chat.reset_queue_navigation(state, true)
       set_status(state, "", false)
       state.dirty = true
       return
@@ -3548,7 +3567,7 @@ local function queue_current_input(state, line, kind)
   end
   if ok then
     history_add(state, line)
-    state.queue_nav_index = nil
+    chat.reset_queue_navigation(state, false)
     set_status(state, "", false)
   else
     set_status(state, "failed to queue message", true)
@@ -3559,12 +3578,16 @@ end
 local function navigate_queue(state, direction)
   local count = agent.pending_message_count()
   if count == 0 then
-    state.queue_nav_index = nil
+    chat.reset_queue_navigation(state, true)
     set_status(state, "queue is empty", false)
     return
   end
   local index = state.queue_nav_index
   if index == nil or index < 1 or index > count then
+    if state.queue_nav_draft == nil then
+      state.queue_nav_draft = state.input or ""
+      state.queue_nav_draft_cursor = state.cursor
+    end
     index = direction == "previous" and count or 1
   elseif direction == "previous" then
     index = index - 1
@@ -3583,6 +3606,7 @@ local function navigate_queue(state, direction)
     return
   end
   state.queue_nav_index = index
+  state.queue_nav_id = item.id
   state.input = item.text or ""
   state.cursor = #state.input
   set_status(state, queue_status_text(), false)
@@ -3593,7 +3617,7 @@ local function restore_queued_message(state, opts)
   opts = opts or {}
   local count = agent.pending_message_count()
   if count == 0 then
-    state.queue_nav_index = nil
+    chat.reset_queue_navigation(state, true)
     if not opts.quiet then
       set_status(state, "No queued messages to restore", false)
     end
@@ -3604,7 +3628,7 @@ local function restore_queued_message(state, opts)
     messages[#messages + 1] = item.text or ""
   end
   if #messages == 0 then
-    state.queue_nav_index = nil
+    chat.reset_queue_navigation(state, true)
     if not opts.quiet then
       set_status(state, "No queued messages to restore", false)
     end
@@ -3613,13 +3637,14 @@ local function restore_queued_message(state, opts)
   for i = count, 1, -1 do
     agent.remove_pending(i)
   end
-  local current = tostring(state.input or "")
+  local current = state.queue_nav_index ~= nil and tostring(state.queue_nav_draft or "")
+    or tostring(state.input or "")
   local queued_text = table.concat(messages, "\n\n")
   local combined = queued_text
   if current:gsub("%s+", "") ~= "" then
     combined = queued_text .. "\n\n" .. current
   end
-  state.queue_nav_index = nil
+  chat.reset_queue_navigation(state, false)
   state.input = combined
   state.cursor = #state.input
   clear_selection(state)
@@ -3645,7 +3670,7 @@ end
 local function abort_active_turn(state)
   local restored = 0
   if agent.pending_message_count() > 0 then
-    restored = restore_queued_message(state, { quiet = true })
+    restored = restore_queued_message(state, { quiet = true, status_text = "" })
   end
   psi.abort_trigger()
   if restored == 0 then
@@ -3889,14 +3914,33 @@ local function observer_queued_user(state, text, kind)
   finish_streaming_assistant(state)
   state.streaming_thinking_index = nil
   state.streaming_assistant_index = nil
-  if state.queue_nav_index ~= nil and state.input == (text or "") then
-    state.input = ""
-    state.cursor = 0
-    clear_selection(state)
-    state.block_edit = nil
-    state.editor_mode = "insert"
+  if state.queue_nav_index ~= nil and state.queue_nav_id ~= nil then
+    local preview_index
+    for index, item in ipairs(agent.pending_messages() or {}) do
+      if item.id == state.queue_nav_id then
+        preview_index = index
+        break
+      end
+    end
+    if preview_index ~= nil then
+      state.queue_nav_index = preview_index
+    else
+      chat.reset_queue_navigation(state, true)
+    end
+  elseif state.queue_nav_index ~= nil and state.input == (text or "") then
+    if state.queue_nav_draft ~= nil then
+      chat.reset_queue_navigation(state, true)
+    else
+      state.input = ""
+      state.cursor = 0
+      clear_selection(state)
+      state.block_edit = nil
+      state.editor_mode = "insert"
+      chat.reset_queue_navigation(state, false)
+    end
+  else
+    chat.reset_queue_navigation(state, false)
   end
-  state.queue_nav_index = nil
   add_entry(state, "user", text or "")
   scroll_anchor_after(state, before)
 end
@@ -5469,6 +5513,10 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     history_search_query = "",
     history_search_draft = "",
     history_search_index = nil,
+    queue_nav_index = nil,
+    queue_nav_id = nil,
+    queue_nav_draft = nil,
+    queue_nav_draft_cursor = nil,
     editor_preferred_col = nil,
     editor_snapped_col = nil,
     editor_gap_anchor = nil,
@@ -5517,7 +5565,8 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
   }
 end
 
-function M._debug_consume_queued_preview(input, queued_text)
+function M._debug_consume_queued_preview(input, queued_text, opts)
+  opts = opts or {}
   local state = {
     opts = {},
     model = {},
@@ -5529,7 +5578,10 @@ function M._debug_consume_queued_preview(input, queued_text)
     selection_kind = nil,
     clipboard = "",
     pending_key = nil,
-    queue_nav_index = 1,
+    queue_nav_index = opts.queue_nav_index or 1,
+    queue_nav_id = opts.queue_nav_id,
+    queue_nav_draft = opts.queue_nav_draft,
+    queue_nav_draft_cursor = opts.queue_nav_draft_cursor,
     block_edit = nil,
     force_full_redraw = false,
     reanchor_renderer = false,
@@ -5549,6 +5601,8 @@ function M._debug_consume_queued_preview(input, queued_text)
     cursor = state.cursor,
     editor_mode = state.editor_mode,
     queue_nav_index = state.queue_nav_index,
+    queue_nav_id = state.queue_nav_id,
+    queue_nav_draft = state.queue_nav_draft,
     status_text = state.status_text,
   }
 end
