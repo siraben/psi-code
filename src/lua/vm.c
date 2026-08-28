@@ -1530,6 +1530,7 @@ static void psi_vm_text_next_cluster(
     const char *text, size_t len, size_t i, size_t *next_i, int *cluster_width) {
     size_t after;
     unsigned long cp;
+    int indic_chain_valid;
     int cluster_is_indic;
     int indic_linker_pending;
     int width;
@@ -1538,6 +1539,7 @@ static void psi_vm_text_next_cluster(
     cp = psi_vm_text_decode_utf8(text, len, i, &after);
     width = psi_vm_text_codepoint_width(cp);
     cluster_is_indic = psi_vm_text_is_indic_consonant(cp);
+    indic_chain_valid = cluster_is_indic;
     indic_linker_pending = 0;
     if (psi_vm_text_is_regional_indicator(cp)) {
         size_t after2;
@@ -1555,10 +1557,11 @@ static void psi_vm_text_next_cluster(
         unsigned long next_cp;
         size_t next_after;
         next_cp = psi_vm_text_decode_utf8(text, len, i, &next_after);
-        if (cluster_is_indic && psi_vm_text_is_indic_linker(next_cp)) {
+        if (indic_chain_valid && psi_vm_text_is_indic_linker(next_cp)) {
             indic_linker_pending = 1;
             i = next_after;
         } else if (next_cp == PSI_VM_TEXT_CODEPOINT_ZERO_WIDTH_NON_JOINER) {
+            indic_chain_valid = 0;
             indic_linker_pending = 0;
             saw_zwj = 0;
             i = next_after;
@@ -1571,7 +1574,7 @@ static void psi_vm_text_next_cluster(
                 saw_zwj = 1;
             }
             i = next_after;
-        } else if (cluster_is_indic && indic_linker_pending &&
+        } else if (indic_chain_valid && indic_linker_pending &&
             psi_vm_text_is_indic_consonant(next_cp)) {
             width += psi_vm_text_codepoint_width(next_cp);
             indic_linker_pending = 0;
