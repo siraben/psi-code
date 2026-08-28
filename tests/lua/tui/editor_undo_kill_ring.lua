@@ -1,5 +1,5 @@
 --[==[psi-test
-expect = "hello|1||0|hello |hello||abc|one two three|two three|line1\nline2\nline3|first||abc|/he|current|0|Ctrl-Y|Alt-Y|Ctrl--"
+expect = "hello|1||0|hello |hello||abc|one two three|two three|line1\nline2\nline3|first||abc|/he|current|0|a|reverse-empty|Ctrl-Y|Alt-Y|Ctrl--"
 ]==]
 local kb = require("psi.keybindings")
 local rt = require("psi.tui_runtime")
@@ -92,6 +92,18 @@ local history_undo = rt._debug_edit_keys("current", 2, {
   { key = "ctrl--" },
 }, false, { prompt_history = { "first", "second" } })
 
+local unicode_space_undo = rt._debug_edit_keys("", 0, {
+  { key = "text", text = "a" },
+  { key = "text", text = "\u{00a0}" },
+  { key = "text", text = "b" },
+  { key = "ctrl--" },
+}, false)
+
+local reverse_search_undo = rt._debug_edit_keys("", 0, {
+  { key = "ctrl-r" },
+  { key = "ctrl--" },
+}, false, { prompt_history = { "first", "second" } })
+
 return table.concat({
   word_once.input,
   tostring(word_once.editor_undo_count),
@@ -110,6 +122,8 @@ return table.concat({
   completion_undo.input,
   history_undo.input,
   tostring(history_undo.cursor),
+  unicode_space_undo.input,
+  reverse_search_undo.input == "" and "reverse-empty" or reverse_search_undo.input,
   kb.display("tui.editor.yank"),
   kb.display("tui.editor.yankPop"),
   kb.display("tui.editor.undo"),

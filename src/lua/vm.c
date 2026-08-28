@@ -593,6 +593,7 @@ static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx, int depth) {
 #define PSI_VM_TUI_CONTROL_MIN 1
 #define PSI_VM_TUI_CONTROL_MAX 26
 #define PSI_VM_TUI_CONTROL_A_OFFSET 1
+#define PSI_VM_TUI_CONTROL_UNDERSCORE 31
 #define PSI_VM_TUI_CSI_PRIMARY_PARAM 1u
 #define PSI_VM_TUI_MODIFIER_SHIFT 2u
 #define PSI_VM_TUI_MODIFIER_ALT_SHIFT 4u
@@ -1113,6 +1114,10 @@ static int psi_vm_tui_normalize_key(
         psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "enter");
         event->text[0] = (char)ch;
         event->text[1] = '\0';
+        return 1;
+    }
+    if (ch == PSI_VM_TUI_CONTROL_UNDERSCORE) {
+        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "ctrl--");
         return 1;
     }
     if (ch >= PSI_VM_TUI_CONTROL_MIN && ch <= PSI_VM_TUI_CONTROL_MAX) {
