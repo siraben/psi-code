@@ -517,14 +517,14 @@ end
 local function refresh_input_layout(state)
   local arg = {
     width = state.width,
-    height = state.height,
+    height = state.terminal_height or state.height,
     busy = state.busy,
     scroll = state.scroll_offset,
     max_rows = settings.get(TUI_CONST.setting_prompt_max_rows, nil),
   }
   local layout = tui_layout.input_layout_table and tui_layout.input_layout_table(arg)
     or safe_decode(tui_layout.input_layout(psi.json_encode(arg)), {})
-  local fallback = default_input_layout(state.height)
+  local fallback = default_input_layout(state.terminal_height or state.height)
   state.input_layout = {
     max_rows = tonumber(layout.max_rows) or fallback.max_rows,
     prefix_first = type(layout.prefix_first) == "string" and layout.prefix_first
@@ -935,7 +935,7 @@ local function new_state(opts, runtime)
     terminal_height = height,
     ui = tui_app.new(),
     renderer = tui_renderer.new(),
-    input_layout = default_input_layout(viewport_height),
+    input_layout = default_input_layout(height),
     tui_caps = caps,
     streaming_assistant_index = nil,
     streaming_thinking_index = nil,
@@ -2457,7 +2457,10 @@ end
 -- The "committed" boundary is always all-but-the-last entry: the last
 -- entry may still be streaming, so we keep it in the mutable region.
 function chat.redraw(state)
-  state.width, state.height = current_size()
+  local terminal_width, terminal_height = current_size()
+  state.width = terminal_width
+  state.height = terminal_height
+  state.terminal_height = terminal_height
   state.scroll_offset = 0
   refresh_input_layout(state)
 
@@ -2607,6 +2610,11 @@ function chat.redraw(state)
   live_lines[#live_lines + 1] = style_input_border(input_width)
   live_lines[#live_lines + 1] = chat.footer_bar_line(state, status_arg, frame_width)
 
+  local visible_cursor_line = cursor_line - input_first_line + 1
+  local cursor_target_idx = input_box_top_idx + visible_cursor_line
+  live_lines, cursor_target_idx =
+    chat.fit_frame_to_viewport(live_lines, cursor_target_idx, state.terminal_height)
+
   -- 4. Emit live region inside synchronized output, then position cursor.
   out[#out + 1] = "\27[?2026h\27[?25l"
   for i, line in ipairs(live_lines) do
@@ -2617,8 +2625,6 @@ function chat.redraw(state)
     end
   end
 
-  local visible_cursor_line = cursor_line - input_first_line + 1
-  local cursor_target_idx = input_box_top_idx + visible_cursor_line
   local rows_up = #live_lines - cursor_target_idx
   local cursor_prefix = cursor_line == 1 and state.input_layout.prefix_first
     or state.input_layout.prefix_rest
@@ -5429,14 +5435,18 @@ function M._debug_busy_animation_frames(times)
   return result
 end
 
-function M._debug_resolve_input_layout(width, height, busy, scroll)
+function M._debug_resolve_input_layout(width, height, busy, scroll, viewport_height)
+  local terminal_height = tonumber(height) or 24
   local state = {
     width = tonumber(width) or 80,
-    height = tonumber(height) or 24,
+    height = tonumber(viewport_height) or terminal_height,
+    terminal_height = terminal_height,
     busy = not not busy,
     scroll_offset = tonumber(scroll) or 0,
+    layout_mode = chat.FRAME,
   }
   refresh_input_layout(state)
+  state.input_layout.effective_max_rows = input_max_rows(state)
   return state.input_layout
 end
 
@@ -5839,7 +5849,7 @@ function M._debug_redraw_counts(input, debug_options)
       height = inline_viewport_height(debug_height),
       terminal_height = debug_height,
       renderer = tui_renderer.new(),
-      input_layout = default_input_layout(inline_viewport_height(debug_height)),
+      input_layout = default_input_layout(debug_height),
       tui_caps = { raw_ansi = false },
       streaming_assistant_index = nil,
       streaming_thinking_index = nil,

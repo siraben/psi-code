@@ -1,5 +1,5 @@
 --[==[psi-test
-expect = "5|8|5|true|true|true"
+expect = "5|4|1|true|true|true"
 ]==]
 local rt = require("psi.tui_runtime")
 local snapshots = rt._debug_chat_redraw_sequence({

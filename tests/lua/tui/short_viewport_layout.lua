@@ -1,5 +1,5 @@
 --[==[psi-test
-expect = "7|5|4|4|1|true|true|1|1|1|true|true|8|8|2|true|true"
+expect = "7|5|4|4|1|true|true|1|1|1|true|true|8|8|2|true|true|18"
 ]==]
 local rt = require("psi.tui_runtime")
 
@@ -21,6 +21,7 @@ local eight = rt._debug_redraw_counts(multiline, {
   height = 8,
   show_hardware_cursor = true,
 })
+local capped_input = rt._debug_resolve_input_layout(20, 80, false, 0, 24)
 
 return table.concat({
   standard_layout.max_rows,
@@ -40,4 +41,5 @@ return table.concat({
   eight.first_input_rows,
   tostring(eight.first_row >= 1 and eight.first_row <= eight.first_height),
   tostring(eight.first_visible),
+  capped_input.effective_max_rows,
 }, "|")
