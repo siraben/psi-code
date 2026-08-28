@@ -58,8 +58,13 @@ local WINDOWS_SCRIPT = table.concat({
   "Add-Type -AssemblyName System.Drawing",
   "$img = [System.Windows.Forms.Clipboard]::GetImage()",
   "if ($null -eq $img) { exit 3 }",
-  "if (([int64]$img.Width * [int64]$img.Height) -gt 100000000) { exit 4 }",
-  "$img.Save($args[0], [System.Drawing.Imaging.ImageFormat]::Png)",
+  "if (([int64]$img.Width * [int64]$img.Height) -gt 4000000) { exit 4 }",
+  "$stream = New-Object System.IO.MemoryStream",
+  "try {",
+  "$img.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)",
+  "if ($stream.Length -gt 16777216) { exit 4 }",
+  "[System.IO.File]::WriteAllBytes($path, $stream.ToArray())",
+  "} finally { $stream.Dispose(); $img.Dispose() }",
 }, "; ")
 
 local function context_env(context, name)
@@ -87,27 +92,32 @@ end
 local function listed_mimes(output)
   local found = {}
   for value in tostring(output or ""):gmatch("[^\r\n]+") do
+    local raw = value:match("^%s*(.-)%s*$")
     local normalized = supported_mime(value)
-    if normalized ~= nil then
-      found[normalized] = true
+    if normalized ~= nil and found[normalized] == nil then
+      found[normalized] = raw
     end
   end
   local ordered = {}
   for _, value in ipairs(SUPPORTED_MIMES) do
     if found[value] then
-      ordered[#ordered + 1] = value
+      ordered[#ordered + 1] = { base = value, raw = found[value] }
     end
   end
   return ordered
 end
 
-local function append_unique(values, value)
+local function append_unique_mime(values, raw)
+  local base = supported_mime(raw)
+  if base == nil then
+    return
+  end
   for _, existing in ipairs(values) do
-    if existing == value then
+    if existing.base == base then
       return
     end
   end
-  values[#values + 1] = value
+  values[#values + 1] = { base = base, raw = raw }
 end
 
 local function command_ok(result)
@@ -116,6 +126,10 @@ end
 
 local function run_command(argv, context)
   return clipboard._run_read_command(argv, context)
+end
+
+local function powershell_literal(value)
+  return "'" .. tostring(value or ""):gsub("'", "''") .. "'"
 end
 
 local function default_image_runner(backend, path, context)
@@ -147,14 +161,14 @@ local function default_image_runner(backend, path, context)
     return run_command({ "osascript", "-e", MACOS_SCRIPT, path }, context)
   end
   if backend.kind == "windows" then
+    local script = "$path = " .. powershell_literal(path) .. "; " .. WINDOWS_SCRIPT
     return run_command({
       "powershell.exe",
       "-NoProfile",
       "-NonInteractive",
       "-STA",
       "-Command",
-      WINDOWS_SCRIPT,
-      path,
+      script,
     }, context)
   end
   return { status = -1, output = "", truncated = false }
@@ -224,8 +238,13 @@ local function wayland_backends(context)
     return {}
   end
   local out = {}
-  for _, mime_type in ipairs(listed_mimes(result.output)) do
-    out[#out + 1] = { name = "wl-paste", kind = "wayland", mime = mime_type }
+  for _, target in ipairs(listed_mimes(result.output)) do
+    out[#out + 1] = {
+      name = "wl-paste",
+      kind = "wayland",
+      mime = target.raw,
+      mime_base = target.base,
+    }
   end
   return out
 end
@@ -234,16 +253,21 @@ local function xclip_backends(context)
   local types = {}
   local result = run_command({ "xclip", "-selection", "clipboard", "-t", "TARGETS", "-o" }, context)
   if command_ok(result) then
-    for _, mime_type in ipairs(listed_mimes(result.output)) do
-      append_unique(types, mime_type)
+    for _, target in ipairs(listed_mimes(result.output)) do
+      append_unique_mime(types, target.raw)
     end
   end
   for _, mime_type in ipairs(SUPPORTED_MIMES) do
-    append_unique(types, mime_type)
+    append_unique_mime(types, mime_type)
   end
   local out = {}
-  for _, mime_type in ipairs(types) do
-    out[#out + 1] = { name = "xclip", kind = "xclip", mime = mime_type }
+  for _, target in ipairs(types) do
+    out[#out + 1] = {
+      name = "xclip",
+      kind = "xclip",
+      mime = target.raw,
+      mime_base = target.base,
+    }
   end
   return out
 end
