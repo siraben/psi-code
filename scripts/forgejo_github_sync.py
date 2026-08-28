@@ -637,7 +637,14 @@ class AuditDatabase:
             "target_number=COALESCE(excluded.target_number, target_mappings.target_number), "
             "target_id=COALESCE(excluded.target_id, target_mappings.target_id), "
             "target_url=COALESCE(excluded.target_url, target_mappings.target_url), "
-            "last_synced_sha256=COALESCE(excluded.last_synced_sha256, target_mappings.last_synced_sha256), "
+            "last_synced_sha256=CASE "
+            "WHEN excluded.last_synced_sha256 IS NOT NULL "
+            "THEN excluded.last_synced_sha256 "
+            "WHEN (excluded.target_number IS NOT NULL "
+            "AND excluded.target_number IS NOT target_mappings.target_number) "
+            "OR (excluded.target_id IS NOT NULL "
+            "AND excluded.target_id IS NOT target_mappings.target_id) "
+            "THEN NULL ELSE target_mappings.last_synced_sha256 END, "
             "updated_at=excluded.updated_at",
             (
                 entity_key,

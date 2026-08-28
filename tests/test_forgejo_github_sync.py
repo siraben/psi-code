@@ -129,6 +129,23 @@ class AuditDatabaseTest(unittest.TestCase):
             destination.with_suffix(destination.suffix + ".sha256").is_file()
         )
 
+    def test_remapping_target_clears_synced_hash(self) -> None:
+        self.database.save_mapping(
+            "pull:1586",
+            "pull",
+            225,
+            "pull",
+            target_number=95,
+            target_id=95,
+            synced_sha256="a" * 64,
+        )
+        self.database.save_mapping(
+            "pull:1586", "pull", 225, "pull", target_number=55, target_id=55
+        )
+        mapping = self.database.mapping("pull:1586")
+        self.assertIsNotNone(mapping)
+        self.assertIsNone(mapping["last_synced_sha256"])
+
 
 class FormattingTest(unittest.TestCase):
     def test_pull_normalization_removes_volatile_embedded_repo_fields(self) -> None:
@@ -257,7 +274,6 @@ class BootstrapMappingTest(unittest.TestCase):
             target_id=95,
             synced_sha256="a" * 64,
         )
-
         class Target:
             @staticmethod
             def repo_path(suffix):
