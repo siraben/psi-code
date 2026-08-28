@@ -893,18 +893,26 @@ def bootstrap_mappings(
         body = target.get("body") or ""
         match = PULL_MARKER.search(body)
         source_index = int(match.group(1)) if match else int(target["number"])
-        source = replacement_pulls.get(source_index) or source_pulls.get(source_index)
+        replacement = replacement_pulls.get(source_index)
+        source = replacement or source_pulls.get(source_index)
         if source is None:
             continue
         source_index = int(source["source_index"])
         source_payload = json.loads(source["payload_json"])
         if not match and source_payload.get("title") != target.get("title"):
             continue
-        database.connection.execute(
-            "DELETE FROM target_mappings "
-            "WHERE target_kind='pull' AND target_number=? AND entity_key<>?",
-            (int(target["number"]), source["entity_key"]),
-        )
+        if replacement is not None:
+            database.connection.execute(
+                "DELETE FROM target_mappings WHERE target_kind='pull' "
+                "AND (target_number=? OR entity_key=?)",
+                (int(target["number"]), source["entity_key"]),
+            )
+        else:
+            database.connection.execute(
+                "DELETE FROM target_mappings "
+                "WHERE target_kind='pull' AND target_number=? AND entity_key<>?",
+                (int(target["number"]), source["entity_key"]),
+            )
         database.connection.commit()
         database.save_mapping(
             source["entity_key"],

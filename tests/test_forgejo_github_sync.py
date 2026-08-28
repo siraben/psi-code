@@ -248,6 +248,15 @@ class BootstrapMappingTest(unittest.TestCase):
         self.database.save_mapping(
             old.key, "pull", 202, "pull", target_number=55, target_id=55
         )
+        self.database.save_mapping(
+            replacement.key,
+            "pull",
+            225,
+            "pull",
+            target_number=95,
+            target_id=95,
+            synced_sha256="a" * 64,
+        )
 
         class Target:
             @staticmethod
@@ -279,6 +288,7 @@ class BootstrapMappingTest(unittest.TestCase):
         self.assertIsNotNone(mapping)
         self.assertEqual(mapping["target_number"], 55)
         self.assertEqual(mapping["source_index"], 225)
+        self.assertIsNone(mapping["last_synced_sha256"])
 
 
 if __name__ == "__main__":
