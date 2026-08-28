@@ -1659,7 +1659,7 @@ local function entry_render_lines(state, entry)
 
   if entry.kind == "ansi" then
     local lines = {}
-    local text = trim_trailing_newlines(entry_text(entry))
+    local text = trim_trailing_newlines(tui_text.normalize_line_endings(entry_text(entry)))
     local cursor = 1
     while true do
       local nl = text:find("\n", cursor, true)
@@ -5939,6 +5939,8 @@ function M._debug_chat_redraw_sequence(steps)
         add_entry(state, "user", step.text or "")
       elseif step.kind == "assistant" then
         add_entry(state, "assistant", step.text or "")
+      elseif step.kind == "ansi" then
+        add_entry(state, "ansi", step.text or "")
       elseif step.kind == "set_input" then
         state.input = step.text or ""
         state.cursor = #state.input
