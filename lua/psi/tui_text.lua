@@ -147,6 +147,32 @@ end
 
 local function is_combining(cp)
   return in_range(cp, 0x0300, 0x036f)
+    or in_range(cp, 0x0483, 0x0489)
+    or in_range(cp, 0x0591, 0x05bd)
+    or cp == 0x05bf
+    or in_range(cp, 0x05c1, 0x05c2)
+    or in_range(cp, 0x05c4, 0x05c5)
+    or cp == 0x05c7
+    or in_range(cp, 0x0610, 0x061a)
+    or in_range(cp, 0x064b, 0x065e)
+    or cp == 0x0670
+    or in_range(cp, 0x06d6, 0x06dc)
+    or in_range(cp, 0x06df, 0x06e4)
+    or in_range(cp, 0x06e7, 0x06e8)
+    or in_range(cp, 0x06ea, 0x06ed)
+    or cp == 0x0711
+    or in_range(cp, 0x0730, 0x074a)
+    or in_range(cp, 0x07a6, 0x07b0)
+    or in_range(cp, 0x07eb, 0x07f3)
+    or cp == 0x07fd
+    or in_range(cp, 0x0816, 0x0819)
+    or in_range(cp, 0x081b, 0x0823)
+    or in_range(cp, 0x0825, 0x0827)
+    or in_range(cp, 0x0829, 0x082d)
+    or in_range(cp, 0x0859, 0x085b)
+    or in_range(cp, 0x0897, 0x089f)
+    or in_range(cp, 0x08ca, 0x08e1)
+    or in_range(cp, 0x08e3, 0x08ff)
     or in_range(cp, 0x1ab0, 0x1aff)
     or in_range(cp, 0x1dc0, 0x1dff)
     or in_range(cp, 0x20d0, 0x20ff)
@@ -168,7 +194,7 @@ end
 local function is_wide(cp)
   return in_range(cp, 0x1100, 0x115f)
     or in_range(cp, 0x2329, 0x232a)
-    or in_range(cp, 0x2e80, 0xa4cf)
+    or (in_range(cp, 0x2e80, 0xa4cf) and cp ~= 0x303f)
     or in_range(cp, 0xac00, 0xd7a3)
     or in_range(cp, 0xf900, 0xfaff)
     or in_range(cp, 0xfe10, 0xfe19)
@@ -598,7 +624,7 @@ function M.wrap_ansi(text, width, opts)
       local seq, next_i = read_escape(text, i)
       if seq then
         line[#line + 1] = seq
-        update_active_sgr(active, seq)
+        update_active_escape(active, seq)
         i = next_i
       else
         local cluster, cluster_width, after = next_cluster(text, i)
