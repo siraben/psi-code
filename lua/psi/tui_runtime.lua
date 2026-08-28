@@ -1028,6 +1028,7 @@ local function new_state(opts, runtime)
     streaming_assistant_index = nil,
     streaming_thinking_index = nil,
     queue_nav_index = nil,
+    queue_nav_id = nil,
     queue_nav_draft = nil,
     queue_nav_draft_cursor = nil,
     entries_version = 0,
@@ -3788,6 +3789,7 @@ function chat.reset_queue_navigation(state, restore_draft)
   local draft = state.queue_nav_draft
   local draft_cursor = state.queue_nav_draft_cursor
   state.queue_nav_index = nil
+  state.queue_nav_id = nil
   state.queue_nav_draft = nil
   state.queue_nav_draft_cursor = nil
   if restore_draft and draft ~= nil then
@@ -3861,6 +3863,7 @@ local function navigate_queue(state, direction)
     return
   end
   state.queue_nav_index = index
+  state.queue_nav_id = item.id
   state.input = item.text or ""
   state.cursor = #state.input
   set_status(state, queue_status_text(), false)
@@ -4215,7 +4218,20 @@ local function observer_queued_user(state, text, kind)
   finish_streaming_assistant(state)
   state.streaming_thinking_index = nil
   state.streaming_assistant_index = nil
-  if state.queue_nav_index ~= nil and state.input == (text or "") then
+  if state.queue_nav_index ~= nil and state.queue_nav_id ~= nil then
+    local preview_index
+    for index, item in ipairs(agent.pending_messages() or {}) do
+      if item.id == state.queue_nav_id then
+        preview_index = index
+        break
+      end
+    end
+    if preview_index ~= nil then
+      state.queue_nav_index = preview_index
+    else
+      chat.reset_queue_navigation(state, true)
+    end
+  elseif state.queue_nav_index ~= nil and state.input == (text or "") then
     if state.queue_nav_draft ~= nil then
       chat.reset_queue_navigation(state, true)
     else
@@ -6036,6 +6052,7 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     history_search_draft = "",
     history_search_index = nil,
     queue_nav_index = nil,
+    queue_nav_id = nil,
     queue_nav_draft = nil,
     queue_nav_draft_cursor = nil,
     editor_preferred_col = nil,
@@ -6104,7 +6121,8 @@ function M._debug_thinking_lines(text, visible)
   return lines
 end
 
-function M._debug_consume_queued_preview(input, queued_text)
+function M._debug_consume_queued_preview(input, queued_text, opts)
+  opts = opts or {}
   local state = {
     opts = {},
     model = {},
@@ -6116,9 +6134,10 @@ function M._debug_consume_queued_preview(input, queued_text)
     selection_kind = nil,
     clipboard = "",
     pending_key = nil,
-    queue_nav_index = 1,
-    queue_nav_draft = nil,
-    queue_nav_draft_cursor = nil,
+    queue_nav_index = opts.queue_nav_index or 1,
+    queue_nav_id = opts.queue_nav_id,
+    queue_nav_draft = opts.queue_nav_draft,
+    queue_nav_draft_cursor = opts.queue_nav_draft_cursor,
     block_edit = nil,
     force_full_redraw = false,
     reanchor_renderer = false,
@@ -6138,6 +6157,8 @@ function M._debug_consume_queued_preview(input, queued_text)
     cursor = state.cursor,
     editor_mode = state.editor_mode,
     queue_nav_index = state.queue_nav_index,
+    queue_nav_id = state.queue_nav_id,
+    queue_nav_draft = state.queue_nav_draft,
     status_text = state.status_text,
   }
 end
