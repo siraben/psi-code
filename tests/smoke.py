@@ -1906,6 +1906,35 @@ def t_tui_bracketed_paste(psi: Psi):
     )
 
 
+@test("mode/tui_system_clipboard_paste")
+def t_tui_system_clipboard_paste(psi: Psi):
+    clipboard_bin = psi.tmp / "clipboard-bin"
+    clipboard_bin.mkdir()
+    pbpaste = clipboard_bin / "pbpaste"
+    pbpaste.write_text("#!/bin/sh\nprintf 'clipboard smoke'\n")
+    pbpaste.chmod(0o755)
+
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [
+            (b"", 0.5),
+            (b"before \x16 after", 0.75),
+            (b"\x03", 0.25),
+            (b"/quit\r", 1.0),
+        ],
+        env_extra={
+            "PATH": str(clipboard_bin) + os.pathsep + psi.env["PATH"],
+            "XDG_STATE_HOME": str(psi.tmp / "state-tui-system-clipboard"),
+        },
+    )
+    raw.assert_clean_exit()
+    assert_bytes_contains(
+        raw,
+        b"before clipboard smoke after",
+        "physical Ctrl-V did not insert system clipboard text",
+    )
+
+
 @test("mode/tui_tab_completion")
 def t_tui_tab_completion(psi: Psi):
     # Exercise the host key decoder, not a synthetic Lua {key="tab"} event.

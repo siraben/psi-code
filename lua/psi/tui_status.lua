@@ -241,6 +241,10 @@ function M.handle_key(arg)
     return nil
   end
 
+  if keybindings.matches(key, "app.clipboard.paste") then
+    return action("clipboard-paste")
+  end
+
   if keybindings.matches(key, "tui.input.submit") then
     if input_length > 0 then
       return action("submit", "steering")
