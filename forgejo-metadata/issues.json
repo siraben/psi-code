@@ -1,0 +1,817 @@
+[
+  {
+    "id": 1,
+    "index": 1,
+    "title": "agent-deck",
+    "state": "closed",
+    "created": "2026-04-26T15:22:29-04:00",
+    "labels": [],
+    "user": "Ghost",
+    "body": "",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/1",
+    "closedAt": "2026-05-16T16:20:01-04:00",
+    "comments": [
+      {
+        "id": 2151,
+        "author": "jrestivo",
+        "created": "2026-05-16T16:19:59-04:00",
+        "body": "implemented "
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "index": 2,
+    "title": "reverse search",
+    "state": "closed",
+    "created": "2026-04-26T15:23:19-04:00",
+    "labels": [],
+    "user": "Ghost",
+    "body": "",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/2",
+    "closedAt": "2026-04-27T22:31:43-04:00",
+    "comments": []
+  },
+  {
+    "id": 3,
+    "index": 3,
+    "title": "multiline prompts",
+    "state": "closed",
+    "created": "2026-04-26T15:24:49-04:00",
+    "labels": [],
+    "user": "Ghost",
+    "body": "",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/3",
+    "closedAt": "2026-04-27T22:31:47-04:00",
+    "comments": []
+  },
+  {
+    "id": 4,
+    "index": 4,
+    "title": "prompt history",
+    "state": "closed",
+    "created": "2026-04-26T15:24:57-04:00",
+    "labels": [],
+    "user": "Ghost",
+    "body": "",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/4",
+    "closedAt": "2026-04-29T15:34:35-04:00",
+    "comments": [
+      {
+        "id": 45,
+        "author": "jrestivo",
+        "created": "2026-04-29T15:34:35-04:00",
+        "body": "we added this"
+      }
+    ]
+  },
+  {
+    "id": 5,
+    "index": 5,
+    "title": "codex support",
+    "state": "closed",
+    "created": "2026-04-26T15:33:23-04:00",
+    "labels": [],
+    "user": "Ghost",
+    "body": "",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/5",
+    "closedAt": "2026-04-29T11:43:28-04:00",
+    "comments": [
+      {
+        "id": 12,
+        "author": "siraben",
+        "created": "2026-04-29T11:43:28-04:00",
+        "body": "Closed by #38."
+      }
+    ]
+  },
+  {
+    "id": 6,
+    "index": 8,
+    "title": "themeing",
+    "state": "closed",
+    "created": "2026-04-26T17:53:48-04:00",
+    "labels": [],
+    "user": "Ghost",
+    "body": "",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/8",
+    "closedAt": "2026-04-27T22:32:25-04:00",
+    "comments": []
+  },
+  {
+    "id": 7,
+    "index": 10,
+    "title": "novel libc compat",
+    "state": "closed",
+    "created": "2026-04-26T18:34:09-04:00",
+    "labels": [],
+    "user": "Ghost",
+    "body": "- [ ] https://github.com/sunfishcode/c-ward\n- [x] cosmopolitan",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/10",
+    "closedAt": "2026-07-20T19:14:14-04:00",
+    "comments": [
+      {
+        "id": 3548,
+        "author": "siraben",
+        "created": "2026-05-30T03:34:27-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-04-26) was `3c2c1f3`.\n\nCurrent master has broader portability support and docs than at opening, including Cosmopolitan-related build targets and notes, but I did not find a c-ward/novel-libc compatibility proof. That original ask therefore still has not been directly completed.\n\nVerdict: **still applies as an optional portability check**. It fits psi's portability philosophy, but should remain a proof/build-matrix item rather than a runtime dependency or design constraint imported from elsewhere."
+      },
+      {
+        "id": 7435,
+        "author": "siraben",
+        "created": "2026-07-20T19:14:14-04:00",
+        "body": "Closing as done. The remaining c-ward compatibility target was implemented by [PR #118](https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/pulls/118), which added the c-ward Nix package plus the libc/compiler CI matrices. Current origin/master contains the package and active c-ward CI entry."
+      }
+    ]
+  },
+  {
+    "id": 8,
+    "index": 11,
+    "title": "network search tool extension",
+    "state": "open",
+    "created": "2026-04-26T18:39:03-04:00",
+    "labels": [],
+    "user": "Ghost",
+    "body": "",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/11",
+    "closedAt": null,
+    "comments": [
+      {
+        "id": 3547,
+        "author": "siraben",
+        "created": "2026-05-30T03:34:27-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-04-26) was `3c2c1f3`.\n\nCurrent master has extension APIs and HTTP/provider primitives, but no bundled network search tool. That remains different from pi-mono-style tool ecosystems and from MCP-style external search integrations.\n\nVerdict: **still applies only as an optional Lua extension/reference tool**. It should not become MCP or a mandatory core network-search dependency. A small extension using existing HTTP primitives would fit psi's “single-file Lua drops” philosophy."
+      }
+    ]
+  },
+  {
+    "id": 9,
+    "index": 20,
+    "title": "support suspend",
+    "state": "closed",
+    "created": "2026-04-26T21:27:46-04:00",
+    "labels": [],
+    "user": "Ghost",
+    "body": "cntrl-zzz",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/20",
+    "closedAt": "2026-04-29T11:43:29-04:00",
+    "comments": [
+      {
+        "id": 15,
+        "author": "siraben",
+        "created": "2026-04-29T11:43:29-04:00",
+        "body": "Closed by #22."
+      }
+    ]
+  },
+  {
+    "id": 10,
+    "index": 21,
+    "title": "Track remaining pi-mono session/tree/data-structure parity gaps",
+    "state": "open",
+    "created": "2026-04-26T21:32:34-04:00",
+    "labels": [],
+    "user": "Ghost",
+    "body": "## Context\n\nPsi has ported the pi-style JSONL session format and now has fast C-side active-session range indexes, but it still does not fully match pi-mono's richer session/tree model.\n\nThis issue tracks the remaining feature and architecture gaps so they do not get lost after the performance/indexing PR.\n\n## Current psi state\n\n- Active in-memory session is a linear growable C array of messages.\n- The performance PR adds per-message token estimates and a parallel prefix-sum array for fast active-session range queries.\n- Entries are stamped with `parentId`, and session headers preserve `parentSession`.\n- `/fork [N]` and `/clone [path]` write new flat JSONL files.\n- Compaction works on the active linear transcript and snaps past leading `tool-result` entries.\n\n## pi-mono structures/features not fully matched\n\n- Full session tree model:\n  - `fileEntries[]` containing all typed entries.\n  - `byId: Map<string, SessionEntry>` for direct lookup.\n  - `leafId` as the active position.\n  - Parent traversal from active leaf to root.\n  - Sibling branches preserved inside one session file.\n\n- Tree navigation UX:\n  - `/tree` interactive navigation.\n  - Branch selection and branch switching.\n  - Session picker/tree UI parity.\n\n- Branch-aware operations:\n  - Branch-aware forks that operate from an arbitrary tree node.\n  - Branch-aware compaction and summaries.\n  - Branch summaries and labels integrated into traversal.\n  - Clone/fork preserving selected active path rather than only flat message prefixes.\n\n- Semantic token accounting:\n  - pi estimates tokens by message/content shape: text blocks, thinking blocks, tool arguments, tool results, images, bash output, summaries.\n  - psi currently caches a conservative string heuristic over stored `text` plus `data_json`.\n  - Need a semantic estimator that stays cheap enough for portable targets, possibly still indexed in C.\n\n- Indexed session metadata:\n  - Children index for parent -> child lookup.\n  - Entry id -> entry index map.\n  - Active-branch index/cache.\n  - Optional prefix token indexes per active branch/path.\n  - Label and branch summary indexes if/when those features are ported.\n\n## Possible implementation direction\n\n1. Keep the current C linear active-session hot path for provider/runtime speed.\n2. Add a higher-level session entry graph/index layer that mirrors pi-mono's `fileEntries`, `byId`, `leafId`, and child lookups.\n3. Make the active transcript a resolved view of the selected tree path.\n4. Extend token indexing from linear transcript prefixes to path-aware prefix metadata.\n5. Port pi-mono's semantic token estimator, then decide whether it lives in Lua or C.\n6. Make compaction operate on resolved branch paths and persist compaction entries without destroying tree history.\n7. Add `/tree` and session picker UI after the underlying graph/index model is stable.\n\n## Acceptance criteria\n\n- Existing flat `/fork`, `/clone`, `/resume`, and compaction behavior remains compatible.\n- A loaded pi-style session with branches can preserve and navigate sibling branches.\n- `/tree` can move the active leaf without losing history.\n- Compaction records summaries on a branch without rewriting away unrelated branches.\n- Context/token accounting remains fast on long sessions.\n- Tests cover linear sessions, branched sessions, fork/clone, branch-aware compaction, and semantic token estimates.\n",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/21",
+    "closedAt": null,
+    "comments": [
+      {
+        "id": 3545,
+        "author": "siraben",
+        "created": "2026-05-30T03:34:27-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-04-26) was `88da56e`.\n\nCurrent master is much closer than at opening: `lua/psi/session_manager.lua` has durable branch/tree structures, semantic token estimation, `/branch`, and `/branches`. Remaining gaps versus pi-mono include a first-class `/tree` alias on master, interactive tree picker/navigation, branch summaries/labels, arbitrary-node fork/clone UX, state-dir-safe fork paths, and branch-safe compaction on master. PR #144 covers some of these but is not merged.\n\nVerdict: **still applies, but should be scoped to remaining tree UX and branch operations**. The direction is philosophically right for psi as long as the session tree stays a Lua data/model feature with thin TUI surfaces rather than a large frontend framework port."
+      }
+    ]
+  },
+  {
+    "id": 11,
+    "index": 31,
+    "title": "make stderr log redirection more robust/multi-session safe later",
+    "state": "closed",
+    "created": "2026-04-27T15:07:16-04:00",
+    "labels": [],
+    "user": "Ghost",
+    "body": "",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/31",
+    "closedAt": "2026-05-30T03:39:34-04:00",
+    "comments": [
+      {
+        "id": 3544,
+        "author": "siraben",
+        "created": "2026-05-30T03:34:27-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-04-27) was `3e66b44`.\n\nAt opening, TUI mode redirected fd 2 into a single `$XDG_STATE_HOME/psi/tui-stderr.log` path, truncating/reusing it across sessions. I do not see that stderr redirection path on current master; logging is now through the host log primitive/debug log path instead.\n\nVerdict: **should close for the original bug**. I did notice a documentation mismatch: `docs/extensions.md` still describes TUI stderr redirection to `$XDG_STATE_HOME/psi/debug.log` during a turn, which did not match the code I found. If that matters, track it separately as a docs/logging behavior issue."
+      }
+    ]
+  },
+  {
+    "id": 12,
+    "index": 39,
+    "title": "sandboxing",
+    "state": "closed",
+    "created": "2026-04-27T22:31:35-04:00",
+    "labels": [],
+    "user": "Ghost",
+    "body": "",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/39",
+    "closedAt": "2026-05-30T03:39:49-04:00",
+    "comments": [
+      {
+        "id": 3543,
+        "author": "siraben",
+        "created": "2026-05-30T03:34:27-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-04-27) was `113eaf3`.\n\nCurrent master intentionally does not implement sandboxing: the README says there are no permission popups and no sandbox, and `docs/architecture.md` keeps host capabilities gated rather than policy-heavy. This matches pi-mono's broad philosophy of not treating the agent as a secure sandbox boundary.\n\nVerdict: **should close as out of scope for psi core**. If anything remains, it should be a documentation/container recipe or an optional launcher integration, not an in-process sandbox feature."
+      }
+    ]
+  },
+  {
+    "id": 13,
+    "index": 40,
+    "title": "compare lua stuff to neovim",
+    "state": "closed",
+    "created": "2026-04-27T23:19:58-04:00",
+    "labels": [],
+    "user": "Ghost",
+    "body": "https://github.com/neovim/neovim?tab=License-1-ov-file it's apache so should be fine to look and compare since apache isn't copyleft",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/40",
+    "closedAt": "2026-05-30T03:40:05-04:00",
+    "comments": [
+      {
+        "id": 3542,
+        "author": "siraben",
+        "created": "2026-05-30T03:34:26-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-04-27) was `113eaf3`.\n\nThe current architecture already has a Neovim-like split in spirit: small C host, Lua policy/modules, frontend boundaries, and extension hooks. The issue is too broad to verify as-is; I do not see a concrete remaining bug or acceptance criterion.\n\nVerdict: **should close or be replaced by targeted issues**. Useful follow-ups would be specific audits such as event-loop ownership, module loading/reload semantics, embedding API, or UI composition. As written, it is less actionable than the pi-mono parity issues and does not map to a clear psi milestone."
+      }
+    ]
+  },
+  {
+    "id": 14,
+    "index": 44,
+    "title": "repalce openssl with mbedtls",
+    "state": "closed",
+    "created": "2026-04-28T11:26:42-04:00",
+    "labels": [],
+    "user": "Ghost",
+    "body": "https://github.com/Mbed-TLS/mbedtls",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/44",
+    "closedAt": "2026-04-29T11:43:31-04:00",
+    "comments": [
+      {
+        "id": 18,
+        "author": "siraben",
+        "created": "2026-04-29T11:43:30-04:00",
+        "body": "Closed by #45."
+      }
+    ]
+  },
+  {
+    "id": 15,
+    "index": 48,
+    "title": "paste scs",
+    "state": "open",
+    "created": "2026-04-28T18:37:21-04:00",
+    "labels": [],
+    "user": "Ghost",
+    "body": "make it so we can paste (and display) screenshots in psi-code",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/48",
+    "closedAt": null,
+    "comments": [
+      {
+        "id": 2154,
+        "author": "jrestivo",
+        "created": "2026-05-16T16:23:30-04:00",
+        "body": "see #51"
+      },
+      {
+        "id": 3540,
+        "author": "siraben",
+        "created": "2026-05-30T03:34:26-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-04-28) was `8f6bd2e`.\n\nCurrent master supports image/file attachments through the read path and provider image blocks, so the backend part is no longer absent. The TUI side still lacks pi-mono-like screenshot/image paste and inline/rendered image UX; closed PR #51 appears related but is not on master.\n\nVerdict: **still applies for screenshot/image paste and display UX, not for basic image attachment support**. This fits psi if implemented as optional TUI capability detection and Lua/provider attachment plumbing, without making image handling a mandatory core dependency."
+      }
+    ]
+  },
+  {
+    "id": 16,
+    "index": 49,
+    "title": "mcp support",
+    "state": "closed",
+    "created": "2026-04-28T19:30:25-04:00",
+    "labels": [],
+    "user": "Ghost",
+    "body": "add lean-mcp as lua extension",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/49",
+    "closedAt": "2026-05-16T20:24:31-04:00",
+    "comments": [
+      {
+        "id": 2150,
+        "author": "jrestivo",
+        "created": "2026-05-16T16:19:41-04:00",
+        "body": "mcp is now added over stdio. We should add in support for mcp over port before closing"
+      }
+    ]
+  },
+  {
+    "id": 56,
+    "index": 56,
+    "title": "add ralph loop",
+    "state": "closed",
+    "created": "2026-04-29T15:35:27-04:00",
+    "labels": [],
+    "user": "jrestivo",
+    "body": "/ralph",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/56",
+    "closedAt": "2026-05-10T23:23:37-04:00",
+    "comments": [
+      {
+        "id": 2050,
+        "author": "jrestivo",
+        "created": "2026-05-10T23:23:49-04:00",
+        "body": "superceded by /goal"
+      }
+    ]
+  },
+  {
+    "id": 57,
+    "index": 57,
+    "title": "add proper /side",
+    "state": "closed",
+    "created": "2026-04-29T15:36:03-04:00",
+    "labels": [],
+    "user": "jrestivo",
+    "body": "I think we could do /side and something even more fancy like a undotree-styled set of open conversations that we could navigate between and \"absorb\" by summarizing and passing that upwards",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/57",
+    "closedAt": "2026-07-10T18:31:19-04:00",
+    "comments": [
+      {
+        "id": 3538,
+        "author": "siraben",
+        "created": "2026-05-30T03:34:26-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-04-29) was `5eded0a`.\n\nCurrent master partially addresses this with the packaged `/btw` extension and `psi.agent.side_question`: it can run an ephemeral side question with local provider awareness and without saving the side turn. It does not provide persistent navigable side conversations, absorb/summarize-back UX, or rich branch integration comparable to pi-mono session-tree workflows.\n\nVerdict: **partially applies; narrow or close**. If the desired feature was “ask a quick side question,” this should close. If the desired feature is persistent side branches with absorb/merge behavior, keep it open but tie it to the session tree work in #21."
+      }
+    ]
+  },
+  {
+    "id": 58,
+    "index": 58,
+    "title": "autocomplete",
+    "state": "closed",
+    "created": "2026-04-29T15:36:25-04:00",
+    "labels": [],
+    "user": "jrestivo",
+    "body": "/ should have autocomplete",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/58",
+    "closedAt": "2026-05-16T16:23:48-04:00",
+    "comments": [
+      {
+        "id": 2156,
+        "author": "jrestivo",
+        "created": "2026-05-16T16:23:48-04:00",
+        "body": "implemented"
+      }
+    ]
+  },
+  {
+    "id": 59,
+    "index": 59,
+    "title": "reviews",
+    "state": "closed",
+    "created": "2026-04-29T15:37:29-04:00",
+    "labels": [],
+    "user": "jrestivo",
+    "body": "add an adversarial reviewer and review loop with ralph once ralph is implemented. May want to draw inspiration from oh-my-codex skills and also the codex plugin for claude",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/59",
+    "closedAt": "2026-05-30T03:40:16-04:00",
+    "comments": [
+      {
+        "id": 3537,
+        "author": "siraben",
+        "created": "2026-05-30T03:34:26-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-04-29) was `5eded0a`.\n\nCurrent master still has no built-in reviewer/ralph-style review loop comparable to pi-mono workflows. That said, psi's README explicitly avoids sub-agents, background orchestration, and heavyweight workflow machinery.\n\nVerdict: **should close as a core feature request, or narrow to an optional extension/prompt template**. A small Lua command that asks the active provider to review a diff would fit psi. A built-in multi-agent/reviewer loop would not fit the philosophy of keeping policy in Lua and avoiding subagent systems."
+      }
+    ]
+  },
+  {
+    "id": 61,
+    "index": 61,
+    "title": "Add local Nix binary cache for Docker CI",
+    "state": "closed",
+    "created": "2026-04-29T17:17:32-04:00",
+    "labels": [],
+    "user": "siraben",
+    "body": "## Background\n\nPR #60 moves Forgejo Actions jobs onto Docker runners. The jobs now run correctly, but each container still pays unnecessary Nix substitution/build setup cost. Forgejo's Actions cache is useful for ordinary workspace paths, but it is not the right mechanism for sharing `/nix/store` paths across isolated job containers.\n\n## Proposal\n\nAdd a local Nix binary cache reachable from the Docker runner containers. Harmonia should be the first candidate. `nix-serve` is intentionally not preferred because it is outdated.\n\nLikely shape:\n\n- Run Harmonia on office-desktop.\n- Expose it on a container-reachable local address, similar to the current Forgejo loopback proxy approach.\n- Configure CI jobs with the local substituter and trusted public key.\n- Decide whether CI should only consume from the cache or also publish build outputs to it.\n- Document the trust/isolation model for local CI containers.\n\n## Acceptance Criteria\n\n- Docker CI jobs can substitute common Nix paths from the local cache.\n- Cache configuration is documented and reproducible.\n- No dependency on the GitHub DNS translation workaround.\n- `nix-serve` is not used unless Harmonia proves unsuitable.\n",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/61",
+    "closedAt": "2026-05-02T20:33:33-04:00",
+    "comments": []
+  },
+  {
+    "id": 1080,
+    "index": 81,
+    "title": "flush out a matrix of tests",
+    "state": "closed",
+    "created": "2026-05-02T20:34:10-04:00",
+    "labels": [],
+    "user": "jrestivo",
+    "body": "test:\n\nc compilers:\nfilc\ncompcert\ntcc\nclang\ngcc\n\nx\nlibcs\nstatic (musl)\ncosmo libc\n\nwith local llm in ci",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/81",
+    "closedAt": "2026-05-30T03:41:40-04:00",
+    "comments": [
+      {
+        "id": 3536,
+        "author": "siraben",
+        "created": "2026-05-30T03:34:26-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-05-02) was `46e6c92`.\n\nCurrent master has much better portability scaffolding than the issue-era branch: the flake exposes tcc/compcert/filc/static musl/i686/RISC-V/cosmocc variants, and Forgejo CI covers format/static checks plus feature-matrix builds. I did not find CI coverage for the broader compiler/libc/arch/local-LLM matrix described by this issue.\n\nVerdict: **still applies, partially addressed**. Keep it open for CI/runtime matrix expansion if that is still desired. It matches psi's portability philosophy, but should stay targeted: compiler/libc/build-feature confidence, not a broad infrastructure project copied from pi-mono."
+      }
+    ]
+  },
+  {
+    "id": 1081,
+    "index": 82,
+    "title": "UTF-8 Audit, handling, test cases, library",
+    "state": "closed",
+    "created": "2026-05-02T20:36:53-04:00",
+    "labels": [],
+    "user": "siraben",
+    "body": "Test everything for UTF-8 compat, consider getting a good C89 library for it.",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/82",
+    "closedAt": "2026-07-20T19:14:14-04:00",
+    "comments": [
+      {
+        "id": 3535,
+        "author": "siraben",
+        "created": "2026-05-30T03:33:45-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-05-02) was `46e6c92`.\n\nCurrent master has substantially more Unicode coverage than at opening: wcwidth support, UTF-8/UTF-16 tests, TUI text helpers, read-tool UTF-16 handling, and surrogate sanitization smoke coverage. I did not find evidence of a complete end-to-end Unicode policy audit across terminal input, provider JSON, filesystem paths, display width, and truncation boundaries.\n\nVerdict: **still applies, but should be narrowed to concrete surfaces**. Psi's portability philosophy makes this important, but a broad “audit UTF-8” issue is hard to finish. A checklist against pi-mono behavior and psi's C/Lua boundaries would make it actionable."
+      },
+      {
+        "id": 7437,
+        "author": "siraben",
+        "created": "2026-07-20T19:14:14-04:00",
+        "body": "Closing this umbrella audit as done. UTF-8 handling is now covered across provider boundaries, session/tool text, terminal width and wrapping, invalid-byte repair, and UTF-16 input by merged [PR #105](https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/pulls/105), [PR #115](https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/pulls/115), [PR #116](https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/pulls/116), [PR #123](https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/pulls/123), [PR #139](https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/pulls/139), and [PR #143](https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/pulls/143). Current origin/master includes Unicode 17 cell-width data and focused regression coverage; future defects should be filed against a specific surface."
+      }
+    ]
+  },
+  {
+    "id": 1143,
+    "index": 111,
+    "title": "Improve displayed metadata",
+    "state": "open",
+    "created": "2026-05-10T23:19:51-04:00",
+    "labels": [],
+    "user": "jrestivo",
+    "body": "should include:\r\n\r\n- PR # (support gh, forgejo)\r\n- build hash \r\n- cwd\r\n- model effort\r\n\r\nthis should all be doable with lua. Need to port over",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/111",
+    "closedAt": null,
+    "comments": [
+      {
+        "id": 3534,
+        "author": "siraben",
+        "created": "2026-05-30T03:33:44-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-05-10) was `2526ebd`.\n\nCurrent master partially covers this. `/session` reports session id/path/message count/model/usage, and the TUI status line includes cwd/model/session/context/scroll state. I did not find PR number/build hash metadata, richer provider effort metadata, or a unified status metadata hook comparable to the richer pi-mono surfaces.\n\nVerdict: **partially applies**. Keep it open if the target is a small Lua metadata/status contract. Avoid making C own high-level project/PR/provider policy; psi's architecture wants that in Lua or extensions."
+      }
+    ]
+  },
+  {
+    "id": 1144,
+    "index": 112,
+    "title": "/goal",
+    "state": "open",
+    "created": "2026-05-10T23:20:55-04:00",
+    "labels": [],
+    "user": "jrestivo",
+    "body": "Mimics codex's /goal. It's implemented but should port over into PR from branch. Is all lua as an extension",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/112",
+    "closedAt": null,
+    "comments": [
+      {
+        "id": 3533,
+        "author": "siraben",
+        "created": "2026-05-30T03:33:43-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-05-10) was `2526ebd`.\n\nCurrent master still has no `/goal` command or goal state. The README explicitly says psi avoids built-in plan/todo machinery, so a core `/goal` feature would push against the stated philosophy.\n\nVerdict: **still applies only if scoped as an optional Lua extension**. If the intent is a built-in planning/goal system, this should be closed as out of scope for psi. If the intent is a lightweight extension that injects a current objective into prompts/status, keep it open under the extension system."
+      }
+    ]
+  },
+  {
+    "id": 1145,
+    "index": 113,
+    "title": "pretty print truncated regions",
+    "state": "open",
+    "created": "2026-05-10T23:22:07-04:00",
+    "labels": [],
+    "user": "jrestivo",
+    "body": "assign a UID to each tool call or region and support a /pretty-print $uid command to expand it in more detail",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/113",
+    "closedAt": null,
+    "comments": [
+      {
+        "id": 3532,
+        "author": "siraben",
+        "created": "2026-05-30T03:33:43-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-05-10) was `2526ebd`.\n\nCurrent master has improved truncation handling: bash can write full output to temporary files, and `read` has offset/limit support. I did not find a user-facing `/pretty-print` command or stable UID/result registry equivalent for retrieving a specific truncated tool result after the fact.\n\nVerdict: **still applies**. This fits psi if implemented as a small Lua-side result registry plus command, not as a large UI subsystem. It is related to pi-mono's better long-output workflow, but psi should keep the mechanism simple and terminal-native."
+      }
+    ]
+  },
+  {
+    "id": 1146,
+    "index": 114,
+    "title": "fix compaction",
+    "state": "closed",
+    "created": "2026-05-10T23:23:02-04:00",
+    "labels": [],
+    "user": "jrestivo",
+    "body": "doesn't autocompact and /compact is broken",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/114",
+    "closedAt": "2026-07-20T19:14:16-04:00",
+    "comments": [
+      {
+        "id": 3529,
+        "author": "siraben",
+        "created": "2026-05-30T03:33:43-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-05-10) was `2526ebd`.\n\nAt opening, the report that auto-compaction and `/compact` were broken applied to the then-current branch. Current master has working compaction paths in `lua/psi/session_manager.lua` and `/compact` routing through `lua/psi/agent_session.lua`, but I still see important compaction gaps: master resets the session tree around compaction, so sibling branches can be lost, and there is still no custom compact prompt/hook parity with pi-mono. PR #144 appears to address the branch-safe compaction part but is not merged.\n\nVerdict: **still applies, but the issue should be narrowed**. The original “/compact is broken” statement is outdated; keep this open for branch-safe compaction and compact customization, or split/close it in favor of #150 plus the PR work."
+      },
+      {
+        "id": 7439,
+        "author": "siraben",
+        "created": "2026-07-20T19:14:15-04:00",
+        "body": "Closing as done for the original report. [PR #144](https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/pulls/144) fixed the remaining compaction parity problems, including append-only branch-safe compaction. Current origin/master has working manual and token-triggered automatic compaction plus regression coverage for preserving sibling branches. Extension customization and cancellation remain separately tracked in [#150](https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/150)."
+      }
+    ]
+  },
+  {
+    "id": 1168,
+    "index": 119,
+    "title": "support mcp over http",
+    "state": "open",
+    "created": "2026-05-16T20:24:25-04:00",
+    "labels": [],
+    "user": "jrestivo",
+    "body": "we only support stdio which is costly in resources ",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/119",
+    "closedAt": null,
+    "comments": []
+  },
+  {
+    "id": 1180,
+    "index": 121,
+    "title": "Implement proper /btw",
+    "state": "closed",
+    "created": "2026-05-18T03:02:25-04:00",
+    "labels": [],
+    "user": "siraben",
+    "body": "",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/121",
+    "closedAt": "2026-07-30T14:56:41-04:00",
+    "comments": []
+  },
+  {
+    "id": 1183,
+    "index": 124,
+    "title": "No thinking indicator while editing queued message",
+    "state": "closed",
+    "created": "2026-05-18T03:50:06-04:00",
+    "labels": [],
+    "user": "siraben",
+    "body": "",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/124",
+    "closedAt": "2026-07-20T19:14:16-04:00",
+    "comments": [
+      {
+        "id": 7441,
+        "author": "siraben",
+        "created": "2026-07-20T19:14:16-04:00",
+        "body": "Closing as done. [PR #157](https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/pulls/157) aligned queue editing/rendering with pi: pending messages render alongside the active editor while the busy indicator remains visible, and queued-message restore/edit behavior is covered by focused tests."
+      }
+    ]
+  },
+  {
+    "id": 1230,
+    "index": 141,
+    "title": "audit command feature parity with pi-mono",
+    "state": "open",
+    "created": "2026-05-26T03:40:35-04:00",
+    "labels": [],
+    "user": "siraben",
+    "body": "",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/141",
+    "closedAt": null,
+    "comments": [
+      {
+        "id": 3527,
+        "author": "siraben",
+        "created": "2026-05-30T03:33:43-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-05-26) was `b34c380`.\n\nCurrent master has a broad command set, but still does not match pi-mono command parity. Missing or incomplete areas include `settings`, `scoped-models`, `share`, `logout`, `changelog`, model selector UI, `/compact` with custom instructions, and the `/tree` alias on master. PR #144 covers some of the smaller gaps but is not merged.\n\nVerdict: **still applies**. The psi-aligned interpretation is not “copy every pi-mono command”; it is to decide which workflows belong as Lua commands/extensions and keep the core command surface small, inspectable, and text-first."
+      }
+    ]
+  },
+  {
+    "id": 1231,
+    "index": 142,
+    "title": "audit login flow/text against pi-mono",
+    "state": "closed",
+    "created": "2026-05-26T03:40:45-04:00",
+    "labels": [],
+    "user": "siraben",
+    "body": "",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/142",
+    "closedAt": "2026-07-20T20:40:34-04:00",
+    "comments": [
+      {
+        "id": 3526,
+        "author": "siraben",
+        "created": "2026-05-30T03:33:43-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-05-26) was `b34c380`.\n\nAt opening, login was much thinner than pi-mono. Current master still only has the OpenAI Codex manual URL/code flow plus provider API key configuration; I did not find a provider selector, `/logout`, browser callback flow, or the broader login UX that pi-mono exposes.\n\nVerdict: **still applies, with scope caution**. Psi's manual-paste fallback is philosophically consistent: it avoids a larger host service just for OAuth. Good next slices would be provider selection, clearer audit/copy text, and `/logout`; copying pi-mono's full browser/callback machinery should be justified carefully against psi's small C-host design."
+      }
+    ]
+  },
+  {
+    "id": 1285,
+    "index": 145,
+    "title": "Port pi-mono TUI focus, overlays, and reusable selector/editor components",
+    "state": "open",
+    "created": "2026-05-27T14:06:25-04:00",
+    "labels": [],
+    "user": "siraben",
+    "body": "## Context\n\nThe feature audit notes that psi's TUI now has the persistent component/differential-rendering base, but still lacks pi-mono's higher-level interactive surfaces.\n\nCurrent documented gap from `docs/port-status.md`:\n\n- no focus/overlay stack\n- no modal composition layer\n- resume/model/theme/thinking/session pickers are still hard-coded paths rather than reusable selector components\n- prompt editor and command autocomplete are not component objects\n\n## Desired direction\n\nKeep psi's terminal philosophy: inline TUI, no alt-screen by default, Lua-owned policy/state, C only for terminal primitives.\n\nImplement:\n\n- focusable component contract\n- anchored overlay stack\n- modal/picker composition primitives\n- reusable `SelectList` / `SettingsList` style components\n- prompt editor as a component\n- command autocomplete as a component\n\n## Acceptance criteria\n\n- Existing TUI behavior remains unchanged unless a picker/modal is open.\n- Resume picker can be expressed through the reusable selector path.\n- New selectors can be added without hard-coding each loop in `tui_runtime.lua`.\n- Keyboard focus, cancel, accept, and redraw behavior are covered by smoke or Lua tests.\n\nOrigin: parity gaps documented during PR #144 feature audit.",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/145",
+    "closedAt": null,
+    "comments": [
+      {
+        "id": 3524,
+        "author": "siraben",
+        "created": "2026-05-30T03:32:58-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-05-27) was `7ae14bf`.\n\nThis is now partly stale. Current master has a real TUI app layer with focus and overlay stack behavior in `lua/psi/tui_app.lua`, plus tests around focus/overlay routing. The remaining gap is the reusable widget/component layer: selectors, editors, modals, pickers, and shared prompt/input components are still mostly bespoke, for example the resume picker in `lua/psi/tui_runtime.lua`.\n\nVerdict: **partially applies; narrow it**. The focus/overlay part should be considered done on master. Keep the issue open only for reusable TUI components and picker/editor surfaces. That direction matches psi if the components stay small Lua modules instead of importing pi-mono's richer UI framework wholesale."
+      }
+    ]
+  },
+  {
+    "id": 1286,
+    "index": 146,
+    "title": "Add RPC mode over JSONL stdin/stdout",
+    "state": "open",
+    "created": "2026-05-27T14:06:26-04:00",
+    "labels": [],
+    "user": "siraben",
+    "body": "## Context\n\n`docs/port-status.md` marks pi-mono RPC mode as not started. The audit explicitly left full RPC/SDK mode out of PR #144.\n\n## Scope\n\nAdd an RPC mode that reuses the existing runtime/session/provider/tool loop and speaks JSONL over stdin/stdout.\n\nKeep this aligned with psi's architecture:\n\n- C host remains small.\n- Lua owns protocol policy and request handling where practical.\n- Existing session persistence, provider streaming, abort handling, and tool dispatch are reused.\n- No separate backend/server dependency.\n\n## Open design points\n\n- exact wire schema compatibility target with pi-mono\n- request lifecycle and streaming event shapes\n- how abort/cancel is represented\n- how provider/tool errors map into protocol events\n- whether this is exposed as `--rpc`, a subcommand, or a mode flag\n\n## Acceptance criteria\n\n- JSONL request/response loop works through stdin/stdout.\n- At least one turn can be run with tool calls and streamed assistant output.\n- Abort/cancel is protocol-visible and leaves session state coherent.\n- Tests cover a happy path, malformed input, provider/tool error, and abort.\n\nOrigin: parity gaps documented during PR #144 feature audit.",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/146",
+    "closedAt": null,
+    "comments": [
+      {
+        "id": 3523,
+        "author": "siraben",
+        "created": "2026-05-30T03:32:57-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-05-27) was `7ae14bf`.\n\nAt opening, RPC was not started. Current master still has RPC listed as not started in `docs/port-status.md`, and I did not find a working JSONL/RPC mode equivalent to pi-mono's `docs/rpc.md` / `runRpcMode` path.\n\nVerdict: **still applies**. A psi-aligned implementation would be a thin C/CLI transport into Lua session commands/events, not a broad SDK/platform layer. The pi-mono comparison is mainly a protocol and behavior reference."
+      }
+    ]
+  },
+  {
+    "id": 1287,
+    "index": 147,
+    "title": "Port skills and package-managed extension workflow",
+    "state": "open",
+    "created": "2026-05-27T14:06:26-04:00",
+    "labels": [],
+    "user": "siraben",
+    "body": "## Context\n\nThe audit notes that project context discovery is now closer to pi-mono, but skills are still not ported. `docs/port-status.md` also notes that the extension system is early/partial and has no npm/git package manager, no TS transpile path, and no sandboxing.\n\nThis issue tracks the non-sandbox package/skills side. Sandboxing is already separately tracked by #39.\n\n## Desired direction\n\nDesign a psi-native skills workflow that stays in philosophy:\n\n- Lua-first and local-file friendly\n- no mandatory hosted marketplace\n- no heavyweight JS runtime requirement\n- clear load order and opt-out behavior\n- compatible with existing `PSI_EXTENSIONS_DIR`, global, and project extension loading\n\n## Scope\n\n- skill discovery and loading model\n- manifest or metadata format if needed\n- install/update workflow for local/git skills\n- integration with prompt/resource assembly\n- tests for global/project precedence and disable controls\n\n## Acceptance criteria\n\n- A local skill can be installed and loaded predictably.\n- Project-local skills can override or augment global skills without surprising global state leaks.\n- Users can disable skill loading.\n- Docs explain the difference between extensions, prompt templates, and skills.\n\nOrigin: parity gaps documented during PR #144 feature audit.",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/147",
+    "closedAt": null,
+    "comments": [
+      {
+        "id": 3522,
+        "author": "siraben",
+        "created": "2026-05-30T03:32:57-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-05-27) was `7ae14bf`.\n\nCurrent master has prompt/templates and a Lua extension model, but it does not have pi-mono-style skills/packages: no skill loader contract, no package workflow, no marketplace/update story, and no structured skill metadata path comparable to pi-mono.\n\nVerdict: **still applies**. This should be scoped to psi's philosophy: local, inspectable Lua/text skills with minimal loader rules. A direct port of pi-mono's package/marketplace assumptions would be too heavy for psi's small-host, Lua-brain design."
+      }
+    ]
+  },
+  {
+    "id": 1288,
+    "index": 148,
+    "title": "Stabilize extension provider registration and model catalog parity",
+    "state": "open",
+    "created": "2026-05-27T14:06:26-04:00",
+    "labels": [],
+    "user": "siraben",
+    "body": "## Context\n\n`docs/port-status.md` says provider/model loop is partial-to-ported: built-in Anthropic, Ollama, OpenRouter, and OpenAI Codex share provider routing, but extension-level provider registration and the broad pi model catalog are not ported.\n\n`docs/extensions.md` also says provider registration exists internally but is not yet a stable extension API.\n\n## Scope\n\n- freeze public provider registration/unregistration contracts\n- expose a stable extension API for adding providers and models\n- decide how provider capabilities are declared and queried\n- define model catalog update strategy that does not make psi depend on a broad JS/runtime stack\n- keep provider code frontend-agnostic\n\n## Acceptance criteria\n\n- An extension can register a provider and model metadata through documented APIs.\n- Registered providers work from `--print`, REPL, and TUI through the same runtime path.\n- Runtime capability checks can see extension-provided models.\n- Tests cover registration, unregistration/reload cleanup, and provider selection.\n\nOrigin: parity gaps documented during PR #144 feature audit.",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/148",
+    "closedAt": null,
+    "comments": [
+      {
+        "id": 3520,
+        "author": "siraben",
+        "created": "2026-05-30T03:32:56-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-05-27) was `7ae14bf`.\n\nAt opening, dynamic provider registration was not a stable extension API. Current master has internal registry functions in `lua/psi/api_registry.lua`, but `docs/extensions.md` still says provider/model registration is not stable and reload cleanup/unregistration is not part of the extension contract.\n\nVerdict: **still applies**. This is aligned with psi if implemented as a Lua-first extension API with clear lifecycle/reload semantics. It should stay frontend-agnostic and should not become a plugin/package-manager framework modeled directly on pi-mono."
+      }
+    ]
+  },
+  {
+    "id": 1289,
+    "index": 149,
+    "title": "Implement full pi-style prompt cache-key controls",
+    "state": "open",
+    "created": "2026-05-27T14:06:44-04:00",
+    "labels": [],
+    "user": "siraben",
+    "body": "## Context\n\n`docs/port-status.md` says system prompt assembly is ported, but prompt-cache controls remain provider-specific rather than a full pi cache-key implementation.\n\n## Scope\n\n- audit pi-mono prompt cache-key semantics\n- decide which cache markers/metadata should be represented in psi session records\n- make provider cache behavior derive from shared prompt/session metadata instead of provider-specific one-offs\n- preserve psi's provider-agnostic runtime loop\n\n## Acceptance criteria\n\n- Cache behavior is described in shared Lua prompt/session code, not only inside individual providers.\n- Anthropic/OpenAI-compatible/OpenAI Codex paths consume the shared cache metadata consistently where their APIs support it.\n- Session replay does not lose or duplicate cache metadata.\n- Tests cover system prompt changes, context file changes, tool metadata changes, and provider differences.\n\nOrigin: parity gaps documented during PR #144 feature audit.",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/149",
+    "closedAt": null,
+    "comments": [
+      {
+        "id": 3518,
+        "author": "siraben",
+        "created": "2026-05-30T03:32:53-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-05-27) was `7ae14bf`.\n\nAt opening, prompt caching was provider-specific. Current master is still provider-specific: Anthropic sets `cache_control` blocks, while OpenAI/Codex mostly parses cached-token usage and does not expose shared controls like pi-mono's session/cache retention/cache-key plumbing.\n\nVerdict: **still applies**. The pi-mono comparison is useful, but the psi-shaped version should be a small Lua-level cache metadata model that providers may consume. Avoid baking pi-mono's full TypeScript runtime abstractions into the C host."
+      }
+    ]
+  },
+  {
+    "id": 1290,
+    "index": 150,
+    "title": "Add extension hooks for compaction customization and cancellation",
+    "state": "open",
+    "created": "2026-05-27T14:06:44-04:00",
+    "labels": [],
+    "user": "siraben",
+    "body": "## Context\n\nCompaction itself is ported and PR #144 made it branch-safe for durable session history, but `docs/port-status.md` still identifies missing extension customization/cancel hooks.\n\n## Scope\n\nAdd extension-level hooks around compaction without moving compaction policy into C.\n\nCandidate hook points:\n\n- before compaction prompt construction\n- custom summary prompt/context injection\n- veto/cancel compaction\n- after compaction summary is persisted\n- diagnostics/events for TUI and extensions\n\n## Acceptance criteria\n\n- Extensions can observe and customize compaction through documented Lua APIs.\n- An extension can cancel compaction cleanly before provider work starts.\n- A canceled compaction leaves session state unchanged and user-visible status clear.\n- Tests cover hook ordering, cancellation, and reload cleanup.\n\nOrigin: parity gaps documented during PR #144 feature audit.",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/150",
+    "closedAt": null,
+    "comments": [
+      {
+        "id": 3519,
+        "author": "siraben",
+        "created": "2026-05-30T03:32:56-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-05-27) was `7ae14bf`.\n\nAt opening, compaction hooks were observe-only. Current master is still that way: extensions see `compaction-start` / `compaction-end`, but there is no before-compact hook that can alter instructions, veto/cancel, or attach compaction-specific metadata before the provider call.\n\nVerdict: **still applies**. Compared with pi-mono's `session_before_compact` hook and custom compact instructions, psi is missing the extension point. This fits psi's philosophy if kept as a small Lua event/decision hook owned by the session layer; it should not pull policy or provider-specific compaction behavior into C."
+      }
+    ]
+  },
+  {
+    "id": 1291,
+    "index": 151,
+    "title": "Evaluate an AgentSession-equivalent runtime facade for psi modes",
+    "state": "closed",
+    "created": "2026-05-27T14:06:44-04:00",
+    "labels": [],
+    "user": "siraben",
+    "body": "## Context\n\n`docs/port-status.md` marks the central session/runtime object as partial. Psi intentionally has a smaller C observer/runtime bridge plus Lua session/runtime modules, but it does not have a single `AgentSession`-equivalent object that owns every mode like pi-mono.\n\nThis may be fine architecturally; the issue is to evaluate whether a Lua facade would reduce drift across `--print`, REPL, TUI, compact, resume, and future RPC without bloating the C host.\n\n## Scope\n\n- audit duplicated mode bootstrap/session/provider setup\n- identify mode-specific behavior that should remain separate\n- decide whether a Lua `agent_session` facade should own turn lifecycle, resume/bootstrap, compaction, abort wiring, and observer events\n- keep C as host boundary only\n\n## Acceptance criteria\n\n- Clear design note deciding whether to add a facade or explicitly keep the current split.\n- If implemented, `--print`, REPL, TUI, and compact share the facade for common lifecycle behavior.\n- Existing mode-specific UX remains unchanged.\n- Tests cover at least one shared lifecycle path across multiple modes.\n\nOrigin: parity gaps documented during PR #144 feature audit.",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/151",
+    "closedAt": "2026-07-22T00:29:09-04:00",
+    "comments": [
+      {
+        "id": 3521,
+        "author": "siraben",
+        "created": "2026-05-30T03:32:57-04:00",
+        "body": "Audit from `origin/master` at `8ce8980` on branch `siraben/audit-issues`. Master at opening (2026-05-27) was `7ae14bf`.\n\nCurrent master has moved in this direction with `lua/psi/agent_session.lua`, which centralizes provider/model state and turn/side-question/compact entry points. It is not fully the runtime object described here: `lua/psi/modes.lua` still owns much of session bootstrap, resume/save, observer setup, and the REPL loop.\n\nVerdict: **still applies, but as a design/refinement issue rather than a greenfield feature**. The psi-compatible target is a small Lua session/runtime object that reduces mode coupling while keeping C as the host shell. The pi-mono comparison is useful for responsibilities, not for copying its heavier session class structure wholesale."
+      }
+    ]
+  },
+  {
+    "id": 1487,
+    "index": 176,
+    "title": "Codex tool-call command arguments truncated by final char (`print`->`prin`, `nproc`->`npro`)",
+    "state": "open",
+    "created": "2026-07-10T03:54:35-04:00",
+    "labels": [],
+    "user": "siraben",
+    "body": "### Summary\n\nWhile using the `openai-codex` provider, tool-call command arguments have been observed **truncated by their final character** — e.g. `print` rendered/executed as `prin` (`sh: prin\\u000f: not found`) and `nproc` becoming `npro`. The trailing `\\u000f` (SI control byte) in one report suggests a control-character leak from the tool-execution / PTY layer rather than plain truncation.\n\n### Investigation so far (not yet reproduced)\n\n- `lua/psi/stream_parser.lua` (SSE/line framing) was reviewed: `push_lines` correctly buffers partial lines across chunk boundaries and only dispatches on a real `\\n`; `push_sse` handles `data:`/`data: ` prefixes and blank-line dispatch. **No off-by-one or trailing-byte drop found here.**\n- `lua/psi/providers/openai_codex.lua` tool-call handling was reviewed: `response.function_call_arguments.delta` appends deltas; `response.function_call_arguments.done` overwrites `arg_text` with the complete `event.arguments`; `function_call` items copy `item.arguments` whole. **No truncation found in the parser.**\n- Compared against pi-mono `packages/ai/src/api/openai-responses-shared.ts` — psi mirrors the same accumulate-then-finalize shape.\n\n### Hypotheses to pursue\n\n1. Control-char (`\\u000f`) injection in the **tool execution / PTY display** path (`lua/psi/tool_shell.lua` / TUI command echo), truncating on render rather than in the arg value.\n2. A model/provider-side streamed-args edge case where the final delta is not flushed before `output_item.done` under a specific event ordering.\n\n### Repro needed\n\nCapture a raw Codex Responses SSE stream that produces the truncated arg, and assert the decoded tool-call argument end-to-end (`tests/lua/providers/openai_codex_parser.lua` is the natural home for a regression case).\n\n_Filed by an overnight maintenance agent; carrying forward an unfinished investigation thread from recent sessions so it is not lost. No code change made because the defect is not yet reproducible._",
+    "assignees": [],
+    "url": "https://office-desktop.tail5ca7.ts.net/forgejo/siraben/psi-coding-agent/issues/176",
+    "closedAt": null,
+    "comments": []
+  }
+]

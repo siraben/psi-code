@@ -1,0 +1,56 @@
+[
+  {
+    "index": "1",
+    "color": "d73a4a",
+    "name": "bug",
+    "description": "Something isn't working"
+  },
+  {
+    "index": "2",
+    "color": "0075ca",
+    "name": "documentation",
+    "description": "Improvements or additions to documentation"
+  },
+  {
+    "index": "3",
+    "color": "cfd3d7",
+    "name": "duplicate",
+    "description": "This issue or pull request already exists"
+  },
+  {
+    "index": "4",
+    "color": "a2eeef",
+    "name": "enhancement",
+    "description": "New feature or request"
+  },
+  {
+    "index": "5",
+    "color": "7057ff",
+    "name": "good first issue",
+    "description": "Good for newcomers"
+  },
+  {
+    "index": "6",
+    "color": "008672",
+    "name": "help wanted",
+    "description": "Extra attention is needed"
+  },
+  {
+    "index": "7",
+    "color": "e4e669",
+    "name": "invalid",
+    "description": "This doesn't seem right"
+  },
+  {
+    "index": "8",
+    "color": "d876e3",
+    "name": "question",
+    "description": "Further information is requested"
+  },
+  {
+    "index": "9",
+    "color": "ffffff",
+    "name": "wontfix",
+    "description": "This will not be worked on"
+  }
+]
