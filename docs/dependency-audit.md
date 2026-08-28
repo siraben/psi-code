@@ -35,9 +35,9 @@ nix run .#audit-sbom -- .#psi-static
 
 ## Current decisions
 
-- The default curl build is trimmed to the HTTP client features `psi` needs. We
-  disable brotli, zstd, HTTP/2, HTTP/3, IDN, PSL/cookies, SCP, GSSAPI, and
-  OpenSSL in the mbedTLS curl used by the default Nix packages.
+- The default curl build contains only the HTTP client features `psi` needs.
+  The default Nix packages disable brotli, zstd, HTTP/2, HTTP/3, IDN,
+  PSL/cookies, SCP, GSSAPI, and OpenSSL in the mbedTLS curl build.
 - `CVE-2008-6393` for package `psi` is whitelisted as a false positive. It
   refers to the unrelated `psi-im:psi` project and disappears when SBOM
   heuristic CPE matching is disabled.

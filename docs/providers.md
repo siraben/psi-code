@@ -12,7 +12,7 @@ psi ships with five routed providers:
 For default models and environment-variable mappings, ask the running agent.
 Runtime introspection stays accurate after provider registry changes:
 
-```
+```text
 psi> /apropos provider:
 psi> /describe provider:openai-codex
 ```
@@ -47,7 +47,7 @@ In priority order:
    Moonshot. Ollama is excluded because it does not require credentials. If no
    provider is authenticated, psi falls back to Anthropic.
 
-## Streaming Retries
+## Streaming retries
 
 Streaming provider requests retry transient failures until assistant content or
 a tool call has been parsed. This covers transport failures such as an empty
@@ -88,7 +88,7 @@ Configure the policy in `~/.config/psi/settings.json` or
 `PSI_AUTO_COMPACT=1` forces it on. Manual `--compact N` and `/compact N`
 continue to interpret `N` as a recent-message count.
 
-## HTTP Timeouts
+## HTTP timeouts
 
 All provider HTTP calls share curl-level stall protection. The defaults
 allow long model streams but fail silent network paths so the agent can
@@ -102,11 +102,11 @@ surface a transport error or retry at the provider layer.
   (default disabled; useful for short metadata requests, risky for
   long streaming turns).
 
-## API-key credentials (auth.json)
+## API-key credentials (`auth.json`)
 
 API-key providers read their key from `~/.config/psi/auth.json` in addition to
 the environment variable, matching pi-mono's credential handling. The
-**auth-file entry takes precedence over the environment variable**.
+*auth-file entry takes precedence over the environment variable*.
 
 Use `/login` without arguments to choose an authentication method, then a
 provider. Provider and method names are available through Tab completion:
@@ -120,7 +120,7 @@ psi> /login moonshot <api-key-or-reference>
 ```
 
 `/login api-key <provider> <api-key-or-reference>` is the equivalent explicit
-form. Psi does not print the submitted value after saving it. To avoid pasting a
+form. psi does not print the submitted value after saving it. To avoid pasting a
 literal secret, set an environment variable before starting psi and store its
 reference, for example `/login anthropic $ANTHROPIC_API_KEY`. The `$...` text is
 entered inside psi, so it is stored as a reference and resolved when used.
@@ -136,11 +136,11 @@ Each provider is keyed by its provider name (`anthropic`, `openrouter`, …):
 
 The `key` field is resolved at use time:
 
-- **Literal** — used verbatim (`"sk-or-..."`).
-- **`$VAR` / `${VAR}`** — substituted from the process environment; embedded
+- **Literal.** Used verbatim (`"sk-or-..."`).
+- **`$VAR` / `${VAR}`.** Substituted from the process environment; embedded
   references (`"pre-${VAR}-post"`) are interpolated too. An unset variable
   collapses to empty.
-- **`!shell-command`** — the command after `!` is run and its trimmed stdout
+- **`!shell-command`.** The command after `!` is run and its trimmed stdout
   becomes the key. Results are cached per psi process, so a command that mints a
   short-lived token runs at most once per session.
 

@@ -1,8 +1,8 @@
-# psi: The Portable Coding Agent
+# psi: the portable coding agent
 
 Coding agents are often slow, bloated and inscrutable. Complex for complexity's
 sake. Can you name all of Claude Code's features? How long does it take to
-compile Codex from source? (Hint: [almost an hour](http://hydra.nixos.org/build/331503530)
+compile Codex from source? (Hint: [almost an hour](https://hydra.nixos.org/build/331503530)
 on macOS and [over an hour](https://hydra.nixos.org/build/331503528) on Linux.)
 
 Some coding agents purport to follow the Unix philosophy, but fall short of
@@ -18,12 +18,9 @@ Haiku, *BSD, or your iPhone via [iSH](https://ish.app/).
 psi has no shortage of features, including:
 
 - support for many LLM backends, including Codex OAuth, OpenRouter, Ollama
-- integration with MCP servers
 - full session tree, forking and queue management
-- skills
 - interactive (CLI, TUI) and non-interactive use
 - extensions and a self-documenting Lua runtime that can be modified on the fly
-- sessions
 
 Features we *don't* implement:
 
@@ -32,13 +29,13 @@ Features we *don't* implement:
 
 ## Running psi
 
-```ShellSession
-$ nix run github:siraben/psi
+```console
+$ nix run github:siraben/psi-code
 ```
 
 For local development:
 
-```ShellSession
+```console
 $ nix develop
 $ make
 $ ./build/psi --help
@@ -47,7 +44,7 @@ $ ./build/psi --help
 The same binary supports the TUI, REPL, one-shot print mode, Lua eval, session
 compaction, and direct agent turns:
 
-```ShellSession
+```console
 $ ANTHROPIC_API_KEY=... ./build/psi
 $ ./build/psi --repl
 $ ./build/psi --print 'hello'
@@ -66,7 +63,7 @@ psi aims to be:
 - Practical (we daily drive psi)
 - Open source
 
-## Design Philosophy
+## Design philosophy
 
 psi is heavily inspired by the [pi coding agent](https://github.com/earendil-works/pi).
 Like pi, psi aims to implement only the base functionality in-tree, and then
@@ -100,7 +97,7 @@ dependencies. We use:
 Optional Make flags default to `1`; set them to `0` to disable the feature.
 
 | Flag | Effect |
-|---|---|
+| --- | --- |
 | `TUI` | Inline terminal frontend and `psi.tui_*` host primitives |
 | `ANSI` | ANSI SGR emission and parsing. Required by `TUI`. |
 | `COLOR` | Color SGR emission. Non-color styles can still be used. |
@@ -110,13 +107,13 @@ Optional Make flags default to `1`; set them to `0` to disable the feature.
 Run the build-matrix check when optional dependencies or preprocessor guards
 change:
 
-```ShellSession
+```console
 $ make check-build-configs
 ```
 
 Dependency SBOM generation and vulnerability gating are available with:
 
-```ShellSession
+```console
 $ nix run .#audit-sbom
 ```
 
