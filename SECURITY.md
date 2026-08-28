@@ -1,14 +1,9 @@
-# Security Policy
+# Security policy
 
-This document describes the security concept behind psi and where the
-boundaries are.
-
-psi is a coding agent that runs locally within the security boundary of
-the user running it. It is the user's responsibility to monitor its
-operations or to contain it within a container, virtual machine, or other
-sandbox solution. psi intentionally ships no sandbox: the agent executes
-model-generated shell commands and file writes with the user's full
-privileges.
+psi runs locally with the privileges of the user who starts it. It ships no
+sandbox and can execute model-generated shell commands and file writes. Use a
+container, virtual machine, or another operating-system boundary when those
+privileges are too broad.
 
 psi treats the local user account, and files writable by that account, as
 inside the same trust boundary as the psi process itself. If an attacker
@@ -21,11 +16,10 @@ boundary.
 
 ## Workspace trust
 
-Opening an untrusted checkout is the dangerous case: a repository can
-carry prompt-injection content (`AGENTS.md`, `CLAUDE.md`, source
-comments) that no coding agent can defend against, and it can ship
-project-local resources that change psi's behavior. psi therefore gates
-the following behind a per-directory trust decision
+An untrusted checkout can contain prompt-injection text in `AGENTS.md`,
+`CLAUDE.md`, or source comments. It can also provide project-local resources
+that change psi's behavior. psi therefore gates the following resources behind
+a per-directory trust decision
 (`~/.config/psi/trust.json`, prompted once interactively, `--trust` /
 `--no-trust` flags, `PSI_TRUST` for scripts, `/trust` to review):
 
@@ -39,20 +33,18 @@ default), `"always"`, or `"never"`. Project-local settings cannot choose their
 own trust policy. Saved decisions use canonical paths and inherit from the
 nearest parent directory with a decision.
 
-In non-interactive use (`--print`, `--agent`, `--eval`) untrusted
-directories are denied by default. `AGENTS.md` / `CLAUDE.md` context
-files are loaded regardless of trust; like upstream pi, psi accepts
-prompt injection via repository content as unprotectable — only work in
-repositories you trust, or contain psi.
+In non-interactive use (`--print`, `--agent`, `--eval`), psi denies untrusted
+directories by default. It loads `AGENTS.md` and `CLAUDE.md` context files
+regardless of trust. Work only in repositories whose content is trusted, or run
+psi inside an operating-system security boundary.
 
 ## Reporting a vulnerability
 
-If you believe you found a security vulnerability in psi, please report
-it privately by opening a private report through GitHub Security
-Advisories for `siraben/psi`. Please include a description of the issue
-and its impact, steps to reproduce or a proof of concept, the affected
-version or commit, and any known mitigations. Do not open a public issue
-for security-sensitive reports.
+Report suspected vulnerabilities privately through
+[GitHub Security Advisories](https://github.com/siraben/psi-code/security/advisories/new).
+Include the impact, reproduction steps or a proof of concept, the affected
+version or commit, and any known mitigations. Do not open a public issue for a
+security-sensitive report.
 
 ## Out of scope
 
