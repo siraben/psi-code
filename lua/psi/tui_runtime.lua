@@ -3654,6 +3654,69 @@ local function abort_active_turn(state)
   end
 end
 
+function chat.strip_utf8_bom(text)
+  text = tostring(text or "")
+  if text:sub(1, 3) == "\239\187\191" then
+    return text:sub(4)
+  end
+  return text
+end
+
+function chat.edit_in_external_editor(content, editor, before_launch, ops)
+  ops = type(ops) == "table" and ops or {}
+  local tempfile_path = ops.tempfile_path or psi.tempfile_path
+  local file_write = ops.file_write or psi.file_write
+  local launch_editor = ops.launch_editor or psi.tui_external_editor
+  local read_file = ops.read_file or psi.read_file
+  local remove_file = ops.remove_file or os.remove
+  local path = type(tempfile_path) == "function" and tempfile_path("psi-editor-") or nil
+  if type(path) ~= "string" or path == "" then
+    return { status = "failed", message = "failed to create editor temp file" }
+  end
+
+  local ok, result = xpcall(function()
+    if type(file_write) ~= "function" or not file_write(path, content or "") then
+      return { status = "failed", message = "failed to write editor temp file" }
+    end
+    if type(before_launch) == "function" then
+      before_launch()
+    end
+    local status, err = launch_editor(path, editor)
+    if status == nil then
+      return {
+        status = "failed",
+        message = tostring(err or "external editor failed"),
+        reanchor = true,
+      }
+    end
+    if tonumber(status) ~= 0 then
+      return {
+        status = "failed",
+        message = "external editor exited with status " .. tostring(status),
+        reanchor = true,
+      }
+    end
+    local updated = type(read_file) == "function" and read_file(path) or nil
+    if type(updated) ~= "string" then
+      return {
+        status = "failed",
+        message = "failed to read editor temp file",
+        reanchor = true,
+      }
+    end
+    updated = chat.strip_utf8_bom(updated):gsub("\n$", "")
+    return { status = "complete", content = updated, reanchor = true }
+  end, debug.traceback)
+
+  if type(remove_file) == "function" then
+    pcall(remove_file, path)
+  end
+  if not ok then
+    error(result, 0)
+  end
+  return result
+end
+
 local function open_external_editor(state)
   local editor = os.getenv("VISUAL") or os.getenv("EDITOR")
   if type(editor) ~= "string" or editor == "" then
@@ -3666,37 +3729,20 @@ local function open_external_editor(state)
     state.dirty = true
     return
   end
-  local path = psi.tempfile_path and psi.tempfile_path("psi-editor-") or nil
-  if type(path) ~= "string" or path == "" then
-    set_status(state, "failed to create editor temp file", true)
-    state.dirty = true
-    return
-  end
-  if not psi.file_write(path, state.input or "") then
-    set_status(state, "failed to write editor temp file", true)
-    state.dirty = true
-    return
-  end
-  set_status(state, "editing in " .. editor, false)
-  redraw(state)
-  local status, err = psi.tui_external_editor(path, editor)
-  state.reanchor_renderer = true
-  if status == nil then
-    set_status(state, tostring(err or "external editor failed"), true)
-    state.dirty = true
-    return
-  end
-  if tonumber(status) == 0 then
-    local updated = psi.read_file(path)
-    updated = (updated or ""):gsub("\n$", "")
-    state.input = updated
+  local result = chat.edit_in_external_editor(state.input or "", editor, function()
+    set_status(state, "editing in " .. editor, false)
+    redraw(state)
+  end)
+  state.reanchor_renderer = not not result.reanchor
+  if result.status == "complete" then
+    state.input = result.content
     state.cursor = #state.input
     clear_selection(state)
     state.block_edit = nil
     state.editor_mode = "insert"
     set_status(state, "", false)
   else
-    set_status(state, "external editor exited with status " .. tostring(status), true)
+    set_status(state, result.message or "external editor failed", true)
   end
   state.dirty = true
 end
@@ -5426,6 +5472,46 @@ end
 
 function M._debug_tui_capabilities()
   return detect_tui_capabilities()
+end
+
+function M._debug_external_editor_transaction(kind, input, updated)
+  local removed = 0
+  local launches = 0
+  local result = chat.edit_in_external_editor(input or "original", "debug-editor", nil, {
+    tempfile_path = function()
+      return "/tmp/psi-editor-debug"
+    end,
+    file_write = function()
+      return kind ~= "write-failure"
+    end,
+    launch_editor = function()
+      launches = launches + 1
+      if kind == "launch-failure" then
+        return nil, "launch failed"
+      end
+      if kind == "nonzero" then
+        return 7
+      end
+      return 0
+    end,
+    read_file = function()
+      if kind == "read-failure" then
+        return nil
+      end
+      return updated or "\239\187\191edited\n"
+    end,
+    remove_file = function()
+      removed = removed + 1
+    end,
+  })
+  return {
+    status = result.status,
+    content = result.status == "complete" and result.content or (input or "original"),
+    message = result.message,
+    reanchor = not not result.reanchor,
+    removed = removed,
+    launches = launches,
+  }
 end
 
 function M._debug_pending_queue_lines(width, max_rows)

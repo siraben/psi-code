@@ -496,11 +496,13 @@ def t_tui_external_editor_releases_and_reanchors(psi: Psi):
         "#!/bin/sh\n"
         "printf 'EDITOR_STDOUT_SENTINEL\\n'\n"
         "printf 'EDITOR_STDERR_SENTINEL\\n' >&2\n"
-        "printf 'edited prompt' > \"$1\"\n"
+        "printf '%s' \"$1\" > \"$EDITOR_PATH_CAPTURE\"\n"
+        "printf '\\357\\273\\277edited prompt\\n' > \"$1\"\n"
     )
     editor.chmod(0o755)
     for args, layout in ((["--tui"], "frame"), (["--chat"], "chat")):
         state = psi.tmp / f"tui-editor-state-{layout}"
+        path_capture = psi.tmp / f"tui-editor-path-{layout}"
         raw = run_pty(
             [psi.binary, *args],
             [
@@ -512,6 +514,7 @@ def t_tui_external_editor_releases_and_reanchors(psi: Psi):
             rows=40,
             env_extra={
                 "EDITOR": str(editor),
+                "EDITOR_PATH_CAPTURE": str(path_capture),
                 "XDG_STATE_HOME": str(state),
                 "PSI_TUI_INLINE_MAX_ROWS": "24",
                 "NO_COLOR": "1",
@@ -522,6 +525,10 @@ def t_tui_external_editor_releases_and_reanchors(psi: Psi):
         assert_bytes_contains(raw, b"EDITOR_STDOUT_SENTINEL", f"{layout} editor stdout boundary")
         assert_bytes_contains(raw, b"EDITOR_STDERR_SENTINEL", f"{layout} editor stderr boundary")
         assert_bytes_contains(raw, b"edited prompt", f"{layout} editor result was not repainted")
+        assert_bytes_not_contains(raw, b"\xef\xbb\xbf", f"{layout} editor result retained BOM")
+        editor_temp = Path(path_capture.read_text())
+        if editor_temp.exists():
+            raise Fail(f"{layout} editor temp file was not removed: {editor_temp}")
         assert_contains(raw.screen_text, "EDITOR_STDOUT_SENTINEL", f"{layout} editor scrollback")
         assert_contains(raw.screen_text, "EDITOR_STDERR_SENTINEL", f"{layout} editor stderr scrollback")
         debug_log = state / "psi" / "debug.log"
