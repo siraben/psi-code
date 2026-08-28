@@ -178,6 +178,11 @@ Use `--trust` or `--no-trust` to override that decision for one run.
 
 See [docs/extensions.md](docs/extensions.md).
 
+An optional, disabled-by-default network-search reference tool is documented in
+[docs/network-search.md](docs/network-search.md). It is implemented entirely as
+a bundled Lua extension over psi's existing HTTP and credential primitives; it
+does not add an MCP or core search dependency.
+
 ## Sessions
 
 Sessions are append-only JSONL in pi's v3 schema: typed entries, parent
