@@ -22,6 +22,12 @@ The SQLite ledger uses three layers:
 - `entity_heads` provides constant-time current-version lookup without
   duplicating payloads.
 
+Forgejo expands the complete repository object under both `base` and `head` in
+every PR response. The ledger replaces those two redundant expansions with
+stable repository identity fields; the complete repository payload is audited
+once as its own entity. This prevents a repository size or timestamp update
+from manufacturing 368 redundant PR-side changes.
+
 `action_events` records target operations as append-only planned, succeeded,
 failed, or skipped events. `target_mappings` relates stable Forgejo IDs to the
 different issue and PR numbers assigned by GitHub. Database triggers reject

@@ -210,7 +210,9 @@ def normalize_pull_payload(payload: dict[str, Any]) -> dict[str, Any]:
     )
     for side in ("base", "head"):
         reference = normalized.get(side)
-        if not isinstance(reference, dict) or not isinstance(reference.get("repo"), dict):
+        if not isinstance(reference, dict) or not isinstance(
+            reference.get("repo"), dict
+        ):
             continue
         repository = reference["repo"]
         reference["repo"] = {

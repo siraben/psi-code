@@ -190,9 +190,9 @@ class FormattingTest(unittest.TestCase):
             "81",
         )
         self.assertEqual(
-            sync.PULL_MARKER.search(
-                "<!-- forgejo-sync:pull:source/repo:225 -->"
-            ).group(1),
+            sync.PULL_MARKER.search("<!-- forgejo-sync:pull:source/repo:225 -->").group(
+                1
+            ),
             "225",
         )
 
@@ -241,7 +241,9 @@ class BootstrapMappingTest(unittest.TestCase):
             source_index=225,
         )
         run_id = self.database.start_run("source/repo", "target/repo", "snapshot")
-        self.database.record_snapshot(run_id, {old.key: old, replacement.key: replacement})
+        self.database.record_snapshot(
+            run_id, {old.key: old, replacement.key: replacement}
+        )
         self.database.finish_run(run_id, "completed")
         self.database.save_mapping(
             old.key, "pull", 202, "pull", target_number=55, target_id=55
