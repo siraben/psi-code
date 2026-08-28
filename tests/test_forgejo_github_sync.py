@@ -145,6 +145,20 @@ class FormattingTest(unittest.TestCase):
         self.assertIn("<!-- forgejo-sync:issue:source/repo:7 -->", desired["body"])
         self.assertEqual(desired["labels"], ["forgejo-sync"])
 
+    def test_closed_pull_does_not_request_a_base_branch_change(self) -> None:
+        payload = {
+            "number": 9,
+            "title": "Merged",
+            "body": "body",
+            "state": "closed",
+            "merged": True,
+            "base": {"ref": "master"},
+            "html_url": "https://forgejo.example/source/repo/pulls/9",
+        }
+        desired = sync.desired_pull(payload, "source/repo")
+        self.assertEqual(desired["state"], "closed")
+        self.assertNotIn("base", desired)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -732,13 +732,16 @@ def desired_pull(payload: dict[str, Any], source_repo: str) -> dict[str, Any]:
     state = (
         "open" if payload["state"] == "open" and not payload.get("merged") else "closed"
     )
-    return {
+    desired = {
         "title": payload["title"],
         "body": (payload.get("body") or "")
         + provenance("pull", int(payload["number"]), source_repo, payload["html_url"]),
         "state": state,
-        "base": payload["base"]["ref"],
     }
+    # GitHub rejects base-branch changes on some closed or already-merged PRs.
+    if state == "open":
+        desired["base"] = payload["base"]["ref"]
+    return desired
 
 
 def log_target_request(
