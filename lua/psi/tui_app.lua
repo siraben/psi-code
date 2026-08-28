@@ -80,6 +80,14 @@ local function focused_overlay(app)
   return nil
 end
 
+local function retarget_overlay_pre_focus(app, removed)
+  for _, entry in ipairs(app.overlay_stack) do
+    if entry ~= removed and entry.pre_focus == removed.component then
+      entry.pre_focus = removed.pre_focus
+    end
+  end
+end
+
 local function visible_width(text)
   return tui_text.visible_width(text)
 end
@@ -209,6 +217,7 @@ function App:show_overlay(child, opts)
   function handle.hide()
     for i, existing in ipairs(self.overlay_stack) do
       if existing == entry then
+        retarget_overlay_pre_focus(self, entry)
         table.remove(self.overlay_stack, i)
         if self.focused == child then
           local top = self:top_visible_overlay()
