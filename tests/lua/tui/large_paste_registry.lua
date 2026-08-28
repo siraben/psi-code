@@ -1,5 +1,5 @@
 --[==[psi-test
-expect = "[paste #1 +11 lines]|[paste #2 1001 chars]|true|true|[paste #1 1001 chars]|true|0"
+expect = "[paste #1 +11 lines]|[paste #2 1001 chars]|true|true|[paste #1 1001 chars]|true|0|true"
 ]==]
 local paste = require("psi.tui_editor_paste")
 
@@ -31,6 +31,9 @@ local restored = paste.expand(state, first .. " " .. second) == expanded
 
 paste.clear(state)
 local fake = paste.expand(state, "[paste #1 1001 chars]")
+local fake_count = #paste.markers(state, fake)
+
+local astral = paste.compact(state, string.rep("😀", 501))
 
 return table.concat({
   first,
@@ -39,5 +42,6 @@ return table.concat({
   tostring(restored),
   compacted,
   tostring(compacted_expands),
-  tostring(#paste.markers(state, fake)),
+  tostring(fake_count),
+  tostring(astral:match("^%[paste #1 1002 chars%]$") ~= nil),
 }, "|")

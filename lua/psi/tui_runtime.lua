@@ -562,7 +562,7 @@ local function input_wrap_break(state, input, chunk_start, limit, line_end, widt
   local i = chunk_start
   while i < line_end and i < limit do
     local marker = chat.paste.starting_at(state, input, i)
-    if marker ~= nil and display_width(marker.text) <= width then
+    if marker ~= nil then
       i = marker.finish
     elseif input:byte(i + 1) == TUI_CONST.byte_space then
       local j = i
@@ -594,7 +594,7 @@ local function input_next_chunk_end(state, input, chunk_start, line_end, width)
   end
   limit = math.min(line_end, chunk_start + limit)
   local marker = chat.paste.containing(state, input, limit)
-  if marker ~= nil and display_width(marker.text) <= width then
+  if marker ~= nil then
     if marker.start > chunk_start then
       limit = marker.start
     else
@@ -799,7 +799,7 @@ local function accept_command_completion(state)
   local kind = state.command_completion_kind
   state.input = before .. replacement .. after
   state.cursor = #before + #replacement
-  chat.paste.clear(state)
+  chat.paste.reconcile(state)
   state.command_completion_input = nil
   state.command_completion_cursor = nil
   state.command_completion_items = nil
@@ -2755,85 +2755,6 @@ function M._word_cluster_class(text, start)
     return "cjk"
   end
   return "word"
-end
-
-function M._cjk_run_length_before(text, finish)
-  local run = 0
-  local pos = 0
-  while pos < finish do
-    if M._word_cluster_class(text, pos) == "cjk" then
-      run = run + 1
-    else
-      run = 0
-    end
-    pos = tui_text.next_grapheme_index(text, pos)
-  end
-  return run
-end
-
-function M._word_backward_pos(text, cursor)
-  text = text or ""
-  local pos = clamp(tonumber(cursor) or 0, 0, #(text or ""))
-  while pos > 0 do
-    local start = tui_text.previous_grapheme_index(text, pos)
-    if M._word_cluster_class(text, start) ~= "space" then
-      break
-    end
-    pos = start
-  end
-  if pos == 0 then
-    return pos
-  end
-  local start = tui_text.previous_grapheme_index(text, pos)
-  local class = M._word_cluster_class(text, start)
-  if class == "cjk" then
-    if M._cjk_run_length_before(text, pos) % 2 == 0 and start > 0 then
-      local prior = tui_text.previous_grapheme_index(text, start)
-      if M._word_cluster_class(text, prior) == "cjk" then
-        return prior
-      end
-    end
-    return start
-  end
-  while pos > 0 do
-    start = tui_text.previous_grapheme_index(text, pos)
-    if M._word_cluster_class(text, start) ~= class then
-      break
-    end
-    pos = start
-  end
-  return pos
-end
-
-function M._word_forward_pos(text, cursor)
-  text = text or ""
-  local pos = clamp(tonumber(cursor) or 0, 0, #(text or ""))
-  while pos < #text do
-    if M._word_cluster_class(text, pos) ~= "space" then
-      break
-    end
-    pos = tui_text.next_grapheme_index(text, pos)
-  end
-  if pos >= #text then
-    return pos
-  end
-  local class = M._word_cluster_class(text, pos)
-  if class == "cjk" then
-    local finish = tui_text.next_grapheme_index(text, pos)
-    if M._cjk_run_length_before(text, pos) % 2 == 0 and finish < #text then
-      if M._word_cluster_class(text, finish) == "cjk" then
-        finish = tui_text.next_grapheme_index(text, finish)
-      end
-    end
-    return finish
-  end
-  while pos < #text do
-    if M._word_cluster_class(text, pos) ~= class then
-      break
-    end
-    pos = tui_text.next_grapheme_index(text, pos)
-  end
-  return pos
 end
 
 function chat.word_cluster_class(state, text, start)
