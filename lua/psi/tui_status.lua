@@ -6,6 +6,7 @@
 
 local ansi = require("psi.ansi")
 local context = require("psi.context")
+local glyphs = require("psi.glyphs")
 local keybindings = require("psi.keybindings")
 local notice = require("psi.notice")
 local prelude = require("psi.prelude")
@@ -16,18 +17,7 @@ local M = {}
 local BAR_SPLIT = string.char(31)
 local enabled_setting
 
-local BUSY_FRAMES = {
-  "⠋",
-  "⠙",
-  "⠹",
-  "⠸",
-  "⠼",
-  "⠴",
-  "⠦",
-  "⠧",
-  "⠇",
-  "⠏",
-}
+local BUSY_FRAMES = glyphs.spinner
 
 local function action(name, arg)
   return { action = name, arg = arg }
@@ -413,7 +403,7 @@ local function accent(text)
 end
 
 local function sep()
-  return label("  •  ")
+  return label("  " .. glyphs.dot .. "  ")
 end
 
 local function pair(key, val, use_accent)
@@ -685,7 +675,7 @@ function M.status_line(arg_json)
     end
   end
   if busy then
-    parts[#parts + 1] = "busy…"
+    parts[#parts + 1] = "busy" .. glyphs.ellipsis
   end
   for _, hook in ipairs(status_hooks) do
     local ok_hook, extra = pcall(hook.fn, arg)
@@ -733,7 +723,7 @@ function M.footer_hint(arg_json)
       or "working"
     local dots = string.rep(".", math.max(1, tonumber(arg.busy_phase) or 1))
     return string.format(
-      "%s (%s  • %s to interrupt) %s",
+      "%s (%s  " .. glyphs.dot .. " %s to interrupt) %s",
       busy_label,
       format_elapsed(arg.elapsed_seconds),
       keybindings.display("app.interrupt"),

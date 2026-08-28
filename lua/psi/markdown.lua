@@ -11,6 +11,7 @@
 -- is that single long paragraph deltas only paint on line boundaries.
 
 local ansi = require("psi.ansi")
+local glyphs = require("psi.glyphs")
 
 local M = {}
 
@@ -286,7 +287,7 @@ local function render_line(line, state)
   -- Bullet list: -, *, + (but not horizontal-rule-like)
   local indent, body = line:match("^(%s*)[%-%*%+]%s+(.*)$")
   if indent and body then
-    return indent .. ansi.color(PI_ACCENT, "•") .. " " .. render_inline(body)
+    return indent .. ansi.color(PI_ACCENT, glyphs.bullet) .. " " .. render_inline(body)
   end
 
   -- Numbered list
@@ -298,7 +299,7 @@ local function render_line(line, state)
   -- Blockquote
   local bq = line:match("^>%s?(.*)$")
   if bq then
-    return ansi.color(PI_GRAY, "│ ") .. render_inline(bq)
+    return ansi.color(PI_GRAY, glyphs.quote_bar) .. render_inline(bq)
   end
 
   -- Plain paragraph line

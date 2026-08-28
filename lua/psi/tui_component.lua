@@ -4,6 +4,7 @@
 -- how those lines become terminal bytes.
 
 local M = {}
+local glyphs = require("psi.glyphs")
 local tui_text = require("psi.tui_text")
 
 local Component = {}
@@ -386,7 +387,7 @@ function Border:render(width)
   then
     return self.cache_lines
   end
-  local line = string.rep(self.char or "─", width)
+  local line = string.rep(self.char or glyphs.hrule, width)
   if type(self.color_fn) == "function" then
     line = self.color_fn(line)
   end
@@ -410,7 +411,7 @@ end
 function M.border(color_fn, char)
   return setmetatable({
     color_fn = color_fn,
-    char = char or "─",
+    char = char or glyphs.hrule,
     generation = 0,
     cache_width = nil,
     cache_generation = nil,
