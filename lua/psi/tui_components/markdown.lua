@@ -26,7 +26,7 @@ end
 
 local function split_lines(text)
   local lines = {}
-  text = tostring(text or "")
+  text = tui_text.normalize_line_endings(text)
   text = text:gsub("\n+$", "")
   if text == "" then
     return { "" }

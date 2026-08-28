@@ -434,6 +434,46 @@ def t_tui_extension_stdio_is_quarantined(psi: Psi):
     assert_equals(debug_log.stat().st_mode & 0o777, 0o600, "debug log mode")
 
 
+@test("mode/tui_frame_line_carriage_return_is_guarded")
+def t_tui_frame_line_carriage_return_is_guarded(psi: Psi):
+    project = psi.tmp / "tui-frame-line-cr"
+    extension_dir = project / ".psi" / "extensions"
+    extension_dir.mkdir(parents=True)
+    (extension_dir / "frame-cr.lua").write_text(
+        "return function(psi)\n"
+        "  require('psi.tui_status').register_startup_hook('frame-cr-smoke', function()\n"
+        "    psi.tui_draw_raw_line(1, 'HOST_PREFIX\\rHOST_MIDDLE\\r\\nHOST_SUFFIX')\n"
+        "  end)\n"
+        "end\n"
+    )
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [(b"", 0.8), (b"/quit\r", 0.8)],
+        cwd=project,
+        env_extra={
+            "NO_COLOR": "1",
+            "XDG_STATE_HOME": str(psi.tmp / "state-tui-frame-cr"),
+        },
+        idle_drain=1.0,
+    )
+    raw.assert_clean_exit()
+    assert_bytes_contains(
+        raw,
+        b"HOST_PREFIX HOST_MIDDLE HOST_SUFFIX",
+        "host frame-line guard should preserve visible text",
+    )
+    assert_bytes_not_contains(
+        raw,
+        b"HOST_PREFIX\rHOST_MIDDLE",
+        "host frame-line guard leaked a cursor-moving line ending",
+    )
+    assert_bytes_not_contains(
+        raw,
+        b"HOST_MIDDLE\r\nHOST_SUFFIX",
+        "host frame-line guard leaked CRLF",
+    )
+
+
 @test("mode/tui_chat_auth_permission_warning_owned")
 def t_tui_chat_auth_permission_warning_owned(psi: Psi):
     project = psi.tmp / "tui-chat-auth-warning"

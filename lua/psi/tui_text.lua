@@ -32,6 +32,10 @@ local BYTE_NEWLINE = 10
 local BYTE_CR = 13
 local BYTE_ESC = 27
 
+function M.normalize_line_endings(text)
+  return (tostring(text or EMPTY):gsub("\r\n", "\n"):gsub("\r", "\n"))
+end
+
 local function read_escape(text, i)
   if text:byte(i) ~= BYTE_ESC then
     return nil
@@ -70,6 +74,20 @@ local function read_escape(text, i)
     return text:sub(i, i + 1), i + 2
   end
   return text:sub(i, i + 1), i + 2
+end
+
+local function hard_newline_end(text, i)
+  local byte = text:byte(i)
+  if byte == BYTE_CR then
+    if text:byte(i + 1) == BYTE_NEWLINE then
+      return i + 2
+    end
+    return i + 1
+  end
+  if byte == BYTE_NEWLINE then
+    return i + 1
+  end
+  return nil
 end
 
 local function strip_ansi(text)
@@ -601,9 +619,15 @@ function M.wrap_ansi(text, width, opts)
         update_active_sgr(active, seq)
         i = next_i
       else
-        local cluster, cluster_width, after = next_cluster(text, i)
-        append_piece(cluster, cluster_width)
-        i = after
+        local newline_end = hard_newline_end(text, i)
+        if newline_end ~= nil then
+          emit_line()
+          i = newline_end
+        else
+          local cluster, cluster_width, after = next_cluster(text, i)
+          append_piece(cluster, cluster_width)
+          i = after
+        end
       end
     end
     if #line > 0 or #lines == 0 then
@@ -665,22 +689,26 @@ function M.wrap_ansi(text, width, opts)
       word[#word + 1] = seq
       i = next_i
     else
-      local cluster, cluster_width, after = next_cluster(text, i)
-      if cluster == "\n" then
+      local newline_end = hard_newline_end(text, i)
+      if newline_end ~= nil then
         flush_word()
         emit_line()
         pending_space = nil
         pending_space_width = 0
         soft_wrapped = false
-      elseif is_space_cluster(cluster) then
-        flush_word()
-        pending_space = " "
-        pending_space_width = pending_space_width + (cluster_width > 0 and cluster_width or 1)
+        i = newline_end
       else
-        word[#word + 1] = cluster
-        word_width = word_width + cluster_width
+        local cluster, cluster_width, after = next_cluster(text, i)
+        if is_space_cluster(cluster) then
+          flush_word()
+          pending_space = " "
+          pending_space_width = pending_space_width + (cluster_width > 0 and cluster_width or 1)
+        else
+          word[#word + 1] = cluster
+          word_width = word_width + cluster_width
+        end
+        i = after
       end
-      i = after
     end
   end
   flush_word()

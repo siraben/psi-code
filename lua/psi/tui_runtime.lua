@@ -169,6 +169,10 @@ end
 local function sanitize_terminal_text(text, preserve_newlines, preserve_line_erase, preserve_sgr)
   text = tostring(text or EMPTY)
   if preserve_newlines then
+    -- Match pi's terminal text wrapping: CRLF is one logical break and a
+    -- bare carriage return is a break too. Never let either reach a physical
+    -- terminal line, where CR would move the cursor and overwrite content.
+    text = tui_text.normalize_line_endings(text)
     if text:find("[\0-\9\11-\31\127]") == nil then
       return text
     end
@@ -1655,7 +1659,7 @@ local function entry_render_lines(state, entry)
 
   if entry.kind == "ansi" then
     local lines = {}
-    local text = trim_trailing_newlines(entry_text(entry))
+    local text = trim_trailing_newlines(tui_text.normalize_line_endings(entry_text(entry)))
     local cursor = 1
     while true do
       local nl = text:find("\n", cursor, true)
@@ -3338,6 +3342,7 @@ end
 local function insert_text(state, text)
   clear_busy_input_error(state)
   exit_history_browse(state)
+  text = tui_text.normalize_line_endings(text)
   state.input = state.input:sub(1, state.cursor) .. text .. state.input:sub(state.cursor + 1)
   state.cursor = state.cursor + #text
   state.dirty = true
@@ -4661,7 +4666,7 @@ local function apply_action(state, action, arg)
 end
 
 function chat.normalize_pasted_text(text)
-  return tostring(text or ""):gsub("\r\n", "\n"):gsub("\r", "\n"):gsub("\t", "    ")
+  return tui_text.normalize_line_endings(text):gsub("\t", "    ")
 end
 
 local function handle_key_event(state, event)
@@ -5934,6 +5939,8 @@ function M._debug_chat_redraw_sequence(steps)
         add_entry(state, "user", step.text or "")
       elseif step.kind == "assistant" then
         add_entry(state, "assistant", step.text or "")
+      elseif step.kind == "ansi" then
+        add_entry(state, "ansi", step.text or "")
       elseif step.kind == "set_input" then
         state.input = step.text or ""
         state.cursor = #state.input
