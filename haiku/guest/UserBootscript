@@ -1,0 +1,41 @@
+#!/bin/bash
+# Haiku UserBootscript — lives at
+#   /boot/home/config/settings/boot/UserBootscript
+# and runs at login (before Tracker starts). Fully self-contained:
+# installs openssh if needed, drops the psi pubkey, starts sshd on
+# port 2222 so the host can drive the rest of the build over SSH.
+
+LOG=/boot/home/userboot.log
+exec >> "$LOG" 2>&1
+echo
+echo "=== UserBootscript $(date) ==="
+
+# --- psi-env (Anthropic key) ---
+if [ -f /PSIGUEST/psi-env ]; then
+  . /PSIGUEST/psi-env
+fi
+
+# --- ssh authorized_keys (idempotent) ---
+mkdir -p /boot/home/.ssh
+chmod 700 /boot/home/.ssh
+PUBKEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILeNLzDKmfou3OsciKEoGSIzBaL71UnnL/BliwVkDYdD psi-haiku'
+if ! grep -qF "$PUBKEY" /boot/home/.ssh/authorized_keys 2>/dev/null; then
+  printf '%s\n' "$PUBKEY" >> /boot/home/.ssh/authorized_keys
+  chmod 600 /boot/home/.ssh/authorized_keys
+fi
+
+# --- sshd ---
+if ! command -v sshd >/dev/null 2>&1; then
+  pkgman install -y openssh || true
+fi
+if command -v sshd >/dev/null 2>&1; then
+  ssh-keygen -A 2>&1 | tail -5 || true
+  if ! pgrep -x sshd >/dev/null 2>&1; then
+    sshd -p 2222 &
+    echo "sshd started on port 2222"
+  else
+    echo "sshd already running"
+  fi
+fi
+
+echo "=== UserBootscript done $(date) ==="
