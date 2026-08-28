@@ -165,6 +165,126 @@ local function is_emoji_modifier(cp)
   return cp ~= nil and in_range(cp, 0x1f3fb, 0x1f3ff)
 end
 
+-- Unicode 17 Indic_Conjunct_Break data. Keep these predicates in sync with
+-- src/lua/vm.c so Lua-owned editor boundaries match the C rendering helpers.
+local INDIC_LINKERS = {
+  [0x094d] = true,
+  [0x09cd] = true,
+  [0x0acd] = true,
+  [0x0b4d] = true,
+  [0x0c4d] = true,
+  [0x0d4d] = true,
+  [0x1039] = true,
+  [0x17d2] = true,
+  [0x1a60] = true,
+  [0x1b44] = true,
+  [0x1bab] = true,
+  [0xa9c0] = true,
+  [0xaaf6] = true,
+  [0x10a3f] = true,
+  [0x11133] = true,
+  [0x113d0] = true,
+  [0x1193e] = true,
+  [0x11a47] = true,
+  [0x11a99] = true,
+  [0x11f42] = true,
+}
+
+local INDIC_CONSONANT_RANGES = {
+  { 0x0915, 0x0939 },
+  { 0x0958, 0x095f },
+  { 0x0978, 0x097f },
+  { 0x0995, 0x09a8 },
+  { 0x09aa, 0x09b0 },
+  { 0x09b2, 0x09b2 },
+  { 0x09b6, 0x09b9 },
+  { 0x09dc, 0x09dd },
+  { 0x09df, 0x09df },
+  { 0x09f0, 0x09f1 },
+  { 0x0a95, 0x0aa8 },
+  { 0x0aaa, 0x0ab0 },
+  { 0x0ab2, 0x0ab3 },
+  { 0x0ab5, 0x0ab9 },
+  { 0x0af9, 0x0af9 },
+  { 0x0b15, 0x0b28 },
+  { 0x0b2a, 0x0b30 },
+  { 0x0b32, 0x0b33 },
+  { 0x0b35, 0x0b39 },
+  { 0x0b5c, 0x0b5d },
+  { 0x0b5f, 0x0b5f },
+  { 0x0b71, 0x0b71 },
+  { 0x0c15, 0x0c28 },
+  { 0x0c2a, 0x0c39 },
+  { 0x0c58, 0x0c5a },
+  { 0x0d15, 0x0d3a },
+  { 0x1000, 0x102a },
+  { 0x103f, 0x103f },
+  { 0x1050, 0x1055 },
+  { 0x105a, 0x105d },
+  { 0x1061, 0x1061 },
+  { 0x1065, 0x1066 },
+  { 0x106e, 0x1070 },
+  { 0x1075, 0x1081 },
+  { 0x108e, 0x108e },
+  { 0x1780, 0x17b3 },
+  { 0x1a20, 0x1a54 },
+  { 0x1b0b, 0x1b0c },
+  { 0x1b13, 0x1b33 },
+  { 0x1b45, 0x1b4c },
+  { 0x1b83, 0x1ba0 },
+  { 0x1bae, 0x1baf },
+  { 0x1bbb, 0x1bbd },
+  { 0xa989, 0xa98b },
+  { 0xa98f, 0xa9b2 },
+  { 0xa9e0, 0xa9e4 },
+  { 0xa9e7, 0xa9ef },
+  { 0xa9fa, 0xa9fe },
+  { 0xaa60, 0xaa6f },
+  { 0xaa71, 0xaa73 },
+  { 0xaa7a, 0xaa7a },
+  { 0xaa7e, 0xaa7f },
+  { 0xaae0, 0xaaea },
+  { 0xabc0, 0xabda },
+  { 0x10a00, 0x10a00 },
+  { 0x10a10, 0x10a13 },
+  { 0x10a15, 0x10a17 },
+  { 0x10a19, 0x10a35 },
+  { 0x11103, 0x11126 },
+  { 0x11144, 0x11144 },
+  { 0x11147, 0x11147 },
+  { 0x11380, 0x11389 },
+  { 0x1138b, 0x1138b },
+  { 0x1138e, 0x1138e },
+  { 0x11390, 0x113b5 },
+  { 0x11900, 0x11906 },
+  { 0x11909, 0x11909 },
+  { 0x1190c, 0x11913 },
+  { 0x11915, 0x11916 },
+  { 0x11918, 0x1192f },
+  { 0x11a00, 0x11a00 },
+  { 0x11a0b, 0x11a32 },
+  { 0x11a50, 0x11a50 },
+  { 0x11a5c, 0x11a83 },
+  { 0x11f04, 0x11f10 },
+  { 0x11f12, 0x11f33 },
+}
+
+local function is_indic_linker(cp)
+  return cp ~= nil and INDIC_LINKERS[cp] == true
+end
+
+local function is_indic_consonant(cp)
+  if cp == nil or cp < 0x0915 or cp > 0x11f33 then
+    return false
+  end
+  for _, range in ipairs(INDIC_CONSONANT_RANGES) do
+    if in_range(cp, range[1], range[2]) then
+      return true
+    end
+  end
+  return false
+end
+
 local function is_wide(cp)
   return in_range(cp, 0x1100, 0x115f)
     or in_range(cp, 0x2329, 0x232a)
@@ -216,6 +336,9 @@ local function next_cluster(text, i)
   local start = i
   local cp, next_i = decode_utf8(text, i)
   local width = codepoint_width(cp)
+  local cluster_is_indic = is_indic_consonant(cp)
+  local indic_chain_valid = cluster_is_indic
+  local indic_linker_pending = false
   local saw_zwj = false
 
   if is_regional_indicator(cp) then
@@ -232,10 +355,25 @@ local function next_cluster(text, i)
     if next_cp == nil then
       break
     end
-    if is_zero_width_cluster_modifier(next_cp) then
+    if indic_chain_valid and is_indic_linker(next_cp) then
+      indic_linker_pending = true
+      i = after
+    elseif next_cp == 0x200c then
+      indic_chain_valid = false
+      indic_linker_pending = false
+      saw_zwj = false
+      i = after
+    elseif is_zero_width_cluster_modifier(next_cp) then
       i = after
     elseif next_cp == 0x200d then
-      saw_zwj = true
+      -- ZWJ extends an Indic linker chain, but cannot start one by itself.
+      if not cluster_is_indic then
+        saw_zwj = true
+      end
+      i = after
+    elseif indic_chain_valid and indic_linker_pending and is_indic_consonant(next_cp) then
+      width = width + codepoint_width(next_cp)
+      indic_linker_pending = false
       i = after
     elseif saw_zwj then
       width = math.max(width, codepoint_width(next_cp), 2)
@@ -298,10 +436,7 @@ function M.grapheme_index_at_or_before(text, cursor)
   return #text
 end
 
-function M.visible_width(text)
-  if host_visible_width then
-    return host_visible_width(text)
-  end
+local function fallback_visible_width(text)
   local width = 0
   text = tostring(text or EMPTY)
   local i = 1
@@ -318,6 +453,17 @@ function M.visible_width(text)
   return width
 end
 
+function M.visible_width(text)
+  if host_visible_width then
+    return host_visible_width(text)
+  end
+  return fallback_visible_width(text)
+end
+
+-- Test hooks keep the dependency-free implementation observable even in the
+-- normal binary, where the optimized C primitives are installed.
+M._debug_fallback_visible_width = fallback_visible_width
+
 function M.pad_line(text, width)
   if host_pad_line then
     return host_pad_line(text, width)
@@ -327,10 +473,7 @@ function M.pad_line(text, width)
   return text .. string.rep(" ", math.max(0, width - M.visible_width(text)))
 end
 
-function M.byte_index_for_width(text, width)
-  if host_byte_index_for_width then
-    return host_byte_index_for_width(text, width)
-  end
+local function fallback_byte_index_for_width(text, width)
   text = tostring(text or EMPTY)
   width = math.max(0, tonumber(width) or 0)
   if width <= 0 then
@@ -353,6 +496,15 @@ function M.byte_index_for_width(text, width)
   end
   return #text
 end
+
+function M.byte_index_for_width(text, width)
+  if host_byte_index_for_width then
+    return host_byte_index_for_width(text, width)
+  end
+  return fallback_byte_index_for_width(text, width)
+end
+
+M._debug_fallback_byte_index_for_width = fallback_byte_index_for_width
 
 local update_active_from_text
 
