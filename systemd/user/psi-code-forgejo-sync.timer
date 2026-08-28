@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the Forgejo-to-GitHub psi-code refresh daily
+
+[Timer]
+OnCalendar=*-*-* 10:30:00 UTC
+Persistent=true
+AccuracySec=1min
+RandomizedDelaySec=5min
+Unit=psi-code-forgejo-sync.service
+
+[Install]
+WantedBy=timers.target

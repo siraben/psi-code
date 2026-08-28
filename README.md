@@ -202,6 +202,7 @@ src/runtime/            CLI parser, print/repl/agent dispatch, TUI mode
 src/lua/vm.c            Lua VM and C/Lua bridge
 include/psi/            public host headers
 scripts/embed.c         build-time deflate of Lua sources and docs
+scripts/forgejo_github_sync.py  audited one-way Forgejo publication
 
 lua/boot.lua            Lua bootstrap; wires psi.* and loads extensions
 lua/psi/                tools, prompts, sessions, scheduler, markdown, TUI
@@ -214,6 +215,10 @@ docs/portability.md     porting principles and per-OS notes
 docs/port-status.md     audit against pi-mono
 docs/extensions.md      extension API and event catalog
 docs/providers.md       provider configuration
+docs/forgejo-github-sync.md  source-of-truth and audit-ledger operations
+
+migrations/forgejo-github-sync/  append-only mirror ledger schema
+systemd/user/           daily mirror service and timer templates
 
 tests/                  Python harnesses for smoke, bench, and valgrind runs
 ```

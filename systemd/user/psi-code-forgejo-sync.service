@@ -1,0 +1,18 @@
+[Unit]
+Description=Audit Forgejo and publish psi-code one-way to GitHub
+After=network-online.target
+Wants=network-online.target
+ConditionPathIsMountPoint=/mnt/siraben-ext
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/psi-coding-agent
+Environment=PATH=%h/.nix-profile/bin:/run/current-system/sw/bin:/usr/bin:/bin
+ExecStart=/run/current-system/sw/bin/python3 %h/psi-coding-agent/scripts/forgejo_github_sync.py sync --database /mnt/siraben-ext/forgejo-github-sync/audit.sqlite3 --backup-dir /mnt/siraben-ext/forgejo-github-sync/backups
+TimeoutStartSec=4h
+UMask=0077
+Nice=10
+IOSchedulingClass=idle
+IOSchedulingPriority=7
+StandardOutput=append:/mnt/siraben-ext/forgejo-github-sync/sync.log
+StandardError=append:/mnt/siraben-ext/forgejo-github-sync/sync.log
