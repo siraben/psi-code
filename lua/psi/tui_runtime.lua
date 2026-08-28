@@ -1198,6 +1198,7 @@ local function history_reverse_search(state)
     return true
   end
   if not state.history_search_active then
+    chat.editor_push_undo(state)
     state.history_search_active = true
     state.history_search_query = state.input or ""
     state.history_search_draft = state.input or ""
@@ -3503,7 +3504,12 @@ local function insert_text(state, text, atomic)
   clear_busy_input_error(state)
   exit_history_browse(state)
   text = tui_text.normalize_line_endings(text)
-  if atomic or text == "\n" or text:match("^%s+$") or state.editor_last_action ~= "type-word" then
+  if
+    atomic
+    or text == "\n"
+    or M._is_unicode_space(M._word_codepoint(text, 0))
+    or state.editor_last_action ~= "type-word"
+  then
     chat.editor_push_undo(state)
   end
   if atomic or text == "\n" then
@@ -4640,7 +4646,6 @@ local function submit(state, queue_kind)
   state.editor_mode = "insert"
   state.pending_key = nil
   exit_history_browse(state)
-  chat.editor_clear_undo(state)
 
   if state.busy then
     if state.busy_kind ~= "agent" then
@@ -4659,6 +4664,7 @@ local function submit(state, queue_kind)
         return
       end
       if action.kind == "print" then
+        chat.editor_clear_undo(state)
         if type(action.payload) == "string" and action.payload ~= "" then
           add_entry(state, "info", action.payload)
         end
@@ -4680,6 +4686,7 @@ local function submit(state, queue_kind)
         return
       end
     end
+    chat.editor_clear_undo(state)
     queue_current_input(state, line, queue_kind)
     return
   end
@@ -4687,11 +4694,13 @@ local function submit(state, queue_kind)
   if line:sub(1, 1) == "/" then
     local handled, expanded = handle_command(state, line)
     if handled then
+      chat.editor_clear_undo(state)
       return
     end
     line = expanded or ""
   end
 
+  chat.editor_clear_undo(state)
   history_add(state, line)
   add_entry(state, "user", line)
   state.streaming_assistant_index = add_entry(state, "assistant", "")

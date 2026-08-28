@@ -2125,6 +2125,18 @@ def t_tui_undo_kill_ring(psi: Psi):
         "decoded undo/yank/yank-pop did not restore and submit /help",
     )
 
+
+@test("mode/tui_legacy_ctrl_minus_undo")
+def t_tui_legacy_ctrl_minus_undo(psi: Psi):
+    # Traditional terminals encode Ctrl-Minus/Ctrl-Underscore as byte 0x1f.
+    # Undo must clear abc so the following /quit remains a valid command.
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [(b"", 0.5), (b"abc\x1f/quit\r", 1.0)],
+        env_extra={"XDG_STATE_HOME": str(psi.tmp / "state-tui-legacy-ctrl-minus")},
+    )
+    raw.assert_clean_exit()
+
 @test("mode/tui_lf_submit")
 def t_tui_lf_submit(psi: Psi):
     raw = run_pty(
