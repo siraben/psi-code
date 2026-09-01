@@ -733,6 +733,9 @@ local function cmd_reload()
     if psi.tui.clear_status_hooks then
       pcall(psi.tui.clear_status_hooks)
     end
+    if psi.tui.clear_footer_line_hooks then
+      pcall(psi.tui.clear_footer_line_hooks)
+    end
     if psi.tui.clear_clipboard_writers then
       pcall(psi.tui.clear_clipboard_writers)
     end

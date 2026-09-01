@@ -2061,8 +2061,22 @@ local function layout_rows(state)
     input_first_line = #input_lines - input_rows + 1
   end
   local footer_row = state.height
+  local footer_extra_rows = state.footer_extra_rows
+  if footer_extra_rows == nil then
+    -- No redraw has stashed a hook-row count yet (first paint, or the
+    -- _debug harness). Run the hooks directly; they are documented as
+    -- cheap, per-redraw functions.
+    footer_extra_rows = 0
+    if tui.has_footer_line_hooks ~= nil and tui.has_footer_line_hooks() then
+      footer_extra_rows = #tui.footer_lines({
+        model = state.model and state.model.id or (state.opts and state.opts.model) or nil,
+        busy = not not state.busy,
+        scroll = tonumber(state.scroll_offset) or 0,
+      })
+    end
+  end
   local input_box_rows = input_rows + 2
-  local input_start_row = footer_row - input_box_rows
+  local input_start_row = footer_row - footer_extra_rows - input_box_rows
   local status_visible = state.busy or state.status_text ~= nil
   local status_row = status_visible and (input_start_row - 1) or nil
   local transcript_start = 2
@@ -2105,6 +2119,7 @@ local function layout_rows(state)
     status_visible = status_visible,
     status_row = status_row,
     footer_row = footer_row,
+    footer_extra_rows = footer_extra_rows,
     input_start_row = input_start_row,
     command_completions = command_completions,
     command_completion_rows = command_completion_rows,
@@ -2195,9 +2210,11 @@ local function ensure_frame_components(state)
 end
 
 -- Footer cache: rebuilt only when model/session/count change; never
--- cached while extension status hooks are registered (output may vary).
+-- cached while extension status or footer-line hooks are registered
+-- (output may vary).
 function chat.footer_bar_line(state, status_arg, frame_width)
-  local hooks_active = tui.has_status_hooks ~= nil and tui.has_status_hooks()
+  local hooks_active = (tui.has_status_hooks ~= nil and tui.has_status_hooks())
+    or (tui.has_footer_line_hooks ~= nil and tui.has_footer_line_hooks())
   local session_id = type(psi.session_id) == "function" and psi.session_id() or nil
   local message_count = type(psi.session_message_count) == "function"
       and psi.session_message_count()
@@ -2228,6 +2245,19 @@ function chat.footer_bar_line(state, status_arg, frame_width)
   return line
 end
 
+-- Extra footer rows contributed by registered footer-line hooks. Hooks
+-- run once per redraw here; the row count is stashed on state so
+-- layout_rows can account for the variable footer height without
+-- re-running (potentially stateful) hooks.
+function chat.footer_extra_lines(state, status_arg)
+  local rows = {}
+  if tui.has_footer_line_hooks ~= nil and tui.has_footer_line_hooks() then
+    rows = tui.footer_lines(status_arg) or {}
+  end
+  state.footer_extra_rows = #rows
+  return rows
+end
+
 local function redraw(state)
   if type(state.flush_notices) == "function" then
     state.flush_notices()
@@ -2249,11 +2279,27 @@ local function redraw(state)
   state.width = terminal_width
   state.terminal_height = terminal_height
   state.height = inline_viewport_height(terminal_height)
+  -- status_arg doubles as the arg table for status/footer-line hooks.
+  -- Build it before layout so the footer-line hooks run exactly once
+  -- per redraw and layout_rows sees the stashed extra-row count.
+  local status_arg = {
+    model = state.model and state.model.id or state.opts.model,
+    provider = state.model and state.model.provider or nil,
+    context_window = state.model and state.model.context_window or nil,
+    busy = state.busy,
+    busy_label = state.busy_label,
+    elapsed_seconds = state.busy_started_at and (os.time() - state.busy_started_at) or 0,
+    busy_phase = state.busy_phase,
+    scroll = state.scroll_offset,
+    editor_mode = state.editor_mode,
+    selection_kind = state.selection_kind,
+    show_queue_in_status = false,
+  }
+  local footer_extra = chat.footer_extra_lines(state, status_arg)
   local rows = layout_rows(state)
   local total_lines = total_rendered_lines(state)
   local max_scroll = math.max(0, total_lines - rows.transcript_height)
   state.last_transcript_height = rows.transcript_height
-  local status_arg
   local status_text = ""
   local cwd
   local frame = ensure_frame_components(state)
@@ -2315,20 +2361,6 @@ local function redraw(state)
   end
   frame.pending:set_lines(rows.pending_lines or {})
 
-  status_arg = {
-    model = state.model and state.model.id or state.opts.model,
-    provider = state.model and state.model.provider or nil,
-    context_window = state.model and state.model.context_window or nil,
-    busy = state.busy,
-    busy_label = state.busy_label,
-    elapsed_seconds = state.busy_started_at and (os.time() - state.busy_started_at) or 0,
-    busy_phase = state.busy_phase,
-    scroll = state.scroll_offset,
-    editor_mode = state.editor_mode,
-    selection_kind = state.selection_kind,
-    show_queue_in_status = false,
-  }
-
   if state.status_text ~= nil then
     status_text = state.status_is_error and ansi.bold(ansi.red(state.status_text))
       or ansi.dim(state.status_text)
@@ -2377,7 +2409,11 @@ local function redraw(state)
   input_component_lines[#input_component_lines + 1] = style_input_border(input_width)
   frame.input:set_lines(input_component_lines)
 
-  frame.footer:set_lines({ chat.footer_bar_line(state, status_arg, frame_width) })
+  local footer_lines = { chat.footer_bar_line(state, status_arg, frame_width) }
+  for _, row in ipairs(footer_extra) do
+    footer_lines[#footer_lines + 1] = row
+  end
+  frame.footer:set_lines(footer_lines)
   local visible_cursor_line = rows.cursor_line - rows.input_first_line + 1
   local cursor_prefix = rows.cursor_line == 1 and state.input_layout.prefix_first
     or state.input_layout.prefix_rest
@@ -2517,6 +2553,7 @@ function chat.redraw(state)
     selection_kind = state.selection_kind,
     show_queue_in_status = false,
   }
+  local footer_extra = chat.footer_extra_lines(state, status_arg)
   local status_text = nil
   if state.status_text ~= nil then
     status_text = state.status_is_error and ansi.bold(ansi.red(state.status_text))
@@ -2576,6 +2613,9 @@ function chat.redraw(state)
   end
   live_lines[#live_lines + 1] = style_input_border(input_width)
   live_lines[#live_lines + 1] = chat.footer_bar_line(state, status_arg, frame_width)
+  for _, row in ipairs(footer_extra) do
+    live_lines[#live_lines + 1] = row
+  end
 
   -- 4. Emit live region inside synchronized output, then position cursor.
   out[#out + 1] = "\27[?2026h\27[?25l"
