@@ -105,6 +105,65 @@ function M.has_status_hooks()
   return #status_hooks > 0
 end
 
+-- Footer-line hooks. Extensions can register fns that each contribute
+-- full-width rows rendered below the status/footer bar (unlike status
+-- hooks, which append right-side segments to the single bar line).
+-- Called on every redraw, so they must be cheap and side-effect-free.
+-- Each call should return one row as a string (or nil / "" to skip);
+-- a string containing "\n" is split into one row per line.
+--
+-- Example:
+--   psi.tui.register_footer_line(function()
+--     return "agents: 3 running  •  1 waiting"
+--   end)
+local footer_line_hooks = {}
+local next_footer_line_hook_id = 0
+
+function M.register_footer_line(fn)
+  if type(fn) ~= "function" then
+    return false, "footer line hook must be a function"
+  end
+  next_footer_line_hook_id = next_footer_line_hook_id + 1
+  footer_line_hooks[#footer_line_hooks + 1] = { id = next_footer_line_hook_id, fn = fn }
+  return next_footer_line_hook_id
+end
+
+function M.unregister_footer_line(id)
+  for index, hook in ipairs(footer_line_hooks) do
+    if hook.id == id then
+      table.remove(footer_line_hooks, index)
+      return true
+    end
+  end
+  return false
+end
+
+function M.clear_footer_line_hooks()
+  footer_line_hooks = {}
+end
+
+function M.has_footer_line_hooks()
+  return #footer_line_hooks > 0
+end
+
+-- Run all footer-line hooks with the same arg table the status hooks
+-- receive and return the rows to render, in registration order (one
+-- array entry per row; embedded "\n" splits into multiple rows).
+-- Hook errors are swallowed like status-hook errors so one bad
+-- extension cannot break the footer for everyone.
+function M.footer_lines(arg)
+  local rows = {}
+  for _, hook in ipairs(footer_line_hooks) do
+    local ok, extra = pcall(hook.fn, arg)
+    if ok and type(extra) == "string" and extra ~= "" then
+      for row in (extra .. "\n"):gmatch("(.-)\n") do
+        rows[#rows + 1] = row
+      end
+    end
+  end
+  return rows
+end
+
 local command_action_handlers = {}
 
 function M.register_command_action_handler(kind, fn)

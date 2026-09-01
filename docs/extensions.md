@@ -33,7 +33,7 @@ skip untrusted project extensions by default; `--trust` / `--no-trust`
 extension discovery entirely.
 
 `/reload` reloads keybindings, settings, prompt templates, bundled TUI
-extension state, TUI key/status/clipboard hooks, and user extensions. It then
+extension state, TUI key/status/footer-line/clipboard hooks, and user extensions. It then
 runs TUI startup hooks so settings-gated extensions can match the fresh
 configuration. Extension registration should be idempotent across a fresh load;
 TUI hooks do not need to unregister themselves first.
@@ -346,6 +346,9 @@ These are part of the stable surface:
 | `psi.tui.register_status_hook(fn)` | Append a short status-bar snippet. `fn(status)` is called on every redraw (must be cheap) and returns a string or nil. Returns a hook id. Useful for tokens/sec meters, background-task indicators, etc. Suppressed while an active status message is on screen. |
 | `psi.tui.unregister_status_hook(id)` | Remove one status hook previously returned by `register_status_hook`. |
 | `psi.tui.clear_status_hooks()` | Remove registered status hooks. Mostly useful in tests. |
+| `psi.tui.register_footer_line(fn)` | Append a full-width row below the status/footer bar. `fn(status)` receives the same arg table as status hooks, is called on every redraw (must be cheap), and returns a string or nil. Each returned string is one row; an embedded `\n` splits it into multiple rows. Multiple hooks stack in registration order. Returns a hook id. Useful for multi-row coordination planes, agent rosters, build tickers, etc. The footer grows by one terminal row per hook row and the transcript shrinks accordingly. |
+| `psi.tui.unregister_footer_line(id)` | Remove one footer-line hook previously returned by `register_footer_line`. |
+| `psi.tui.clear_footer_line_hooks()` | Remove registered footer-line hooks. Mostly useful in tests. |
 | `psi.tui.register_clipboard_writer(fn)` | Append a TUI clipboard writer used by yank-style editor actions. `fn(text, context)` should return `true` when it handled the write. Returns a writer id. |
 | `psi.tui.unregister_clipboard_writer(id)` | Remove one clipboard writer previously returned by `register_clipboard_writer`. |
 | `psi.tui.clear_clipboard_writers()` | Remove registered clipboard writers. Mostly useful in tests and reload reset paths. |
