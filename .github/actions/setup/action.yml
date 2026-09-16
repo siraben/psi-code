@@ -1,0 +1,17 @@
+name: Set up CI environment
+description: Install Nix and configure the build directory on a GitHub-hosted runner.
+
+inputs:
+  github-token:
+    description: GitHub token used by Nix to fetch flake inputs without anonymous API limits.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      with:
+        github_access_token: ${{ inputs.github-token }}
+    - name: Set build directory
+      shell: bash
+      run: echo "CI_BUILD_DIR=$GITHUB_WORKSPACE/build" >> "$GITHUB_ENV"
