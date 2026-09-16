@@ -802,6 +802,7 @@ def t_diff_render_numbered_tool_diff(psi: Psi):
     out = psi.run(
         "--eval",
         'local ansi = require("psi.ansi")\n'
+        + 'ansi.enabled = (psi.runtime_info() or {}).ansi ~= false\n'
         + 'ansi.color_enabled = true\n'
         + 'local rendered = require("psi.tui_components.diff").render_diff("-12 old word\\n+12 new word\\n 13 same\\n   ...")\n'
         + 'return tostring((psi.runtime_info() or {}).ansi ~= false) .. "\\n" .. rendered',
@@ -821,6 +822,7 @@ def t_markdown_inline_code_no_backticks(psi: Psi):
     out = psi.run(
         "--eval",
         'local ansi = require("psi.ansi")\n'
+        + 'ansi.enabled = (psi.runtime_info() or {}).ansi ~= false\n'
         + 'ansi.color_enabled = true\n'
         + 'return require("psi.markdown").render_line("Use `psi` here")',
     ).stdout.rstrip("\n")
@@ -846,6 +848,7 @@ def t_markdown_component_multiline_emphasis(psi: Psi):
     out = psi.run(
         "--eval",
         'local ansi = require("psi.ansi")\n'
+        + 'ansi.enabled = (psi.runtime_info() or {}).ansi ~= false\n'
         + 'ansi.color_enabled = true\n'
         + 'local c = require("psi.tui_components.markdown").new({ text = "**bold\\ncontinued** and tail" })\n'
         + 'return tostring((psi.runtime_info() or {}).ansi ~= false) .. "\\n" .. table.concat(c:render(80), "\\n")',
@@ -1275,6 +1278,7 @@ def t_tui_busy_status(psi: Psi):
     out = psi.run(
         "--eval",
         'local ansi = require("psi.ansi")\n'
+        + 'ansi.enabled = (psi.runtime_info() or {}).ansi ~= false\n'
         + 'ansi.color_enabled = true\n'
         + 'return require("psi.tui_status").render_busy_status("working", 2, 4, 5)',
     ).stdout.rstrip("\n")

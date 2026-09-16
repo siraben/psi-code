@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run inside the feature-matrix CI job. Reads MAKE_FLAGS and SMOKE_EXCLUDES
 # from the environment (passed via the workflow step's `env:` block), and
-# expects CI_BUILD_DIR to be set (call scripts/ci/setup-env.sh first).
+# expects CI_BUILD_DIR to be set by .github/actions/setup.
 
 set -euo pipefail
 

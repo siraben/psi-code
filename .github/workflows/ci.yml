@@ -5,157 +5,116 @@ on:
     branches:
       - master
   pull_request:
+  workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
 env:
-  NIX_CONFIG: |
-    experimental-features = nix-command flakes
-    build-users-group =
   LANG: C.UTF-8
   LC_ALL: C.UTF-8
   TERM: xterm-256color
-  FORGEJO_CI_URL: https://office-desktop.tail5ca7.ts.net/forgejo
-  FORGEJO_CI_REPOSITORY: siraben/psi-coding-agent
-  # actions/checkout is a JS action and the runner image (nixos/nix:latest)
-  # has no Node, so we hand-roll the fetch. The repo isn't on disk yet, so a
-  # composite action can't help here either: its action.yml lives in the repo.
-  FETCH_SCRIPT: |
-    token="${FORGEJO_TOKEN:-${GITHUB_TOKEN:-}}"
-    workspace="/tmp/psi-ci-${GITHUB_RUN_ID}-${GITHUB_JOB}-${GITHUB_RUN_ATTEMPT}-workspace"
-    rm -rf "$workspace"
-    mkdir -p "$workspace"
-    cd "$workspace"
-    git init .
-    git remote add origin "${FORGEJO_CI_URL%/}/${FORGEJO_CI_REPOSITORY}"
-    fetch_ref() {
-      if [ -n "$token" ]; then
-        auth_header="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
-        GIT_TERMINAL_PROMPT=0 git -c "http.extraHeader=Authorization: Basic $auth_header" fetch --quiet --depth=1 origin "$1"
-      else
-        GIT_TERMINAL_PROMPT=0 git fetch --quiet --depth=1 origin "$1"
-      fi
-    }
-    # When a pipeline pileup has every job container fetching at once, the
-    # server intermittently refuses connections and git exits 128 within
-    # seconds, failing the job before it does any work. Retry each ref with
-    # backoff before falling through to the next one.
-    fetch_ref_retry() {
-      attempt=1
-      until fetch_ref "$1"; do
-        [ "$attempt" -ge 5 ] && return 1
-        sleep $((attempt * 3))
-        attempt=$((attempt + 1))
-      done
-    }
-    checkout_fetched() {
-      git checkout --detach "$GITHUB_SHA" 2>/dev/null || git checkout --detach FETCH_HEAD
-    }
-    checked_out=0
-    for ref in "$GITHUB_SHA" "$GITHUB_REF"; do
-      if fetch_ref_retry "$ref" && checkout_fetched; then
-        checked_out=1
-        break
-      fi
-    done
-    case "${GITHUB_REF:-}" in
-      refs/pull/*/*)
-        pr_number="${GITHUB_REF#refs/pull/}"
-        pr_number="${pr_number%%/*}"
-        for ref in "refs/pull/${pr_number}/head" "refs/pull/${pr_number}/merge"; do
-          [ "$checked_out" -eq 1 ] && break
-          if fetch_ref_retry "$ref" && checkout_fetched; then
-            checked_out=1
-          fi
-        done
-        ;;
-    esac
-    if [ "$checked_out" -ne 1 ]; then
-      fetch_ref_retry "+refs/pull/*/head:refs/remotes/origin/pr/*"
-      git checkout --detach "$GITHUB_SHA"
-    fi
-  SETUP_SCRIPT: |
-    tag="/tmp/psi-ci-${GITHUB_RUN_ID}-${GITHUB_JOB}-${GITHUB_RUN_ATTEMPT}"
-    home_dir="${tag}-home"
-    cache_dir="${tag}-cache"
-    rm -rf "$home_dir" "$cache_dir"
-    mkdir -p "$home_dir" "$cache_dir"
-    export HOME="$home_dir"
-    export XDG_CACHE_HOME="$cache_dir"
-    if [ -n "${BUILD_DIR_SUFFIX:-}" ]; then
-      build_dir="${tag}-${BUILD_DIR_SUFFIX}"
-      rm -rf build "$build_dir"
-      mkdir -p "$build_dir"
-      ln -s "$build_dir" build
-      export CI_BUILD_DIR="$build_dir"
-    fi
 
 jobs:
   format:
     name: C formatting
-    runs-on: docker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          github-token: ${{ github.token }}
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Check C formatting
         run: |
-          eval "$FETCH_SCRIPT"
-          eval "$SETUP_SCRIPT"
           nix develop --command make check-format-c
 
   style:
     name: Style and static analysis
-    runs-on: docker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     needs: [format]
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          github-token: ${{ github.token }}
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Run style and static analysis
-        env:
-          BUILD_DIR_SUFFIX: ${{ github.job }}
         run: |
-          eval "$FETCH_SCRIPT"
-          eval "$SETUP_SCRIPT"
           nix develop --command make BUILD_DIR="$CI_BUILD_DIR" lint
 
   sbom-audit:
     name: SBOM audit
-    runs-on: docker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     needs: [valgrind]
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          github-token: ${{ github.token }}
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Run runtime dependency audit
         run: |
-          eval "$FETCH_SCRIPT"
-          eval "$SETUP_SCRIPT"
           nix run .#audit-sbom -- .#default sbom
 
   infer:
     name: Infer static analysis
-    runs-on: docker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     needs: [style]
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          github-token: ${{ github.token }}
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Run Infer
         run: |
-          eval "$FETCH_SCRIPT"
-          eval "$SETUP_SCRIPT"
-          tag="/tmp/psi-ci-${GITHUB_RUN_ID}-${GITHUB_JOB}-${GITHUB_RUN_ATTEMPT}"
-          export INFER_BUILD_DIR="${tag}-build"
-          export INFER_RESULTS_DIR="${tag}-infer-out"
+          export INFER_BUILD_DIR="$RUNNER_TEMP/infer-build"
+          export INFER_RESULTS_DIR="$RUNNER_TEMP/infer-out"
           nix run .#infer
 
   scan-build:
     name: Clang static analyzer
-    runs-on: docker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     needs: [infer]
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          github-token: ${{ github.token }}
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Run scan-build
         run: |
-          eval "$FETCH_SCRIPT"
-          eval "$SETUP_SCRIPT"
-          export SCAN_BUILD_BUILD_DIR="/tmp/psi-ci-${GITHUB_RUN_ID}-${GITHUB_JOB}-${GITHUB_RUN_ATTEMPT}-build"
+          export SCAN_BUILD_BUILD_DIR="$RUNNER_TEMP/scan-build"
           nix run .#scan-build
 
   feature-matrix:
     name: Build and smoke (${{ matrix.name }})
-    runs-on: docker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     needs: [scan-build]
     strategy:
       fail-fast: false
@@ -180,19 +139,24 @@ jobs:
             make_flags: "TUI=0 ANSI=0 COLOR=0 REPL_EDITLINE=0"
             smoke_excludes: "events/tui,render/tui,tui/,mode/tui,commands/rainbow,markdown/inline_code_no_backticks,theme/compound_ansi_mapping,theme/composite_ansi_remap,ansi/windows_console_force_ansi,ansi/windows_console_plain_by_default,ansi/windows_msys_allows_ansi,ansi/windows_xterm_allows_ansi,ansi/piped_stdout_force_ansi"
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          github-token: ${{ github.token }}
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Build and run smoke tests
         env:
-          BUILD_DIR_SUFFIX: feature-${{ matrix.name }}
           MAKE_FLAGS: ${{ matrix.make_flags }}
           SMOKE_EXCLUDES: ${{ matrix.smoke_excludes }}
         run: |
-          eval "$FETCH_SCRIPT"
-          eval "$SETUP_SCRIPT"
           bash scripts/ci/build-and-smoke.sh
 
   libc-matrix:
     name: Libc package and smoke (${{ matrix.name }})
-    runs-on: docker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     needs: [feature-matrix]
     strategy:
       fail-fast: false
@@ -215,19 +179,25 @@ jobs:
             nix_build_flags: ""
             smoke_excludes: ""
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          github-token: ${{ github.token }}
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Build package and run smoke tests when applicable
         env:
           PACKAGE_ATTR: ${{ matrix.package }}
           NIX_BUILD_FLAGS: ${{ matrix.nix_build_flags }}
           SMOKE_EXCLUDES: ${{ matrix.smoke_excludes }}
         run: |
-          eval "$FETCH_SCRIPT"
-          eval "$SETUP_SCRIPT"
           bash scripts/ci/package-smoke.sh
 
   compiler-matrix:
     name: Compiler package and smoke (${{ matrix.name }})
-    runs-on: docker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     needs: [libc-matrix]
     strategy:
       fail-fast: false
@@ -249,26 +219,37 @@ jobs:
             package: psi-compcert
             smoke_excludes: ""
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          github-token: ${{ github.token }}
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Build package and run smoke tests
         env:
           PACKAGE_ATTR: ${{ matrix.package }}
           SMOKE_EXCLUDES: ${{ matrix.smoke_excludes }}
         run: |
-          eval "$FETCH_SCRIPT"
-          eval "$SETUP_SCRIPT"
           bash scripts/ci/package-smoke.sh
 
   valgrind:
     name: Valgrind
-    runs-on: docker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     needs: [compiler-matrix]
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          github-token: ${{ github.token }}
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Run memcheck harness
-        env:
-          BUILD_DIR_SUFFIX: ${{ github.job }}
         run: |
-          eval "$FETCH_SCRIPT"
-          eval "$SETUP_SCRIPT"
+          # CI_BUILD_DIR is expanded by the shell inside nix develop.
+          # shellcheck disable=SC2016
           nix develop --command bash -euxo pipefail -c '
             make BUILD_DIR="$CI_BUILD_DIR"
             bash tests/valgrind.sh
