@@ -368,7 +368,8 @@ function M.clip_ansi(text, width)
   update_active_from_text(active, clipped)
   if active.hyperlink ~= nil then
     clipped = clipped .. OSC8_CLOSE_PREFIX .. (active.hyperlink_terminator or BEL)
-  elseif #active > 0 then
+  end
+  if #active > 0 then
     clipped = clipped .. ANSI_RESET_STYLE
   end
   return clipped
@@ -486,7 +487,7 @@ update_active_from_text = function(active, text)
 end
 
 local function append_active_prefix(out, active)
-  if #out == 0 and #active > 0 then
+  if #out == 0 and (#active > 0 or active.hyperlink ~= nil) then
     out[#out + 1] = ansi_active_prefix(active)
   end
 end
@@ -507,10 +508,11 @@ function M.slice_by_columns(text, start_col, width, strict)
   while i <= #text do
     local seq, next_i = read_escape(text, i)
     if seq then
-      update_active_sgr(active, seq)
       if col >= start_col and col < finish_col then
+        append_active_prefix(out, active)
         out[#out + 1] = seq
       end
+      update_active_escape(active, seq)
       i = next_i
     else
       local cluster, cluster_width, after = next_cluster(text, i)
@@ -536,8 +538,13 @@ function M.slice_by_columns(text, start_col, width, strict)
   end
 
   local rendered = table.concat(out)
-  if rendered ~= "" and #active > 0 then
-    rendered = rendered .. ESC .. "[0m"
+  if rendered ~= "" then
+    if active.hyperlink ~= nil then
+      rendered = rendered .. OSC8_CLOSE_PREFIX .. (active.hyperlink_terminator or BEL)
+    end
+    if #active > 0 then
+      rendered = rendered .. ANSI_RESET_STYLE
+    end
   end
   return rendered
 end
