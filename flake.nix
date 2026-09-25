@@ -396,7 +396,10 @@
           psi = mkPsi { p = pkgs; };
           default = self.packages.${system}.psi;
           psi-gcc = self.packages.${system}.psi;
-          c-ward = pkgs.callPackage ./nix/c-ward.nix {};
+          # c-ward 0.22.3's printf-compat still uses VaList::arg, removed by
+          # Rust 1.98. Reuse the already-pinned cosmo input's older native
+          # Rust toolchain until c-ward supports the new API.
+          c-ward = (if isLinux then cosmoBase else pkgs).callPackage ./nix/c-ward.nix {};
 
           psi-clang = mkPsi {
             p = pkgs;
