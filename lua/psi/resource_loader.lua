@@ -119,4 +119,95 @@ function M.append_system_prompt_file()
   })
 end
 
+-- Skills are advertised by metadata only. The model reads SKILL.md with
+-- the ordinary read tool when a task matches; scanning never executes code.
+local function skill_metadata(path)
+  if psi.file_type(path) ~= "file" then
+    return nil
+  end
+  -- Frontmatter is small; avoid loading bundled reference material just to
+  -- discover the skill. A header that exceeds this bound is ignored.
+  local content = psi.read_file_prefix(path, 8192)
+  if type(content) ~= "string" then
+    return nil
+  end
+  content = content:gsub("^\239\187\191", ""):gsub("\r\n", "\n")
+  local header = content:match("^%-%-%-\n(.-)\n%-%-%-\n")
+    or content:match("^%-%-%-\n(.-)\n%-%-%-$")
+  if not header then
+    return nil
+  end
+  local fields = {}
+  for line in (header .. "\n"):gmatch("([^\n]*)\n") do
+    local key, value = line:match("^([%w%-]+):%s*(.-)%s*$")
+    if key and value then
+      if value:match('^".*"$') or value:match("^'.*'$") then
+        value = value:sub(2, -2)
+      end
+      fields[key] = value
+    end
+  end
+  local description = fields.description
+  if not description or description == "" or #description > 1024 then
+    return nil
+  end
+  local directory = psi.parent_directory(path)
+  local name = fields.name or directory:match("([^/\\]+)$")
+  if not name or #name > 64 or name:find("--", 1, true)
+    or not (name:match("^[a-z0-9]$") or name:match("^[a-z0-9][a-z0-9-]*[a-z0-9]$")) then
+    return nil
+  end
+  return {
+    name = name,
+    description = description,
+    path = path,
+    directory = directory,
+    disable_model_invocation = fields["disable-model-invocation"] == "true",
+  }
+end
+
+local function scan_skill_dir(dir, out, seen_dirs, seen_names)
+  if psi.file_type(dir) ~= "directory" then
+    return
+  end
+  local canonical = psi.path_realpath and psi.path_realpath(dir) or dir
+  if seen_dirs[canonical] then
+    return
+  end
+  seen_dirs[canonical] = true
+
+  local skill = skill_metadata(prelude.path_join(dir, "SKILL.md"))
+  if skill then
+    if not seen_names[skill.name] then
+      out[#out + 1] = skill
+      seen_names[skill.name] = true
+    end
+    return
+  end
+
+  local entries = psi.list_dir(dir) or {}
+  table.sort(entries)
+  for _, name in ipairs(entries) do
+    if name:sub(1, 1) ~= "." and name ~= "node_modules" then
+      local child = prelude.path_join(dir, name)
+      if psi.file_type(child) == "directory" then
+        scan_skill_dir(child, out, seen_dirs, seen_names)
+      end
+    end
+  end
+end
+
+function M.skills()
+  local found, seen_dirs, seen_names = {}, {}, {}
+  local cfg = config_dir()
+  if cfg then
+    scan_skill_dir(prelude.path_join(cfg, "skills"), found, seen_dirs, seen_names)
+  end
+  if psi.project_trusted then
+    local project_dir = prelude.path_join(prelude.path_join(psi.cwd(), ".psi"), "skills")
+    scan_skill_dir(project_dir, found, seen_dirs, seen_names)
+  end
+  return found
+end
+
 return M

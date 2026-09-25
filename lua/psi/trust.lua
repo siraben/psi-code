@@ -2,7 +2,7 @@
 --
 -- A checkout can ship ./.psi/extensions (code executed at startup),
 -- ./.psi/settings.json (provider/model defaults), ./.psi/SYSTEM.md and
--- APPEND_SYSTEM.md (system prompt control), ./.psi/prompts and
+-- APPEND_SYSTEM.md (system prompt control), ./.psi/skills, ./.psi/prompts and
 -- keybindings.json. Loading these unconditionally turns `cd evil-repo
 -- && psi` into silent code execution, so they stay disabled until the
 -- directory is trusted. Trust decisions are kept in
@@ -17,6 +17,7 @@ local RESOURCE_NAMES = {
   "settings.json",
   "extensions",
   "prompts",
+  "skills",
   "SYSTEM.md",
   "APPEND_SYSTEM.md",
   "keybindings.json",

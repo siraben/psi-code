@@ -165,7 +165,7 @@ out of the box. Extensions add more with `psi.tools.register`.
 
 Drop a Lua file in any of:
 
-- `$PSI_EXTENSIONS_DIR` (colon-separated, takes precedence)
+- `$PSI_EXTENSIONS_DIR` (colon-separated, loaded first)
 - `~/.config/psi/extensions/`
 - `./.psi/extensions/`
 
@@ -177,6 +177,17 @@ sessions prompt once; non-interactive modes skip untrusted project resources.
 Use `--trust` or `--no-trust` to override that decision for one run.
 
 See [docs/extensions.md](docs/extensions.md).
+
+## Skills
+
+Put each skill's `SKILL.md` under `~/.config/psi/skills/<name>/` or
+`./.psi/skills/<name>/` (use `$XDG_CONFIG_HOME/psi/skills/` when set).
+The file needs frontmatter with a single-line `description` and may set `name`.
+Psi lists skill names, descriptions, and file paths in the system prompt;
+the agent reads the full file with `read` when a task matches. Project skills
+load only after the workspace is trusted. Set `disable-model-invocation: true`
+to keep a skill out of the model's list. Skill packages, `/skill:name`, and
+`.agents/skills` discovery are not implemented.
 
 ## Sessions
 
