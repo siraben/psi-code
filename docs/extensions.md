@@ -130,7 +130,7 @@ end
 
 | API | Notes |
 |---|---|
-| `psi.events.on(event, fn)` | Subscribe. `fn(payload)`. |
+| `psi.events.on(event, fn)` | Subscribe. `fn(payload)`. Returns an unsubscribe function. |
 | `psi.events.off(event, fn)` | Unsubscribe a specific handler. |
 | `psi.events.emit(event, payload)` | Fire an event (extensions can emit custom events). |
 | `psi.events.handlers(event)` | Introspection; shallow copy. |
