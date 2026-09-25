@@ -309,54 +309,76 @@ function M.run_compact(opts)
     return true, "session is already small enough"
   end
   plan.tokens_before = context.estimate_context_tokens().tokens
-  plan.reason = opts.reason
+  plan.reason = opts.reason or "manual"
 
-  local provider, resolved = pick_provider(M.current_model(opts.model))
-  local thinking_level = M.thinking_level_for(resolved, opts.thinking_level, opts.reasoning_effort)
-
-  local function complete(request, max_tokens)
-    local model_max = tonumber(resolved.max_output_tokens)
-    if model_max and model_max > 0 then
-      max_tokens = math.min(max_tokens, model_max)
-    end
-    return sched.run(function()
-      return provider.complete_text({
-        system_prompt = request[1],
-        user_text = request[2],
-        model = resolved.id,
-        max_tokens = max_tokens,
-        thinking_level = thinking_level,
-        reasoning_effort = M.current_reasoning_effort(opts.reasoning_effort),
-        abort_check = opts.abort_check,
-      })
-    end)
+  -- Extensions may stop compaction or provide a summary without making a
+  -- provider request. This hook runs before any transcript mutation.
+  local before = {
+    plan = plan,
+    reason = plan.reason,
+    will_retry = opts.will_retry == true,
+  }
+  if psi.events then
+    psi.events.emit("session_before_compact", before)
+  end
+  if before.cancel then
+    return false, "compaction cancelled"
+  end
+  if before.summary ~= nil and (type(before.summary) ~= "string" or before.summary == "") then
+    return false, "extension compaction summary must be a nonempty string"
   end
 
-  local summary
-  if plan.is_split_turn then
-    local history = plan.previous_summary or "No prior history."
-    if #plan.messages_to_summarize > 0 then
-      local ok
-      ok, history = complete(prompt.compaction_request(plan), context.compaction_budget())
-      if not ok then
-        return false, history
+  local summary = before.summary
+  if not summary then
+    local provider, resolved = pick_provider(M.current_model(opts.model))
+    local thinking_level = M.thinking_level_for(resolved, opts.thinking_level, opts.reasoning_effort)
+
+    local function complete(request, max_tokens)
+      local model_max = tonumber(resolved.max_output_tokens)
+      if model_max and model_max > 0 then
+        max_tokens = math.min(max_tokens, model_max)
       end
+      return sched.run(function()
+        return provider.complete_text({
+          system_prompt = request[1],
+          user_text = request[2],
+          model = resolved.id,
+          max_tokens = max_tokens,
+          thinking_level = thinking_level,
+          reasoning_effort = M.current_reasoning_effort(opts.reasoning_effort),
+          abort_check = opts.abort_check,
+        })
+      end)
     end
-    local ok, prefix = complete(prompt.turn_prefix_request(plan), context.turn_prefix_budget())
-    if not ok then
-      return false, prefix
-    end
-    summary = history .. "\n\n---\n\n**Turn Context (split turn):**\n\n" .. prefix
-  else
-    local request = prompt.compaction_request(plan)
-    local ok
-    ok, summary = complete(request, context.compaction_budget())
-    if not ok then
-      return false, summary
+
+    if plan.is_split_turn then
+      local history = plan.previous_summary or "No prior history."
+      if #plan.messages_to_summarize > 0 then
+        local ok
+        ok, history = complete(prompt.compaction_request(plan), context.compaction_budget())
+        if not ok then
+          return false, history
+        end
+      end
+      local ok, prefix = complete(prompt.turn_prefix_request(plan), context.turn_prefix_budget())
+      if not ok then
+        return false, prefix
+      end
+      summary = history .. "\n\n---\n\n**Turn Context (split turn):**\n\n" .. prefix
+    else
+      local request = prompt.compaction_request(plan)
+      local ok
+      ok, summary = complete(request, context.compaction_budget())
+      if not ok then
+        return false, summary
+      end
     end
   end
 
   summary = (summary or "") .. prompt.format_file_operations(plan.read_files, plan.modified_files)
+  if type(opts.abort_check) == "function" and opts.abort_check() then
+    return false, "compaction cancelled"
+  end
   local compacted, err = session.do_compact(plan, summary)
   if not compacted then
     return false, err

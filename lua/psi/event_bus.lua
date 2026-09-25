@@ -12,7 +12,7 @@
 local notice = require("psi.notice")
 local M = {}
 
--- handlers[event] = { fn1, fn2, ... }
+-- handlers[event] = { { fn = fn1 }, { fn = fn2 }, ... }
 local handlers = {}
 -- snapshots[event] = immutable copy of handlers[event] used by emit.
 -- Invalidated (never mutated) by on()/off() so an emit that is
@@ -28,7 +28,6 @@ local aliases = {
   ["assistant-text-delta"] = "message_update",
   ["before-provider-request"] = "before_provider_request",
   ["after-provider-response"] = "after_provider_response",
-  ["compaction-start"] = "session_before_compact",
   ["compaction-end"] = "session_compact",
 }
 
@@ -46,10 +45,21 @@ function M.on(event, fn)
     return
   end
   local list = list_for(event)
-  list[#list + 1] = fn
+  local registration = { fn = fn }
+  list[#list + 1] = registration
   snapshots[event] = nil
   return function()
-    M.off(event, fn)
+    local current = handlers[event]
+    if not current then
+      return
+    end
+    for i = #current, 1, -1 do
+      if current[i] == registration then
+        table.remove(current, i)
+        snapshots[event] = nil
+        break
+      end
+    end
   end
 end
 
@@ -59,7 +69,7 @@ function M.off(event, fn)
     return
   end
   for i = #list, 1, -1 do
-    if list[i] == fn then
+    if list[i].fn == fn then
       table.remove(list, i)
     end
   end
@@ -85,7 +95,7 @@ function M.emit(event, payload)
   end
   local n = #snapshot
   for i = 1, n do
-    local ok, err = pcall(snapshot[i], payload)
+    local ok, err = pcall(snapshot[i].fn, payload)
     if not ok then
       notice.error(
         "psi.events: handler for '" .. tostring(event) .. "' failed: " .. tostring(err),
@@ -99,8 +109,8 @@ end
 function M.handlers(event)
   local list = handlers[event] or {}
   local out = {}
-  for i, fn in ipairs(list) do
-    out[i] = fn
+  for i, registration in ipairs(list) do
+    out[i] = registration.fn
   end
   return out
 end

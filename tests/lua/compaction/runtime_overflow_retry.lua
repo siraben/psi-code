@@ -16,7 +16,7 @@ agent.run_turn = function()
 end
 agent.run_compact = function(opts)
   compact_count = compact_count + 1
-  return opts.reason == "overflow", "summary"
+  return opts.reason == "overflow" and opts.will_retry == true, "summary"
 end
 agent.continue_turn = function()
   continue_count = continue_count + 1

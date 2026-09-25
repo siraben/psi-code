@@ -185,7 +185,7 @@ function Runtime:turn(user_text, options)
     }
   end
 
-  local function auto_compact(reason, descriptor)
+  local function auto_compact(reason, descriptor, will_retry)
     local estimate = context.estimate_context_tokens()
     notice.info(
       string.format(
@@ -201,6 +201,7 @@ function Runtime:turn(user_text, options)
       reasoning_effort = self.opts.reasoning_effort,
       abort_check = options.abort_check or psi.is_aborted,
       reason = reason,
+      will_retry = will_retry == true,
     })
     if not compact_ok then
       notice.error("psi: auto-compaction failed: " .. tostring(compact_summary))
@@ -223,7 +224,7 @@ function Runtime:turn(user_text, options)
       not turn_ok
       and context.auto_compact_enabled()
       and context.is_overflow_error(tostring(turn_reply or ""))
-      and auto_compact("overflow", descriptor)
+      and auto_compact("overflow", descriptor, true)
     then
       local retry_options = turn_options()
       retry_options.user_text = nil

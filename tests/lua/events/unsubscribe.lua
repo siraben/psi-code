@@ -1,10 +1,12 @@
 --[==[psi-test
-expect = "1,1,0"
+expect = "2,3,1"
 ]==]
 local calls = 0
-local unsubscribe = psi.events.on("unsubscribe-test", function()
+local function handler()
   calls = calls + 1
-end)
+end
+local unsubscribe = psi.events.on("unsubscribe-test", handler)
+psi.events.on("unsubscribe-test", handler)
 psi.events.emit("unsubscribe-test", {})
 local first = calls
 unsubscribe()

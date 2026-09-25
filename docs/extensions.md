@@ -135,6 +135,14 @@ end
 | `psi.events.emit(event, payload)` | Fire an event (extensions can emit custom events). |
 | `psi.events.handlers(event)` | Introspection; shallow copy. |
 
+`session_before_compact` runs after the compaction plan is prepared and before
+the provider request or transcript rewrite. Its payload has `plan`, `reason`
+(`manual`, `threshold`, or `overflow`), and `will_retry`. Set
+`payload.cancel = true` to stop compaction, or set `payload.summary` to a
+nonempty string to use
+that summary without calling the provider. The usual `compaction-start` and
+`compaction-end` observation events still bracket the transcript rewrite.
+
 Semantics: synchronous dispatch in registration order, handler return
 values ignored, errors swallowed per handler with a structured diagnostic.
 Designed so adding a subscriber never interferes with rendering or
@@ -445,6 +453,7 @@ retains its underscore name.
 | `assistant-text` | Per aggregated assistant text block (render-level). | `{ text }` |
 | `turn-end` | Final event when a turn ends with no more tool_use (i.e. the full turn is done). | `{ text, model }` |
 | `after-turn` | Right after `turn-end`, during render flush. | `{ text, ["assistant-streamed"] }` |
+| `session_before_compact` | After preparing compaction, before the summary request or transcript rewrite. | `{ plan, reason, will_retry, cancel?, summary? }`; handlers may set `cancel` or `summary`. |
 | `compaction-start` | Before `psi.session.do_compact` clears the in-memory session and appends the summary. Extensions (e.g. autosave) can flush current on-disk state before the rewrite. | `{ total, keep_recent, compacted }` |
 | `compaction-end` | After the summary + kept tail are appended back. Pair with `compaction-start`; the summary text is included so loggers don't have to re-read the session. | `{ total, keep_recent, compacted, summary }` |
 | `context` | Right before a provider request is built, once per turn iteration. The `messages` table is mutable: handlers may insert, remove, or replace entries and the edits hit the wire. Use for RAG injection, tool-result redaction, mid-context compression. | `{ messages, model, provider, system_prompt }` |
