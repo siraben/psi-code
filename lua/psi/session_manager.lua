@@ -1781,10 +1781,12 @@ function M.load(path)
   display_name = nil
 
   local version = 1
+  local valid_header = false
   for line in f:lines() do
     local parsed = prelude.safe_json_decode(line)
     if type(parsed) == "table" then
       if parsed.type == "session" then
+        valid_header = type(parsed.id) == "string"
         version = parsed.version or 1
         if parsed.id then
           psi.session_set_id(parsed.id)
@@ -1815,7 +1817,20 @@ function M.load(path)
       end
     end
   end
+  local last_byte
+  if f:seek("end", -1) then
+    last_byte = f:read(1)
+  end
   f:close()
+
+  -- A valid final JSONL record may lack its terminating newline after a
+  -- crash or an external write. Separate it before the append-only save
+  -- path writes the next record, including when the final line is malformed.
+  if valid_header and last_byte and last_byte ~= "\n" then
+    if not psi.file_append(path, "\n", PRIVATE_FILE_MODE) then
+      return false, "failed to repair unterminated session file"
+    end
+  end
 
   if psi.session_message_count() == 0 and #file_entries > 0 then
     rebuild_active_path()
