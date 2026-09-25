@@ -266,6 +266,9 @@ Rendering policy:
 - Complete output batches use synchronized-output markers. Frame lines stay one
   cell narrower than the terminal to avoid pending-wrap cursor drift.
 - Lua owns the previous-frame cache and emits only changed logical rows.
+- Idle TUI and resume-picker loops sample terminal dimensions every 200 ms;
+  active turns sample them at scheduler ticks. A size change invalidates the
+  component cache and forces a full frame at the new width and height.
 - Fall back to plain-text frames when ANSI or color is disabled by the
   runtime policy.
 

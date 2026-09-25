@@ -1774,6 +1774,65 @@ def t_tui_quits(psi: Psi):
     )
     assert_contains(text, "Resume with: psi --session", "TUI quit resume command")
 
+
+@test("mode/tui_resizes_without_input")
+def t_tui_resizes_without_input(psi: Psi):
+    def output_after_resize(
+        args: list[str], exit_bytes: bytes, expected_exit: int = 0
+    ) -> tuple[bytes, bytes]:
+        child = pexpect.spawn(
+            psi.binary,
+            args,
+            cwd=str(ROOT),
+            env=psi.env.copy(),
+            dimensions=(24, 80),
+            encoding=None,
+            timeout=0.1,
+        )
+
+        def drain(seconds: float) -> bytes:
+            chunks = bytearray()
+            deadline = time.monotonic() + seconds
+            while time.monotonic() < deadline:
+                try:
+                    chunks.extend(child.read_nonblocking(65536, timeout=0.1))
+                except pexpect.TIMEOUT:
+                    continue
+                except pexpect.EOF:
+                    break
+            return bytes(chunks)
+
+        try:
+            drain(0.5)
+            child.setwinsize(18, 42)
+            shrunk = drain(0.5)
+            child.setwinsize(30, 100)
+            grown = drain(0.5)
+            child.send(exit_bytes)
+            child.expect(pexpect.EOF, timeout=4)
+            child.close()
+            assert_true(
+                child.exitstatus == expected_exit,
+                f"TUI exits after resize {args}: status={child.exitstatus}",
+            )
+            return shrunk, grown
+        finally:
+            if child.isalive():
+                child.terminate(force=True)
+            child.close(force=False)
+
+    inline_small, inline_large = output_after_resize(["--tui"], b"/quit\r")
+    assert_bytes_contains(inline_small, b"\x1b[?2026h", "inline TUI redraw after shrink")
+    assert_bytes_contains(inline_large, b"\x1b[?2026h", "inline TUI redraw after grow")
+    chat_small, chat_large = output_after_resize(["--chat"], b"/quit\r")
+    assert_bytes_contains(chat_small, b"\x1b[?2026h", "chat TUI redraw after shrink")
+    assert_bytes_contains(chat_large, b"\x1b[?2026h", "chat TUI redraw after grow")
+    picker_small, picker_large = output_after_resize(
+        ["--tui", "--resume"], b"\x1b", expected_exit=1
+    )
+    assert_bytes_contains(picker_small, b"Resume session", "picker redraw after shrink")
+    assert_bytes_contains(picker_large, b"Resume session", "picker redraw after grow")
+
 @test("mode/tui_resume_picker_previews_session")
 def t_tui_resume_picker_previews_session(psi: Psi):
     project = psi.tmp / "resume-picker-preview"

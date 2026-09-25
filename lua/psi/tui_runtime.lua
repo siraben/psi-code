@@ -43,6 +43,7 @@ local FRAME_WIDTH_MARGIN = 1
 local TUI_CONST = {
   busy_animation_interval_ms = 80,
   busy_redraw_min_interval_ms = 33,
+  resize_poll_interval_ms = 200,
   byte_bel = 7,
   byte_backslash = 92,
   byte_cr = 13,
@@ -432,6 +433,21 @@ local function current_size()
   local width = math.max(MIN_SIZE, tonumber(size and size.width) or DEFAULT_WIDTH)
   local height = math.max(MIN_SIZE, tonumber(size and size.height) or DEFAULT_HEIGHT)
   return width, height
+end
+
+function chat.check_resize(state)
+  local width, height = current_size()
+  if width == state.width and height == state.terminal_height then
+    return false
+  end
+  state.width = width
+  state.terminal_height = height
+  state.dirty = true
+  state.force_full_redraw = true
+  if state.ui then
+    state.ui:invalidate()
+  end
+  return true
 end
 
 local function env_bool(name)
@@ -4821,6 +4837,7 @@ local function handle_key_event(state, event)
 end
 
 local function tick(state)
+  chat.check_resize(state)
   while true do
     local event = psi.tui_poll_key(0)
     if event == nil then
@@ -4957,9 +4974,11 @@ choose_session_tui = function(current_infos)
   local scope = "current"
   local selected = #scopes.current > 0 and 1 or 0
   local offset = 1
+  local drawn_width, drawn_height
+  local needs_draw = true
   while true do
     local infos = scopes[scope] or {}
-    local _, height = current_size()
+    local width, height = current_size()
     local list_rows = math.max(1, height - 4)
     if #infos == 0 then
       selected = 0
@@ -4976,10 +4995,17 @@ choose_session_tui = function(current_infos)
         offset = selected - list_rows + 1
       end
     end
-    draw_resume_picker(infos, selected, offset, scope)
+    if needs_draw or width ~= drawn_width or height ~= drawn_height then
+      draw_resume_picker(infos, selected, offset, scope)
+      drawn_width, drawn_height = width, height
+      needs_draw = false
+    end
 
-    local event = psi.tui_poll_key(-1)
+    local event = psi.tui_poll_key(TUI_CONST.resize_poll_interval_ms)
     local key = event and event.key or nil
+    if key then
+      needs_draw = true
+    end
     if key == "enter" then
       if infos[selected] then
         return infos[selected].path
@@ -5107,7 +5133,8 @@ function M.run(opts)
     redraw(state)
 
     while state.running do
-      local event = psi.tui_poll_key(-1)
+      local event = psi.tui_poll_key(TUI_CONST.resize_poll_interval_ms)
+      chat.check_resize(state)
       if event ~= nil then
         handle_key_event(state, event)
       end

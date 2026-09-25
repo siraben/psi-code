@@ -32,7 +32,7 @@ concrete differences while keeping policy in Lua and the C89 host unchanged:
 
 | Surface | Brought closer to pi | Remaining gap |
 | --- | --- | --- |
-| UI | ANSI column slicing preserves and closes OSC 8 links, including styled links clipped beside overlays. | Reusable selectors, interactive model/theme/session pickers, and a graphical session tree are still absent. |
+| UI | ANSI column slicing preserves and closes OSC 8 links, including styled links clipped beside overlays. Idle inline/chat views and the resume picker repaint when terminal dimensions change. | Reusable selectors, interactive model/theme/session pickers, and a graphical session tree are still absent. |
 | Extensions | Wrapped path completion; event unsubscribe closures; `session_before_compact` can cancel or supply a summary before provider work, with an abort check before rewriting. | Provider registration, scoped lifecycles, tool renderers, and much of pi's event catalog need a Lua API design. |
 | Prompts and skills | Trusted `SYSTEM.md` replaces built-in prompt sections; skill names, descriptions, and read paths are advertised without loading full instructions into the prompt. | Structured system-message sections and prompt patches, `/skill:name`, `.agents/skills`, and package resources remain unported. |
 | Tools | `find` supports path globs and nested Git ignores outside repositories; `grep` limits matches rather than context rows and treats no matches as a successful search. | psi expects `fd` and `rg` on the host; pi's runtime downloader is deliberately omitted. |
