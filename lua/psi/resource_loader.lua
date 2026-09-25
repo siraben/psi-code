@@ -132,8 +132,7 @@ local function skill_metadata(path)
     return nil
   end
   content = content:gsub("^\239\187\191", ""):gsub("\r\n", "\n")
-  local header = content:match("^%-%-%-\n(.-)\n%-%-%-\n")
-    or content:match("^%-%-%-\n(.-)\n%-%-%-$")
+  local header = content:match("^%-%-%-\n(.-)\n%-%-%-\n") or content:match("^%-%-%-\n(.-)\n%-%-%-$")
   if not header then
     return nil
   end
@@ -153,8 +152,12 @@ local function skill_metadata(path)
   end
   local directory = psi.parent_directory(path)
   local name = fields.name or directory:match("([^/\\]+)$")
-  if not name or #name > 64 or name:find("--", 1, true)
-    or not (name:match("^[a-z0-9]$") or name:match("^[a-z0-9][a-z0-9-]*[a-z0-9]$")) then
+  if
+    not name
+    or #name > 64
+    or name:find("--", 1, true)
+    or not (name:match("^[a-z0-9]$") or name:match("^[a-z0-9][a-z0-9-]*[a-z0-9]$"))
+  then
     return nil
   end
   return {

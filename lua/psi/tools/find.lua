@@ -141,7 +141,9 @@ local function impl(input, meta)
   end
   if limit_reached then
     extras.result_limit_reached = limit
-    output_text = output_text .. "\n\n[" .. tostring(limit)
+    output_text = output_text
+      .. "\n\n["
+      .. tostring(limit)
       .. " results limit reached. Use a higher limit or refine pattern.]"
   end
   if result.truncated then

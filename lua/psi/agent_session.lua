@@ -331,7 +331,8 @@ function M.run_compact(opts)
   local summary = before.summary
   if not summary then
     local provider, resolved = pick_provider(M.current_model(opts.model))
-    local thinking_level = M.thinking_level_for(resolved, opts.thinking_level, opts.reasoning_effort)
+    local thinking_level =
+      M.thinking_level_for(resolved, opts.thinking_level, opts.reasoning_effort)
 
     local function complete(request, max_tokens)
       local model_max = tonumber(resolved.max_output_tokens)
