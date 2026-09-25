@@ -12,8 +12,9 @@ listed here is internal and may change.
 
 ## Discovery
 
-At boot, psi scans three locations in order. Earlier entries win on conflicts;
-later entries see the cumulative `psi` state.
+At boot, psi scans three locations in order. Later files see the cumulative
+`psi` state. When extensions register the same tool or extension command name,
+the later registration replaces the earlier one; event subscribers accumulate.
 
 1. `$PSI_EXTENSIONS_DIR` (colon-separated list of directories)
 2. `~/.config/psi/extensions/`
