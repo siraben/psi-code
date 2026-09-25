@@ -1,5 +1,5 @@
 --[==[psi-test
-contains = "ctx 0.3% (3566/1048576)"
+contains = "0.3%/1.0M (auto)"
 env = { PSI_OPENROUTER_MODELS_CACHE = "{TMP}/openrouter_models_status_bar.json" }
 [[files]]
 path = "openrouter_models_status_bar.json"

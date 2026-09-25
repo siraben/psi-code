@@ -15,6 +15,7 @@ local tui_text = require("psi.tui_text")
 local M = {}
 local BAR_SPLIT = string.char(31)
 local enabled_setting
+local usage_cache
 
 local BUSY_FRAMES = {
   "⠋",
@@ -395,8 +396,14 @@ function M.handle_key(arg)
   if keybindings.matches(key, "app.redraw") then
     return action("redraw")
   end
+  if keybindings.matches(key, "app.model.select") then
+    return action("model-picker")
+  end
   if keybindings.matches(key, "app.tools.expand") then
     return action("toggle-tools")
+  end
+  if keybindings.matches(key, "app.thinking.toggle") then
+    return action("toggle-thinking")
   end
   if keybindings.matches(key, "app.suspend") then
     return action("suspend")
@@ -537,7 +544,11 @@ local function tilde_path(path)
   if type(path) ~= "string" or path == "" then
     return path
   end
-  if type(home) == "string" and home ~= "" and path:sub(1, #home) == home then
+  if
+    type(home) == "string"
+    and home ~= ""
+    and (path == home or path:sub(1, #home + 1) == home .. "/")
+  then
     return "~" .. path:sub(#home + 1)
   end
   return path
@@ -563,11 +574,14 @@ local function shorten_middle(text, width)
     return text
   end
   if width <= 3 then
-    return text:sub(1, tui_text.byte_index_for_width(text, width))
+    return tui_text.slice_by_columns(text, 0, width, true)
   end
   local left = math.max(1, math.floor((width - 3) / 2))
   local right = math.max(1, width - 3 - left)
-  return text:sub(1, left) .. "..." .. text:sub(#text - right + 1)
+  local total = tui_text.visible_width(text)
+  return tui_text.slice_by_columns(text, 0, left, true)
+    .. "..."
+    .. tui_text.slice_by_columns(text, total - right, right, true)
 end
 
 local runtime_info_cache = false
@@ -612,9 +626,15 @@ local function workspace_model(cwd)
   if commit ~= "" then
     right_parts[#right_parts + 1] = pair("build", commit, true)
   end
+  local path = tilde_path(cwd or "-")
+  local ok, session = pcall(require, "psi.session_manager")
+  local name = ok and session.display_name and session.display_name() or nil
+  if type(name) == "string" and name ~= "" then
+    path = path .. " • " .. name
+  end
   return {
     kind = "cwd",
-    path = tilde_path(cwd or "-"),
+    path = path,
     right_parts = right_parts,
   }
 end
@@ -627,7 +647,7 @@ local function render_workspace_left(model, path)
   if model.kind == "worktree" then
     return model.left
   end
-  return pair("cwd", path or model.path or "-", false)
+  return ansi.dim(path or model.path or "-")
 end
 
 local function render_workspace_bar(model, path, right)
@@ -649,8 +669,8 @@ local function fit_cwd_path(path, right, width)
   end
 
   local right_width = right ~= "" and tui_text.visible_width(right) or 0
-  local label_width = tui_text.visible_width(label("cwd") .. " ")
-  local min_left_width = label_width + 1
+  local label_width = 0
+  local min_left_width = 1
   if right ~= "" and total_width - right_width - 2 < min_left_width then
     right = ""
     right_width = 0
@@ -759,28 +779,120 @@ function M.status_bar(arg_json)
   local arg = type(arg_json) == "table" and arg_json or prelude.safe_json_decode(arg_json, {})
   local ok, agent = pcall(require, "psi.agent_session")
   local resolved = ok and agent.model_descriptor(arg.model)
-  local model = (resolved and resolved.id) or arg.model or "?"
+  local model = (resolved and resolved.id) or arg.model or "no-model"
   local context_window = tonumber(arg.context_window)
     or (resolved and tonumber(resolved.context_window))
-  local left = pair("session", short_id(psi.session_id()), true)
-  local right_parts = {
-    pair("model", model, false),
-    pair("messages", tostring(psi.session_message_count()), false),
-  }
+    or context.context_window(model)
+  local session_id = type(psi.session_id) == "function" and psi.session_id() or nil
+  local message_count = type(psi.session_message_count) == "function"
+      and psi.session_message_count()
+    or nil
+  local totals = { input = 0, output = 0, cache_read = 0, cache_write = 0 }
+  local latest_cache_hit = nil
+  local ok_session, session = pcall(require, "psi.session_manager")
+  local leaf = ok_session and type(session.last_entry_id) == "function"
+      and session.last_entry_id()
+    or nil
+  if
+    usage_cache ~= nil
+    and usage_cache.session_id == session_id
+    and usage_cache.message_count == message_count
+    and usage_cache.leaf == leaf
+  then
+    totals = usage_cache.totals
+    latest_cache_hit = usage_cache.latest_cache_hit
+  elseif ok_session and type(session.messages) == "function" then
+    for _, message in ipairs(session.messages()) do
+      local body = prelude.safe_json_decode(message.data, {})
+      local usage = body and body.message and body.message.usage
+      if type(usage) == "table" then
+        local input = tonumber(usage.input or usage.input_tokens) or 0
+        local output = tonumber(usage.output or usage.output_tokens) or 0
+        local cache_read = tonumber(usage.cacheRead or usage.cache_read_input_tokens) or 0
+        local cache_write = tonumber(usage.cacheWrite or usage.cache_creation_input_tokens) or 0
+        totals.input = totals.input + input
+        totals.output = totals.output + output
+        totals.cache_read = totals.cache_read + cache_read
+        totals.cache_write = totals.cache_write + cache_write
+        local prompt = input + cache_read + cache_write
+        if prompt > 0 then
+          latest_cache_hit = (cache_read / prompt) * 100
+        end
+      end
+    end
+    usage_cache = {
+      session_id = session_id,
+      message_count = message_count,
+      leaf = leaf,
+      totals = totals,
+      latest_cache_hit = latest_cache_hit,
+    }
+  end
+  local function format_tokens(count)
+    if count < 1000 then
+      return tostring(math.floor(count))
+    end
+    if count < 10000 then
+      return string.format("%.1fk", count / 1000)
+    end
+    if count < 1000000 then
+      return tostring(math.floor(count / 1000 + 0.5)) .. "k"
+    end
+    if count < 10000000 then
+      return string.format("%.1fM", count / 1000000)
+    end
+    return tostring(math.floor(count / 1000000 + 0.5)) .. "M"
+  end
+  local left_parts = {}
+  if totals.input > 0 then
+    left_parts[#left_parts + 1] = ansi.dim("↑" .. format_tokens(totals.input))
+  end
+  if totals.output > 0 then
+    left_parts[#left_parts + 1] = ansi.dim("↓" .. format_tokens(totals.output))
+  end
+  if totals.cache_read > 0 then
+    left_parts[#left_parts + 1] = ansi.dim("R" .. format_tokens(totals.cache_read))
+  end
+  if totals.cache_write > 0 then
+    left_parts[#left_parts + 1] = ansi.dim("W" .. format_tokens(totals.cache_write))
+  end
+  if latest_cache_hit ~= nil and (totals.cache_read > 0 or totals.cache_write > 0) then
+    left_parts[#left_parts + 1] = ansi.dim(string.format("CH%.1f%%", latest_cache_hit))
+  end
   local estimate = context.estimate_context_tokens()
-  if estimate and estimate.tokens and estimate.tokens > 0 then
-    local window = context_window or context.context_window(model)
-    local pct = (estimate.tokens / window) * 100
-    right_parts[#right_parts + 1] =
-      pair("ctx", string.format("%.1f%% (%d/%d)", pct, estimate.tokens, window), false)
+  local pct = context_window > 0 and ((estimate.tokens or 0) / context_window) * 100 or 0
+  local context_text = string.format(
+    "%.1f%%/%s%s",
+    pct,
+    format_tokens(context_window),
+    context.auto_compact_enabled() and " (auto)" or ""
+  )
+  if pct > 90 then
+    left_parts[#left_parts + 1] = ansi.red(context_text)
+  elseif pct > 70 then
+    left_parts[#left_parts + 1] = ansi.yellow(context_text)
+  else
+    left_parts[#left_parts + 1] = ansi.dim(context_text)
   end
   for _, hook in ipairs(status_hooks) do
     local ok_hook, extra = pcall(hook.fn, arg)
     if ok_hook and type(extra) == "string" and extra ~= "" then
-      right_parts[#right_parts + 1] = extra
+      extra = extra:gsub("[%c]", " "):gsub(" +", " "):gsub("^ +", ""):gsub(" +$", "")
+      if extra ~= "" then
+        left_parts[#left_parts + 1] = extra
+      end
     end
   end
-  return left .. BAR_SPLIT .. table.concat(right_parts, sep())
+  local right = model
+  if resolved and (resolved.reasoning or resolved.supports_reasoning) then
+    local level = arg.thinking_level
+    if level == nil and ok and type(agent.thinking_level_for) == "function" then
+      level = agent.thinking_level_for(resolved)
+    end
+    level = level or "off"
+    right = right .. (level == "off" and " • thinking off" or (" • " .. tostring(level)))
+  end
+  return table.concat(left_parts, " ") .. BAR_SPLIT .. ansi.dim(right)
 end
 
 -- Short help line for the footer. Content depends on mode.

@@ -1769,7 +1769,7 @@ def t_tui_quits(psi: Psi):
     # We don't require exact chrome; just confirm the Lua-rendered top
     # bar was painted before accepting /quit.
     assert_true(
-        ("repo" in text and "worktree" in text) or "cwd" in text,
+        ("repo" in text and "worktree" in text) or ROOT.name in text,
         "TUI header should show workspace context",
     )
     assert_contains(text, "Resume with: psi --session", "TUI quit resume command")
@@ -1832,6 +1832,70 @@ def t_tui_resizes_without_input(psi: Psi):
     )
     assert_bytes_contains(picker_small, b"Resume session", "picker redraw after shrink")
     assert_bytes_contains(picker_large, b"Resume session", "picker redraw after grow")
+
+
+@test("mode/tui_footer_hook_resizes_without_input")
+def t_tui_footer_hook_resizes_without_input(psi: Psi):
+    extdir = psi.tmp / "footer-resize-ext"
+    extdir.mkdir()
+    (extdir / "footer.lua").write_text(
+        "return function(psi)\n"
+        "  psi.tui.register_footer_line(function() return 'FOOTER RESIZE MARKER' end)\n"
+        "end\n"
+    )
+    env = psi.env.copy()
+    env["PSI_EXTENSIONS_DIR"] = str(extdir)
+    child = pexpect.spawn(
+        psi.binary,
+        ["--tui"],
+        cwd=str(ROOT),
+        env=env,
+        dimensions=(24, 80),
+        encoding=None,
+        timeout=0.1,
+    )
+
+    def drain(seconds: float) -> bytes:
+        chunks = bytearray()
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            try:
+                chunks.extend(child.read_nonblocking(65536, timeout=0.1))
+            except pexpect.TIMEOUT:
+                continue
+            except pexpect.EOF:
+                break
+        return bytes(chunks)
+
+    try:
+        initial = drain(0.5)
+        child.setwinsize(18, 42)
+        shrunk = drain(0.5)
+        child.setwinsize(30, 100)
+        grown = drain(0.5)
+        child.send(b"/quit\r")
+        child.expect(pexpect.EOF, timeout=4)
+        child.close()
+        assert_true(child.exitstatus == 0, "footer-hook TUI did not exit cleanly")
+        for label, output in (("initial", initial), ("shrink", shrunk), ("grow", grown)):
+            assert_bytes_contains(output, b"FOOTER RESIZE MARKER", f"footer hook {label}")
+    finally:
+        if child.isalive():
+            child.terminate(force=True)
+        child.close(force=False)
+
+
+@test("mode/tui_model_picker_search_select")
+def t_tui_model_picker_search_select(psi: Psi):
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [(b"", 0.3), (b"\x0c", 0.3), (b"gpt-5.5", 0.3), (b"\r", 0.3), (b"/quit\r", 0.3)],
+        env_extra={"XDG_STATE_HOME": str(psi.tmp / "state-model-picker")},
+        idle_drain=0.5,
+    )
+    raw.assert_clean_exit()
+    assert_bytes_contains(raw, b"Select model", "Ctrl-L model picker")
+    assert_bytes_contains(raw, b"model set to openai-codex/gpt-5.5", "model selection")
 
 @test("mode/tui_resume_picker_previews_session")
 def t_tui_resume_picker_previews_session(psi: Psi):
@@ -2004,7 +2068,7 @@ def t_tui_lf_submit(psi: Psi):
     raw.assert_clean_exit()
     text = strip_ansi(raw)
     assert_true(
-        ("repo" in text and "worktree" in text) or "cwd" in text,
+        ("repo" in text and "worktree" in text) or ROOT.name in text,
         "bare LF submits commands and paints workspace context",
     )
 

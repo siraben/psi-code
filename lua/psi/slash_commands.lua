@@ -1906,10 +1906,7 @@ function M.handle(line)
   if starts_word(line, "/model") then
     local spec = arg_after(line, "/model")
     if spec == "" then
-      return records.new_command_action(
-        "print",
-        "usage: /model <spec> (e.g. ollama/llama3.1:latest)"
-      )
+      return records.new_command_action("model-picker", nil)
     end
     return records.new_command_action("set-model", spec)
   end

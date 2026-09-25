@@ -288,6 +288,10 @@ local function handle_slash_command(runtime, line)
     print("model set to " .. tostring(opts.model))
     return true, false
   end
+  if kind == "model-picker" then
+    print("usage: /model <spec> (e.g. ollama/llama3.1:latest)")
+    return true, false
+  end
   if kind == "set-reasoning-effort" then
     local value = action.payload
     opts.reasoning_effort = value
