@@ -48,6 +48,9 @@ function M.on(event, fn)
   local list = list_for(event)
   list[#list + 1] = fn
   snapshots[event] = nil
+  return function()
+    M.off(event, fn)
+  end
 end
 
 function M.off(event, fn)
@@ -104,6 +107,7 @@ end
 
 function M.clear()
   handlers = {}
+  snapshots = {}
 end
 
 return M

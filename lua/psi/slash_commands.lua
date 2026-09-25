@@ -1527,6 +1527,23 @@ local function path_completions(token, limit)
   return out
 end
 
+-- Opening punctuation around a path belongs to the user's prose, not to
+-- the filesystem name. Leave closed pairs alone: `(group)/file` and
+-- `[slug]/page` can themselves be real paths.
+local PATH_WRAPPERS = { ["("] = ")", ["["] = "]", ["{"] = "}", ["<"] = ">", ["`"] = "`" }
+
+local function unwrap_path_token(token)
+  local prefix = 0
+  while prefix < #token do
+    local closer = PATH_WRAPPERS[token:sub(prefix + 1, prefix + 1)]
+    if not closer or token:find(closer, prefix + 2, true) then
+      break
+    end
+    prefix = prefix + 1
+  end
+  return token:sub(prefix + 1)
+end
+
 local function model_arg_completions(arg, limit)
   local ok, registry = pcall(require, "psi.api_registry")
   if not ok or type(registry) ~= "table" or not registry.all_models then
@@ -1720,7 +1737,7 @@ function M.input_completions(input, cursor, limit, force)
   if cmd_name then
     local arg = before:sub(#("/" .. cmd_name .. sep) + 1)
     if PATH_ARG_COMMANDS[cmd_name] then
-      local token = arg:match("(%S*)$") or ""
+      local token = unwrap_path_token(arg:match("(%S*)$") or "")
       local items = path_completions(token, limit)
       if type(items) ~= "table" or #items == 0 then
         return nil
@@ -1749,7 +1766,7 @@ function M.input_completions(input, cursor, limit, force)
     }
   end
 
-  local token = before:match("(%S*)$") or ""
+  local token = unwrap_path_token(before:match("(%S*)$") or "")
   local path_like = token:find("/", 1, true) ~= nil
     or token:sub(1, 1) == "."
     or token:sub(1, 2) == "~/"
