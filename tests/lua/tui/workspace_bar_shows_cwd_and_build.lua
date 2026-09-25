@@ -11,7 +11,7 @@ local line = tui.compose_bar(tui.workspace_bar_for_width("/tmp/example-project",
 psi.runtime_info = saved
 return table.concat({
   tostring(full:find("/tmp/example-project", 1, true) ~= nil),
-  tostring(line:find("cwd", 1, true) ~= nil),
+  tostring(line:find("cwd", 1, true) == nil),
   tostring(line:find("/tmp/example-project", 1, true) ~= nil),
   tostring(line:find("abc1234", 1, true) ~= nil),
 }, "|")

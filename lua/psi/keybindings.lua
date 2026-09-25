@@ -172,6 +172,12 @@ local DEFINITIONS = {
     description = "Toggle tool output",
   },
   {
+    id = "app.thinking.toggle",
+    section = "Other",
+    default_keys = { "ctrl-t" },
+    description = "Toggle thinking blocks",
+  },
+  {
     id = "app.exit",
     section = "Other",
     default_keys = { "ctrl-d" },
@@ -180,8 +186,14 @@ local DEFINITIONS = {
   {
     id = "app.redraw",
     section = "Other",
-    default_keys = { "ctrl-l" },
+    default_keys = {},
     description = "Redraw screen",
+  },
+  {
+    id = "app.model.select",
+    section = "Other",
+    default_keys = { "ctrl-l" },
+    description = "Select model",
   },
   {
     id = "app.suspend",
@@ -419,6 +431,7 @@ local DISPLAY = {
   ["ctrl-g"] = "Ctrl-G",
   ["ctrl-k"] = "Ctrl-K",
   ["ctrl-l"] = "Ctrl-L",
+  ["ctrl-t"] = "Ctrl-T",
   ["ctrl-n"] = "Ctrl-N",
   ["ctrl-p"] = "Ctrl-P",
   ["ctrl-c"] = "Ctrl-C",

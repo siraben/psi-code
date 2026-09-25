@@ -1733,8 +1733,10 @@ local function entry_render_lines(state, entry)
 
   local lines = {}
   local first_prefix, rest_prefix = entry_prefixes(entry)
+  local content = entry.kind == "thinking" and not state.show_thinking and "Thinking..."
+    or entry_text(entry)
   local trimmed = sanitize_terminal_text(
-    trim_trailing_newlines(entry_text(entry)),
+    trim_trailing_newlines(content),
     true,
     entry.kind == "tool_call" or entry.kind == "tool_result",
     entry.kind == "tool_call" or entry.kind == "tool_result"
@@ -1908,8 +1910,7 @@ local function add_session_entry(state, msg)
       for _, block in ipairs(content) do
         if type(block) == "table" then
           if
-            state.show_thinking
-            and block.type == "thinking"
+            block.type == "thinking"
             and type(block.thinking) == "string"
             and block.thinking ~= ""
           then
@@ -2006,7 +2007,6 @@ local function rebuild_from_session(state, messages)
   state.tool_entry_index = nil
   state.streaming_assistant_index = nil
   state.streaming_thinking_index = nil
-  state.show_thinking = tui.show_thinking() == "1"
   invalidate_render_totals(state)
   for _, msg in ipairs(messages or session.messages()) do
     add_session_entry(state, msg)
@@ -2302,6 +2302,7 @@ local function redraw(state)
     model = state.model and state.model.id or state.opts.model,
     provider = state.model and state.model.provider or nil,
     context_window = state.model and state.model.context_window or nil,
+    thinking_level = agent.thinking_level_for(state.model, state.opts.thinking_level, state.opts.reasoning_effort),
     busy = state.busy,
     busy_label = state.busy_label,
     elapsed_seconds = state.busy_started_at and (os.time() - state.busy_started_at) or 0,
@@ -2560,6 +2561,7 @@ function chat.redraw(state)
     model = state.model and state.model.id or state.opts.model,
     provider = state.model and state.model.provider or nil,
     context_window = state.model and state.model.context_window or nil,
+    thinking_level = agent.thinking_level_for(state.model, state.opts.thinking_level, state.opts.reasoning_effort),
     busy = state.busy,
     busy_label = state.busy_label,
     elapsed_seconds = state.busy_started_at and (os.time() - state.busy_started_at) or 0,
@@ -3771,9 +3773,6 @@ local function observer_text_delta(state, text)
 end
 
 local function observer_thinking_delta(state, text)
-  if not state.show_thinking then
-    return
-  end
   if type(text) ~= "string" or text == "" then
     return
   end
@@ -4149,6 +4148,7 @@ local function run_btw(state, question)
 end
 
 local choose_session_tui
+local choose_model_tui
 
 local function handle_command(state, line)
   if line == "/quit" or line == "/q" or line == ":quit" or line == ":q" then
@@ -4267,6 +4267,19 @@ local function handle_command(state, line)
     return true
   end
 
+  if action.kind == "model-picker" then
+    local selected = choose_model_tui(state.model and state.model.ref or state.opts.model)
+    state.reanchor_renderer = true
+    state.force_full_redraw = true
+    state.dirty = true
+    if selected == nil then
+      set_status(state, "model selection cancelled", false)
+      return true
+    end
+    action.kind = "set-model"
+    action.payload = selected
+  end
+
   if action.kind == "set-model" then
     agent.set_model(action.payload)
     state.opts.model = action.payload
@@ -4307,6 +4320,7 @@ local function handle_command(state, line)
       set_status(state, "theme: " .. tostring(err or "unknown theme"), true)
       return true
     end
+    state.footer_bar_cache = nil
     add_entry(state, "info", "theme set to " .. tostring(action.payload))
     state.dirty = true
     set_status(state, "", false)
@@ -4437,7 +4451,6 @@ local function submit(state, queue_kind)
   history_add(state, line)
   add_entry(state, "user", line)
   state.streaming_assistant_index = add_entry(state, "assistant", "")
-  state.show_thinking = tui.show_thinking() == "1"
   state.scroll_offset = 0
   state.busy = true
   state.busy_kind = "agent"
@@ -4619,6 +4632,14 @@ local function apply_action(state, action, arg)
     state.dirty = true
     return
   end
+  if action == "model-picker" then
+    if state.busy then
+      set_status(state, "model selection unavailable while busy", true)
+    else
+      handle_command(state, "/model")
+    end
+    return
+  end
   if action == "toggle-tools" then
     state.tools_expanded = not state.tools_expanded
     for _, entry in ipairs(state.entries) do
@@ -4634,6 +4655,19 @@ local function apply_action(state, action, arg)
       "Tool output: " .. (state.tools_expanded and "expanded" or "collapsed"),
       false
     )
+    state.dirty = true
+    return
+  end
+  if action == "toggle-thinking" then
+    state.show_thinking = not state.show_thinking
+    for _, entry in ipairs(state.entries) do
+      if entry.kind == "thinking" then
+        entry.render_cache_width = nil
+        entry.render_cache_lines = nil
+      end
+    end
+    invalidate_render_totals(state)
+    set_status(state, "Thinking blocks: " .. (state.show_thinking and "visible" or "hidden"), false)
     state.dirty = true
     return
   end
@@ -4918,18 +4952,137 @@ local function clip_text(text, width)
     return ""
   end
   text = tostring(text or ""):gsub("%s+", " ")
-  if #text <= width then
+  if tui_text.visible_width(text) <= width then
     return text
   end
   if width <= 3 then
-    return text:sub(1, width)
+    return tui_text.slice_by_columns(text, 0, width, true)
   end
-  return text:sub(1, width - 3) .. "..."
+  return tui_text.slice_by_columns(text, 0, width - 3, true) .. "..."
 end
 
 local function pad_right(text, width)
   text = clip_text(text, width)
-  return text .. string.rep(" ", math.max(0, width - #text))
+  return text .. string.rep(" ", math.max(0, width - tui_text.visible_width(text)))
+end
+
+local function model_matches(model, query)
+  if query == "" then
+    return true
+  end
+  local haystack = (tostring(model.id or "") .. " " .. tostring(model.name or "")):lower()
+  for word in query:lower():gmatch("%S+") do
+    if not haystack:find(word, 1, true) then
+      return false
+    end
+  end
+  return true
+end
+
+local function draw_model_picker(models, selected, offset, query)
+  local width, height = current_size()
+  local list_start = 4
+  local list_rows = math.max(1, height - list_start)
+  psi.tui_clear()
+  psi.tui_draw_line(1, ansi.bold(ansi.cyan("Select model")))
+  psi.tui_draw_line(2, ansi.dim("Search: ") .. query)
+  psi.tui_draw_line(3, ansi.dim("Enter selects  Esc cancels  Up/Down moves  Backspace edits"))
+  if #models == 0 then
+    psi.tui_draw_line(list_start, ansi.dim("  No matching models"))
+  else
+    for row = 0, list_rows - 1 do
+      local model = models[offset + row]
+      if model ~= nil then
+        local marker = offset + row == selected and "> " or "  "
+        local id = tostring(model.id or "")
+        local name = tostring(model.name or "")
+        local label = marker .. id
+        if name ~= "" and name ~= id then
+          label = label .. "  " .. name
+        end
+        label = clip_text(label, width)
+        if offset + row == selected then
+          label = ansi.bold(ansi.cyan(label))
+        else
+          label = ansi.dim(label)
+        end
+        psi.tui_draw_line(list_start + row, label)
+      end
+    end
+  end
+  psi.tui_set_cursor(2, math.min(width, 9 + tui_text.visible_width(query)), true)
+  psi.tui_refresh()
+end
+
+choose_model_tui = function(current_model)
+  local registry = require("psi.api_registry")
+  local all = registry.all_models()
+  local query = ""
+  local models = all
+  local selected = 1
+  local offset = 1
+  for i, model in ipairs(models) do
+    if model.id == current_model then
+      selected = i
+      break
+    end
+  end
+  local drawn_width, drawn_height
+  local needs_draw = true
+  while true do
+    local width, height = current_size()
+    local list_rows = math.max(1, height - 4)
+    if #models == 0 then
+      selected = 0
+      offset = 1
+    else
+      selected = clamp(selected, 1, #models)
+      if selected < offset then
+        offset = selected
+      elseif selected >= offset + list_rows then
+        offset = selected - list_rows + 1
+      end
+    end
+    if needs_draw or width ~= drawn_width or height ~= drawn_height then
+      draw_model_picker(models, selected, offset, query)
+      drawn_width, drawn_height = width, height
+      needs_draw = false
+    end
+    local event = psi.tui_poll_key(TUI_CONST.resize_poll_interval_ms)
+    local key = event and event.key or nil
+    if key ~= nil then
+      needs_draw = true
+    end
+    if key == "enter" then
+      return models[selected] and models[selected].id or nil
+    elseif key == "escape" or key == "ctrl-d" then
+      return nil
+    elseif key == "text" and type(event.text) == "string" then
+      query = query .. event.text
+    elseif key == "backspace" then
+      query = query:sub(1, tui_text.previous_grapheme_index(query, #query))
+    elseif key == "ctrl-u" then
+      query = ""
+    elseif (key == "up" or key == "ctrl-p") and selected > 1 then
+      selected = selected - 1
+    elseif (key == "down" or key == "ctrl-n") and selected < #models then
+      selected = selected + 1
+    elseif key == "page-up" then
+      selected = math.max(1, selected - list_rows)
+    elseif key == "page-down" then
+      selected = math.min(#models, selected + list_rows)
+    end
+    if key == "text" or key == "backspace" or key == "ctrl-u" then
+      models = {}
+      for _, model in ipairs(all) do
+        if model_matches(model, query) then
+          models[#models + 1] = model
+        end
+      end
+      selected = #models > 0 and 1 or 0
+      offset = 1
+    end
+  end
 end
 
 local function resume_preview_line(info, row, width)
@@ -5541,6 +5694,7 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     editor_gap_anchor = nil,
     status_text = debug_options.status_text,
     status_is_error = not not debug_options.status_is_error,
+    show_thinking = debug_options.show_thinking ~= false,
     width = tonumber(debug_options.width) or 80,
     height = tonumber(debug_options.height) or 24,
     input_layout = default_input_layout(tonumber(debug_options.height) or 24),
@@ -5577,11 +5731,22 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     editor_preferred_col = state.editor_preferred_col,
     editor_snapped_col = state.editor_snapped_col,
     tools_expanded = state.tools_expanded,
+    show_thinking = state.show_thinking,
     last_entry_kind = state.entries[#state.entries] and state.entries[#state.entries].kind or nil,
     last_entry_text = state.entries[#state.entries] and entry_text(state.entries[#state.entries])
       or nil,
     rendered = rendered,
   }
+end
+
+function M._debug_thinking_lines(text, visible)
+  local state = { width = 80, show_thinking = visible ~= false }
+  local entry = { kind = "thinking", text = text or "" }
+  local lines = {}
+  for _, line in ipairs(entry_render_lines(state, entry)) do
+    lines[#lines + 1] = line.text
+  end
+  return lines
 end
 
 function M._debug_consume_queued_preview(input, queued_text)
