@@ -21,6 +21,11 @@ durable audit policy in `docs/dependency-audit.md` and
 `sbom/vulnxscan.whitelist.csv`, and publish full SBOM output as CI or release
 artifacts when needed.
 
+The triage report queries Repology. CI sets `PSI_SBOM_TRIAGE=0` because that
+external service can be unavailable; CI still generates both runtime SBOMs,
+scans vulnerabilities, and fails on unwhitelisted high or critical findings.
+Local audits keep triage enabled by default.
+
 To include the build-time closure:
 
 ```sh
@@ -41,9 +46,9 @@ nix run .#audit-sbom -- .#psi-static
 - `CVE-2008-6393` for package `psi` is whitelisted as a false positive. It
   refers to the unrelated `psi-im:psi` project and disappears when SBOM
   heuristic CPE matching is disabled.
-- The pinned nixpkgs input reports curl 8.19.0 findings with fixed versions
-  available in newer nixpkgs/upstream curl releases. They are whitelisted until
-  this repository advances its root nixpkgs input to a fixed curl.
+- The root nixpkgs input was advanced to a curl 8.22.0 release to address the
+  new September 2026 curl findings. Older accepted-risk entries remain in the
+  whitelist for historical context and can be removed separately.
 - Dynamic Linux builds include `glibc`. Known `glibc` scanner findings are
   whitelisted with NixOS tracker or nixpkgs issue references, so CI records them
   as accepted risk while still failing on new untracked high or critical runtime
@@ -54,3 +59,7 @@ nix run .#audit-sbom -- .#psi-static
 - `.#psi-static` is the preferred release artifact when avoiding dynamic
   `glibc` runtime exposure is the priority. It must still be scanned before
   release because it has a different runtime closure and risk profile.
+- `CVE-2026-16554` concerns a 32-bit `size_t` overflow in cJSON. Psi's Nix
+  targets are x86_64 and aarch64, so the affected integer-width path cannot
+  occur in the audited runtime closure. Reassess this exception if a 32-bit
+  target is added.
