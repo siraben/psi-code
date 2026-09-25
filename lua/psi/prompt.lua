@@ -83,6 +83,7 @@ end
 function M.system_prompt()
   local _, custom_prompt = resources.system_prompt_file()
   local append_path, append_prompt = resources.append_system_prompt_file()
+  local has_custom_prompt = custom_prompt ~= nil and custom_prompt ~= ""
 
   -- Honour psi.tools.set_active(...): the "Available tools:" list
   -- must mirror what the model can actually dispatch, and the
@@ -92,30 +93,39 @@ function M.system_prompt()
   local all_tools = tools.active()
   local have = tool_set(all_tools)
 
-  local buf = { custom_prompt or PREAMBLE, "\n\nAvailable tools:\n" }
-  for _, t in ipairs(all_tools) do
-    buf[#buf + 1] = "- " .. t.name .. ": " .. t.prompt_snippet .. "\n"
-  end
-  buf[#buf + 1] =
-    "\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n"
-
-  buf[#buf + 1] = "\nGuidelines:\n"
-  local seen = {}
-  local function add_guideline(g)
-    if g == nil or g == "" or seen[g] then
-      return
+  local buf = { has_custom_prompt and custom_prompt or PREAMBLE }
+  -- A project SYSTEM.md replaces the built-in prompt, including its tool
+  -- list, rules, and documentation section. The actual tool schemas are
+  -- still sent separately by the provider.
+  if not has_custom_prompt then
+    buf[#buf + 1] = "\n\nAvailable tools:\n"
+    if #all_tools == 0 then
+      buf[#buf + 1] = "(none)\n"
     end
-    seen[g] = true
-    write_line(buf, "- ", g)
-  end
-  add_guideline(exploration_guideline(have))
-  for _, t in ipairs(all_tools) do
-    for _, g in ipairs(t.guidelines or {}) do
+    for _, t in ipairs(all_tools) do
+      buf[#buf + 1] = "- " .. t.name .. ": " .. t.prompt_snippet .. "\n"
+    end
+    buf[#buf + 1] =
+      "\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n"
+
+    buf[#buf + 1] = "\nGuidelines:\n"
+    local seen = {}
+    local function add_guideline(g)
+      if g == nil or g == "" or seen[g] then
+        return
+      end
+      seen[g] = true
+      write_line(buf, "- ", g)
+    end
+    add_guideline(exploration_guideline(have))
+    for _, t in ipairs(all_tools) do
+      for _, g in ipairs(t.guidelines or {}) do
+        add_guideline(g)
+      end
+    end
+    for _, g in ipairs(BASE_GUIDELINES) do
       add_guideline(g)
     end
-  end
-  for _, g in ipairs(BASE_GUIDELINES) do
-    add_guideline(g)
   end
 
   local host_lines = platform.host_context_lines()
@@ -126,19 +136,21 @@ function M.system_prompt()
     end
   end
 
-  buf[#buf + 1] = table.concat({
-    "\nPsi documentation (embedded in the binary; the read tool serves ",
-    "the bundled copy when the file is not on disk, so these paths ",
-    "work regardless of cwd):\n",
-    "- README.md                 — main documentation\n",
-    "- docs/architecture.md      — architecture overview\n",
-    "- docs/port-status.md       — port audit against pi\n",
-    "- docs/extensions.md        — extension / event / slash-command API\n",
-    "- docs/providers.md         — provider routing and configuration\n",
-    "- Read only when the user asks about psi itself, its architecture, ",
-    "Lua modules, or host layer. Always read the target .md file ",
-    "completely and follow links to related docs.",
-  })
+  if not has_custom_prompt then
+    buf[#buf + 1] = table.concat({
+      "\nPsi documentation (embedded in the binary; the read tool serves ",
+      "the bundled copy when the file is not on disk, so these paths ",
+      "work regardless of cwd):\n",
+      "- README.md                 — main documentation\n",
+      "- docs/architecture.md      — architecture overview\n",
+      "- docs/port-status.md       — port audit against pi\n",
+      "- docs/extensions.md        — extension / event / slash-command API\n",
+      "- docs/providers.md         — provider routing and configuration\n",
+      "- Read only when the user asks about psi itself, its architecture, ",
+      "Lua modules, or host layer. Always read the target .md file ",
+      "completely and follow links to related docs.",
+    })
+  end
 
   if append_prompt and append_prompt ~= "" then
     buf[#buf + 1] = "\n\n"

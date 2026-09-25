@@ -29,6 +29,37 @@ local function find_guidelines()
   return { "Prefer find over bash when locating files." }
 end
 
+local function inside_git_repo(path)
+  local current = path
+  while current do
+    local git_path = path_util.join(current, ".git")
+    if git_path and psi.file_exists(git_path) then
+      return true
+    end
+    local parent = path_util.parent(current)
+    if not parent or parent == current then
+      break
+    end
+    current = parent
+  end
+  return false
+end
+
+local function relative_results(output, root)
+  local prefix = root:gsub("\\", "/"):gsub("/+$", "") .. "/"
+  local results = {}
+  for line in (output .. "\n"):gmatch("([^\n]*)\n") do
+    local normalized = line:gsub("\r$", ""):gsub("\\", "/")
+    if normalized ~= "" then
+      if normalized:sub(1, #prefix) == prefix then
+        normalized = normalized:sub(#prefix + 1)
+      end
+      results[#results + 1] = normalized
+    end
+  end
+  return table.concat(results, "\n"), #results
+end
+
 local function impl(input, meta)
   local pattern = registry.require_string(input, "pattern")
   if not pattern then
@@ -36,19 +67,39 @@ local function impl(input, meta)
   end
   local raw_path = registry.optional_string(input, "path", ".")
   local path = path_util.resolve(raw_path) or raw_path
-  local limit = registry.optional_number(input, "limit", 1000)
+  if not psi.file_exists(path) then
+    return records.tool_failure("find", "path not found: " .. tostring(raw_path))
+  end
+  if psi.file_type(path) ~= "directory" then
+    return records.tool_failure("find", "not a directory: " .. tostring(raw_path))
+  end
+  local limit = math.max(1, math.floor(registry.optional_number(input, "limit", 1000)))
   local argv = {
     "fd",
+    "--color=never",
     "--hidden",
     "--threads",
     "1",
-    "--max-results",
-    tostring(limit),
     "--glob",
-    "--",
-    pattern,
-    path,
   }
+  if not inside_git_repo(path) then
+    argv[#argv + 1] = "--no-require-git"
+  end
+  local effective_pattern = pattern
+  if pattern:find("/", 1, true) then
+    argv[#argv + 1] = "--full-path"
+    if pattern:sub(1, 1) ~= "/" and pattern:sub(1, 3) ~= "**/" and pattern ~= "**" then
+      effective_pattern = "**/" .. pattern
+    end
+    if platform.is_windows() then
+      effective_pattern = effective_pattern:gsub("/", "[/\\\\]")
+    end
+  end
+  argv[#argv + 1] = "--max-results"
+  argv[#argv + 1] = tostring(limit)
+  argv[#argv + 1] = "--"
+  argv[#argv + 1] = effective_pattern
+  argv[#argv + 1] = path
 
   local tool_call_id = meta and meta.tool_call_id or nil
   local stream = shell.run_streaming_argv(argv, tool_call_id, {
@@ -69,7 +120,8 @@ local function impl(input, meta)
   end
   -- find tool: head-truncate by bytes only — line cap is enforced by
   -- fd's --max-results.
-  local result = truncate.truncate_head(raw, {
+  local relative, count = relative_results(raw, path)
+  local result = truncate.truncate_head(relative, {
     max_bytes = DEFAULT_BYTES,
     max_lines = math.huge,
   })
@@ -83,6 +135,15 @@ local function impl(input, meta)
   }
 
   local output_text = result.content
+  local limit_reached = count >= limit
+  if output_text == "" and stream.status == 0 then
+    output_text = "No files found matching pattern"
+  end
+  if limit_reached then
+    extras.result_limit_reached = limit
+    output_text = output_text .. "\n\n[" .. tostring(limit)
+      .. " results limit reached. Use a higher limit or refine pattern.]"
+  end
   if result.truncated then
     extras.truncated = true
     local notice = truncate.head_notice(result)

@@ -70,10 +70,14 @@ local function clip_lines(text, limit)
   local out = {}
   local clipped_any = false
   local limited = false
+  local matches = 0
   for line in (text .. "\n"):gmatch("([^\n]*)\n") do
-    if limit and #out >= limit then
-      limited = true
-      break
+    if line:match("^%d+:") or line:match("^.-:%d+:") then
+      matches = matches + 1
+      if limit and matches > limit then
+        limited = true
+        break
+      end
     end
     local clipped, was = truncate.truncate_line(line, LINE_LIMIT)
     if was then
@@ -146,7 +150,7 @@ local function impl(input, meta)
     local notice_parts = {}
     if limit_reached then
       notice_parts[#notice_parts + 1] = string.format(
-        "[Showing first %d grep output lines. Narrow the search or raise limit to continue.]",
+        "[Showing first %d matches. Narrow the search or raise limit to continue.]",
         limit
       )
     end
@@ -173,8 +177,11 @@ local function impl(input, meta)
     extras.truncated = false
   end
 
+  if stream.status == 1 and output_text == "" then
+    output_text = "No matches found"
+  end
   extras.output = output_text
-  local ok = (stream.status == 0)
+  local ok = (stream.status == 0 or stream.status == 1)
   return records.new_tool_result(ok, "grep", nil, extras)
 end
 
