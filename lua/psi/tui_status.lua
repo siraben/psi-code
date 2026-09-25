@@ -790,8 +790,7 @@ function M.status_bar(arg_json)
   local totals = { input = 0, output = 0, cache_read = 0, cache_write = 0 }
   local latest_cache_hit = nil
   local ok_session, session = pcall(require, "psi.session_manager")
-  local leaf = ok_session and type(session.last_entry_id) == "function"
-      and session.last_entry_id()
+  local leaf = ok_session and type(session.last_entry_id) == "function" and session.last_entry_id()
     or nil
   if
     usage_cache ~= nil

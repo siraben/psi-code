@@ -2302,7 +2302,11 @@ local function redraw(state)
     model = state.model and state.model.id or state.opts.model,
     provider = state.model and state.model.provider or nil,
     context_window = state.model and state.model.context_window or nil,
-    thinking_level = agent.thinking_level_for(state.model, state.opts.thinking_level, state.opts.reasoning_effort),
+    thinking_level = agent.thinking_level_for(
+      state.model,
+      state.opts.thinking_level,
+      state.opts.reasoning_effort
+    ),
     busy = state.busy,
     busy_label = state.busy_label,
     elapsed_seconds = state.busy_started_at and (os.time() - state.busy_started_at) or 0,
@@ -2561,7 +2565,11 @@ function chat.redraw(state)
     model = state.model and state.model.id or state.opts.model,
     provider = state.model and state.model.provider or nil,
     context_window = state.model and state.model.context_window or nil,
-    thinking_level = agent.thinking_level_for(state.model, state.opts.thinking_level, state.opts.reasoning_effort),
+    thinking_level = agent.thinking_level_for(
+      state.model,
+      state.opts.thinking_level,
+      state.opts.reasoning_effort
+    ),
     busy = state.busy,
     busy_label = state.busy_label,
     elapsed_seconds = state.busy_started_at and (os.time() - state.busy_started_at) or 0,

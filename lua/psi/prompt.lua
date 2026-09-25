@@ -182,13 +182,16 @@ function M.system_prompt()
       end
     end
     if #visible > 0 then
-      buf[#buf + 1] = "\n\nThe following skills provide specialized instructions for specific tasks.\n"
+      buf[#buf + 1] =
+        "\n\nThe following skills provide specialized instructions for specific tasks.\n"
       if file_reader == "read" then
-        buf[#buf + 1] = "Use the read tool to load a skill's file when the task matches its description.\n"
+        buf[#buf + 1] =
+          "Use the read tool to load a skill's file when the task matches its description.\n"
       else
         buf[#buf + 1] = "Use bash to load a skill's file when the task matches its description.\n"
       end
-      buf[#buf + 1] = "Resolve relative paths in a skill against its directory (the parent of SKILL.md).\n"
+      buf[#buf + 1] =
+        "Resolve relative paths in a skill against its directory (the parent of SKILL.md).\n"
       buf[#buf + 1] = "<available_skills>\n"
       for _, skill in ipairs(visible) do
         buf[#buf + 1] = "  <skill>\n"
