@@ -334,7 +334,7 @@ These are part of the stable surface:
 | `psi.path_join(base, name)` / `psi.path_expand(path)` / `psi.path_resolve(path)` / `psi.parent_directory(path)` | Portable path helpers. `path_expand` handles `~` and leading `@`; `path_resolve` anchors relative paths at the current working directory. |
 | `psi.mkdir_p(path)` / `psi.mkdir_parent(path)` | Recursive directory creation. |
 | `psi.current_date()` | `"YYYY-MM-DD"`. |
-| `psi.runtime_info()` | Build/runtime capability table including `ansi`, `color`, `mcp`, `repl_editline`, `tui`, `git-commit`, and `version`. |
+| `psi.runtime_info()` | Build/runtime capability table including `ansi`, `color`, `mcp-http`, `mcp-stdio-primitives`, legacy `mcp` (the stdio-primitives gate), `repl-editline`, `tui`, `git-commit`, and `version`. |
 | `psi.is_aborted()` | `true` when Ctrl-C / Esc requested. Poll during long work. |
 | `psi.json_encode(v)` / `psi.json_decode(s)` | JSON. |
 | `psi.session_message_count()` / `psi.session_messages()` | Read current in-memory session. |
@@ -368,6 +368,9 @@ These are part of the stable surface:
 | `psi.session.append_custom_message(text, opts)` | Persist a model-visible custom message. `opts.role` may be `"user"` or `"assistant"`; `opts.hidden=true` keeps it out of provider context. |
 | `psi.providers.all_providers()` / `all_models()` | Inspect the built-in provider/model registry. Provider registration exists internally but is not a stable extension API. |
 | `psi.settings.get(path, default)` / `reload()` | Read layered JSON settings from `~/.config/psi/settings.json` and `./.psi/settings.json`. |
+| `psi.mcp.new_client(config)` | Create an uninitialized JSON-RPC MCP client for Streamable HTTP. Returns `client` or `nil, error`; no stdio client transport is bundled. |
+| `psi.mcp.clients()` / `status()` | Inspect configured live MCP clients and their bootstrap results. |
+| `psi.mcp.bootstrap()` / `reload()` / `close_all()` | Manage configured MCP sessions and their namespaced tool registrations. See `docs/mcp.md`. |
 | `psi.resources.context_files()` | Discover global/project context files. Emits `resources_discover`. |
 | `psi.prompt_templates.load()` / `list()` / `find(name)` / `expand(text)` | Loader + lookup + runtime expansion for user-authored slash-command templates. `/reload` reloads them. See "Prompt templates" below. |
 
@@ -493,7 +496,9 @@ Unsupported:
   the files you install.
 - No extension manifest, versioning, or compatibility checks.
 - No file-watcher hot reload. `/reload` is the explicit manual reload path.
-- No MCP bridge.
+- No stdio MCP client, deprecated HTTP+SSE compatibility transport, or
+  standalone GET/resumable SSE stream. The bundled client intentionally covers
+  Streamable HTTP initialization, discovery, and tool calls only.
 - No dedicated system-prompt event. Use `psi.prompt.register_transformer(fn)`
   for extension-controlled prompt rewrites.
 - The event catalog is intentionally compact. New events are added when an
