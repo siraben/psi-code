@@ -3916,6 +3916,9 @@ local function navigate_queue(state, direction)
   if item == nil then
     return
   end
+  if state.queue_nav_draft_pastes == nil and type(chat.reset_queue_navigation) == "function" then
+    state.queue_nav_draft_pastes = chat.paste.clone(state)
+  end
   state.queue_nav_index = index
   state.queue_nav_id = item.id
   state.input = item.text or ""
@@ -3949,8 +3952,7 @@ local function restore_queued_message(state, opts)
   for i = count, 1, -1 do
     agent.remove_pending(i)
   end
-  local current = state.queue_nav_index ~= nil and tostring(state.queue_nav_draft or "")
-    or tostring(state.input or "")
+  local current = chat.paste_draft_input(state)
   local queued_text = table.concat(messages, "\n\n")
   local combined = queued_text
   if current:gsub("%s+", "") ~= "" then
@@ -3958,6 +3960,7 @@ local function restore_queued_message(state, opts)
   end
   chat.reset_queue_navigation(state, false)
   state.input = combined
+  chat.paste.clear(state)
   state.cursor = #state.input
   clear_selection(state)
   state.block_edit = nil
@@ -6645,5 +6648,54 @@ function M._debug_chat_redraw_sequence(steps)
   end
   return result
 end
+
+-- Preserve payloads when the undo and queue-draft ports are also present.
+function chat.paste_draft_input(state)
+  if state.queue_nav_index ~= nil and state.queue_nav_draft ~= nil then
+    local draft = {}
+    chat.paste.restore(draft, state.queue_nav_draft_pastes)
+    return chat.paste.expand(draft, state.queue_nav_draft)
+  end
+  return chat.paste.expand(state, state.input or "")
+end
+
+function chat.install_paste_snapshots()
+  if type(chat.editor_push_undo) == "function" then
+    local push = chat.editor_push_undo
+    local undo = chat.editor_undo
+    local kill = chat.editor_push_kill
+    chat.editor_push_kill = function(state, text, prepend, accumulate)
+      kill(state, chat.paste.expand(state, text), prepend, accumulate)
+    end
+    chat.editor_push_undo = function(state)
+      push(state)
+      local stack = state.editor_undo_stack
+      stack[#stack].pastes = chat.paste.clone(state)
+    end
+    chat.editor_undo = function(state)
+      local stack = state.editor_undo_stack or {}
+      local snapshot = stack[#stack]
+      if undo(state) then
+        chat.paste.restore(state, snapshot.pastes)
+        return true
+      end
+      return false
+    end
+  end
+  if type(chat.reset_queue_navigation) == "function" then
+    local reset = chat.reset_queue_navigation
+    chat.reset_queue_navigation = function(state, restore_draft)
+      local snapshot = state.queue_nav_draft_pastes
+      local has_draft = state.queue_nav_draft ~= nil
+      reset(state, restore_draft)
+      state.queue_nav_draft_pastes = nil
+      if restore_draft and has_draft then
+        chat.paste.restore(state, snapshot)
+      end
+    end
+  end
+end
+
+chat.install_paste_snapshots()
 
 return M
