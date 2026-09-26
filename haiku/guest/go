@@ -1,0 +1,92 @@
+#!/bin/bash
+# /PSIGUEST/go — single VNC-typed command that does the right thing
+# for the current phase. Minimizes VNC typing: the user types just
+#
+#     sh /PSIGUEST/go
+#
+# (14 characters) in the Live-CD or disk-booted Terminal, no http-
+# server dance, no 80-char wget-chains, no `&&` that vncdo drops.
+#
+# Phases auto-detected:
+#   A. Live CD, disk has an install → fix-boot.sh (writembr +
+#      makebootable + clean shutdown).
+#   B. Live CD, disk empty          → start sshd so the host can
+#      drive DriveSetup/Installer over ssh (rare path).
+#   C. Disk-booted                  → start sshd, then hint the
+#      host on what to run next (install-psi.sh).
+#
+# Phases are idempotent — re-running `go` after a reboot just does
+# the next thing.
+#
+# Explicit subcommands (used over ssh after initial VNC bootstrap):
+#     sh /PSIGUEST/go fix       — just run fix-boot.sh
+#     sh /PSIGUEST/go ssh       — just start sshd
+#     sh /PSIGUEST/go build     — just run install-psi.sh
+#     sh /PSIGUEST/go           — auto-detect
+
+set -e
+say() { printf '\n=== %s ===\n' "$*"; }
+
+# Resolve each helper from the first place it's available:
+#   ~/bin (seeded by install-psi.sh)  →  /PSIGUEST (CD)
+# On disk-booted Haiku ~/bin wins so users can patch helpers locally
+# without having to rebuild guest.iso.
+find_helper() {
+  local name="$1"
+  for p in "/boot/home/bin/$name" "/PSIGUEST/$name"; do
+    [ -f "$p" ] && { echo "$p"; return; }
+  done
+  return 1
+}
+
+# PSIGUEST auto-mounts on Live CD (Tracker) but NOT on disk-booted
+# Haiku. Mount it here if it isn't already; makes `sh /PSIGUEST/go`
+# itself work (user typed the path so it must be reachable — this
+# branch fires only when *another* script calls `go` before mount).
+if [ ! -d "/PSIGUEST" ] || [ ! -f "/PSIGUEST/go" ]; then
+  mountvolume PSIGUEST >/dev/null 2>&1 || true
+fi
+
+case "${1:-auto}" in
+  fix)   bash "$(find_helper fix-boot.sh)";       exit ;;
+  ssh)   bash "$(find_helper ssh-bootstrap.sh)";  exit ;;
+  build) bash "$(find_helper install-psi.sh)";   exit ;;
+esac
+
+CD=/PSIGUEST
+
+on_live_cd() {
+  df /boot 2>/dev/null | awk 'NR==3' | grep -q 'scsi/0/1'
+}
+
+disk_has_install() {
+  bfsinfo /dev/disk/scsi/0/0/0/0 2>/dev/null |
+    awk '/Used Blocks/ { used=$3 } END { exit (used+0 > 1000) ? 0 : 1 }'
+}
+
+ensure_sshd() {
+  if pgrep -x sshd >/dev/null 2>&1; then
+    say "sshd already up on :2222"
+    return
+  fi
+  say "starting sshd"
+  bash "$CD/ssh-bootstrap.sh"
+}
+
+if on_live_cd && disk_has_install; then
+  say "Live CD + installed disk — running fix-boot + clean shutdown"
+  bash "$CD/fix-boot.sh"
+  exit
+fi
+
+ensure_sshd
+
+if on_live_cd; then
+  say "Live CD, no install yet — sshd ready. Run Installer in GUI,"
+  say "then re-run  sh /PSIGUEST/go  to fix MBR + shutdown."
+else
+  say "disk-booted. From host, run:"
+  say "  scp /PSIGUEST/install-psi.sh user@…:/tmp/ (or just use the CD)"
+  say "  ssh -i ~/.ssh/psi_haiku -p 2222 user@localhost \\"
+  say "      'ANTHROPIC_API_KEY=xxx bash /PSIGUEST/install-psi.sh'"
+fi
