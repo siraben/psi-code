@@ -4069,10 +4069,14 @@ local function open_external_editor(state)
     state.dirty = true
     return
   end
-  local result = chat.edit_in_external_editor(chat.paste.expand(state, state.input or ""), editor, function()
-    set_status(state, "editing in " .. editor, false)
-    redraw(state)
-  end)
+  local result = chat.edit_in_external_editor(
+    chat.paste.expand(state, state.input or ""),
+    editor,
+    function()
+      set_status(state, "editing in " .. editor, false)
+      redraw(state)
+    end
+  )
   state.reanchor_renderer = not not result.reanchor
   if result.status == "complete" then
     if result.content ~= state.input then
