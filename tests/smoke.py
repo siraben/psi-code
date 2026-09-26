@@ -2094,6 +2094,27 @@ def t_tui_multiline_prompt(psi: Psi):
     text = strip_ansi(raw)
     assert_contains(text, "ANTHROPIC_API_KEY is not set", "multiline input submitted")
 
+@test("mode/tui_short_viewport")
+def t_tui_short_viewport(psi: Psi):
+    for args, layout in ((["--tui"], "frame"), (["--chat"], "chat")):
+        raw = run_pty(
+            [psi.binary, *args],
+            [
+                (b"tiny viewport prompt", 0.6),
+                (b"\x15/quit\r", 0.8),
+            ],
+            rows=4,
+            cols=32,
+            env_extra={
+                "NO_COLOR": "1",
+                "XDG_STATE_HOME": str(psi.tmp / f"state-tui-short-{layout}"),
+            },
+            idle_drain=0.8,
+        )
+        raw.assert_clean_exit()
+        assert_bytes_contains(raw, b"tiny viewport prompt", f"{layout} short viewport prompt")
+        assert_bytes_contains(raw, b"\x1b[?25h", f"{layout} short viewport hardware cursor")
+
 @test("session/round_trip")
 def t_session_round_trip(psi: Psi):
     sess = psi.tmp / "session.jsonl"
