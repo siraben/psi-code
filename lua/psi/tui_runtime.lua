@@ -1,6 +1,7 @@
 local agent = require("psi.agent_session")
 local agent_runtime = require("psi.agent_session_runtime")
 local ansi = require("psi.ansi")
+local clipboard = require("psi.clipboard")
 local commands = require("psi.slash_commands")
 local markdown = require("psi.markdown")
 local prelude = require("psi.prelude")
@@ -4548,6 +4549,14 @@ local function apply_action(state, action, arg)
     insert_text(state, arg or "")
     return
   end
+  if action == "clipboard-paste" then
+    local reader = state.clipboard_reader or clipboard.read_system
+    local ok, text = pcall(reader)
+    if ok and type(text) == "string" and text ~= "" then
+      insert_text(state, chat.normalize_pasted_text(text))
+    end
+    return
+  end
   if action == "submit" then
     submit(state, arg)
     return
@@ -4805,7 +4814,11 @@ local function apply_action(state, action, arg)
 end
 
 function chat.normalize_pasted_text(text)
-  return tostring(text or ""):gsub("\r\n", "\n"):gsub("\r", "\n"):gsub("\t", "    ")
+  return tostring(text or "")
+    :gsub("\r\n", "\n")
+    :gsub("\r", "\n")
+    :gsub("\t", "    ")
+    :gsub("[%z\1-\8\11\12\14-\31\127]", "")
 end
 
 local function handle_key_event(state, event)
@@ -5766,6 +5779,7 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     selection_anchor = nil,
     selection_kind = nil,
     clipboard = "",
+    clipboard_reader = debug_options.clipboard_reader,
     clipboard_writers_disabled = debug_options.clipboard_writers ~= true,
     pending_key = nil,
     block_edit = nil,
