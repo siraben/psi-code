@@ -1,8 +1,8 @@
 # psi architecture
 
-This document describes the runtime model `psi` is expected to follow. It covers
-current behavior and intended direction. Migration notes and compatibility
-history belong in issue threads or port-status docs, not here.
+psi uses a C89 host for operating-system boundaries and a single-threaded Lua
+runtime for agent policy. This document describes the current runtime model and
+the constraints that guide new work.
 
 ## Design rules
 
@@ -26,7 +26,7 @@ history belong in issue threads or port-status docs, not here.
 
 ## Runtime layers
 
-### 1. Host boundary in C
+### C host boundary
 
 The C layer provides a narrow execution substrate:
 
@@ -48,7 +48,7 @@ Host primitives are registered in `src/lua/vm.c` via `PSI_REG_DOC`,
 which attaches a one-line docstring queryable from inside psi. The
 running agent enumerates and describes them itself:
 
-```
+```text
 psi> /apropos psi.                # all host primitives by name
 psi> /describe psi.read_file_slice
 psi> /describe psi.tool_call
@@ -86,7 +86,7 @@ useful before the binary is installed. Regenerate this table from
 | `--version` | — | show version |
 <!-- @end -->
 
-### 2. Lua runtime
+### Lua runtime
 
 Lua owns the runtime model:
 
@@ -108,7 +108,7 @@ Lua policy must not assume every host capability is present. It should check
 `psi.runtime_info()` or a module-level capability wrapper and degrade cleanly
 when a feature is disabled.
 
-### 3. Frontends
+### Frontends
 
 Frontends consume the same runtime and differ only in presentation:
 
@@ -226,8 +226,8 @@ C owns only the terminal boundary:
 
 ### TUI module boundaries
 
-- `src/runtime/tui_mode.c` switches the terminal into raw mode and delegates to Lua mode
-  without entering the alternate screen by default
+- `src/runtime/tui_mode.c` switches the terminal into raw mode and delegates to
+  Lua without entering the alternate screen by default
 - `src/lua/vm.c` exposes the `psi.tui_*` host primitives
 - `lua/psi/tui_runtime.lua` owns the runtime state machine for `--tui`
 - `lua/psi/tui_app.lua` owns the pi-style TUI controller layer: root
@@ -244,9 +244,9 @@ C owns only the terminal boundary:
 - `lua/psi/tui_layout.lua` owns layout policy such as prefixes, footer text,
   and row caps
 
-The rule is simple: one renderer owns terminal bytes while active. C reports
-terminal facts, implements terminal text math, and enforces that ownership.
-Lua decides what the interface means and what the screen should say.
+One renderer owns terminal bytes while active. C reports terminal facts,
+implements terminal text math, and enforces that ownership. Lua decides what
+the interface means and what the screen should say.
 
 ### TUI rendering path
 
@@ -293,8 +293,8 @@ Runtime overrides:
 - `PSI_COLOR=0|1` forces Lua's color rendering policy within compiled support.
 - `PSI_TUI_RAW_ANSI=0|1` forces raw ANSI TUI line drawing within compiled and
   terminal support.
-- `PSI_TUI_ALT_SCREEN=1` restores the old alternate-screen + mouse-capture
-  terminal boundary.
+- `PSI_TUI_ALT_SCREEN=1` enables the alternate-screen and mouse-capture terminal
+  boundary.
 - `PSI_TUI_FULLSCREEN=1` or `PSI_TUI_INLINE_MAX_ROWS=<n>` controls the inline
   viewport height policy.
 - `PSI_HARDWARE_CURSOR=0` falls back to the Lua-drawn prompt cursor.
@@ -473,12 +473,11 @@ Extensions should not need to patch C for runtime policy changes.
 
 Near-term direction:
 
-- keep the C codebase below 10k lines
+- keep the C host small and resist moving policy into it
 - continue moving policy and orchestration upward into Lua
 - keep the TUI Lua-owned, with C restricted to terminal primitives
 - keep provider and tool concurrency explicit and reviewable
 - add tests around event ordering, session lifecycle, and concurrent tool
   behavior whenever the runtime surface changes
 
-For new code, ask: "Can this be expressed as Lua policy on top of a narrow host
-primitive?" If yes, it belongs in Lua.
+New policy belongs in Lua whenever a narrow host primitive can support it.
