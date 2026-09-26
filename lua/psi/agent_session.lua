@@ -171,6 +171,8 @@ end
 
 M.queue_steering = control.queue_steering
 M.queue_follow_up = control.queue_follow_up
+M.queue_internal_follow_up = control.queue_internal_follow_up
+M.clear_internal_follow_ups = control.clear_internal_follow_ups
 M.queue_mode = control.queue_mode
 M.queue_modes = control.queue_modes
 M.set_queue_mode = control.set_queue_mode

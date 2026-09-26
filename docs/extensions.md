@@ -345,6 +345,7 @@ These are part of the stable surface:
 | `psi.prompt.register_transformer(fn)` | Append a system-prompt rewriter. Receives the assembled prompt, returns a replacement (or `nil` to leave it). Runs after built-in assembly; transformers stack in registration order. |
 | `psi.agent.set_model(name)` / `psi.agent.current_model(fallback)` | Switch the default model at runtime (any prefix psi understands: `anthropic/`, `ollama/`, `openrouter/`, `openai-codex/`, `moonshot/`). Picked up on the *next* turn; the TUI status line reflects it immediately. Pass `nil` to clear. |
 | `psi.agent.queue_follow_up(text)` / `queue_steering(text)` | Queue user text for the active run loop. Follow-ups run after the current task would otherwise stop; steering is injected before the next provider request. |
+| `psi.agent.queue_internal_follow_up(text)` | Queue a model-visible continuation as a custom session message without presenting it as user-authored queued input. Intended for lifecycle extensions such as goals. |
 | `psi.agent.queue_modes()` / `queue_mode(kind)` / `set_queue_mode(kind, mode)` | Inspect or set pi-style queue drain modes, also exposed in the TUI as `/queue set-steering-mode MODE` and `/queue set-follow-up-mode MODE`. `kind` is `steering` or `follow-up`; `mode` is `one-at-a-time` or `all`. |
 | `psi.agent.pending_messages()` / `pending_message(i)` / `replace_pending(i, text)` / `remove_pending(i)` / `clear_queue(kind)` / `clear_queues()` | Inspect and edit queued messages. TUI busy-submit queues steering, and Alt-Enter queues follow-up messages. |
 | `psi.agent.side_question(question, opts)` | Ask an ephemeral `/btw`-style side question using the current transcript excerpt. Uses the configured model, including local providers, does not expose tools, and does not append to the session. |
@@ -385,6 +386,17 @@ The built-in OSC 52 clipboard layer
 It is enabled by default so yanks update terminal clipboards, including tmux
 via DCS passthrough. Disable it with
 `"extensions": { "osc52_clipboard": { "enabled": false } }`.
+
+The bundled goal layer (`lua/psi/extensions/goal.lua`) owns `/goal`. Use
+`/goal <objective>` to start a persistent objective and its first turn; bare
+`/goal` displays the current state. `/goal edit <objective>`, `/goal pause`,
+`/goal resume`, and `/goal clear` mirror Codex's user-controlled lifecycle.
+The model receives `create_goal`, `get_goal`, and `update_goal` tools; only the
+model can mark work `complete` or `blocked`. Active goals continue through
+internal model-visible follow-ups, track elapsed time and provider token usage,
+honor explicitly requested token budgets, and appear in the TUI status line.
+Goal state uses custom session entries, so it survives resume and compaction
+without treating continuation prompts as user-authored queued input.
 
 Image attachments can be disabled globally with `"images": { "block_images":
 true }` in settings. When disabled, image blocks are replaced with `Image
@@ -454,6 +466,7 @@ retains its underscore name.
 | `thinking-delta` | Every streamed thinking/reasoning chunk from providers that expose one, including Anthropic, Ollama reasoning models, and OpenAI Codex reasoning summaries. | `{ text }` |
 | `tool-call` | Before a tool is dispatched. | `{ id, tool, input }` |
 | `tool-result` | After a tool returns. | `{ id, tool, result }` |
+| `tool-results-persisted` | After a completed tool batch and all of its results have been appended and saved. | `{ count }` |
 | `assistant-text` | Per aggregated assistant text block (render-level). | `{ text }` |
 | `turn-end` | Final event when a turn ends with no more tool_use (i.e. the full turn is done). | `{ text, model }` |
 | `after-turn` | Right after `turn-end`, during render flush. | `{ text, ["assistant-streamed"] }` |
