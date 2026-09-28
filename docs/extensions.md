@@ -226,8 +226,11 @@ handles another action kind.
 ### Themes: `psi.theme`
 
 Theme support stays Lua-first: extensions register a theme spec, then select it.
-The bundled default is a dark TUI theme; custom themes can override only the
-slots they need and inherit the rest.
+The bundled `pi-dark` / `pi-light` themes (also `dark` / `light`) match Pi
+0.84.4. Optional `pi-modern-dark` / `pi-modern-light` themes match pi-mono
+`6f755151`. Select via `"theme": "pi-dark"`, `theme.name`, or `tui.theme`
+in settings. Custom themes can override only the slots they need and inherit
+the rest.
 
 | API | Notes |
 |---|---|

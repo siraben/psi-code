@@ -66,7 +66,13 @@ tracks the active effort color. Thinking visibility is sticky via
 history; PgUp/PgDn scroll the transcript in frame/fullscreen mode. Normal-screen
 chat mode leaves mouse-wheel scrollback to the terminal, while
 `PSI_TUI_ALT_SCREEN=1` enables application-owned wheel scrolling and Alt-wheel
-acceleration. The startup mark spells `psi` in block letters with a dotted `i`.
+acceleration. Startup shows the name and version (`psi v…`), without a graphic logo.
+
+The default `pi-dark` / `pi-light` palettes match Pi 0.84.4. The newer
+pi-mono (`6f755151`) palettes are available as `pi-modern-dark` /
+`pi-modern-light`; select one with `"theme": "pi-modern-dark"` in settings.
+The `dark` / `light` aliases and existing `theme.name` / `tui.theme` settings
+are also supported.
 
 In the TUI or REPL, `! command` runs a local shell command without calling the
 model and includes its result in subsequent model context. `!! command` runs

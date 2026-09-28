@@ -20,6 +20,6 @@ local maximum = theme.thinking_border("max", "x")
 return table.concat({
   tostring(all_colored),
   tostring((function() local n = 0 for _ in pairs(seen) do n = n + 1 end return n == #levels end)()),
-  tostring(medium:find("38;2;97;133;204", 1, true) ~= nil
-    and maximum:find("38;2;254;84;98", 1, true) ~= nil),
+  tostring(medium:find("38;2;129;162;190", 1, true) ~= nil
+    and maximum:find("38;2;255;95;255", 1, true) ~= nil),
 }, "|")

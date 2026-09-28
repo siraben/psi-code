@@ -16,5 +16,5 @@ local out = render.render_tool_call({
 local plain = text.strip_ansi(out)
 local first = plain:match("\n([^\n]*)") or plain:match("([^\n]*)") or ""
 
-return tostring(out:find("\27[48;2;52;56;58m", 1, true) ~= nil) .. "|"
+return tostring(out:find("\27[48;2;40;40;50m", 1, true) ~= nil) .. "|"
   .. tostring(text.visible_width(first) == 80)

@@ -6,8 +6,8 @@ local text = require("psi.tui_text")
 local compact = text.strip_ansi(startup.render({ expanded = false }))
 local expanded = text.strip_ansi(startup.render({ expanded = true }))
 return table.concat({
-  tostring(compact:find("▀▀█ █▀▀ ▀ v", 1, true) == 1),
-  tostring(expanded:find("█▀  ▄▄█ █", 1, true) ~= nil),
+  tostring(compact:find("psi v", 1, true) == 1),
+  tostring(expanded:find("psi v", 1, true) == 1 and not expanded:find("▀", 1, true)),
   tostring(compact:find("v" .. psi.version(), 1, true) ~= nil),
   tostring(compact:find("Esc interrupt", 1, true) ~= nil),
   tostring(compact:find("Ctrl-C/Ctrl-D clear/exit", 1, true) ~= nil),

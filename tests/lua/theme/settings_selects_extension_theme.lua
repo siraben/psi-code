@@ -1,5 +1,5 @@
 --[==[psi-test
-expect = "toxic|118|233|254"
+expect = "toxic|118|233|253"
 cwd = "theme-project"
 env = { PSI_EXTENSIONS_DIR = "{TMP}/theme-ext" }
 files = [
