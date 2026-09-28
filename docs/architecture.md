@@ -80,7 +80,7 @@ useful before the binary is installed. Regenerate this table from
 | `-r`, `--resume` | — | pick a session to resume (TUI picker) |
 | `--session` | `FILE` | load and save a JSONL session file |
 | `--system-prompt` | — | print the default coding-agent system prompt |
-| `--thinking` | `LEVEL` | thinking level: off, minimal, low, medium, high, xhigh |
+| `--thinking` | `LEVEL` | thinking level: off, minimal, low, medium, high, xhigh, max |
 | `--trust` | — | trust this directory's .psi resources without prompting |
 | `--tui` | — | run the inline interactive TUI |
 | `--version` | — | show version |
@@ -243,6 +243,8 @@ C owns only the terminal boundary:
   edit/navigation actions
 - `lua/psi/tui_layout.lua` owns layout policy such as prefixes, footer text,
   and row caps
+- `lua/psi/tui_startup.lua` owns the compact/expanded pi-style startup help
+  and two-row block-letter psi mark
 
 The rule is simple: one renderer owns terminal bytes while active. C reports
 terminal facts, implements terminal text math, and enforces that ownership.
@@ -260,6 +262,10 @@ Rendering policy:
 - The runtime mutates persistent components and asks `tui_app` for one final
   composed frame. Overlays are rendered separately, positioned by anchor or
   row/column options, and spliced into the base frame by terminal columns.
+- The startup header is a non-session transcript entry. Ctrl-O expands both
+  its shortcut list and tool output, and `quietStartup=true` suppresses it.
+- Prompt borders and busy indicators use the current pi effort palette for
+  `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`.
 - The first inline paint anchors at the terminal's current cursor. Later paints
   use relative movement from the renderer's tracked hardware row, so startup
   output stays above the live region and terminal scrolling remains natural.
@@ -293,8 +299,10 @@ Runtime overrides:
 - `PSI_COLOR=0|1` forces Lua's color rendering policy within compiled support.
 - `PSI_TUI_RAW_ANSI=0|1` forces raw ANSI TUI line drawing within compiled and
   terminal support.
-- `PSI_TUI_ALT_SCREEN=1` restores the old alternate-screen + mouse-capture
-  terminal boundary.
+- `PSI_TUI_ALT_SCREEN=1` enters a persistent alternate-screen frame, enables
+  SGR mouse capture, and routes wheel events to the transcript. Wheel steps are
+  one logical row; Alt-wheel steps five. Normal-screen chat mode does not
+  capture the mouse and leaves scrollback to the terminal.
 - `PSI_TUI_FULLSCREEN=1` or `PSI_TUI_INLINE_MAX_ROWS=<n>` controls the inline
   viewport height policy.
 - `PSI_HARDWARE_CURSOR=0` falls back to the Lua-drawn prompt cursor.
@@ -320,9 +328,14 @@ assumption.
 
 Built-in Vim-style modal editing is installed as a Lua extension through the
 same `psi.tui.register_key_handler` and `psi.tui.register_status_hook` APIs
-available to user extensions. C normalizes terminal input to semantic key ids;
-Lua chooses whether a key edits text, switches editor mode, scrolls the
-transcript, updates the status bar, or falls through to the default policy.
+available to user extensions. The default editor follows pi's edge semantics:
+Up/Down move through wrapped prompt rows and enter history only at the top or
+bottom, rather than scrolling the transcript. Frame/fullscreen PgUp/PgDn and
+Home/End navigate the transcript; main-screen mode applies those keys to the
+prompt and delegates mouse-wheel scrollback to the terminal. C normalizes
+terminal input to semantic key ids; Lua chooses whether a key edits text,
+switches editor mode, scrolls the transcript, updates the status bar, or falls
+through to the default policy.
 
 `/reload` resets bundled TUI extension state, clears TUI key, status, and
 clipboard hooks, reloads user extensions, and then runs TUI startup hooks. That

@@ -57,6 +57,23 @@ $ ./build/psi --session /tmp/s.jsonl --compact 12
 $ ./build/psi --model openai-codex/gpt-5.5 --thinking xhigh --agent '...'
 ```
 
+The TUI follows pi's current startup and editing model: a compact branded help
+screen expands with Ctrl-O, Shift-Tab cycles thinking effort, Ctrl-P /
+Ctrl-Shift-P cycle models, Ctrl-T toggles thinking blocks, and the prompt border
+tracks the active effort color. Thinking visibility is sticky via
+`hideThinkingBlock` in `~/.config/psi/settings.json` (or
+`$XDG_CONFIG_HOME/psi/settings.json`). Up/Down stay in the editor and its
+history; PgUp/PgDn scroll the transcript in frame/fullscreen mode. Normal-screen
+chat mode leaves mouse-wheel scrollback to the terminal, while
+`PSI_TUI_ALT_SCREEN=1` enables application-owned wheel scrolling and Alt-wheel
+acceleration. The startup mark spells `psi` in block letters with a dotted `i`.
+
+In the TUI or REPL, `! command` runs a local shell command without calling the
+model and includes its result in subsequent model context. `!! command` runs
+it but excludes the result from model context (it is still saved locally).
+The TUI streams output, reports exit status, and supports Escape cancellation.
+Shell commands entered while another operation is busy stay in the editor.
+
 ## Design goals
 
 psi aims to be:

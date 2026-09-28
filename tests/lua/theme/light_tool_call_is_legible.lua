@@ -15,10 +15,10 @@ theme.use("pi-light")
 
 local call = te.render_call("bash", { command = "ls -la" })
 return table.concat({
-  -- pale pending tint #e8e8f0
-  tostring(call:find("\27[48;2;232;232;240m", 1, true) ~= nil),
-  -- dark title text #1f2328 (bold)
-  tostring(call:find("\27[1;38;2;31;35;40m", 1, true) ~= nil),
+  -- pale pending tint from pi's current light theme
+  tostring(call:find("\27[48;2;228;229;230m", 1, true) ~= nil),
+  -- dark title text from pi's current light theme (bold)
+  tostring(call:find("\27[1;38;2;59;63;65m", 1, true) ~= nil),
   -- the raw dark-green success palette must not leak through
   tostring(call:find("\27[48;5;22m", 1, true) == nil),
 }, "|")

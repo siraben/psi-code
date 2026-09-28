@@ -69,6 +69,9 @@ local TUI_CONST = {
 -- additional helpers must live on this table, not as top-level locals.
 local chat = { FRAME = "frame", CHAT = "chat" }
 chat.paste = require("psi.tui_editor_paste")
+chat.startup = require("psi.tui_startup")
+chat.theme = require("psi.theme")
+chat.thinking = require("psi.thinking")
 
 function chat.editor_push_undo(state)
   state.editor_undo_stack = state.editor_undo_stack or {}
@@ -1032,6 +1035,8 @@ local function new_state(opts, runtime)
     status_text = nil,
     status_is_error = false,
     show_thinking = tui.show_thinking() == "1",
+    persist_ui_settings = true,
+    last_clear_at = nil,
     show_hardware_cursor = env_bool("PSI_HARDWARE_CURSOR") ~= false,
     width = width,
     height = viewport_height,
@@ -1381,6 +1386,19 @@ local function set_entry_text(state, index, text)
   entry.render_cache_lines = nil
   chat.invalidate_entry_render(state, index)
   state.dirty = true
+end
+
+function chat.add_status_entry(state, text, kind)
+  local index = #state.entries
+  local last = state.entries[index]
+  if last ~= nil and last.status_feedback then
+    last.kind = kind or "info"
+    set_entry_text(state, index, text)
+    return index
+  end
+  index = add_entry(state, kind or "info", text)
+  state.entries[index].status_feedback = true
+  return index
 end
 
 local function append_entry_text(state, index, text)
@@ -1793,20 +1811,31 @@ local function entry_render_lines(state, entry)
   if entry.kind == "ansi" then
     local lines = {}
     local text = trim_trailing_newlines(tui_text.normalize_line_endings(entry_text(entry)))
-    local cursor = 1
-    while true do
-      local nl = text:find("\n", cursor, true)
-      local source_line = nl and text:sub(cursor, nl - 1) or text:sub(cursor)
-      lines[#lines + 1] = {
-        kind = entry.kind,
-        text = source_line,
-        raw = source_line,
-        entry = entry,
-      }
-      if not nl then
-        break
+    if entry.startup then
+      for _, source_line in ipairs(tui_text.wrap_ansi(text, math.max(1, state.width - 1))) do
+        lines[#lines + 1] = {
+          kind = entry.kind,
+          text = source_line,
+          raw = source_line,
+          entry = entry,
+        }
       end
-      cursor = nl + 1
+    else
+      local cursor = 1
+      while true do
+        local nl = text:find("\n", cursor, true)
+        local source_line = nl and text:sub(cursor, nl - 1) or text:sub(cursor)
+        lines[#lines + 1] = {
+          kind = entry.kind,
+          text = source_line,
+          raw = source_line,
+          entry = entry,
+        }
+        if not nl then
+          break
+        end
+        cursor = nl + 1
+      end
     end
     entry.render_cache_width = state.width
     entry.render_cache_lines = lines
@@ -2125,10 +2154,16 @@ end
 
 local function rebuild_from_session(state, messages)
   state.entries = {}
+  state.startup_entry_index = nil
   state.tool_entry_index = nil
   state.streaming_assistant_index = nil
   state.streaming_thinking_index = nil
   invalidate_render_totals(state)
+  if chat.startup.visible() then
+    state.startup_entry_index =
+      add_entry(state, "ansi", chat.startup.render({ expanded = state.tools_expanded }))
+    state.entries[state.startup_entry_index].startup = true
+  end
   for _, msg in ipairs(messages or session.messages()) do
     add_session_entry(state, msg)
   end
@@ -2148,7 +2183,7 @@ local function style_line(line)
     return markdown.render_line(line.text, line.in_code_fence)
   end
   if line.kind == "thinking" then
-    return ansi.italic(ansi.dim(line.text))
+    return ansi.italic(ansi.color("thinking-text", line.text))
   end
   if line.kind == "user" then
     return ansi.bold(ansi.cyan(line.text))
@@ -2304,8 +2339,22 @@ local function style_input_fill(width)
   return string.rep(" ", math.max(0, width))
 end
 
-local function style_input_border(width)
-  return ansi.color(PI_STYLE.border, string.rep("─", math.max(0, width)))
+function chat.current_thinking_level(state)
+  return agent.thinking_level_for(
+    state.model,
+    state.opts and state.opts.thinking_level,
+    state.opts and state.opts.reasoning_effort
+  )
+end
+
+local function style_input_border(state, width)
+  if state.input and state.input:sub(1, 1) == "!" then
+    return ansi.color("bash-mode", string.rep("─", math.max(0, width)))
+  end
+  return chat.theme.thinking_border(
+    chat.current_thinking_level(state),
+    string.rep("─", math.max(0, width))
+  )
 end
 
 local function input_box_line(content, width)
@@ -2511,7 +2560,8 @@ local function redraw(state)
       state.busy_label or "working",
       state.busy_phase,
       status_arg.elapsed_seconds,
-      state.busy_tick
+      state.busy_tick,
+      status_arg.thinking_level
     )
   end
   if rows.status_visible then
@@ -2522,7 +2572,7 @@ local function redraw(state)
 
   local input_width = frame_width
   local input_component_lines = {
-    style_input_border(input_width),
+    style_input_border(state, input_width),
   }
   for i = 0, rows.input_rows - 1 do
     local line_index = rows.input_first_line + i
@@ -2548,7 +2598,7 @@ local function redraw(state)
     end
     input_component_lines[#input_component_lines + 1] = input_text
   end
-  input_component_lines[#input_component_lines + 1] = style_input_border(input_width)
+  input_component_lines[#input_component_lines + 1] = style_input_border(state, input_width)
   frame.input:set_lines(input_component_lines)
 
   local footer_lines = { chat.footer_bar_line(state, status_arg, frame_width) }
@@ -2710,7 +2760,8 @@ function chat.redraw(state)
       state.busy_label or "working",
       state.busy_phase,
       status_arg.elapsed_seconds,
-      state.busy_tick
+      state.busy_tick,
+      status_arg.thinking_level
     )
   end
   for _, line in ipairs(pending_queue_lines(frame_width)) do
@@ -2733,7 +2784,7 @@ function chat.redraw(state)
   end
   local input_width = frame_width
   local input_box_top_idx = #live_lines + 1
-  live_lines[#live_lines + 1] = style_input_border(input_width)
+  live_lines[#live_lines + 1] = style_input_border(state, input_width)
   for i = 0, input_rows_n - 1 do
     local line_index = input_first_line + i
     local line = input_lines[line_index]
@@ -2758,7 +2809,7 @@ function chat.redraw(state)
     end
     live_lines[#live_lines + 1] = rendered
   end
-  live_lines[#live_lines + 1] = style_input_border(input_width)
+  live_lines[#live_lines + 1] = style_input_border(state, input_width)
   live_lines[#live_lines + 1] = chat.footer_bar_line(state, status_arg, frame_width)
   for _, row in ipairs(footer_extra) do
     live_lines[#live_lines + 1] = row
@@ -3215,6 +3266,18 @@ function chat.editor_arrow_down(state)
     return true
   end
   return false
+end
+
+function chat.editor_page(state, direction)
+  local page_size =
+    math.max(5, math.floor((tonumber(state.terminal_height) or state.height or 24) * 0.3))
+  local delta = direction == "up" and -1 or 1
+  for _ = 1, page_size do
+    if not chat.move_visual_line(state, delta) then
+      break
+    end
+  end
+  state.dirty = true
 end
 
 local function set_insert_mode(state)
@@ -4741,6 +4804,43 @@ local function handle_command(state, line)
   return true
 end
 
+function chat.run_shell(state, line)
+  local shell = require("psi.shell_commands")
+  local request = shell.parse(line)
+  if request.command == "" then
+    set_status(state, "usage: ! <command> or !! <command>", true)
+    return
+  end
+  history_add(state, line)
+  local label = "$ " .. request.command .. (request.hidden and " (excluded from context)" or "")
+  local index = add_entry(state, "shell", label)
+  state.busy = true
+  state.busy_kind = "shell"
+  state.busy_label = "running command"
+  state.busy_started_at = os.time()
+  state.busy_next_frame_at = now_ms() + TUI_CONST.busy_animation_interval_ms
+  set_status(state, "", false)
+  redraw(state)
+  local ok, result, err = pcall(shell.run, request, function(output)
+    set_entry_text(state, index, label .. "\n" .. output)
+  end)
+  reset_busy(state)
+  set_status(state, "", false)
+  if ok and result then
+    set_entry_text(
+      state,
+      index,
+      result.text .. (request.hidden and "\n(excluded from context)" or "")
+    )
+    if result.save_error then
+      set_status(state, "failed to save shell result: " .. tostring(result.save_error), true)
+    end
+  else
+    set_entry_text(state, index, label .. "\n" .. tostring(ok and err or result))
+  end
+  state.dirty = true
+end
+
 local function submit(state, queue_kind)
   if state.input == "" then
     return
@@ -4757,6 +4857,12 @@ local function submit(state, queue_kind)
   exit_history_browse(state)
 
   if state.busy then
+    if line:sub(1, 1) == "!" then
+      state.input = line
+      state.cursor = #line
+      set_status(state, "shell command unavailable while busy", true)
+      return
+    end
     if state.busy_kind ~= "agent" then
       state.input = line
       state.cursor = #state.input
@@ -4797,6 +4903,12 @@ local function submit(state, queue_kind)
     end
     chat.editor_clear_undo(state)
     queue_current_input(state, line, queue_kind)
+    return
+  end
+
+  if line:sub(1, 1) == "!" then
+    chat.editor_clear_undo(state)
+    chat.run_shell(state, line)
     return
   end
 
@@ -4971,7 +5083,13 @@ local function apply_action(state, action, arg)
     return
   end
   if action == "clear-buffer" then
+    local now = now_ms()
+    if state.last_clear_at ~= nil and now - state.last_clear_at < 500 then
+      state.running = false
+      return
+    end
     clear_buffer(state)
+    state.last_clear_at = now
     return
   end
   if action == "history-search" then
@@ -4980,36 +5098,50 @@ local function apply_action(state, action, arg)
     end
     return
   end
+  if action == "history-previous" then
+    history_up(state)
+    return
+  end
+  if action == "history-next" then
+    history_down(state)
+    return
+  end
+  if action == "editor-up" then
+    chat.editor_arrow_up(state)
+    return
+  end
+  if action == "editor-down" then
+    chat.editor_arrow_down(state)
+    return
+  end
+  if action == "editor-page" then
+    chat.editor_page(state, arg)
+    return
+  end
   if action == "scroll" then
     if state.layout_mode == chat.CHAT then
-      -- Terminal handles scrollback natively. Keep history navigation though.
-      if arg == "line-up" and history_up_applicable(state) then
-        history_up(state)
-      elseif arg == "line-down" and history_down_applicable(state) then
-        history_down(state)
-      end
+      -- Main-screen mode delegates transcript scrolling to the terminal.
       return
     end
+    local viewport_rows = math.max(1, (state.last_transcript_height or state.height or 1) - 2)
     if arg == "page-up" then
-      scroll_by(state, math.max(4, math.floor(state.height / 2)))
+      scroll_by(state, viewport_rows)
     elseif arg == "page-down" then
-      scroll_by(state, -math.max(4, math.floor(state.height / 2)))
+      scroll_by(state, -viewport_rows)
     elseif arg == "top" then
       state.scroll_offset = max_scroll_offset(state)
       state.dirty = true
     elseif arg == "bottom" then
       state.scroll_offset = 0
       state.dirty = true
-    elseif arg == "line-up" then
-      if history_up_applicable(state) and history_up(state) then
-        return
-      end
+    elseif arg == "line-up" or arg == "wheel-up" then
       scroll_by(state, 1)
-    elseif arg == "line-down" then
-      if history_down_applicable(state) and history_down(state) then
-        return
-      end
+    elseif arg == "line-down" or arg == "wheel-down" then
       scroll_by(state, -1)
+    elseif arg == "wheel-page-up" then
+      scroll_by(state, 5)
+    elseif arg == "wheel-page-down" then
+      scroll_by(state, -5)
     end
     return
   end
@@ -5026,6 +5158,40 @@ local function apply_action(state, action, arg)
     end
     return
   end
+  if action == "model-cycle" then
+    if state.busy then
+      set_status(state, "model cycling unavailable while busy", true)
+      return
+    end
+    local registry = require("psi.api_registry")
+    local current = state.model and state.model.ref or state.opts.model
+    local models = {}
+    for _, model in ipairs(registry.all_models()) do
+      if model.id == current or registry.provider_has_auth(model.provider) then
+        models[#models + 1] = model
+      end
+    end
+    if #models <= 1 then
+      set_status(state, "Only one model available", false)
+      return
+    end
+    local index = 1
+    for i, model in ipairs(models) do
+      if model.id == current then
+        index = i
+        break
+      end
+    end
+    index = arg == "backward" and ((index - 2) % #models + 1) or (index % #models + 1)
+    local selected = models[index].id
+    agent.set_model(selected)
+    state.opts.model = selected
+    state.model = agent.model_descriptor(selected)
+    state.footer_bar_cache = nil
+    set_status(state, "Model: " .. tostring(selected), false)
+    state.dirty = true
+    return
+  end
   if action == "toggle-tools" then
     state.tools_expanded = not state.tools_expanded
     for _, entry in ipairs(state.entries) do
@@ -5034,6 +5200,14 @@ local function apply_action(state, action, arg)
         entry.render_cache_width = nil
         entry.render_cache_lines = nil
       end
+    end
+    if state.startup_entry_index ~= nil and state.entries[state.startup_entry_index] then
+      set_entry_text(
+        state,
+        state.startup_entry_index,
+        chat.startup.render({ expanded = state.tools_expanded })
+      )
+      state.entries[state.startup_entry_index].startup = true
     end
     invalidate_render_totals(state)
     set_status(
@@ -5053,8 +5227,86 @@ local function apply_action(state, action, arg)
       end
     end
     invalidate_render_totals(state)
-    set_status(state, "Thinking blocks: " .. (state.show_thinking and "visible" or "hidden"), false)
+    local saved, save_err = true, nil
+    if state.persist_ui_settings ~= false and type(tui.set_show_thinking) == "function" then
+      saved, save_err = tui.set_show_thinking(state.show_thinking)
+    end
+    local message = "Thinking blocks: " .. (state.show_thinking and "visible" or "hidden")
+    if saved then
+      chat.add_status_entry(state, message, "info")
+    else
+      chat.add_status_entry(
+        state,
+        message .. " (not saved: " .. tostring(save_err) .. ")",
+        "warning"
+      )
+    end
+    -- Pi renders toggle feedback in the transcript rather than pinning it in
+    -- the status row below the conversation.
+    set_status(state, "", false)
     state.dirty = true
+    return
+  end
+  if action == "cycle-thinking" then
+    if state.busy then
+      set_status(state, "thinking level unavailable while busy", true)
+      return
+    end
+    local levels = chat.thinking.available(state.model)
+    if #levels <= 1 then
+      set_status(state, "Current model does not support thinking", false)
+      return
+    end
+    local current = chat.current_thinking_level(state)
+    local index = 1
+    for i, level in ipairs(levels) do
+      if level == current then
+        index = i
+        break
+      end
+    end
+    local next_level = levels[index % #levels + 1]
+    local ok, level = agent.set_thinking_level(next_level, state.opts.model)
+    if not ok then
+      set_status(state, tostring(level), true)
+      return
+    end
+    state.opts.thinking_level = level
+    state.opts.reasoning_effort = level == "off" and "none" or level
+    state.footer_bar_cache = nil
+    set_status(state, "Thinking level: " .. tostring(level), false)
+    state.dirty = true
+    return
+  end
+  if action == "save-thinking" then
+    local level = chat.current_thinking_level(state)
+    local ok, err = settings.set_global("defaultThinkingLevel", level)
+    if ok then
+      set_status(state, "Default thinking level: " .. tostring(level), false)
+    else
+      set_status(state, "failed to save thinking level: " .. tostring(err), true)
+    end
+    return
+  end
+  if action == "copy-response" then
+    local text = nil
+    for i = #state.entries, 1, -1 do
+      if state.entries[i].kind == "assistant" and entry_text(state.entries[i]) ~= "" then
+        text = entry_text(state.entries[i])
+        break
+      end
+    end
+    if text == nil then
+      set_status(state, "No assistant response to copy", true)
+      return
+    end
+    state.clipboard = text
+    local copied = tui.write_clipboard(text, {
+      source = "tui-copy-response",
+      state = state,
+      disabled = state.clipboard_writers_disabled,
+    })
+    set_status(state, copied and "Copied last assistant response" or "Copy unavailable", not copied)
     return
   end
   if action == "abort" then
@@ -5269,13 +5521,6 @@ local function handle_key_event(state, event)
     end
   end
 
-  if event.key == "up" and chat.editor_arrow_up(state) then
-    return
-  end
-  if event.key == "down" and chat.editor_arrow_down(state) then
-    return
-  end
-
   local result = tui.handle_key({
     key = event.key,
     busy = state.busy,
@@ -5287,6 +5532,8 @@ local function handle_key_event(state, event)
     selection_anchor = state.selection_anchor,
     pending_key = state.pending_key,
     scroll = state.scroll_offset,
+    viewport = state.layout_mode == chat.FRAME,
+    alt_screen = not not state.alt_screen_active,
     queue_count = agent.pending_message_count(),
     text = event.text or "",
   })
@@ -5664,12 +5911,15 @@ function M.run(opts)
   local runtime = agent_runtime.new(opts)
 
   local layout_mode = chat.resolve_mode(opts)
-  local alt_screen_active = layout_mode == chat.CHAT
+  local persistent_alt_screen = layout_mode == chat.FRAME and env_bool("PSI_TUI_ALT_SCREEN") == true
+  local alt_screen_active = persistent_alt_screen
+    or layout_mode == chat.CHAT
     or not not opts.resume
     or not not opts.continue_recent
 
-  -- The resume picker and chat bootstrap use absolute positioning; keep that
-  -- contained in alt-screen without making inline TUI the default.
+  -- Pickers use absolute positioning in a temporary alternate screen. An
+  -- explicit PSI_TUI_ALT_SCREEN=1 keeps frame mode there and leaves mouse
+  -- capture enabled for application-owned wheel scrolling.
   if alt_screen_active then
     chat.set_alt_screen(true)
   end
@@ -5692,13 +5942,14 @@ function M.run(opts)
     return false
   end
 
-  if alt_screen_active then
+  if alt_screen_active and not persistent_alt_screen then
     chat.set_alt_screen(false)
     alt_screen_active = false
   end
 
   state = new_state(opts, runtime)
   state.layout_mode = layout_mode
+  state.alt_screen_active = persistent_alt_screen
   state.flush_notices = flush_notices
   rebuild_from_session(state)
   flush_notices()
@@ -6134,6 +6385,8 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     status_text = debug_options.status_text,
     status_is_error = not not debug_options.status_is_error,
     show_thinking = debug_options.show_thinking ~= false,
+    persist_ui_settings = debug_options.persist_settings == true,
+    last_clear_at = nil,
     width = tonumber(debug_options.width) or 80,
     height = tonumber(debug_options.height) or 24,
     input_layout = default_input_layout(tonumber(debug_options.height) or 24),
@@ -6281,13 +6534,9 @@ function M._debug_history_sequence(history, keys, input, cursor)
         state.scrolled = true
       end
     elseif key == "arrow-up" then
-      if not chat.editor_arrow_up(state) then
-        state.scrolled = true
-      end
+      chat.editor_arrow_up(state)
     elseif key == "arrow-down" then
-      if not chat.editor_arrow_down(state) then
-        state.scrolled = true
-      end
+      chat.editor_arrow_down(state)
     elseif key == "ctrl-r" or key == "reverse" then
       history_reverse_search(state, true)
     elseif key == "backspace" then

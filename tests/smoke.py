@@ -1339,7 +1339,11 @@ def t_tui_busy_status(psi: Psi):
         "⠴ working...",
         "busy status renders Pi's stable label and braille frame",
     )
-    assert_contains(out, "\x1b[38;2;138;190;183m", "busy spinner uses the accent color")
+    assert_contains(
+        out,
+        "\x1b[38;2;167;152;215m",
+        "busy spinner uses the medium thinking color",
+    )
 
 
 @test("tui/differential_redraw_uses_changed_rows")
@@ -2032,6 +2036,114 @@ def t_tui_theme_applies_to_rendered_colors(psi: Psi):
     raw.assert_clean_exit()
     assert_bytes_contains(raw, b"38;5;118", "configured TUI accent color did not reach rendered output")
 
+@test("mode/tui_startup_screen_matches_pi_shape")
+def t_tui_startup_screen_matches_pi_shape(psi: Psi):
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [(b"", 0.6), (b"\x0f", 0.35), (b"/quit\r", 0.8)],
+        env_extra={"XDG_STATE_HOME": str(psi.tmp / "state-tui-startup")},
+    )
+    raw.assert_clean_exit()
+    text = strip_ansi(raw)
+    assert_contains(text, "▀▀█ █▀▀", "startup uses block-letter psi branding")
+    assert_contains(text, "█▀  ▄▄█ █", "startup logo includes the s")
+    assert_contains(text, "Esc interrupt", "startup compact key hints")
+    assert_contains(text, "Ctrl-C/Ctrl-D clear/exit", "startup clear/exit hint")
+    assert_contains(text, "Ctrl-O", "startup expansion key")
+    assert_contains(text, "Shift-Tab to cycle thinking level", "expanded startup shortcut list")
+    assert_contains(text, "psi can explain its own features", "startup onboarding copy")
+
+
+@test("mode/tui_thinking_toggle_persists_without_sticky_status")
+def t_tui_thinking_toggle_persists_without_sticky_status(psi: Psi):
+    config = psi.tmp / "thinking-toggle-config"
+    state = psi.tmp / "thinking-toggle-state"
+    env = {
+        "XDG_CONFIG_HOME": str(config),
+        "XDG_STATE_HOME": str(state),
+    }
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [(b"", 0.6), (b"\x14", 0.4), (b"/quit\r", 0.8)],
+        env_extra=env,
+    )
+    raw.assert_clean_exit()
+    settings = json.loads((config / "psi" / "settings.json").read_text())
+    assert_equals(settings.get("hideThinkingBlock"), True,
+                  "Ctrl-T should persist pi's hideThinkingBlock setting")
+    out = psi.run(
+        "--eval",
+        'return require("psi.tui_status").show_thinking()',
+        env_extra=env,
+    ).stdout.strip()
+    assert_equals(out, "0", "next TUI should restore hidden thinking blocks")
+    assert_contains(strip_ansi(raw), "Thinking blocks: hidden",
+                    "toggle feedback should be rendered in the transcript")
+
+
+@test("mode/tui_alt_screen_captures_mouse_wheel")
+def t_tui_alt_screen_captures_mouse_wheel(psi: Psi):
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [
+            (b"", 0.6),
+            (b"\x1b[<64;1;1M\x1b[<72;1;1M", 0.2),
+            (b"/quit\r", 0.8),
+        ],
+        env_extra={
+            "PSI_TUI_ALT_SCREEN": "1",
+            "XDG_STATE_HOME": str(psi.tmp / "state-tui-alt-mouse"),
+        },
+    )
+    raw.assert_clean_exit()
+    assert_bytes_contains(raw, b"\x1b[?1049h", "fullscreen mode should enter alternate screen")
+    assert_bytes_contains(raw, b"\x1b[?1000h", "fullscreen mode should capture mouse buttons/wheel")
+    assert_bytes_contains(raw, b"\x1b[?1006h", "fullscreen mode should request SGR mouse reports")
+    assert_bytes_contains(raw, b"\x1b[?1006l", "fullscreen teardown should release SGR mouse capture")
+    assert_bytes_contains(raw, b"\x1b[?1049l", "fullscreen teardown should leave alternate screen")
+
+
+@test("mode/tui_shift_tab_and_kitty_shortcuts_decode")
+def t_tui_shift_tab_and_kitty_shortcuts_decode(psi: Psi):
+    raw = run_pty(
+        [psi.binary, "--tui", "--model", "openai-codex/gpt-5.5"],
+        [
+            (b"", 0.6),
+            (b"\x1b[Z", 0.25),            # traditional Shift-Tab
+            (b"\x1b[112;6u", 0.25),       # Kitty Shift-Ctrl-P
+            (b"/quit\r", 0.8),
+        ],
+        env_extra={"XDG_STATE_HOME": str(psi.tmp / "state-tui-shortcuts")},
+    )
+    raw.assert_clean_exit()
+    text = strip_ansi(raw)
+    assert_contains(text, "Thinking level:", "Shift-Tab should cycle thinking")
+    assert_not_contains(text, "[Z/quit", "Shift-Tab bytes must not leak into editor")
+    assert_not_contains(text, "[112;6u/quit", "Kitty shortcut bytes must not leak into editor")
+
+
+@test("mode/tui_bang_shell_commands")
+def t_tui_bang_shell_commands(psi: Psi):
+    raw = run_pty(
+        [psi.binary, "--tui"],
+        [
+            (b"", 0.5),
+            (b"!printf shell-visible\r", 0.7),
+            (b"!!printf shell-hidden; exit 7\r", 0.7),
+            (b"!sleep 30\r", 0.3),
+            (b"\x1b", 0.5),
+            (b"/quit\r", 0.8),
+        ],
+        env_extra={"XDG_STATE_HOME": str(psi.tmp / "state-tui-shell")},
+    )
+    raw.assert_clean_exit()
+    text = strip_ansi(raw)
+    assert_contains(text, "Command exited with code 0", "! runs locally")
+    assert_contains(text, "Command exited with code 7", "shell failures show exit codes")
+    assert_contains(text, "excluded from context", "!! labels excluded output")
+    assert_contains(text, "Command cancelled", "Escape aborts shell commands")
+
+
 @test("mode/tui_input_box_background")
 def t_tui_input_box_background(psi: Psi):
     state = psi.tmp / "state-tui-input-box"
@@ -2056,8 +2168,8 @@ def t_tui_input_box_background(psi: Psi):
     assert_bytes_not_contains(raw, b"\x1b[4m", "input box should not render a Lua-owned cursor cell")
     assert_bytes_not_contains(raw, b"\x1b[48;5;238m",
                               "input box should not paint a filled background")
-    assert_bytes_contains(raw, b"\x1b[38;2;95;135;255m",
-                          "pi-style input border color did not reach rendered output")
+    assert_bytes_contains(raw, b"\x1b[38;2;97;133;204m",
+                          "thinking-level input border color did not reach rendered output")
 
 @test("mode/tui_bracketed_paste")
 def t_tui_bracketed_paste(psi: Psi):
