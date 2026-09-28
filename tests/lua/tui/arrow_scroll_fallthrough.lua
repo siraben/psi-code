@@ -1,5 +1,5 @@
 --[==[psi-test
-expect = "true|true"
+expect = "false|false"
 ]==]
 local rt = require("psi.tui_runtime")
 

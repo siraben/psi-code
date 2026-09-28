@@ -1,5 +1,5 @@
 --[==[psi-test
-expect = "submit:steering|submit:steering|submit:follow-up|insert:\\n|kill-start:-|quit:-|delete-forward:-|queue-restore:-|scroll:line-up|scroll:line-up|scroll:line-down|abort:-|external-editor:-|insert:x"
+expect = "submit:steering|submit:steering|submit:follow-up|insert:\\n|kill-start:-|quit:-|delete-forward:-|queue-restore:-|editor-up:-|scroll:wheel-up|scroll:wheel-down|abort:-|external-editor:-|insert:x"
 ]==]
 local tui = require("psi.tui_status")
 local function fmt(res)

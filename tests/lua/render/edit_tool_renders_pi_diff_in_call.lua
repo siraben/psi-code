@@ -24,7 +24,7 @@ local result_text =
   render.handle_event("tool-result", { id = "e1", tool = "edit", result = result })
 
 return table.concat({
-  tostring(call:find("\27[48;2;40;50;40m", 1, true) ~= nil),
+  tostring(call:find("\27[48;2;37;65;49m", 1, true) ~= nil),
   tostring(call:find("-1 alpha ", 1, true) ~= nil),
   tostring(call:find("+1 alpha ", 1, true) ~= nil),
   tostring(call:find("\27[7m", 1, true) ~= nil),

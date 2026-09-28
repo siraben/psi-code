@@ -50,7 +50,7 @@ static int psi_cli_valid_thinking(const char *level) {
         return 0;
     return strcmp(level, "off") == 0 || strcmp(level, "minimal") == 0 ||
         strcmp(level, "low") == 0 || strcmp(level, "medium") == 0 || strcmp(level, "high") == 0 ||
-        strcmp(level, "xhigh") == 0;
+        strcmp(level, "xhigh") == 0 || strcmp(level, "max") == 0;
 }
 
 static int psi_cli_argtable_add(struct psi_cli_argtable *args, void *arg) {
@@ -78,7 +78,7 @@ static int psi_cli_build_argtable(struct psi_cli_argtable *args) {
     args->agent = arg_str0(NULL, "agent", "TEXT", "run a single coding-agent turn");
     args->model = arg_str0(NULL, "model", "MODEL", "model to use with --agent");
     args->thinking = arg_str0(
-        NULL, "thinking", "LEVEL", "thinking level: off, minimal, low, medium, high, xhigh");
+        NULL, "thinking", "LEVEL", "thinking level: off, minimal, low, medium, high, xhigh, max");
     args->max_tokens = arg_int0(NULL, "max-tokens", "N", "max output tokens for --agent");
     args->compact = arg_int0(
         NULL, "compact", "N", "compact the current session, keeping the most recent N messages");

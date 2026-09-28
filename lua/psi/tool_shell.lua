@@ -211,6 +211,9 @@ local function stream(handle, tool_call_id, opts, poll_fn)
           end
         end
       end
+      if opts.on_output ~= nil then
+        opts.on_output(truncate_for_mode(buffered_text(), opts).content or "")
+      end
       if psi.tool_progress ~= nil and tool_call_id ~= nil then
         if opts.progress == "truncated" then
           -- Recomputing the preview concatenates the whole rolling buffer;

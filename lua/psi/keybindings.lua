@@ -34,6 +34,42 @@ local DEFINITIONS = {
     description = "Reverse-search prompt history",
   },
   {
+    id = "tui.editor.cursorUp",
+    section = "Navigation",
+    default_keys = { "up" },
+    description = "Move cursor up or recall history at the top",
+  },
+  {
+    id = "tui.editor.cursorDown",
+    section = "Navigation",
+    default_keys = { "down" },
+    description = "Move cursor down or leave history at the bottom",
+  },
+  {
+    id = "tui.editor.historyPrevious",
+    section = "Navigation",
+    default_keys = {},
+    description = "Recall previous prompt history entry",
+  },
+  {
+    id = "tui.editor.historyNext",
+    section = "Navigation",
+    default_keys = {},
+    description = "Recall next prompt history entry",
+  },
+  {
+    id = "tui.editor.pageUp",
+    section = "Navigation",
+    default_keys = { "page-up", "ctrl-page-up" },
+    description = "Move prompt cursor up one page",
+  },
+  {
+    id = "tui.editor.pageDown",
+    section = "Navigation",
+    default_keys = { "page-down", "ctrl-page-down" },
+    description = "Move prompt cursor down one page",
+  },
+  {
     id = "tui.editor.cursorLeft",
     section = "Navigation",
     default_keys = { "left", "ctrl-b" },
@@ -60,25 +96,25 @@ local DEFINITIONS = {
   {
     id = "tui.editor.cursorLineStart",
     section = "Navigation",
-    default_keys = { "home", "ctrl-a" },
+    default_keys = { "home", "ctrl-home", "ctrl-a" },
     description = "Move to line start",
   },
   {
     id = "tui.editor.cursorLineEnd",
     section = "Navigation",
-    default_keys = { "end", "ctrl-e" },
+    default_keys = { "end", "ctrl-end", "ctrl-e" },
     description = "Move to line end",
   },
   {
     id = "tui.transcript.lineUp",
     section = "Navigation",
-    default_keys = { "up" },
+    default_keys = {},
     description = "Scroll transcript up",
   },
   {
     id = "tui.transcript.lineDown",
     section = "Navigation",
-    default_keys = { "down" },
+    default_keys = {},
     description = "Scroll transcript down",
   },
   {
@@ -92,6 +128,18 @@ local DEFINITIONS = {
     section = "Navigation",
     default_keys = { "page-down" },
     description = "Scroll transcript page down",
+  },
+  {
+    id = "tui.transcript.top",
+    section = "Navigation",
+    default_keys = { "home" },
+    description = "Scroll transcript to top",
+  },
+  {
+    id = "tui.transcript.bottom",
+    section = "Navigation",
+    default_keys = { "end" },
+    description = "Scroll transcript to bottom",
   },
   {
     id = "tui.queue.previous",
@@ -196,6 +244,12 @@ local DEFINITIONS = {
     description = "Toggle thinking blocks",
   },
   {
+    id = "app.message.copy",
+    section = "Other",
+    default_keys = { "ctrl-x" },
+    description = "Copy the last assistant response",
+  },
+  {
     id = "app.exit",
     section = "Other",
     default_keys = { "ctrl-d" },
@@ -206,6 +260,30 @@ local DEFINITIONS = {
     section = "Other",
     default_keys = {},
     description = "Redraw screen",
+  },
+  {
+    id = "app.thinking.cycle",
+    section = "Other",
+    default_keys = { "shift-tab" },
+    description = "Cycle thinking level",
+  },
+  {
+    id = "app.thinking.save",
+    section = "Other",
+    default_keys = { "ctrl-s" },
+    description = "Save current thinking level as default",
+  },
+  {
+    id = "app.model.cycleForward",
+    section = "Other",
+    default_keys = { "ctrl-p" },
+    description = "Cycle to next model",
+  },
+  {
+    id = "app.model.cycleBackward",
+    section = "Other",
+    default_keys = { "shift-ctrl-p" },
+    description = "Cycle to previous model",
   },
   {
     id = "app.model.select",
@@ -249,7 +327,7 @@ end
 
 local function normalize_key(key)
   key = tostring(key or "")
-  key = key:gsub("_", "-")
+  key = key:gsub("_", "-"):gsub("%+", "-")
   if key == "pageUp" or key == "pageup" or key == "pgup" then
     return "page-up"
   end
@@ -267,6 +345,24 @@ local function normalize_key(key)
   end
   if key == "ctrlRight" or key == "ctrlright" then
     return "ctrl-right"
+  end
+  if key == "ctrlHome" or key == "ctrlhome" then
+    return "ctrl-home"
+  end
+  if key == "ctrlEnd" or key == "ctrlend" then
+    return "ctrl-end"
+  end
+  if key == "ctrlPageUp" or key == "ctrlpageup" then
+    return "ctrl-page-up"
+  end
+  if key == "ctrlPageDown" or key == "ctrlpagedown" then
+    return "ctrl-page-down"
+  end
+  if key == "shiftTab" or key == "shifttab" then
+    return "shift-tab"
+  end
+  if key == "shiftCtrlP" or key == "shiftctrlp" or key == "ctrlShiftP" or key == "ctrlshiftp" then
+    return "shift-ctrl-p"
   end
   if key == "altUp" or key == "altup" then
     return "alt-up"
@@ -367,8 +463,20 @@ local function ensure_resolved()
   end)
 
   for _, def in ipairs(DEFINITIONS) do
-    local keys = overrides[def.id] or def.default_keys
-    resolved[def.id] = normalize_keys(keys)
+    local keys = normalize_keys(overrides[def.id] or def.default_keys)
+    if overrides[def.id] == nil then
+      local filtered = {}
+      for _, key in ipairs(keys) do
+        -- An explicit user binding wins over defaults on other actions. This
+        -- is what lets Ctrl-P be reassigned from model cycling to queue/history
+        -- navigation without both actions firing.
+        if user_claims[key] == nil then
+          filtered[#filtered + 1] = key
+        end
+      end
+      keys = filtered
+    end
+    resolved[def.id] = keys
   end
   return resolved
 end
@@ -450,16 +558,24 @@ local DISPLAY = {
   ["ctrl-g"] = "Ctrl-G",
   ["ctrl-k"] = "Ctrl-K",
   ["ctrl-l"] = "Ctrl-L",
-  ["ctrl-t"] = "Ctrl-T",
   ["ctrl-n"] = "Ctrl-N",
+  ["ctrl-o"] = "Ctrl-O",
   ["ctrl-p"] = "Ctrl-P",
+  ["ctrl-r"] = "Ctrl-R",
+  ["ctrl-s"] = "Ctrl-S",
+  ["ctrl-t"] = "Ctrl-T",
   ["ctrl-c"] = "Ctrl-C",
   ["ctrl-left"] = "Ctrl-Left",
   ["ctrl-right"] = "Ctrl-Right",
+  ["ctrl-home"] = "Ctrl-Home",
+  ["ctrl-end"] = "Ctrl-End",
+  ["ctrl-page-up"] = "Ctrl-PgUp",
+  ["ctrl-page-down"] = "Ctrl-PgDn",
   ["ctrl-up"] = "Ctrl-Up",
   ["ctrl-u"] = "Ctrl-U",
   ["ctrl-v"] = "Ctrl-V",
   ["ctrl-w"] = "Ctrl-W",
+  ["ctrl-x"] = "Ctrl-X",
   ["ctrl-y"] = "Ctrl-Y",
   ["ctrl--"] = "Ctrl--",
   ["ctrl-z"] = "Ctrl-Z",
@@ -474,6 +590,8 @@ local DISPLAY = {
   ["page-up"] = "PgUp",
   ["right"] = "Right",
   ["shift-enter"] = "Shift-Enter",
+  ["shift-tab"] = "Shift-Tab",
+  ["shift-ctrl-p"] = "Ctrl-Shift-P",
   ["up"] = "Up",
 }
 

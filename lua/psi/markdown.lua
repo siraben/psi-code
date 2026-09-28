@@ -16,7 +16,7 @@ local M = {}
 
 local PI_ACCENT = "36" -- mdCode / list bullets, theme accent
 local PI_HEADING = "33" -- mdHeading, theme warning/gold slot
-local PI_LINK = "34" -- mdLink, theme header/link slot
+local PI_LINK = "md-link" -- mdLink differs from the border blue
 local PI_GRAY = "38;5;242" -- mdQuote/mdHr/toolOutput, theme chrome slot
 
 local RESET = string.char(27) .. "[0m"
@@ -205,7 +205,7 @@ local function render_tokens(tokens)
       out[#out + 1] = ansi.color(PI_ACCENT, token.text)
     elseif token.kind == "link" then
       out[#out + 1] = ansi.color(PI_LINK, underline(render_tokens(token.label)))
-        .. ansi.dim(" (" .. token.url .. ")")
+        .. ansi.color(PI_GRAY, " (" .. token.url .. ")")
     elseif token.kind == "strong" then
       out[#out + 1] = ansi.bold(render_tokens(token.children))
     elseif token.kind == "emph" then
@@ -263,7 +263,7 @@ local function render_line(line, state)
     return ansi.color(PI_GRAY, line)
   end
   if state.in_code_fence then
-    return ansi.color(PI_GRAY, line)
+    return ansi.green(line)
   end
 
   -- Headers: # ... ######

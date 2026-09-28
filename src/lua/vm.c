@@ -598,11 +598,13 @@ static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx, int depth) {
 #define PSI_VM_TUI_MODIFIER_SHIFT 2u
 #define PSI_VM_TUI_MODIFIER_ALT_SHIFT 4u
 #define PSI_VM_TUI_MODIFIER_CTRL 5u
+#define PSI_VM_TUI_MODIFIER_SHIFT_CTRL 6u
 #define PSI_VM_TUI_MODIFIER_ALT 3u
 #define PSI_VM_TUI_MODIFIER_SHIFT_MIN 2u
 #define PSI_VM_TUI_LEGACY_ENTER_CODE 13u
 #define PSI_VM_TUI_KITTY_SHIFT_ENTER_CODE 57414u
 #define PSI_VM_TUI_MOUSE_WHEEL_FLAG 64u
+#define PSI_VM_TUI_MOUSE_ALT_FLAG 8u
 #define PSI_VM_TUI_MOUSE_BUTTON_MASK 3u
 #define PSI_VM_TUI_MOUSE_WHEEL_UP 0u
 #define PSI_VM_TUI_MOUSE_WHEEL_DOWN 1u
@@ -971,6 +973,9 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
     if (strcmp(sequence, "[D") == 0 || strcmp(sequence, "OD") == 0) {
         return "left";
     }
+    if (strcmp(sequence, "[Z") == 0) {
+        return "shift-tab";
+    }
     if (strcmp(sequence, "[H") == 0 || strcmp(sequence, "OH") == 0 ||
         strcmp(sequence, "[1~") == 0 || strcmp(sequence, "[7~") == 0) {
         return "home";
@@ -1027,6 +1032,23 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
             return "alt-left";
         }
     }
+    if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3) {
+        if (first == 1u && second == PSI_VM_TUI_MODIFIER_CTRL && final == 'H') {
+            return "ctrl-home";
+        }
+        if (first == 1u && second == PSI_VM_TUI_MODIFIER_CTRL && final == 'F') {
+            return "ctrl-end";
+        }
+        if (first == 3u && second == PSI_VM_TUI_MODIFIER_ALT && final == '~') {
+            return "alt-delete";
+        }
+        if (first == 5u && second == PSI_VM_TUI_MODIFIER_CTRL && final == '~') {
+            return "ctrl-page-up";
+        }
+        if (first == 6u && second == PSI_VM_TUI_MODIFIER_CTRL && final == '~') {
+            return "ctrl-page-down";
+        }
+    }
     if (sscanf(sequence, "[<%u;%u;%u%c", &button, &column, &row, &final) == 4 &&
         (final == 'M' || final == 'm')) {
         PSI_UNUSED(column);
@@ -1034,10 +1056,10 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
         /* SGR mouse reports wheel direction in the low button bits. */
         if (final == 'M' && (button & PSI_VM_TUI_MOUSE_WHEEL_FLAG) != 0u) {
             if ((button & PSI_VM_TUI_MOUSE_BUTTON_MASK) == PSI_VM_TUI_MOUSE_WHEEL_UP) {
-                return "wheel-up";
+                return (button & PSI_VM_TUI_MOUSE_ALT_FLAG) != 0u ? "alt-wheel-up" : "wheel-up";
             }
             if ((button & PSI_VM_TUI_MOUSE_BUTTON_MASK) == PSI_VM_TUI_MOUSE_WHEEL_DOWN) {
-                return "wheel-down";
+                return (button & PSI_VM_TUI_MOUSE_ALT_FLAG) != 0u ? "alt-wheel-down" : "wheel-down";
             }
         }
         return NULL;
@@ -1058,6 +1080,14 @@ static const char *psi_vm_tui_escape_sequence_key(const char *sequence) {
             return "alt-enter";
         }
         return "shift-enter";
+    }
+    if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 && final == 'u' && first == 9u &&
+        second == PSI_VM_TUI_MODIFIER_SHIFT) {
+        return "shift-tab";
+    }
+    if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 && final == 'u' &&
+        first == 112u && second == PSI_VM_TUI_MODIFIER_SHIFT_CTRL) {
+        return "shift-ctrl-p";
     }
     /* Kitty CSI-u encoding for Ctrl-Minus, pi's default undo binding. */
     if (sscanf(sequence, "[%u;%u%c", &first, &second, &final) == 3 && final == 'u' &&

@@ -11,6 +11,7 @@ local transform = require("psi.transform_messages")
 local prompt = require("psi.prompt")
 local sched = require("psi.sched")
 local session = require("psi.session_manager")
+local settings = require("psi.settings_manager")
 local thinking = require("psi.thinking")
 local providers = require("psi.api_registry")
 
@@ -81,10 +82,15 @@ function M.configure(opts)
 end
 
 function M.set_model(name)
+  local previous = override_model or configured_model
   if name == nil or name == "" then
     override_model = nil
   else
     override_model = name
+    if name ~= previous then
+      session.append_model_change(name)
+      session.save()
+    end
   end
 end
 
@@ -131,7 +137,12 @@ local function provider_env_thinking(model)
       return codex
     end
   end
-  return nil
+  local configured =
+    settings.get("defaultThinkingLevel", settings.get("defaults.reasoning_effort", nil))
+  if configured == "none" then
+    return "off"
+  end
+  return configured
 end
 
 local function requested_thinking(explicit, reasoning_effort, model)

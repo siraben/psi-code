@@ -1,5 +1,5 @@
 --[==[psi-test
-expect = "pi-dark|234|115"
+expect = "pi-dark|234|140"
 ]==]
 local t = require("psi.theme")
 local cur = t.current()

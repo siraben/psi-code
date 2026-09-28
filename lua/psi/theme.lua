@@ -20,42 +20,66 @@ local TUI_SLOTS = {
   "success",
   "error",
   "chrome",
+  "thinking_off",
+  "thinking_minimal",
+  "thinking_low",
+  "thinking_medium",
+  "thinking_high",
+  "thinking_xhigh",
+  "thinking_max",
 }
 
 local DEFAULT_THEME = {
-  -- pi-mono dark theme color aliases, translated to SGR. See
-  -- /root/pi-mono/packages/coding-agent/src/modes/interactive/theme/dark.json
+  -- Current pi-mono dark theme color aliases, translated from OKHSL to
+  -- truecolor SGR. See packages/coding-agent/.../theme/dark.json.
   ansi = {
-    ["2"] = "38;2;102;102;102", -- dim #666666
-    ["31"] = "38;2;204;102;102", -- error/red #cc6666
-    ["32"] = "38;2;181;189;104", -- success/green #b5bd68
-    ["33"] = "38;2;255;255;0", -- warning/yellow #ffff00
-    ["34"] = "38;2;95;135;255", -- border/blue #5f87ff
-    ["36"] = "38;2;138;190;183", -- accent #8abeb7
-    ["37"] = "38;2;212;212;212", -- pi text #d4d4d4
-    ["90"] = "38;2;102;102;102", -- dimGray #666666
-    ["96"] = "38;2;0;215;255", -- cyan #00d7ff
-    ["1;36"] = "1;38;2;138;190;183",
-    ["38;5;242"] = "38;2;128;128;128", -- gray/toolOutput #808080
-    ["38;5;245"] = "38;2;128;128;128",
-    ["38;5;81"] = "38;2;0;215;255",
-    ["38;5;108"] = "38;2;181;189;104",
-    ["38;5;174"] = "38;2;204;102;102",
-    ["38;5;221"] = "38;2;255;255;0",
-    ["48;5;236"] = "48;2;40;40;50",
-    ["48;5;22"] = "48;2;40;50;40",
-    ["48;5;52"] = "48;2;60;40;40",
-    ["48;5;237"] = "48;2;58;58;74",
-    ["48;5;238"] = "48;2;52;53;65",
+    ["2"] = "38;2;126;136;142", -- dim
+    ["31"] = "38;2;234;127;129", -- error/red
+    ["32"] = "38;2;104;183;141", -- success/green
+    ["33"] = "38;2;205;154;34", -- warning/yellow
+    ["34"] = "38;2;95;168;204", -- border/blue
+    ["36"] = "38;2;167;152;215", -- accent/violet
+    ["37"] = "38;2;222;224;225", -- text
+    ["90"] = "38;2;126;136;142",
+    ["96"] = "38;2;167;152;215",
+    ["1;36"] = "1;38;2;167;152;215",
+    ["38;5;242"] = "38;2;157;165;169", -- muted/toolOutput
+    ["38;5;245"] = "38;2;157;165;169",
+    ["38;5;81"] = "38;2;167;152;215",
+    ["38;5;108"] = "38;2;104;183;141",
+    ["38;5;174"] = "38;2;234;127;129",
+    ["38;5;221"] = "38;2;205;154;34",
+    ["48;5;236"] = "48;2;52;56;58",
+    ["48;5;22"] = "48;2;37;65;49",
+    ["48;5;52"] = "48;2;91;40;42",
+    ["48;5;237"] = "48;2;33;59;73",
+    ["48;5;238"] = "48;2;33;59;73",
+    ["md-link"] = "38;2;105;173;208",
+    ["thinking-text"] = "38;2;150;160;164",
+    ["bash-mode"] = "38;2;94;178;134",
+    ["thinking-off"] = "38;2;108;118;123",
+    ["thinking-minimal"] = "38;2;104;128;141",
+    ["thinking-low"] = "38;2;84;137;164",
+    ["thinking-medium"] = "38;2;97;133;204",
+    ["thinking-high"] = "38;2;151;118;229",
+    ["thinking-xhigh"] = "38;2;222;84;193",
+    ["thinking-max"] = "38;2;254;84;98",
   },
   tui = {
-    header = { fg = 81, bg = 234 },
-    accent = { fg = 115, bg = 234 },
-    text = { fg = 253, bg = 234 },
-    warning = { fg = 226, bg = 234 },
-    success = { fg = 150, bg = 234 },
+    header = { fg = 74, bg = 234 },
+    accent = { fg = 140, bg = 234 },
+    text = { fg = 254, bg = 234 },
+    warning = { fg = 178, bg = 234 },
+    success = { fg = 108, bg = 234 },
     error = { fg = 174, bg = 234 },
-    chrome = { fg = 244, bg = 234 },
+    chrome = { fg = 247, bg = 234 },
+    thinking_off = { fg = 243, bg = 234 },
+    thinking_minimal = { fg = 66, bg = 234 },
+    thinking_low = { fg = 67, bg = 234 },
+    thinking_medium = { fg = 68, bg = 234 },
+    thinking_high = { fg = 141, bg = 234 },
+    thinking_xhigh = { fg = 170, bg = 234 },
+    thinking_max = { fg = 203, bg = 234 },
   },
 }
 
@@ -65,36 +89,53 @@ local DEFAULT_THEME = {
 -- toolTitle/text stays legible; the dark theme uses the inverse.
 local LIGHT_THEME = {
   ansi = {
-    ["2"] = "38;2;118;118;118", -- dim / dimGray #767676
-    ["31"] = "38;2;170;85;85", -- error/red #aa5555
-    ["32"] = "38;2;88;132;88", -- success/green #588458
-    ["33"] = "38;2;154;115;38", -- warning/yellow #9a7326
-    ["34"] = "38;2;84;125;167", -- border/blue #547da7
-    ["36"] = "38;2;90;128;128", -- accent/teal #5a8080
-    ["37"] = "38;2;31;35;40", -- text #1f2328
-    ["90"] = "38;2;118;118;118", -- dimGray #767676
-    ["96"] = "38;2;90;128;128", -- borderAccent/teal #5a8080
-    ["1;36"] = "1;38;2;90;128;128",
-    ["38;5;242"] = "38;2;108;108;108", -- toolOutput/mediumGray #6c6c6c
-    ["38;5;245"] = "38;2;108;108;108",
-    ["38;5;81"] = "38;2;90;128;128",
-    ["38;5;108"] = "38;2;88;132;88",
-    ["38;5;174"] = "38;2;170;85;85",
-    ["38;5;221"] = "38;2;154;115;38",
-    ["48;5;236"] = "48;2;232;232;240", -- toolPendingBg #e8e8f0
-    ["48;5;22"] = "48;2;232;240;232", -- toolSuccessBg #e8f0e8
-    ["48;5;52"] = "48;2;240;232;232", -- toolErrorBg #f0e8e8
-    ["48;5;237"] = "48;2;208;208;224", -- selectedBg #d0d0e0
-    ["48;5;238"] = "48;2;232;232;232", -- userMsgBg #e8e8e8
+    ["2"] = "38;2;135;144;149", -- dim
+    ["31"] = "38;2;200;37;61", -- error/red
+    ["32"] = "38;2;51;126;88", -- success/green
+    ["33"] = "38;2;143;104;2", -- warning/yellow
+    ["34"] = "38;2;61;142;179", -- border/blue
+    ["36"] = "38;2;116;89;180", -- accent/violet
+    ["37"] = "38;2;59;63;65", -- text
+    ["90"] = "38;2;135;144;149",
+    ["96"] = "38;2;116;89;180",
+    ["1;36"] = "1;38;2;116;89;180",
+    ["38;5;242"] = "38;2;103;113;118", -- muted/toolOutput
+    ["38;5;245"] = "38;2;103;113;118",
+    ["38;5;81"] = "38;2;116;89;180",
+    ["38;5;108"] = "38;2;51;126;88",
+    ["38;5;174"] = "38;2;200;37;61",
+    ["38;5;221"] = "38;2;143;104;2",
+    ["48;5;236"] = "48;2;228;229;230",
+    ["48;5;22"] = "48;2;222;233;225",
+    ["48;5;52"] = "48;2;238;226;225",
+    ["48;5;237"] = "48;2;223;231;236",
+    ["48;5;238"] = "48;2;223;231;236",
+    ["md-link"] = "38;2;47;120;153",
+    ["thinking-text"] = "38;2;124;134;140",
+    ["bash-mode"] = "38;2;64;151;108",
+    ["thinking-off"] = "38;2;194;200;202",
+    ["thinking-minimal"] = "38;2;181;196;203",
+    ["thinking-low"] = "38;2;159;194;213",
+    ["thinking-medium"] = "38;2;162;183;224",
+    ["thinking-high"] = "38;2;181;165;232",
+    ["thinking-xhigh"] = "38;2;229;133;205",
+    ["thinking-max"] = "38;2;254;116;121",
   },
   tui = {
-    header = { fg = 25, bg = 255 },
-    accent = { fg = 30, bg = 255 },
-    text = { fg = 235, bg = 255 },
+    header = { fg = 31, bg = 255 },
+    accent = { fg = 97, bg = 255 },
+    text = { fg = 238, bg = 255 },
     warning = { fg = 136, bg = 255 },
-    success = { fg = 65, bg = 255 },
-    error = { fg = 131, bg = 255 },
+    success = { fg = 29, bg = 255 },
+    error = { fg = 161, bg = 255 },
     chrome = { fg = 243, bg = 255 },
+    thinking_off = { fg = 251, bg = 255 },
+    thinking_minimal = { fg = 250, bg = 255 },
+    thinking_low = { fg = 153, bg = 255 },
+    thinking_medium = { fg = 147, bg = 255 },
+    thinking_high = { fg = 183, bg = 255 },
+    thinking_xhigh = { fg = 176, bg = 255 },
+    thinking_max = { fg = 210, bg = 255 },
   },
 }
 
@@ -107,6 +148,13 @@ local ANSI_SLOT_CODES = {
   ["1;36"] = "accent",
   ["37"] = "text",
   ["38;5;242"] = "chrome",
+  ["thinking-off"] = "thinking_off",
+  ["thinking-minimal"] = "thinking_minimal",
+  ["thinking-low"] = "thinking_low",
+  ["thinking-medium"] = "thinking_medium",
+  ["thinking-high"] = "thinking_high",
+  ["thinking-xhigh"] = "thinking_xhigh",
+  ["thinking-max"] = "thinking_max",
 }
 
 local function deep_copy(value)
@@ -253,6 +301,22 @@ function M.names()
   end
   table.sort(names)
   return names
+end
+
+function M.thinking_border(level, text)
+  level = tostring(level or "off"):lower()
+  if
+    level ~= "off"
+    and level ~= "minimal"
+    and level ~= "low"
+    and level ~= "medium"
+    and level ~= "high"
+    and level ~= "xhigh"
+    and level ~= "max"
+  then
+    level = "off"
+  end
+  return ansi.color("thinking-" .. level, tostring(text or ""))
 end
 
 function M.apply_configured(opts)

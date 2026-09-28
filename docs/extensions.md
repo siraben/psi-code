@@ -253,6 +253,13 @@ Theme spec shape:
     success = { fg = 150, bg = 234 },
     error   = { fg = 210, bg = 234 },
     chrome  = { fg = 245, bg = 234 },
+    thinking_off     = { fg = 243, bg = 234 },
+    thinking_minimal = { fg = 66,  bg = 234 },
+    thinking_low     = { fg = 67,  bg = 234 },
+    thinking_medium  = { fg = 68,  bg = 234 },
+    thinking_high    = { fg = 141, bg = 234 },
+    thinking_xhigh   = { fg = 170, bg = 234 },
+    thinking_max     = { fg = 203, bg = 234 },
   },
 }
 ```
@@ -367,7 +374,8 @@ These are part of the stable surface:
 | `psi.session.append_custom(name, data)` | Persist extension data in the session file without adding it to model context. |
 | `psi.session.append_custom_message(text, opts)` | Persist a model-visible custom message. `opts.role` may be `"user"` or `"assistant"`; `opts.hidden=true` keeps it out of provider context. |
 | `psi.providers.all_providers()` / `all_models()` | Inspect the built-in provider/model registry. Provider registration exists internally but is not a stable extension API. |
-| `psi.settings.get(path, default)` / `reload()` | Read layered JSON settings from `~/.config/psi/settings.json` and `./.psi/settings.json`. |
+| `psi.settings.get(path, default)` / `reload()` | Read layered JSON settings from `$XDG_CONFIG_HOME/psi/settings.json` (default `~/.config/psi/settings.json`) and `./.psi/settings.json`. |
+| `psi.settings.set_global(path, value)` | Atomically persist a dotted-path user setting while preserving unrelated keys, then reload layered settings. Returns `true`, or `false, error`. Project settings retain higher read precedence. |
 | `psi.resources.context_files()` | Discover global/project context files. Emits `resources_discover`. |
 | `psi.prompt_templates.load()` / `list()` / `find(name)` / `expand(text)` | Loader + lookup + runtime expansion for user-authored slash-command templates. `/reload` reloads them. See "Prompt templates" below. |
 
@@ -382,8 +390,8 @@ control bytes to `ctrl-a` through `ctrl-z`.
 
 The built-in OSC 52 clipboard layer
 (`lua/psi/extensions/osc52_clipboard.lua`) registers a TUI clipboard writer.
-It is enabled by default so yanks update terminal clipboards, including tmux
-via DCS passthrough. Disable it with
+It is enabled by default so yanks and Ctrl-X response copies update terminal
+clipboards, including tmux via DCS passthrough. Disable it with
 `"extensions": { "osc52_clipboard": { "enabled": false } }`.
 
 Image attachments can be disabled globally with `"images": { "block_images":

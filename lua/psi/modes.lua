@@ -371,7 +371,18 @@ function M.run_repl(opts)
     if line == nil then
       break
     end
-    if line:sub(1, 1) == "/" then
+    if line:sub(1, 1) == "!" then
+      local shell = require("psi.shell_commands")
+      local ok, result, err = pcall(shell.run, shell.parse(line))
+      if ok and result then
+        print(result.text)
+        if result.save_error then
+          io.stderr:write("failed to save shell result: " .. tostring(result.save_error) .. "\n")
+        end
+      else
+        io.stderr:write(tostring(ok and err or result) .. "\n")
+      end
+    elseif line:sub(1, 1) == "/" then
       local ok, quit = handle_slash_command(runtime, line)
       if not ok then
         runtime:shutdown()

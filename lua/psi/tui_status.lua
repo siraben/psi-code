@@ -10,6 +10,7 @@ local keybindings = require("psi.keybindings")
 local notice = require("psi.notice")
 local prelude = require("psi.prelude")
 local settings = require("psi.settings_manager")
+local theme = require("psi.theme")
 local tui_text = require("psi.tui_text")
 
 local M = {}
@@ -372,11 +373,29 @@ function M.handle_key(arg)
   if not busy and keybindings.matches(key, "tui.input.reverseSearch") then
     return action("history-search")
   end
+  if keybindings.matches(key, "tui.editor.historyPrevious") then
+    return action("history-previous")
+  end
+  if keybindings.matches(key, "tui.editor.historyNext") then
+    return action("history-next")
+  end
+  if keybindings.matches(key, "tui.editor.cursorUp") then
+    return action("editor-up")
+  end
+  if keybindings.matches(key, "tui.editor.cursorDown") then
+    return action("editor-down")
+  end
   if keybindings.matches(key, "tui.editor.cursorLeft") then
     return action("move-left")
   end
   if keybindings.matches(key, "tui.editor.cursorRight") then
     return action("move-right")
+  end
+  if arg.viewport and keybindings.matches(key, "tui.transcript.top") then
+    return action("scroll", "top")
+  end
+  if arg.viewport and keybindings.matches(key, "tui.transcript.bottom") then
+    return action("scroll", "bottom")
   end
   if keybindings.matches(key, "tui.editor.cursorLineStart") then
     return action("move-home")
@@ -385,10 +404,16 @@ function M.handle_key(arg)
     return action("move-end")
   end
   if key == "wheel-up" then
-    return action("scroll", "line-up")
+    return action("scroll", "wheel-up")
   end
   if key == "wheel-down" then
-    return action("scroll", "line-down")
+    return action("scroll", "wheel-down")
+  end
+  if key == "alt-wheel-up" then
+    return action("scroll", "wheel-page-up")
+  end
+  if key == "alt-wheel-down" then
+    return action("scroll", "wheel-page-down")
   end
   if keybindings.matches(key, "tui.transcript.lineUp") then
     return action("scroll", "line-up")
@@ -396,11 +421,17 @@ function M.handle_key(arg)
   if keybindings.matches(key, "tui.transcript.lineDown") then
     return action("scroll", "line-down")
   end
-  if keybindings.matches(key, "tui.transcript.pageUp") then
+  if arg.viewport and keybindings.matches(key, "tui.transcript.pageUp") then
     return action("scroll", "page-up")
   end
-  if keybindings.matches(key, "tui.transcript.pageDown") then
+  if arg.viewport and keybindings.matches(key, "tui.transcript.pageDown") then
     return action("scroll", "page-down")
+  end
+  if not arg.viewport and keybindings.matches(key, "tui.editor.pageUp") then
+    return action("editor-page", "up")
+  end
+  if not arg.viewport and keybindings.matches(key, "tui.editor.pageDown") then
+    return action("editor-page", "down")
   end
   if keybindings.matches(key, "app.redraw") then
     return action("redraw")
@@ -408,11 +439,26 @@ function M.handle_key(arg)
   if keybindings.matches(key, "app.model.select") then
     return action("model-picker")
   end
+  if keybindings.matches(key, "app.model.cycleForward") then
+    return action("model-cycle", "forward")
+  end
+  if keybindings.matches(key, "app.model.cycleBackward") then
+    return action("model-cycle", "backward")
+  end
   if keybindings.matches(key, "app.tools.expand") then
     return action("toggle-tools")
   end
   if keybindings.matches(key, "app.thinking.toggle") then
     return action("toggle-thinking")
+  end
+  if keybindings.matches(key, "app.thinking.cycle") then
+    return action("cycle-thinking")
+  end
+  if keybindings.matches(key, "app.thinking.save") then
+    return action("save-thinking")
+  end
+  if keybindings.matches(key, "app.message.copy") then
+    return action("copy-response")
   end
   if keybindings.matches(key, "app.suspend") then
     return action("suspend")
@@ -941,13 +987,19 @@ function M.workspace_bar_for_width(cwd, width)
   return render_workspace_bar(model, nil, right)
 end
 
-function M.render_busy_status(label_text, phase, elapsed_seconds, glisten_phase)
+function M.render_busy_status(label_text, phase, elapsed_seconds, glisten_phase, thinking_level)
   local text = tostring(label_text or "Working")
   if text:sub(-3) ~= "..." then
     text = text .. "..."
   end
   local index = ((tonumber(glisten_phase) or tonumber(phase) or 0) % #BUSY_FRAMES) + 1
-  return accent(BUSY_FRAMES[index]) .. " " .. label(text)
+  local spinner = BUSY_FRAMES[index]
+  if thinking_level ~= nil and type(theme.thinking_border) == "function" then
+    spinner = theme.thinking_border(thinking_level, spinner)
+  else
+    spinner = accent(spinner)
+  end
+  return spinner .. " " .. label(text)
 end
 
 function M.pick_busy_status()
@@ -959,7 +1011,24 @@ function M.pick_busy_status()
 end
 
 function M.show_thinking()
+  local hidden = settings.get("hideThinkingBlock", nil)
+  if hidden ~= nil then
+    if type(hidden) == "string" then
+      hidden = hidden:lower()
+      hidden = hidden == "1" or hidden == "true" or hidden == "on" or hidden == "yes"
+    else
+      hidden = hidden == true or hidden == 1
+    end
+    return hidden and "0" or "1"
+  end
   return enabled_setting("tui.show_thinking", "PSI_SHOW_THINKING", true) and "1" or "0"
+end
+
+function M.set_show_thinking(visible)
+  if type(settings.set_global) ~= "function" then
+    return false, "settings persistence unavailable"
+  end
+  return settings.set_global("hideThinkingBlock", not visible)
 end
 
 return M
