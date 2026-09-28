@@ -3885,19 +3885,32 @@ local function queue_status_text(extra_text)
   return "queued: " .. preview
 end
 
-local function busy_command_action(line)
-  if line == "/queue" or line:match("^/queue%s+") then
-    local action = commands.handle(line)
-    if action ~= nil then
-      return action
-    end
-    return {
-      kind = "print",
-      payload = "usage: /queue [list|state|modes|mode|steer|follow-up|clear|drop|edit]",
-    }
+-- Commands that replace or rewrite active session state cannot safely run from
+-- the scheduler's host tick. Pi reports these immediately while leaving the
+-- active response visible; informational/settings/extension commands execute.
+function chat.busy_command_warning(line)
+  local name = tostring(line or ""):match("^/([^%s]+)")
+  name = name and name:lower() or ""
+  if name == "new" or name == "clear" then
+    return "Wait for the current response to finish before starting a new session."
   end
-  if line:match("^/btw%s+") then
-    return { kind = "btw" }
+  if name == "reload" then
+    return "Wait for the current response to finish before reloading."
+  end
+  if name == "resume" or name == "import" then
+    return "Wait for the current response to finish before changing sessions."
+  end
+  if name == "compact" then
+    return "Wait for the current response to finish before compacting."
+  end
+  if name == "login" or name == "logout" then
+    return "Wait for the current response to finish before changing authentication."
+  end
+  if (name == "branch" or name == "tree") and line:match("^/[^%s]+%s+%S") then
+    return "Wait for the current response to finish before navigating the session tree."
+  end
+  if name == "btw" then
+    return "Wait for the current response to finish before asking a side question."
   end
   return nil
 end
@@ -4570,8 +4583,12 @@ end
 local choose_session_tui
 local choose_model_tui
 
-local function handle_command(state, line)
+local function handle_command(state, line, opts)
+  opts = type(opts) == "table" and opts or {}
   if line == "/quit" or line == "/q" or line == ":quit" or line == ":q" then
+    if opts.while_busy then
+      psi.abort_trigger()
+    end
     state.running = false
     return true
   end
@@ -4582,8 +4599,29 @@ local function handle_command(state, line)
     return true
   end
 
+  if
+    opts.while_busy
+    and (
+      action.kind == "btw"
+      or action.kind == "compact"
+      or action.kind == "tree"
+      or action.kind == "resume"
+      or action.kind == "resume-picker"
+    )
+  then
+    add_entry(
+      state,
+      "warning",
+      "Wait for the current operation to finish before running that command."
+    )
+    set_status(state, "", false)
+    return true
+  end
+
   if action.kind == "print" then
-    rebuild_from_session(state)
+    if not opts.while_busy then
+      rebuild_from_session(state)
+    end
     if type(action.payload) == "string" and action.payload ~= "" then
       add_entry(state, "info", action.payload)
     end
@@ -4592,7 +4630,9 @@ local function handle_command(state, line)
   end
 
   if action.kind == "ansi-print" then
-    rebuild_from_session(state)
+    if not opts.while_busy then
+      rebuild_from_session(state)
+    end
     if type(action.payload) == "string" and action.payload ~= "" then
       add_entry(state, "ansi", action.payload)
     end
@@ -4863,43 +4903,38 @@ local function submit(state, queue_kind)
       set_status(state, "shell command unavailable while busy", true)
       return
     end
-    if state.busy_kind ~= "agent" then
+    if line:sub(1, 1) == "/" then
+      history_add(state, line)
+      local warning = chat.busy_command_warning(line)
+      if warning ~= nil then
+        chat.editor_clear_undo(state)
+        add_entry(state, "warning", warning)
+        set_status(state, "", false)
+        return
+      end
+      local handled, expanded = handle_command(state, line, { while_busy = true })
+      if handled then
+        chat.editor_clear_undo(state)
+        return
+      end
+      line = expanded or ""
+      if state.busy_kind ~= "agent" then
+        state.input = line
+        state.cursor = #state.input
+        set_status(
+          state,
+          "Wait for the current operation to finish before submitting a prompt.",
+          true
+        )
+        state.dirty = true
+        return
+      end
+    elseif state.busy_kind ~= "agent" then
       state.input = line
       state.cursor = #state.input
       set_status(state, "busy", true)
       state.dirty = true
       return
-    end
-    if line:sub(1, 1) == "/" then
-      local action = busy_command_action(line)
-      if action == nil then
-        state.input = line
-        state.cursor = #state.input
-        set_status(state, "command unavailable while busy", true)
-        return
-      end
-      if action.kind == "print" then
-        chat.editor_clear_undo(state)
-        if type(action.payload) == "string" and action.payload ~= "" then
-          add_entry(state, "info", action.payload)
-        end
-        set_status(state, "", false)
-        return
-      end
-      if action.kind == "btw" then
-        state.input = line
-        state.cursor = #state.input
-        set_status(state, "/btw is unavailable while a turn is running", true)
-        return
-      end
-      if action.kind == "expand" then
-        line = action.payload or ""
-      else
-        state.input = line
-        state.cursor = #state.input
-        set_status(state, "command unavailable while busy", true)
-        return
-      end
     end
     chat.editor_clear_undo(state)
     queue_current_input(state, line, queue_kind)
@@ -6343,7 +6378,7 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
   local state = {
     opts = {},
     model = {},
-    entries = {},
+    entries = debug_options.entries or {},
     input = input or "",
     cursor = tonumber(cursor) or #(input or ""),
     editor_mode = "insert",
@@ -6413,6 +6448,7 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     paste_count = state.editor_paste_counter,
     cursor = state.cursor,
     running = state.running,
+    busy = state.busy,
     editor_mode = state.editor_mode,
     selection_anchor = state.selection_anchor,
     selection_kind = state.selection_kind,
@@ -6432,6 +6468,9 @@ function M._debug_edit_keys(input, cursor, events, apply_startup_hooks, debug_op
     last_entry_kind = state.entries[#state.entries] and state.entries[#state.entries].kind or nil,
     last_entry_text = state.entries[#state.entries] and entry_text(state.entries[#state.entries])
       or nil,
+    entry_count = #state.entries,
+    first_entry_kind = state.entries[1] and state.entries[1].kind or nil,
+    first_entry_text = state.entries[1] and entry_text(state.entries[1]) or nil,
     rendered = rendered,
   }
 end

@@ -174,6 +174,11 @@ Bundled (but extension-owned) commands like `/vim` and `/btw` come
 from `lua/psi/extensions/`; they show up under the same `/help`,
 `/describe`, and `/apropos` queries.
 
+In the TUI, registered commands execute and append their returned output even
+while an agent response, thinking stream, shell command, or compaction is
+active. Actions that request a competing model operation or replace active
+session state are rejected until the current operation ends.
+
 ### Keybindings: `psi.keybindings`
 
 Keybinding metadata lives in `lua/psi/keybindings.lua`, mirroring pi's action-id
@@ -226,11 +231,10 @@ handles another action kind.
 ### Themes: `psi.theme`
 
 Theme support stays Lua-first: extensions register a theme spec, then select it.
-The bundled `pi-dark` / `pi-light` themes (also `dark` / `light`) match Pi
-0.84.4. Optional `pi-modern-dark` / `pi-modern-light` themes match pi-mono
-`6f755151`. Select via `"theme": "pi-dark"`, `theme.name`, or `tui.theme`
-in settings. Custom themes can override only the slots they need and inherit
-the rest.
+The bundled `pi-dark` / `pi-light` themes (also `dark` / `light`) exactly match
+released Pi 0.87.1. Select via `"theme": "pi-dark"`, `theme.name`, or
+`tui.theme` in settings. Custom themes can override only the slots they need
+and inherit the rest.
 
 | API | Notes |
 |---|---|
