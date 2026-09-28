@@ -13,6 +13,15 @@ local platform = require("psi.platform")
 
 local ESC = string.char(27)
 local code_map = {}
+-- Semantic slots still emit valid SGR when no theme has been installed.
+local semantic_fallbacks = {
+  ["md-heading"] = "33",
+  ["md-link"] = "34",
+  ["md-link-url"] = "2",
+  ["md-bullet"] = "36",
+  ["thinking-text"] = "38;5;242",
+  ["bash-mode"] = "32",
+}
 -- Codes form a small closed set, so memoize resolve results per code
 -- string; the memo is invalidated whenever the code map changes.
 local resolve_cache = {}
@@ -49,6 +58,10 @@ local function resolve_code(code)
   local cached = resolve_cache[code]
   if cached ~= nil then
     return cached
+  end
+  code = semantic_fallbacks[code] or code
+  if code_map[code] ~= nil then
+    return code_map[code]
   end
   local values = {}
   for part in code:gmatch("[^;]+") do

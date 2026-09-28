@@ -1341,7 +1341,7 @@ def t_tui_busy_status(psi: Psi):
     )
     assert_contains(
         out,
-        "\x1b[38;2;167;152;215m",
+        "\x1b[38;2;138;190;183m",
         "busy spinner uses the medium thinking color",
     )
 
@@ -2045,8 +2045,8 @@ def t_tui_startup_screen_matches_pi_shape(psi: Psi):
     )
     raw.assert_clean_exit()
     text = strip_ansi(raw)
-    assert_contains(text, "▀▀█ █▀▀", "startup uses block-letter psi branding")
-    assert_contains(text, "█▀  ▄▄█ █", "startup logo includes the s")
+    assert_contains(text, "psi v", "startup uses a simple psi name/version")
+    assert "▀" not in text and "▄▄█" not in text, "no graphical startup logo"
     assert_contains(text, "Esc interrupt", "startup compact key hints")
     assert_contains(text, "Ctrl-C/Ctrl-D clear/exit", "startup clear/exit hint")
     assert_contains(text, "Ctrl-O", "startup expansion key")
@@ -2168,7 +2168,7 @@ def t_tui_input_box_background(psi: Psi):
     assert_bytes_not_contains(raw, b"\x1b[4m", "input box should not render a Lua-owned cursor cell")
     assert_bytes_not_contains(raw, b"\x1b[48;5;238m",
                               "input box should not paint a filled background")
-    assert_bytes_contains(raw, b"\x1b[38;2;97;133;204m",
+    assert_bytes_contains(raw, b"\x1b[38;2;129;162;190m",
                           "thinking-level input border color did not reach rendered output")
 
 @test("mode/tui_bracketed_paste")

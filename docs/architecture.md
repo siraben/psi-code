@@ -244,7 +244,7 @@ C owns only the terminal boundary:
 - `lua/psi/tui_layout.lua` owns layout policy such as prefixes, footer text,
   and row caps
 - `lua/psi/tui_startup.lua` owns the compact/expanded pi-style startup help
-  and two-row block-letter psi mark
+  and plain psi name/version header
 
 The rule is simple: one renderer owns terminal bytes while active. C reports
 terminal facts, implements terminal text math, and enforces that ownership.
@@ -264,7 +264,7 @@ Rendering policy:
   row/column options, and spliced into the base frame by terminal columns.
 - The startup header is a non-session transcript entry. Ctrl-O expands both
   its shortcut list and tool output, and `quietStartup=true` suppresses it.
-- Prompt borders and busy indicators use the current pi effort palette for
+- Prompt borders and busy indicators use the selected theme's effort palette for
   `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`.
 - The first inline paint anchors at the terminal's current cursor. Later paints
   use relative movement from the renderer's tracked hardware row, so startup

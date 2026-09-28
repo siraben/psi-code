@@ -14,8 +14,8 @@ local ansi = require("psi.ansi")
 
 local M = {}
 
-local PI_ACCENT = "36" -- mdCode / list bullets, theme accent
-local PI_HEADING = "33" -- mdHeading, theme warning/gold slot
+local PI_ACCENT = "36" -- mdCode, theme accent
+local PI_HEADING = "md-heading" -- distinct from warning in the classic palette
 local PI_LINK = "md-link" -- mdLink differs from the border blue
 local PI_GRAY = "38;5;242" -- mdQuote/mdHr/toolOutput, theme chrome slot
 
@@ -205,7 +205,7 @@ local function render_tokens(tokens)
       out[#out + 1] = ansi.color(PI_ACCENT, token.text)
     elseif token.kind == "link" then
       out[#out + 1] = ansi.color(PI_LINK, underline(render_tokens(token.label)))
-        .. ansi.color(PI_GRAY, " (" .. token.url .. ")")
+        .. ansi.color("md-link-url", " (" .. token.url .. ")")
     elseif token.kind == "strong" then
       out[#out + 1] = ansi.bold(render_tokens(token.children))
     elseif token.kind == "emph" then
@@ -286,13 +286,13 @@ local function render_line(line, state)
   -- Bullet list: -, *, + (but not horizontal-rule-like)
   local indent, body = line:match("^(%s*)[%-%*%+]%s+(.*)$")
   if indent and body then
-    return indent .. ansi.color(PI_ACCENT, "•") .. " " .. render_inline(body)
+    return indent .. ansi.color("md-bullet", "•") .. " " .. render_inline(body)
   end
 
   -- Numbered list
   local num_indent, num, num_body = line:match("^(%s*)(%d+%.)%s+(.*)$")
   if num then
-    return num_indent .. ansi.color(PI_ACCENT, num) .. " " .. render_inline(num_body)
+    return num_indent .. ansi.color("md-bullet", num) .. " " .. render_inline(num_body)
   end
 
   -- Blockquote

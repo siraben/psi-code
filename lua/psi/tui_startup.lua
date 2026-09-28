@@ -32,25 +32,6 @@ local function bool_setting(path, fallback, default)
   return default
 end
 
--- A compact two-row block-letter psi mark: p, s, and i.
-function M.logo_lines()
-  local coral = "38;2;228;138;122"
-  local blue = "38;2;79;142;179"
-  local yellow = "38;2;234;182;93"
-  local top = ansi.color(coral .. ";48;2;79;142;179", "▀")
-    .. ansi.color(coral, "▀█")
-    .. " "
-    .. ansi.color(blue, "█▀▀")
-    .. " "
-    .. ansi.color(yellow, "▀")
-  local bottom = ansi.color(blue, "█▀")
-    .. "  "
-    .. ansi.color(blue, "▄▄█")
-    .. " "
-    .. ansi.color(yellow, "█")
-  return top, bottom
-end
-
 local function key_text(id)
   local text = keybindings.display(id)
   return text ~= "" and text or nil
@@ -60,7 +41,7 @@ local function raw_hint(key, description)
   if key == nil or key == "" then
     return nil
   end
-  return ansi.cyan(key) .. ansi.dim(" " .. description)
+  return ansi.dim(key) .. ansi.color("38;5;242", " " .. description)
 end
 
 local function hint(id, description)
@@ -87,7 +68,7 @@ local function compact_hints()
       out[#out + 1] = item
     end
   end
-  return table.concat(out, ansi.dim(" · "))
+  return table.concat(out, ansi.color("38;5;242", " · "))
 end
 
 local function expanded_hints()
@@ -134,12 +115,11 @@ end
 function M.render(opts)
   opts = type(opts) == "table" and opts or {}
   local expanded = not not opts.expanded
-  local top, bottom = M.logo_lines()
   local version = type(psi.version) == "function" and psi.version() or "?"
   local hints = expanded and expanded_hints() or compact_hints()
   local lines = {
-    top .. " " .. ansi.dim("v" .. tostring(version)),
-    bottom .. " " .. hints,
+    ansi.color("1;36", "psi") .. " " .. ansi.dim("v" .. tostring(version)),
+    hints,
   }
   if not expanded then
     lines[#lines + 1] = ansi.dim(
