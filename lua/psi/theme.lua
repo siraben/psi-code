@@ -30,7 +30,7 @@ local TUI_SLOTS = {
 }
 
 local DEFAULT_THEME = {
-  -- Pi 0.84.4 dark theme, matching the installed pi executable.
+  -- Released Pi 0.87.1 dark theme (also used by installed Pi 0.84.4).
   ansi = {
     ["2"] = "38;2;102;102;102", -- dim #666666
     ["31"] = "38;2;204;102;102", -- error/red #cc6666
@@ -85,7 +85,7 @@ local DEFAULT_THEME = {
   },
 }
 
--- Pi 0.84.4 light theme, translated to SGR.
+-- Released Pi 0.87.1 light theme, translated to SGR.
 -- The tool background tints are deliberately pale so that the dark
 -- toolTitle/text stays legible; the dark theme uses the inverse.
 local LIGHT_THEME = {
@@ -356,9 +356,6 @@ end
 function M.bootstrap()
   M.register(DEFAULT_THEME_NAME, DEFAULT_THEME)
   M.register(LIGHT_THEME_NAME, LIGHT_THEME)
-  local modern = require("psi.theme_modern")
-  M.register("pi-modern-dark", modern.dark)
-  M.register("pi-modern-light", modern.light)
   M.register("dark", DEFAULT_THEME)
   M.register("light", LIGHT_THEME)
   return M.apply_configured()

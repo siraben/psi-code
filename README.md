@@ -68,17 +68,19 @@ chat mode leaves mouse-wheel scrollback to the terminal, while
 `PSI_TUI_ALT_SCREEN=1` enables application-owned wheel scrolling and Alt-wheel
 acceleration. Startup shows the name and version (`psi v…`), without a graphic logo.
 
-The default `pi-dark` / `pi-light` palettes match Pi 0.84.4. The newer
-pi-mono (`6f755151`) palettes are available as `pi-modern-dark` /
-`pi-modern-light`; select one with `"theme": "pi-modern-dark"` in settings.
-The `dark` / `light` aliases and existing `theme.name` / `tui.theme` settings
-are also supported.
+The default `pi-dark` / `pi-light` palettes exactly match released Pi 0.87.1
+(the same palette used by 0.84.4). The `dark` / `light` aliases and existing
+`theme`, `theme.name`, and `tui.theme` settings are also supported.
 
 In the TUI or REPL, `! command` runs a local shell command without calling the
 model and includes its result in subsequent model context. `!! command` runs
 it but excludes the result from model context (it is still saved locally).
 The TUI streams output, reports exit status, and supports Escape cancellation.
 Shell commands entered while another operation is busy stay in the editor.
+Informational, settings, and extension slash commands execute and render in the
+transcript while the agent is working or thinking. Commands that would replace
+or rewrite active session state instead render a warning and wait for the active
+operation to finish.
 
 ## Design goals
 

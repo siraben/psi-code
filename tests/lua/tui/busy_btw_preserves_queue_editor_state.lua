@@ -1,5 +1,5 @@
 --[==[psi-test
-expect = "/btw later|10|1|queued text|nil|insert|/btw is unavailable while a turn is running"
+expect = "|0|1|queued text|nil|insert|nil|warning|Wait for the current response to finish before asking a side question."
 ]==]
 local agent = require("psi.agent_session")
 local rt = require("psi.tui_runtime")
@@ -21,4 +21,6 @@ return table.concat({
   tostring(state.queue_nav_index),
   tostring(state.editor_mode),
   tostring(state.status_text),
+  tostring(state.last_entry_kind),
+  tostring(state.last_entry_text),
 }, "|")

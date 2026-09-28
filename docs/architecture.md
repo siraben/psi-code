@@ -266,6 +266,11 @@ Rendering policy:
   its shortcut list and tool output, and `quietStartup=true` suppresses it.
 - Prompt borders and busy indicators use the selected theme's effort palette for
   `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`.
+- Informational, settings, and extension slash commands remain executable from
+  scheduler ticks while an agent turn, thinking stream, shell command, or
+  compaction is active. Their output is appended without rebuilding or erasing
+  mutable transcript entries. Commands that replace/rewrite active session
+  state are rejected with a transcript warning until the operation completes.
 - The first inline paint anchors at the terminal's current cursor. Later paints
   use relative movement from the renderer's tracked hardware row, so startup
   output stays above the live region and terminal scrolling remains natural.
