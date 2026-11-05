@@ -309,7 +309,8 @@ Runtime overrides:
   one logical row; Alt-wheel steps five. Normal-screen chat mode does not
   capture the mouse and leaves scrollback to the terminal.
 - `PSI_TUI_FULLSCREEN=1` or `PSI_TUI_INLINE_MAX_ROWS=<n>` controls the inline
-  viewport height policy.
+  frame viewport. Prompt-height policy still derives from the physical terminal;
+  frame mode then caps the prompt to the rows available in that viewport.
 - `PSI_HARDWARE_CURSOR=0` falls back to the Lua-drawn prompt cursor.
 - `NO_COLOR=1` disables color rendering.
 

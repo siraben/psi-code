@@ -10,9 +10,10 @@ local prompt_max_rows_override = nil
 
 local MIN_WIDTH = 40
 local DEFAULT_WIDTH = 80
-local MIN_HEIGHT = 12
+local MIN_HEIGHT = 1
 local DEFAULT_HEIGHT = 24
-local PROMPT_RESERVED_ROWS = 6
+local PROMPT_MIN_ROWS = 5
+local PROMPT_HEIGHT_FRACTION = 0.3
 local INPUT_BOX_ROWS = 3
 local TRANSCRIPT_START_ROW = 2
 local SINGLE_ROW = 1
@@ -21,8 +22,7 @@ local TITLE = "psi coding agent"
 local PROMPT_PREFIX_FIRST = " › "
 local PROMPT_PREFIX_REST = "   "
 
-local function clamp_prompt_max_rows(rows, height)
-  local max_allowed = math.max(SINGLE_ROW, height - PROMPT_RESERVED_ROWS)
+local function normalize_prompt_max_rows(rows)
   rows = tonumber(rows)
   if rows == nil then
     return nil
@@ -31,21 +31,20 @@ local function clamp_prompt_max_rows(rows, height)
   if rows < SINGLE_ROW then
     rows = SINGLE_ROW
   end
-  if rows > max_allowed then
-    rows = max_allowed
-  end
   return rows
 end
 
 local function default_prompt_max_rows(height)
-  return math.max(SINGLE_ROW, height - PROMPT_RESERVED_ROWS)
+  -- Match pi's editor viewport: 30% of terminal rows, with five rows as
+  -- the normal minimum. Frame mode applies its stricter physical-space cap.
+  return math.max(PROMPT_MIN_ROWS, math.floor(height * PROMPT_HEIGHT_FRACTION))
 end
 
 local function resolve_prompt_max_rows(configured, height)
   if prompt_max_rows_override ~= nil then
     configured = prompt_max_rows_override
   end
-  return clamp_prompt_max_rows(configured, height) or default_prompt_max_rows(height)
+  return normalize_prompt_max_rows(configured) or default_prompt_max_rows(height)
 end
 
 function M.set_prompt_max_rows(rows)
@@ -62,10 +61,10 @@ end
 function M.geometry(width, height)
   width = math.max(MIN_WIDTH, tonumber(width) or DEFAULT_WIDTH)
   height = math.max(MIN_HEIGHT, tonumber(height) or DEFAULT_HEIGHT)
-  local footer_y = height - SINGLE_ROW
-  local input_y = height - INPUT_BOX_ROWS
-  local status_y = input_y - SINGLE_ROW
-  local transcript_h = math.max(SINGLE_ROW, status_y - TRANSCRIPT_START_ROW)
+  local footer_y = math.max(0, height - SINGLE_ROW)
+  local input_y = math.max(0, height - INPUT_BOX_ROWS)
+  local status_y = math.max(0, input_y - SINGLE_ROW)
+  local transcript_h = math.max(0, status_y - TRANSCRIPT_START_ROW)
   return {
     width = width,
     height = height,

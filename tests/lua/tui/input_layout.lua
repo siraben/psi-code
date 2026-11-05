@@ -1,5 +1,5 @@
 --[==[psi-test
-expect = '18|" › "|"   "'
+expect = '7|" › "|"   "'
 ]==]
 local prelude = require("psi.prelude")
 local raw = require("psi.tui_layout").input_layout(
