@@ -1,0 +1,26 @@
+# Everything here is either a build artifact, a downloaded image, or a secret.
+# Only the scripts in this directory are tracked.
+
+# Credentials: the overlay stages auth.json and env.sh (API keys) into the
+# initrd, and vncpasswd is the VNC password. Never commit these.
+overlay/
+vncpasswd
+serve/
+
+# Downloaded ISOs and extracted boot images
+downloads/
+core64-x/
+core64.gz
+vmlinuz64
+psi-core64.gz
+psi-overlay.gz
+
+# VM state and runtime sockets
+*.qcow2
+*.sock
+serial.log
+.provision*
+
+# Screenshots are curated into ../images/ by hand
+*.ppm
+*.png
