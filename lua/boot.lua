@@ -104,6 +104,7 @@ end
 
 for _, module_name in ipairs({
   "psi.extensions.btw",
+  "psi.extensions.network_search",
 }) do
   load_packaged_extension(module_name)
 end
