@@ -3,6 +3,7 @@
 -- The POSIX TUI renders ANSI frames from Lua. Keep geometry and labels
 -- here so ports can converge on the same screen shape.
 
+local glyphs = require("psi.glyphs")
 local prelude = require("psi.prelude")
 
 local M = {}
@@ -18,7 +19,7 @@ local TRANSCRIPT_START_ROW = 2
 local SINGLE_ROW = 1
 
 local TITLE = "psi coding agent"
-local PROMPT_PREFIX_FIRST = " › "
+local PROMPT_PREFIX_FIRST = " " .. glyphs.prompt_caret .. " "
 local PROMPT_PREFIX_REST = "   "
 
 local function clamp_prompt_max_rows(rows, height)

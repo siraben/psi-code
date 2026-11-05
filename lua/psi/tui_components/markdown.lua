@@ -5,6 +5,7 @@
 -- styled terminal lines that can be composed with other TUI components.
 
 local ansi = require("psi.ansi")
+local glyphs = require("psi.glyphs")
 local markdown = require("psi.markdown")
 local tui_component = require("psi.tui_component")
 local tui_text = require("psi.tui_text")
@@ -332,9 +333,10 @@ end
 local function border(left, join, right, widths)
   local cells = {}
   for _, width in ipairs(widths) do
-    cells[#cells + 1] = string.rep("─", width)
+    cells[#cells + 1] = string.rep(glyphs.box_h, width)
   end
-  return left .. "─" .. table.concat(cells, "─" .. join .. "─") .. "─" .. right
+  local h = glyphs.box_h
+  return left .. h .. table.concat(cells, h .. join .. h) .. h .. right
 end
 
 local function wrap_cell(text, width)
@@ -363,7 +365,8 @@ local function render_row(cells, widths, style_header)
       local cell = pad_cell(wrapped[col][row] or "", widths[col])
       parts[col] = style_header and ansi.bold(cell) or cell
     end
-    lines[#lines + 1] = "│ " .. table.concat(parts, " │ ") .. " │"
+    local v = glyphs.box_v
+    lines[#lines + 1] = v .. " " .. table.concat(parts, " " .. v .. " ") .. " " .. v
   end
   return lines
 end
@@ -389,21 +392,21 @@ local function render_table_lines(raw_lines, available_width)
   end
 
   local out = {
-    border("┌", "┬", "┐", widths),
+    border(glyphs.box_tl, glyphs.box_tm, glyphs.box_tr, widths),
   }
   for _, line in ipairs(render_row(header, widths, true)) do
     out[#out + 1] = line
   end
-  out[#out + 1] = border("├", "┼", "┤", widths)
+  out[#out + 1] = border(glyphs.box_ml, glyphs.box_mm, glyphs.box_mr, widths)
   for row_index, row in ipairs(rows) do
     for _, line in ipairs(render_row(row, widths, false)) do
       out[#out + 1] = line
     end
     if row_index < #rows then
-      out[#out + 1] = border("├", "┼", "┤", widths)
+      out[#out + 1] = border(glyphs.box_ml, glyphs.box_mm, glyphs.box_mr, widths)
     end
   end
-  out[#out + 1] = border("└", "┴", "┘", widths)
+  out[#out + 1] = border(glyphs.box_bl, glyphs.box_bm, glyphs.box_br, widths)
   return out
 end
 

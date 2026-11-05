@@ -24,6 +24,8 @@
 --
 -- The /describe and /apropos slash commands sit on top.
 
+local glyphs = require("psi.glyphs")
+
 local M = {}
 
 local entries = {} -- key -> {kind, doc, source, extra}
@@ -169,7 +171,7 @@ local function bootstrap_providers(providers)
       local doc = string.format(
         "default model %s; override via %s; auth: %s",
         spec.default_model or "?",
-        spec.model_env or "—",
+        spec.model_env or glyphs.dash,
         table.concat(auth, ", ")
       )
       set("provider:" .. entry.name, "provider", doc, {
