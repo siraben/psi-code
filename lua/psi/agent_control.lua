@@ -13,6 +13,7 @@ local M = {}
 
 local steering_queue = {}
 local follow_up_queue = {}
+local internal_follow_up_queue = {}
 local next_queue_id = 0
 local queue_mode_overrides = {}
 
@@ -167,6 +168,12 @@ function M.queue_follow_up(message)
   return push("follow-up", follow_up_queue, message)
 end
 
+-- Internal continuations are model-visible custom messages. They advance the
+-- provider loop without appearing as user-authored queued input in the TUI.
+function M.queue_internal_follow_up(message)
+  return push("internal-follow-up", internal_follow_up_queue, message)
+end
+
 function M.queue_mode(kind)
   local normalized = normalize_queue_name(kind)
   if normalized == nil then
@@ -209,6 +216,26 @@ end
 
 function M.append_follow_ups(on_append)
   return append_drained(M.drain_follow_ups(), on_append, "follow-up")
+end
+
+function M.append_internal_follow_ups()
+  local count = #internal_follow_up_queue
+  if count == 0 then
+    return 0
+  end
+  local items = internal_follow_up_queue
+  internal_follow_up_queue = {}
+  for _, item in ipairs(items) do
+    session.append_custom_message(item.text, { role = "user" })
+  end
+  session.save()
+  return count
+end
+
+function M.clear_internal_follow_ups()
+  local count = #internal_follow_up_queue
+  internal_follow_up_queue = {}
+  return count
 end
 
 function M.pending_count()
@@ -262,6 +289,7 @@ end
 function M.clear_queues()
   steering_queue = {}
   follow_up_queue = {}
+  internal_follow_up_queue = {}
 end
 
 function M.clear_queue(kind)
