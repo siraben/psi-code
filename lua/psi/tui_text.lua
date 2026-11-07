@@ -877,6 +877,71 @@ function M.wrap_ansi(text, width, opts)
   return lines
 end
 
+-- Legacy console output preserves measured cell geometry with ASCII glyphs.
+-- The source buffer and model/session content retain their original Unicode.
+local ascii_glyphs = {
+  ["─"] = "-",
+  ["━"] = "-",
+  ["│"] = "|",
+  ["┃"] = "|",
+  ["┌"] = "+",
+  ["┐"] = "+",
+  ["└"] = "+",
+  ["┘"] = "+",
+  ["╭"] = "+",
+  ["╮"] = "+",
+  ["╰"] = "+",
+  ["╯"] = "+",
+  ["├"] = "+",
+  ["┤"] = "+",
+  ["┬"] = "+",
+  ["┴"] = "+",
+  ["┼"] = "+",
+  ["↑"] = "^",
+  ["↓"] = "v",
+  ["←"] = "<",
+  ["→"] = ">",
+  ["…"] = ".",
+  ["•"] = "*",
+  ["·"] = ".",
+  ["›"] = ">",
+  ["✓"] = "+",
+}
+
+function M.terminal_line(value)
+  local profile = require("psi.platform").terminal_profile()
+  if not profile.ascii and profile.osc8 then
+    return value
+  end
+  value = tostring(value or "")
+  local out, i = {}, 1
+  while i <= #value do
+    local seq, next_i = read_escape(value, i)
+    if seq then
+      local sgr = seq:match("^\27%[([%d;]*)m$")
+      if sgr then
+        out[#out + 1] = require("psi.ansi").sgr(sgr)
+      elseif profile.osc8 and seq:sub(1, 2) == "\27]" then
+        out[#out + 1] = seq
+      end
+      i = next_i
+    elseif profile.ascii and value:byte(i) >= 128 then
+      local finish = M.next_grapheme_index(value, i - 1) + 1
+      local cluster = value:sub(i, finish - 1)
+      local width = M.visible_width(cluster)
+      out[#out + 1] = string.rep(ascii_glyphs[cluster] or "?", math.max(0, width))
+      i = finish
+    else
+      local byte = value:byte(i)
+      if byte >= 32 and byte ~= 127 then
+        out[#out + 1] = value:sub(i, i)
+      end
+      i = i + 1
+    end
+  end
+  return table.concat(out)
+end
+
 function M.wrap_plain(text, width)
   return M.wrap_ansi(M.strip_ansi(text), width)
 end

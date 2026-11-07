@@ -12,9 +12,10 @@ local ESC = string.char(27)
 local CSI = ESC .. "["
 local RESET = CSI .. "0m"
 local OSC_RESET = ESC .. "]8;;" .. string.char(7)
-local LINE_RESET = RESET .. OSC_RESET
-local SYNC_BEGIN = CSI .. "?2026h"
-local SYNC_END = CSI .. "?2026l"
+local profile = require("psi.platform").terminal_profile()
+local LINE_RESET = RESET .. (profile.osc8 and OSC_RESET or "")
+local SYNC_BEGIN = profile.sync and (CSI .. "?2026h") or ""
+local SYNC_END = profile.sync and (CSI .. "?2026l") or ""
 local HIDE_CURSOR = CSI .. "?25l"
 local SHOW_CURSOR = CSI .. "?25h"
 
@@ -125,9 +126,22 @@ local function normalize_frame(frame)
         line = line:sub(1, start_pos - 1) .. line:sub(end_pos + 1)
       end
     end
-    lines[row] = line .. LINE_RESET
+    lines[row] = tui_text.clip_ansi(tui_text.terminal_line(line), width) .. LINE_RESET
   end
 
+  local max_height = math.max(1, math.floor(tonumber(frame.max_height) or height))
+  if height > max_height then
+    -- Keep the actual editor marker visible when chrome cannot fit in a
+    -- tiny terminal. Relative cursor accounting uses the emitted rows only.
+    local first = clamp(cursor.row - math.min(1, max_height - 1), 1, height - max_height + 1)
+    local visible = {}
+    for row = 1, max_height do
+      visible[row] = lines[first + row - 1]
+    end
+    lines = visible
+    cursor.row = cursor.row - first + 1
+    height = max_height
+  end
   return {
     width = width,
     height = height,

@@ -1825,6 +1825,68 @@ def t_tui_quits(psi: Psi):
     )
     assert_contains(text, "Resume with: psi --session", "TUI quit resume command")
 
+    # Kernel-console/DEC profiles, inherited tty flags, and small viewports.
+    # These are host PTYs with Linux-style settings, not a Linux VT emulator.
+    for term, mode, cols, rows in [
+        ("linux", "--tui", 40, 12),
+        ("linux", "--chat", 40, 12),
+        ("vt100", "--tui", 40, 12),
+        ("linux", "--tui", 8, 4),
+        ("linux", "--tui", 1, 1),
+    ]:
+        tag = f"{term}-{mode[2:]}-{cols}-{rows}"
+        before, after = psi.tmp / (tag + "-before"), psi.tmp / (tag + "-after")
+        script = ('stty igncr inlcr ixon ixoff echonl; stty -g > "$1"; '
+                  '"$3" "$4"; status=$?; stty -g > "$2"; exit "$status"')
+        raw = run_pty(
+            ["/bin/sh", "-c", script, "tty-audit", str(before), str(after), psi.binary, mode],
+            [(b"", 0.5), (b"/quit\nsecond-line", 0.3), (b"\x03/quit\r", 0.5)],
+            env_extra={"TERM": term, "LC_ALL": "C", "LANG": "C", "NO_COLOR": "",
+                       "PSI_THEME_BACKGROUND": "light", "PSI_TUI_ALT_SCREEN": "1",
+                       "XDG_STATE_HOME": str(psi.tmp / ("state-" + tag))},
+            cols=cols, rows=rows,
+        )
+        raw.assert_clean_exit()
+        assert_equals(before.read_text(), after.read_text(), "tty attributes restored")
+        assert_bytes_not_contains(raw, b"\x1b]", "legacy profile must not emit OSC strings")
+        assert_bytes_not_contains(raw, b"\x1b_", "internal cursor markers must not leak")
+        assert_bytes_not_contains(raw, b"\x1b[?2026", "legacy profile omits sync negotiation")
+        assert_bytes_not_contains(raw, b"\x1b[?1049", "legacy profile uses primary screen")
+        assert_bytes_not_contains(raw, b"\x1b[38;", "legacy profile omits extended foregrounds")
+        assert_bytes_not_contains(raw, b"\x1b[48;", "legacy profile omits extended backgrounds")
+        assert_true(all(byte < 128 for byte in raw), "legacy output is ASCII-safe")
+        if cols >= 40:
+            assert_bytes_contains(raw, b"second-line", "Ctrl-J remains newline under inherited INLCR")
+
+    profile_check = r'''
+local ansi = require("psi.ansi")
+local theme = require("psi.theme")
+local text = require("psi.tui_text")
+ansi.enabled, ansi.color_enabled = true, true
+assert(theme.use("pi-dark"))
+assert(ansi.resolve("38;5;242") == "37")
+assert(theme.use("pi-light"))
+assert(ansi.resolve("38;5;242") == "30")
+local source = "─界é\27]8;;https://example.invalid\7link\27]8;;\7"
+local safe = text.terminal_line(source)
+assert(not safe:find("[\128-\255]"))
+assert(not safe:find("\27]", 1, true))
+assert(text.visible_width(safe) == text.visible_width(source))
+local writes = 0
+psi.tui_write = function() writes = writes + 1 end
+assert(not require("psi.clipboard").write_osc52("demo", {force = true}))
+assert(writes == 0)
+return "ok"
+'''
+    result = psi.run("--eval", profile_check, env_extra={"TERM": "linux", "LC_ALL": "C"})
+    assert_equals(result.stdout.strip(), "ok", "console color, glyph, and OSC fallback")
+
+    for term in ("dumb", "unknown", "vt52", ""):
+        raw = run_pty([psi.binary, "--tui"], [], env_extra={"TERM": term})
+        assert_equals(raw.exitstatus, 1, "unsupported terminals fail before raw-mode entry")
+        assert_bytes_not_contains(raw, b"\x1b", "unsupported terminals receive no escape sequences")
+        assert_bytes_contains(raw, b"--repl or --print", "actionable terminal fallback")
+
 
 @test("mode/tui_resizes_without_input")
 def t_tui_resizes_without_input(psi: Psi):

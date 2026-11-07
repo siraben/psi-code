@@ -36,7 +36,7 @@ local PI_STYLE = {
 local DEFAULT_WIDTH = 80
 local DEFAULT_HEIGHT = 24
 local MIN_SIZE = 1
-local MIN_HEIGHT = 12
+local MIN_HEIGHT = 1
 local PROMPT_RESERVED_ROWS = 6
 local FRAME_WIDTH_MARGIN = 1
 
@@ -157,6 +157,12 @@ function chat.resolve_mode(opts)
 end
 
 function chat.set_alt_screen(enter)
+  if not require("psi.platform").terminal_profile().alternate_screen then
+    if type(psi.tui_set_alt_screen_active) == "function" then
+      psi.tui_set_alt_screen_active(false)
+    end
+    return
+  end
   if type(psi.tui_write) == "function" then
     if enter then
       psi.tui_write("\27[?1049h\27[?1000h\27[?1006h\27[?2004h\27[?25h\27[2J\27[H")
@@ -568,7 +574,7 @@ local function detect_tui_capabilities()
   local term = os.getenv("TERM") or ""
   local windows_ansi_ok = platform.is_windows() and platform.windows_ansi_supported()
   local ansi_ok = info.ansi ~= false and ((term ~= "" and term ~= "dumb") or windows_ansi_ok)
-  local color_ok = ansi_ok and info.color ~= false
+  local color_ok = ansi_ok and info.color ~= false and platform.terminal_profile().colors ~= 0
   local force_ansi = env_bool("PSI_ANSI")
   local force_color = env_bool("PSI_COLOR")
 
@@ -587,6 +593,7 @@ local function detect_tui_capabilities()
     color_ok = force_color and ansi_ok and info.color ~= false
   end
 
+  color_ok = color_ok and platform.terminal_profile().colors ~= 0
   local raw_ansi_ok = ansi_ok and type(psi.tui_draw_raw_line) == "function"
 
   return {
@@ -2697,6 +2704,7 @@ local function redraw(state)
   state.renderer = state.renderer:render({
     width = frame_width,
     height = frame_height,
+    max_height = state.height,
     lines = frame_lines,
     cursor = {
       row = cursor_row,
@@ -2780,11 +2788,11 @@ function chat.redraw(state)
       out[#out + 1] = "\r\n"
     end
     for _, line in ipairs(entry_render_lines(state, entry)) do
-      out[#out + 1] = style_line(line)
+      out[#out + 1] = tui_text.clip_ansi(tui_text.terminal_line(style_line(line)), frame_width)
       out[#out + 1] = "\27[0m\r\n"
     end
     if entry.kind == "tool_result" and (not next_entry or next_entry.kind ~= "tool_result") then
-      out[#out + 1] = ansi.yellow("╰─")
+      out[#out + 1] = tui_text.terminal_line(ansi.yellow("╰─"))
       out[#out + 1] = "\27[0m\r\n"
     end
     state.chat_committed_entry_count = idx
@@ -2906,7 +2914,8 @@ function chat.redraw(state)
   end
 
   -- 4. Emit live region inside synchronized output, then position cursor.
-  out[#out + 1] = "\27[?2026h\27[?25l"
+  local sync = require("psi.platform").terminal_profile().sync
+  out[#out + 1] = (sync and "\27[?2026h" or "") .. "\27[?25l"
   for i, line in ipairs(live_lines) do
     -- Chat positions the cursor explicitly below; internal frame markers
     -- must never escape to the terminal (APC/BEL is not portable).
@@ -2915,7 +2924,7 @@ function chat.redraw(state)
     if marker_start then
       line = line:sub(1, marker_start - 1) .. line:sub(marker_end + 1)
     end
-    out[#out + 1] = tui_text.clip_ansi(line, frame_width)
+    out[#out + 1] = tui_text.clip_ansi(tui_text.terminal_line(line), frame_width)
     out[#out + 1] = "\27[0m"
     if i < #live_lines then
       out[#out + 1] = "\r\n"
@@ -2935,7 +2944,8 @@ function chat.redraw(state)
     out[#out + 1] = "\r"
   end
   out[#out + 1] = "\27[" .. cursor_col_n .. "G"
-  out[#out + 1] = (state.show_hardware_cursor and "\27[?25h" or "\27[?25l") .. "\27[?2026l"
+  out[#out + 1] = (state.show_hardware_cursor and "\27[?25h" or "\27[?25l")
+    .. (sync and "\27[?2026l" or "")
 
   state.chat_live_rows = #live_lines
   state.chat_cursor_offset = math.max(0, cursor_target_idx - 1)

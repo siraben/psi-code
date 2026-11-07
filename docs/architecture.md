@@ -255,7 +255,12 @@ the interface means and what the screen should say.
 Lua selects the TUI renderer at startup from host/runtime capabilities.
 `lua/psi/tui_runtime.lua` derives `ansi`, `color`, and `raw_ansi` from
 `psi.runtime_info()`, `TERM`, `NO_COLOR`, and explicit override environment
-variables.
+variables. Kernel consoles (`TERM=linux`) use eight-color output; legacy
+DEC/ANSI profiles use monochrome output. These profiles use ASCII display
+substitutions with preserved cell widths and omit OSC links/clipboard,
+alternate-screen mouse capture, and synchronized-output negotiation.
+`PSI_CHARSET=ascii` forces display substitutions; `PSI_CHARSET=utf8` permits
+Unicode glyphs. Session and model content retain the original text.
 
 Rendering policy:
 
@@ -274,14 +279,16 @@ Rendering policy:
 - The first inline paint anchors at the terminal's current cursor. Later paints
   use relative movement from the renderer's tracked hardware row, so startup
   output stays above the live region and terminal scrolling remains natural.
-- Complete output batches use synchronized-output markers. Frame lines stay one
-  cell narrower than the terminal to avoid pending-wrap cursor drift.
+- Emulator output batches use synchronized-output markers. Frame lines stay one
+  cell narrower than the terminal to avoid pending-wrap cursor drift. Frames
+  taller than the physical viewport are cropped around the editor cursor.
 - Lua owns the previous-frame cache and emits only changed logical rows.
 - Idle TUI and resume-picker loops sample terminal dimensions every 200 ms;
   active turns sample them at scheduler ticks. A size change invalidates the
   component cache and forces a full frame at the new width and height.
-- Fall back to plain-text frames when ANSI or color is disabled by the
-  runtime policy.
+- Color-disabled profiles retain cursor positioning and non-color styles.
+  Non-ANSI terminals receive an error directing the user to `--repl` or
+  `--print`, before raw mode or control sequences are emitted.
 
 Operational messages use `psi.notice`. Before the TUI state exists, its
 explicit sink buffers a bounded FIFO. Once attached, notices become transcript
