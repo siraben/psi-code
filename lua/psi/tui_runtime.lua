@@ -2055,6 +2055,21 @@ end
 
 local function add_session_entry(state, msg)
   local body = safe_decode(msg.data, {})
+  if body.message and body.message.role == "system" then
+    return
+  end
+  if body.__entry_type == "custom_message" then
+    local legacy = type(body.message) == "table" and body.message or {}
+    if body.display == false or legacy.hidden or legacy.display == false then
+      return
+    end
+    local content = body.content or legacy.content
+    local text = require("psi.session_projection").content_text(content)
+    if text ~= "" then
+      add_entry(state, "info", text)
+    end
+    return
+  end
   if msg.role == "user" then
     add_entry(state, "user", msg.text or "")
     return

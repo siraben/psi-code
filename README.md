@@ -217,6 +217,13 @@ to keep a skill out of the model's list. Skill packages, `/skill:name`, and
 Sessions are append-only JSONL in pi's v3 schema: typed entries, parent
 pointers, cache markers, file-op provenance, custom entries, custom
 model-context messages, compaction summaries, and branch summaries.
+The Pi 1.4 context projection applies branch-local context edits and compaction
+boundaries while preserving original message IDs. System sections and historical
+tool declarations are checkpointed; only locally registered tools execute.
+Unknown fields and entry types survive save/export; unrecognized entry types
+remain opaque state outside model context. Prompt sections refresh from psi's
+local resources, tool set, and trust policy when continuing a session.
+Pi extensions, packages, credentials, and provider configuration are not imported.
 
 A session started under one provider can be resumed under another.
 Provider-specific thinking and signature blocks may be downgraded during replay.

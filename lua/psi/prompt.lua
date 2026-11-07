@@ -5,6 +5,7 @@ local session = require("psi.session_manager")
 local tools = require("psi.tools")
 local resources = require("psi.resource_loader")
 local platform = require("psi.platform")
+local projection = require("psi.session_projection")
 
 local M = {}
 
@@ -26,8 +27,8 @@ local PREAMBLE = table.concat({
 local function escape_attr(value)
   value = tostring(value or "")
   value = value:gsub("&", "&amp;")
-  value = value:gsub('"', "&quot;")
-  value = value:gsub("<", "&lt;")
+  value = value:gsub('"', "&quot;"):gsub("'", "&apos;")
+  value = value:gsub("<", "&lt;"):gsub(">", "&gt;")
   return value
 end
 
@@ -80,139 +81,210 @@ function M.clear_transformers()
   transformers = {}
 end
 
-function M.system_prompt()
-  local _, custom_prompt = resources.system_prompt_file()
-  local append_path, append_prompt = resources.append_system_prompt_file()
-  local has_custom_prompt = custom_prompt ~= nil and custom_prompt ~= ""
-
-  -- Honour psi.tools.set_active(...): the "Available tools:" list
-  -- must mirror what the model can actually dispatch, and the
-  -- guideline inference (grep/find/ls vs bash) must key off the
-  -- active set too — not the full registry. Mirrors pi's
-  -- `selectedTools` option in buildSystemPrompt.
+-- Ordered sections and wording follow Pi 1.4.0 system-prompt.ts and
+-- skills.ts (MIT, Mario Zechner); branding/docs and executable tools are local.
+function M.system_sections()
+  local _, custom = resources.system_prompt_file()
+  local _, addendum = resources.append_system_prompt_file()
   local all_tools = tools.active()
-  local have = tool_set(all_tools)
-
-  local buf = { has_custom_prompt and custom_prompt or PREAMBLE }
-  -- A project SYSTEM.md replaces the built-in prompt, including its tool
-  -- list, rules, and documentation section. The actual tool schemas are
-  -- still sent separately by the provider.
-  if not has_custom_prompt then
-    buf[#buf + 1] = "\n\nAvailable tools:\n"
-    if #all_tools == 0 then
-      buf[#buf + 1] = "(none)\n"
+  local have, sections, order = tool_set(all_tools), {}, {}
+  local function section(name, value)
+    if value and value ~= "" then
+      order[#order + 1] = name
+      sections[name] = name == "preamble" and value
+        or ("<" .. name .. ">\n" .. value .. "\n</" .. name .. ">")
     end
-    for _, t in ipairs(all_tools) do
-      buf[#buf + 1] = "- " .. t.name .. ": " .. t.prompt_snippet .. "\n"
-    end
-    buf[#buf + 1] =
-      "\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n"
-
-    buf[#buf + 1] = "\nGuidelines:\n"
-    local seen = {}
-    local function add_guideline(g)
-      if g == nil or g == "" or seen[g] then
-        return
-      end
-      seen[g] = true
-      write_line(buf, "- ", g)
-    end
-    add_guideline(exploration_guideline(have))
-    for _, t in ipairs(all_tools) do
-      for _, g in ipairs(t.guidelines or {}) do
-        add_guideline(g)
+  end
+  section("preamble", custom and custom ~= "" and custom or PREAMBLE)
+  if not custom or custom == "" then
+    local snippets, rules, seen = {}, {}, {}
+    for _, tool in ipairs(all_tools) do
+      if tool.prompt_snippet and tool.prompt_snippet ~= "" then
+        snippets[#snippets + 1] = "- " .. tool.name .. ": " .. tool.prompt_snippet
       end
     end
-    for _, g in ipairs(BASE_GUIDELINES) do
-      add_guideline(g)
+    section(
+      "tools",
+      (#snippets > 0 and table.concat(snippets, "\n") or "(none)")
+        .. "\n\nIn addition to the tools above, you may have access to other custom tools depending on the project."
+    )
+    local function rule(value)
+      value = type(value) == "string" and value:match("^%s*(.-)%s*$") or nil
+      if value and value ~= "" and not seen[value] then
+        seen[value] = true
+        write_line(rules, "- ", value)
+      end
     end
-  end
-
-  local host_lines = platform.host_context_lines()
-  if #host_lines > 0 then
-    buf[#buf + 1] = "\nHost context:\n"
-    for _, line in ipairs(host_lines) do
-      write_line(buf, "- ", line)
+    rule(exploration_guideline(have))
+    for _, tool in ipairs(all_tools) do
+      for _, value in ipairs(tool.guidelines or {}) do
+        rule(value)
+      end
     end
-  end
-
-  if not has_custom_prompt then
-    buf[#buf + 1] = table.concat({
-      "\nPsi documentation (embedded in the binary; the read tool serves ",
-      "the bundled copy when the file is not on disk, so these paths ",
-      "work regardless of cwd):\n",
-      "- README.md                 — main documentation\n",
-      "- docs/architecture.md      — architecture overview\n",
-      "- docs/port-status.md       — port audit against pi\n",
-      "- docs/extensions.md        — extension / event / slash-command API\n",
-      "- docs/providers.md         — provider routing and configuration\n",
-      "- Read only when the user asks about psi itself, its architecture, ",
-      "Lua modules, or host layer. Always read the target .md file ",
-      "completely and follow links to related docs.",
-    })
-  end
-
-  if append_prompt and append_prompt ~= "" then
-    buf[#buf + 1] = "\n\n"
-    buf[#buf + 1] = append_prompt
-    if append_path then
-      buf[#buf + 1] = "\n"
+    for _, value in ipairs(BASE_GUIDELINES) do
+      rule(value)
     end
+    section("rules", (table.concat(rules):gsub("\n$", "")))
+    section(
+      "docs",
+      table.concat({
+        "Psi documentation (read only when the user asks about psi itself, its architecture, Lua modules, or host layer):",
+        "- README.md — main documentation",
+        "- docs/architecture.md — architecture overview",
+        "- docs/port-status.md — port audit against pi",
+        "- docs/extensions.md — extension / event / slash-command API",
+        "- docs/providers.md — provider routing and configuration",
+        "- These paths serve embedded documentation when the file is not on disk.",
+        "- Always read the target .md file completely and follow links to related docs.",
+      }, "\n")
+    )
   end
-
+  section("addendum", addendum)
   local context_files = M.find_context_files()
   if #context_files > 0 then
-    buf[#buf + 1] = "\n\n<project_context>\n\nProject-specific instructions and guidelines:\n\n"
-    for _, f in ipairs(context_files) do
-      buf[#buf + 1] = '<project_instructions path="'
-        .. escape_attr(f.path)
+    local lines = { "Project-specific instructions and guidelines:" }
+    for _, file in ipairs(context_files) do
+      lines[#lines + 1] = '<project_instructions path="'
+        .. escape_attr(file.path)
         .. '">\n'
-        .. f.content
-        .. "\n</project_instructions>\n\n"
+        .. (file.content or "")
+        .. "\n</project_instructions>"
     end
-    buf[#buf + 1] = "</project_context>\n"
+    section("project_context", table.concat(lines, "\n\n"))
   end
-  local file_reader = have.read and "read" or (have.bash and "bash" or nil)
-  if file_reader then
-    local skills = resources.skills()
+  local reader = have.read and "read" or (have.bash and "bash" or nil)
+  if reader then
     local visible = {}
-    for _, skill in ipairs(skills) do
+    for _, skill in ipairs(resources.skills()) do
       if not skill.disable_model_invocation then
         visible[#visible + 1] = skill
       end
     end
     if #visible > 0 then
-      buf[#buf + 1] =
-        "\n\nThe following skills provide specialized instructions for specific tasks.\n"
-      if file_reader == "read" then
-        buf[#buf + 1] =
-          "Use the read tool to load a skill's file when the task matches its description.\n"
-      else
-        buf[#buf + 1] = "Use bash to load a skill's file when the task matches its description.\n"
-      end
-      buf[#buf + 1] =
-        "Resolve relative paths in a skill against its directory (the parent of SKILL.md).\n"
-      buf[#buf + 1] = "<available_skills>\n"
+      local lines = {
+        "The following skills provide specialized instructions for specific tasks.",
+        reader == "read"
+            and "Use the read tool to load a skill's file when the task matches its description."
+          or "Use bash to load a skill's file when the task matches its description.",
+        "When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
+        "",
+        "<available_skills>",
+      }
       for _, skill in ipairs(visible) do
-        buf[#buf + 1] = "  <skill>\n"
-        buf[#buf + 1] = "    <name>" .. escape_attr(skill.name) .. "</name>\n"
-        buf[#buf + 1] = "    <description>" .. escape_attr(skill.description) .. "</description>\n"
-        buf[#buf + 1] = "    <location>" .. escape_attr(skill.path) .. "</location>\n"
-        buf[#buf + 1] = "  </skill>\n"
+        lines[#lines + 1] = "  <skill>\n    <name>"
+          .. escape_attr(skill.name)
+          .. "</name>\n    <description>"
+          .. escape_attr(skill.description)
+          .. "</description>\n    <location>"
+          .. escape_attr(skill.path)
+          .. "</location>\n  </skill>"
       end
-      buf[#buf + 1] = "</available_skills>"
+      lines[#lines + 1] = "</available_skills>"
+      section("skills", table.concat(lines, "\n"))
     end
   end
-  buf[#buf + 1] = "\nCurrent date: " .. psi.current_date()
-  buf[#buf + 1] = "\nCurrent working directory: " .. platform.native_cwd()
-  local out = table.concat(buf)
+  section("cwd", platform.native_cwd():gsub("\\", "/"))
+  if platform.is_windows() then
+    section("host_context", table.concat(platform.host_context_lines(), "\n"))
+  end
+  local result = prelude.ordered_object(order, sections)
+  local original = projection.system_text({ sections = result })
+  local transformed = original
   for _, fn in ipairs(transformers) do
-    local transformed = fn(out)
-    if type(transformed) == "string" and transformed ~= "" then
-      out = transformed
+    local value = fn(transformed)
+    if type(value) == "string" and value ~= "" then
+      transformed = value
     end
   end
-  return out
+  if transformed ~= original then
+    return prelude.ordered_object({ "preamble" }, { preamble = transformed })
+  end
+  return result
+end
+
+function M.system_prompt()
+  return projection.system_text({ sections = M.system_sections() })
+end
+
+local function equal(a, b)
+  if type(a) ~= type(b) then
+    return false
+  end
+  if type(a) ~= "table" then
+    return a == b
+  end
+  for key, value in pairs(a) do
+    if not equal(value, b[key]) then
+      return false
+    end
+  end
+  for key in pairs(b) do
+    if a[key] == nil then
+      return false
+    end
+  end
+  return true
+end
+
+-- Full declarations/checkpoints avoid a delta-writing subsystem. Foreign
+-- declarations are data, never executable registrations.
+function M.prepare_checkpoint()
+  local previous = session.current_system()
+  local sections, declarations = M.system_sections(), prelude.as_array({})
+  for _, tool in ipairs(tools.active()) do
+    declarations[#declarations + 1] = {
+      name = tool.name,
+      description = tool.description,
+      parameters = projection.copy(tool.input_schema),
+    }
+  end
+  local managed = {
+    preamble = true,
+    tools = true,
+    rules = true,
+    docs = true,
+    addendum = true,
+    project_context = true,
+    skills = true,
+    cwd = true,
+    host_context = true,
+  }
+  local section_order = projection.keys(sections)
+  for _, name in ipairs(projection.keys(previous and previous.sections or {})) do
+    if not managed[name] then
+      sections[name] = previous.sections[name]
+      section_order[#section_order + 1] = name
+    end
+  end
+  sections = prelude.ordered_object(section_order, sections)
+  local patch = projection.copy(sections)
+  local order = projection.keys(patch)
+  for _, name in ipairs(projection.keys(previous and previous.sections or {})) do
+    if patch[name] == nil then
+      order[#order + 1] = name
+      patch[name] = psi.json_null
+    end
+  end
+  patch = prelude.ordered_object(order, patch)
+  if
+    not previous
+    or not equal(previous.sections, sections)
+    or not equal(previous.toolsAdded, declarations)
+  then
+    local removed = prelude.as_array({})
+    for _, tool in ipairs(previous and previous.toolsAdded or {}) do
+      removed[#removed + 1] = { name = tool.name }
+    end
+    session.append_system({
+      role = "system",
+      content = "",
+      sections = patch,
+      toolsAdded = declarations,
+      toolsRemoved = removed,
+      timestamp = math.floor(os.time() * 1000),
+    })
+  end
+  return projection.system_text(session.current_system())
 end
 
 -- ---------- compaction request ----------
@@ -223,7 +295,7 @@ end
 
 local COMPACTION_SYSTEM = table.concat({
   "You are a context summarization assistant. ",
-  "Your task is to read a conversation between a user and an AI coding assistant, ",
+  "Your task is to read a conversation between a user and an AI assistant, ",
   "then produce a structured summary following the exact format specified.\n\n",
   "Do NOT continue the conversation. Do NOT respond to any questions in the conversation. ",
   "ONLY output the structured summary.",
@@ -296,55 +368,45 @@ end
 local function serialize_compaction_messages(messages)
   local buf = {}
   for _, entry in ipairs(messages or {}) do
-    local body = prelude.safe_json_decode(entry.data, nil)
+    local body = prelude.safe_json_decode(entry.data, nil, true)
     local message = type(body) == "table" and body.message or nil
     if type(message) ~= "table" then
       if entry.text and entry.text ~= "" then
         buf[#buf + 1] = session.role_prefix(entry) .. entry.text
       end
-    elseif message.role == "user" then
+    elseif message.role == "user" or message.role == "custom" then
       local text = content_text(message.content)
       if text ~= "" then
         buf[#buf + 1] = "[User]: " .. text
       end
     elseif message.role == "assistant" then
-      local thinking = {}
       local tool_summaries = {}
       local text = {}
       for _, block in ipairs(type(message.content) == "table" and message.content or {}) do
-        if block.type == "thinking" and type(block.thinking) == "string" then
-          thinking[#thinking + 1] = block.thinking
-        elseif block.type == "text" and type(block.text) == "string" then
+        if block.type == "text" and type(block.text) == "string" then
           text[#text + 1] = block.text
         elseif block.type == "toolCall" then
           local args = {}
-          for key, value in pairs(type(block.arguments) == "table" and block.arguments or {}) do
-            args[#args + 1] = tostring(key) .. "=" .. safe_json(value)
+          local arguments = type(block.arguments) == "table" and block.arguments or {}
+          for _, key in ipairs(projection.keys(arguments)) do
+            args[#args + 1] = tostring(key) .. "=" .. safe_json(arguments[key])
           end
-          table.sort(args)
           tool_summaries[#tool_summaries + 1] = tostring(block.name or "")
             .. "("
             .. table.concat(args, ", ")
             .. ")"
         end
       end
-      if #thinking > 0 then
-        buf[#buf + 1] = "[Assistant thinking]: " .. table.concat(thinking, "\n")
-      end
       if #text > 0 then
-        buf[#buf + 1] = "[Assistant]: " .. table.concat(text)
+        buf[#buf + 1] = "[Assistant]: " .. table.concat(text, "\n")
       end
       if #tool_summaries > 0 then
         buf[#buf + 1] = "[Assistant tool calls]: " .. table.concat(tool_summaries, "; ")
       end
+    elseif message.role == "branchSummary" or message.role == "compactionSummary" then
+      buf[#buf + 1] = "[User]: " .. projection.summary_text(message.role, message.summary)
     elseif message.role == "toolResult" then
-      local text = content_text(message.content)
-      if #text > 2000 then
-        text = text:sub(1, 2000)
-          .. "\n\n[... "
-          .. tostring(#content_text(message.content) - 2000)
-          .. " more characters truncated]"
-      end
+      local text = projection.truncate_for_summary(content_text(message.content), 2000)
       if text ~= "" then
         buf[#buf + 1] = "[Tool result]: " .. text
       end
@@ -406,32 +468,27 @@ local BRANCH_SUMMARY_PREAMBLE = table.concat({
 local BRANCH_SUMMARY_INSTRUCTIONS = table.concat({
   "Create a structured summary of this conversation branch for context when returning later.\n\n",
   "Use this EXACT format:\n\n",
-  "## Branch Goal\n",
+  "## Goal\n",
   "[What was the user trying to accomplish in this branch?]\n\n",
-  "## Progress\n",
-  "- [Completed work, discoveries, and decisions]\n\n",
-  "## Files and State\n",
-  "- [Relevant files read or changed, if known]\n\n",
-  "## Carry Forward\n",
-  "- [Important context that should be available on the destination branch]\n\n",
-  "Keep it concise and preserve exact file paths, commands, errors, and identifiers.",
+  "## Constraints & Preferences\n",
+  "- [Any constraints, preferences, or requirements mentioned]\n",
+  '- [Or "(none)" if none were mentioned]\n\n',
+  "## Progress\n### Done\n",
+  "- [x] [Completed tasks/changes]\n\n",
+  "### In Progress\n- [ ] [Work that was started but not finished]\n\n",
+  "### Blocked\n- [Issues preventing progress, if any]\n\n",
+  "## Key Decisions\n- **[Decision]**: [Brief rationale]\n\n",
+  "## Next Steps\n1. [What should happen next to continue this work]\n\n",
+  "Keep each section concise. Preserve exact file paths, function names, and error messages.",
 })
 
 function M.branch_summary_request(messages, custom_instructions)
-  local buf = {}
-  for _, m in ipairs(messages or {}) do
-    if type(m) == "table" and type(m.text) == "string" and m.text ~= "" then
-      buf[#buf + 1] = session.role_prefix(m) .. m.text .. "\n"
-    end
-  end
+  local text = serialize_compaction_messages(messages)
   local instructions = BRANCH_SUMMARY_INSTRUCTIONS
   if type(custom_instructions) == "string" and custom_instructions ~= "" then
     instructions = instructions .. "\n\nAdditional focus: " .. custom_instructions
   end
-  local user_prompt = "<conversation>\n"
-    .. table.concat(buf)
-    .. "\n</conversation>\n\n"
-    .. instructions
+  local user_prompt = "<conversation>\n" .. text .. "\n</conversation>\n\n" .. instructions
   return { COMPACTION_SYSTEM, user_prompt, BRANCH_SUMMARY_PREAMBLE }
 end
 

@@ -1,6 +1,6 @@
 --[==[psi-test
 contains = [
-  "Host context:",
+  "<host_context>",
   "Host OS: Windows",
   "Shell tool backend: cmd.exe /d /c",
   "Execute short inline Windows shell commands",

@@ -5,12 +5,17 @@ local prelude = require("psi.prelude")
 
 local M = {}
 
-local CONTEXT_FILENAMES = { "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD" }
+local CONTEXT_FILENAMES =
+  { "AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD" }
 local diagnostics = {}
 
 local function add_context(out, path, source)
-  if psi.file_exists(path) then
-    out[#out + 1] = records.new_context_file(path, psi.read_file(path))
+  if psi.file_type(path) == "file" then
+    local content = psi.read_file(path)
+    if type(content) ~= "string" then
+      return false
+    end
+    out[#out + 1] = records.new_context_file(path, content:gsub("^\239\187\191", ""))
     out[#out].source = source
     return true
   end
@@ -81,8 +86,14 @@ function M.context_files()
     dir = parent
   end
 
+  local seen = {}
+  for _, file in ipairs(found) do
+    seen[file.path] = true
+  end
   for _, f in ipairs(project) do
-    found[#found + 1] = f
+    if not seen[f.path] then
+      found[#found + 1], seen[f.path] = f, true
+    end
   end
   if psi.events then
     psi.events.emit("resources_discover", { context_files = found, diagnostics = diagnostics })

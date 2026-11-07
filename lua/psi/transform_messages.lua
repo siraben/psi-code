@@ -7,6 +7,7 @@
 
 local prelude = require("psi.prelude")
 local session_mod = require("psi.session_manager")
+local projection = require("psi.session_projection")
 
 local M = {}
 
@@ -25,7 +26,7 @@ M.USER_IMAGE_PLACEHOLDER = USER_IMAGE_PLACEHOLDER
 M.TOOL_IMAGE_PLACEHOLDER = TOOL_IMAGE_PLACEHOLDER
 
 function M.plain_session()
-  local session_messages = session_mod.messages()
+  local session_messages = session_mod.context_messages()
   local plain = prelude.array(#session_messages)
   for i, m in ipairs(session_messages) do
     plain[i] = { role = m.role, text = m.text, data = m.data }
@@ -47,6 +48,9 @@ function M.skip_assistant(message)
 end
 
 function M.text_from_content(content)
+  if type(content) == "string" then
+    return clean_text(content)
+  end
   local parts = prelude.array(#(content or {}))
   for _, block in ipairs(content or {}) do
     if type(block) == "table" and block.type == "text" and type(block.text) == "string" then
@@ -57,6 +61,9 @@ function M.text_from_content(content)
 end
 
 function M.text_from_content_with_image_placeholder(content, placeholder)
+  if type(content) == "string" then
+    return clean_text(content)
+  end
   placeholder = placeholder or TOOL_IMAGE_PLACEHOLDER
   local parts = prelude.array(#(content or {}))
   local previous_placeholder = false
@@ -186,6 +193,30 @@ function M.replay_session(session, handlers)
     local entry = session[i]
     local message, body = M.message_body(entry)
     local role = entry.role
+    if role == "custom" and type(body) == "table" and body.__entry_type == "custom_message" then
+      if not message then
+        message = { role = "custom", content = body.content, display = body.display }
+        body.message = message
+      elseif message.hidden then
+        role = "metadata"
+      end
+    end
+    if type(message) == "table" and message.role == "bashExecution" then
+      if message.excludeFromContext then
+        role = "metadata"
+      else
+        message = { role = "user", content = projection.bash_text(message) }
+        role = "user"
+      end
+    end
+    if type(message) == "table" and type(message.content) == "string" then
+      local copy = {}
+      for key, value in pairs(message) do
+        copy[key] = value
+      end
+      copy.content = prelude.as_array({ { type = "text", text = message.content } })
+      message = copy
+    end
 
     if role == "assistant" and message then
       if M.skip_assistant(message) then
@@ -227,7 +258,10 @@ function M.replay_session(session, handlers)
       flush_synthetic_results()
       if type(handlers.compaction_summary) == "function" then
         handlers.compaction_summary(
-          (type(body) == "table" and body.summary) or entry.text or "",
+          projection.summary_text(
+            "compactionSummary",
+            (type(body) == "table" and body.summary) or entry.text
+          ),
           body,
           entry
         )
@@ -237,13 +271,19 @@ function M.replay_session(session, handlers)
       flush_synthetic_results()
       if type(handlers.branch_summary) == "function" then
         handlers.branch_summary(
-          (type(body) == "table" and body.summary) or entry.text or "",
+          projection.summary_text(
+            "branchSummary",
+            (type(body) == "table" and body.summary) or entry.text
+          ),
           body,
           entry
         )
       elseif type(handlers.compaction_summary) == "function" then
         handlers.compaction_summary(
-          (type(body) == "table" and body.summary) or entry.text or "",
+          projection.summary_text(
+            "branchSummary",
+            (type(body) == "table" and body.summary) or entry.text
+          ),
           body,
           entry
         )
@@ -254,11 +294,10 @@ function M.replay_session(session, handlers)
       and type(body) == "table"
       and body.__entry_type == "custom_message"
       and type(body.message) == "table"
-      and not body.message.hidden
     then
       flush_synthetic_results()
       if type(handlers.custom_message) == "function" then
-        handlers.custom_message(body.message, body, entry)
+        handlers.custom_message(message, body, entry)
       end
       i = i + 1
     else

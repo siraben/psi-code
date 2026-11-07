@@ -1688,7 +1688,9 @@ def t_session_cwd_scoped_dirs_do_not_collide(psi: Psi):
 @test("prompt/system_lists_tools")
 def t_system_prompt_tools(psi: Psi):
     out = psi.system_prompt()
-    assert_regex(out, r"^Available tools:$", "available-tools heading")
+    assert_regex(out, r"^<tools>$", "tools section")
+    assert_contains(out, "</tools>", "tools section end")
+    assert_contains(out, "Prefer grep/find/ls tools over bash", "exploration guidance")
     assert_contains(out, "lua: Inspect or evaluate the embedded Lua runtime",
                     "lua tool description")
 

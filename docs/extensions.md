@@ -358,7 +358,7 @@ These are part of the stable surface:
 | `psi.current_date()` | `"YYYY-MM-DD"`. |
 | `psi.runtime_info()` | Build/runtime capability table including `ansi`, `color`, `mcp`, `repl_editline`, `tui`, `git-commit`, and `version`. |
 | `psi.is_aborted()` | `true` when Ctrl-C / Esc requested. Poll during long work. |
-| `psi.json_encode(v)` / `psi.json_decode(s)` | JSON. |
+| `psi.json_encode(v)` / `psi.json_decode(s, preserve)` | JSON. Optional `preserve=true` retains object key order and represents nulls as `psi.json_null`; encoding preserves both. |
 | `psi.session_message_count()` / `psi.session_messages()` | Read current in-memory session. |
 | `psi.embedded_doc(name)` / `psi.embedded_doc_names()` | Fetch doc files bundled into the binary (e.g. `README.md`). |
 | `psi.embedded_source(name)` / `psi.embedded_source_names()` | Fetch the raw Lua source of an embedded module (e.g. `psi.render`). Useful for live introspection when there is no on-disk path. |
@@ -387,7 +387,11 @@ These are part of the stable surface:
 | `psi.tools.set_active(names)` / `get_active()` | Narrow the tool set offered to the model for subsequent turns. Pass a list of tool names to restrict; pass `nil` to clear the scope and restore all registered tools. Useful for skill-scoped agents (e.g. `tools.set_active({"read","grep"})` for a read-only investigation). |
 | `psi.session.send_message(role, text)` | Inject a user or assistant message into the in-memory session without triggering a turn. `role` is `"user"` or `"assistant"`. Call `psi.session.save()` afterwards to persist. Replaces the former internal-only `append_user` / `append_assistant` for extension use. |
 | `psi.session.append_custom(name, data)` | Persist extension data in the session file without adding it to model context. |
-| `psi.session.append_custom_message(text, opts)` | Persist a model-visible custom message. `opts.role` may be `"user"` or `"assistant"`; `opts.hidden=true` keeps it out of provider context. |
+| `psi.session.append_custom_message(text, opts)` | Persist a Pi custom message. `opts.display=false` hides it in the TUI while retaining model context. `opts.exclude_from_context=true` (or legacy `hidden=true`) stores extension metadata only. `opts.role="assistant"` emits a standard assistant message. |
+| `psi.session.projection()` | Read the canonical Pi-shaped messages, provenance entries, active path, and model/thinking metadata. Treat the snapshot as read-only. |
+| `psi.session.context_messages(include_system)` | Read the projected context as psi provider-shaped records; system records are excluded by default. |
+| `psi.session.current_system()` / `append_system(message)` | Read folded prompt/tool state or persist a system-message delta. Tool declarations do not register executable tools. |
+| `psi.session.append_context_edit(target_id, replacement)` | Persist a branch-local context edit without rewriting raw messages. Pass `{content=...}` to replace content or `nil` to omit the target from context. Returns `true` or `false, error`. |
 | `psi.providers.all_providers()` / `all_models()` | Inspect the built-in provider/model registry. Provider registration exists internally but is not a stable extension API. |
 | `psi.settings.get(path, default)` / `reload()` | Read layered JSON settings from `$XDG_CONFIG_HOME/psi/settings.json` (default `~/.config/psi/settings.json`) and `./.psi/settings.json`. |
 | `psi.settings.set_global(path, value)` | Atomically persist a dotted-path user setting while preserving unrelated keys, then reload layered settings. Returns `true`, or `false, error`. Project settings retain higher read precedence. |
@@ -481,8 +485,8 @@ retains its underscore name.
 | `turn-end` | Final event when a turn ends with no more tool_use (i.e. the full turn is done). | `{ text, model }` |
 | `after-turn` | Right after `turn-end`, during render flush. | `{ text, ["assistant-streamed"] }` |
 | `session_before_compact` | After preparing compaction, before the summary request or transcript rewrite. | `{ plan, reason, will_retry, cancel?, summary? }`; handlers may set `cancel` or `summary`. |
-| `compaction-start` | Before `psi.session.do_compact` clears the in-memory session and appends the summary. Extensions (e.g. autosave) can flush current on-disk state before the rewrite. | `{ total, keep_recent, compacted }` |
-| `compaction-end` | After the summary + kept tail are appended back. Pair with `compaction-start`; the summary text is included so loggers don't have to re-read the session. | `{ total, keep_recent, compacted, summary }` |
+| `compaction-start` | Before the compaction boundary is appended. Extensions can flush pending state. | `{ total, keep_recent, compacted }` |
+| `compaction-end` | After context reconstruction from the summary and retained original entries. The event includes the summary text. | `{ total, keep_recent, compacted, summary }` |
 | `context` | Right before a provider request is built, once per turn iteration. The `messages` table is mutable: handlers may insert, remove, or replace entries and the edits hit the wire. Use for RAG injection, tool-result redaction, mid-context compression. | `{ messages, model, provider, system_prompt }` |
 | `resources_discover` | During context/resource discovery before the system prompt is finalized. | `{ context_files, diagnostics }` |
 | `session-start` | Fired once when a session is loaded (`source="load"`) or freshly created (`source="new"`). Extensions that own log files / counters / timers should initialise here instead of on the first `before-turn`. | `{ id, path, source, message_count }` |

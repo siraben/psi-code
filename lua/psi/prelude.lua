@@ -197,15 +197,19 @@ end
 -- ---------- json / eval / io shims ----------
 
 -- Decode JSON text, returning `fallback` on nil/empty input or parse error.
-function M.safe_json_decode(text, fallback)
+function M.safe_json_decode(text, fallback, preserve)
   if not text or text == "" then
     return fallback
   end
-  local ok, value = pcall(psi.json_decode, text)
+  local ok, value = pcall(psi.json_decode, text, preserve)
   if not ok then
     return fallback
   end
   return value
+end
+
+function M.ordered_object(order, values)
+  return setmetatable(values or {}, { __jsontype = "object", __jsonorder = order or {} })
 end
 
 -- Compile a Lua expression (preferring `return expr` form, falling back to
