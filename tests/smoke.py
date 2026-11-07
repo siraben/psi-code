@@ -45,9 +45,6 @@ DEFAULT_PTY_ROWS = 24
 _CURRENT_TEST_ENV: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar(
     "CURRENT_TEST_ENV", default=None)
 
-# ---------------------------------------------------------------------------
-# Test runner.
-# ---------------------------------------------------------------------------
 
 TESTS: list[tuple[str, callable, dict]] = []
 
@@ -149,10 +146,6 @@ def _smoke_env(tmp: Path) -> dict[str, str]:
     env["PSI_TRUST"] = "always"
     return env
 
-# ---------------------------------------------------------------------------
-# Psi helper: thin wrapper around subprocess that knows where the binary
-# lives, keeps a per-test temp dir, and surfaces stdout + stderr + exit.
-# ---------------------------------------------------------------------------
 
 class Psi:
     def __init__(self, binary: str, tmp: Path, env: dict[str, str] | None = None):
@@ -205,11 +198,7 @@ class Psi:
             args = ["--session", str(session)] + args
         return self.run(*args, timeout=120, **kw)
 
-# ---------------------------------------------------------------------------
-# PTY driver for TUI tests. Uses pexpect for process control and pyte for a
-# terminal-screen projection. Existing callers still get byte-like output for
-# raw ANSI checks, plus exit/screen metadata for newer assertions.
-# ---------------------------------------------------------------------------
+# pexpect drives the process; pyte projects the terminal screen.
 
 class PtyOutput(bytes):
     def __new__(cls, raw: bytes, screen_text: str, exitstatus: int | None,
@@ -316,13 +305,7 @@ def strip_ansi(raw: bytes) -> str:
     text = re.sub(r"\x1b\[\?[\d]+[a-z]", "", text)
     return text
 
-# ---------------------------------------------------------------------------
-# Offline tests (no API key required).
-#
-# Most single-eval cases live in tests/lua/ as declarative .lua files; this
-# module keeps the multi-step / PTY / CLI-surface tests that don't fit that
-# format.
-# ---------------------------------------------------------------------------
+# Single-eval cases live under tests/lua; multi-step, PTY, and CLI tests stay here.
 
 @test("mode/tui_rainbow_renders_ansi")
 def t_tui_rainbow_renders_ansi(psi: Psi):
@@ -2318,9 +2301,6 @@ def t_session_round_trip(psi: Psi):
     assert_equals(text.count('"type":"message"'), 4, "message count")
     assert_contains(text, '"text":"two"', "second user text")
 
-# ---------------------------------------------------------------------------
-# Live-agent tests — gated on ANTHROPIC_API_KEY.
-# ---------------------------------------------------------------------------
 
 def _live_model() -> str:
     return os.environ.get("PSI_ANTHROPIC_MODEL", "claude-haiku-4-5")
@@ -2424,10 +2404,7 @@ def t_live_parallel_panels(psi: Psi):
         assert_contains(text, fruit, f"{fruit} in TUI output")
     assert_bytes_contains(raw, b"\x1b[48;2;40;40;50m", "no pi-style tool block in TUI stream")
 
-# ---------------------------------------------------------------------------
-# Pytest driver. The script entrypoint below preserves the old smoke.py CLI by
-# translating it into a pytest invocation.
-# ---------------------------------------------------------------------------
+# The script entrypoint translates CLI options into a pytest invocation.
 
 def pytest_generate_tests(metafunc):
     if "smoke_case" not in metafunc.fixturenames:

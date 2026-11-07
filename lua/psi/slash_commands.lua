@@ -27,8 +27,6 @@ local BUILTIN_TUI_EXTENSIONS = {
   "osc52_clipboard",
 }
 
--- ---------- parsers ----------
-
 local function arg_after(line, prefix)
   return prelude.trim(line:sub(#prefix + 1))
 end
@@ -489,8 +487,6 @@ local function clone_output_path()
   return session.new_session_file_path(psi.cwd and psi.cwd() or nil)
 end
 
--- ---------- session status (/session) ----------
-
 local function last_assistant_summary()
   local msgs = psi.session_messages()
   for i = #msgs, 1, -1 do
@@ -534,8 +530,6 @@ local function session_status()
   return table.concat(lines, "\n")
 end
 
--- ---------- clipboard (/copy) ----------
-
 local function last_assistant_text()
   local last = last_assistant_summary()
   if not last then
@@ -566,8 +560,6 @@ local function cmd_copy()
     "clipboard unavailable: " .. tostring(tool or "osc52 unavailable")
   )
 end
-
--- ---------- markdown export (/export) ----------
 
 local function render_markdown_session()
   local lines = {}
@@ -1037,8 +1029,6 @@ local function cmd_queue(rest)
   )
 end
 
--- ---------- self-documenting commands ----------
-
 -- Resolve a user-typed key to the canonical psi.doc entry key. Users
 -- type "/help" or "help"; tools as "read" or "tool:read"; primitives
 -- as "psi.cwd" or "cwd"; keybindings as "tui.input.submit". The
@@ -1154,8 +1144,6 @@ local function cmd_find_source(rest)
     string.format("%s -> %s", key, entry.source or "(unknown)")
   )
 end
-
--- ---------- dispatcher + registry ----------
 
 local BUILTIN_COMMANDS = {
   {

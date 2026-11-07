@@ -65,10 +65,7 @@ def target_ssh_argv(target: dict) -> tuple[list[str], list[str]]:
     return ssh, [target.get("psi", "psi")]
 
 
-# ---------------------------------------------------------------------------
-# Bench definitions. Each entry is (name, lua-expression).
-# The expression must print a single "ms: N" line (the last line of stdout).
-# ---------------------------------------------------------------------------
+# Entries are (name, Lua expression). Each expression prints a final "ms: N" line.
 
 BENCHES: list[tuple[str, str]] = [
     (
@@ -422,11 +419,6 @@ BENCHES: list[tuple[str, str]] = [
         """,
     ),
 ]
-
-
-# ---------------------------------------------------------------------------
-# Runner.
-# ---------------------------------------------------------------------------
 
 
 def run_bench(psi_cmd: list[str], name: str, lua: str, ssh_prefix: list[str] | None, timeout: float = 60) -> str:

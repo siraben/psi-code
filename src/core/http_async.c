@@ -153,14 +153,7 @@ static void psi_http_stream_free_request(struct psi_http_stream *h) {
     free(h);
 }
 
-/* ------------------------------------------------------------------
- * Queue management — all under `mu`.
- * ------------------------------------------------------------------ */
-
-/* Enqueue a copy of `data[0..len)`. Returns 1 on success, 0 if
- * either allocation fails. On failure, `write_failed` is latched
- * under `mu` so the write callback can abort curl rather than
- * silently lose streamed bytes. */
+/* Queue operations are synchronized by mu. */
 static void psi_http_queue_push_fail(struct psi_http_stream *h) {
     pthread_mutex_lock(&h->mu);
     h->write_failed = 1;
@@ -180,6 +173,8 @@ static int psi_http_queue_would_exceed_limits(const struct psi_http_stream *h, s
     return 0;
 }
 
+/* Copy data into the queue. Allocation or queue-limit failure returns 0,
+ * latches write_failed, and wakes waiters under mu. */
 static int psi_http_queue_push(struct psi_http_stream *h, const char *data, size_t len) {
     struct psi_http_chunk_node *node;
 
@@ -272,9 +267,7 @@ static void psi_http_queue_free_all(struct psi_http_stream *h) {
     psi_http_chunk_list_free(psi_http_queue_detach_locked(h));
 }
 
-/* ------------------------------------------------------------------
- * curl callbacks (run on helper thread).
- * ------------------------------------------------------------------ */
+/* curl callbacks run on the HTTP helper thread. */
 
 static size_t psi_http_stream_write_cb(void *data, size_t size, size_t nmemb, void *userdata) {
     struct psi_http_stream *h = (struct psi_http_stream *)userdata;
@@ -304,10 +297,6 @@ static int psi_http_stream_xferinfo(
     (void)ulnow;
     return (s != NULL && psi_abort_signal_is_triggered(s)) ? 1 : 0;
 }
-
-/* ------------------------------------------------------------------
- * Helper-thread entry.
- * ------------------------------------------------------------------ */
 
 static void *psi_http_stream_thread(void *arg) {
     struct psi_http_stream *h = (struct psi_http_stream *)arg;
@@ -358,10 +347,6 @@ static void *psi_http_stream_thread(void *arg) {
     pthread_mutex_unlock(&h->mu);
     return NULL;
 }
-
-/* ------------------------------------------------------------------
- * Public API.
- * ------------------------------------------------------------------ */
 
 int psi_http_stream_begin(const char *url, const char *const *header_lines, size_t header_count,
     const char *body, size_t body_len, const struct psi_abort_signal *abort_signal,

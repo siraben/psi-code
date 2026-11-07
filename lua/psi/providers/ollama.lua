@@ -31,7 +31,6 @@ local function resolve_model(m)
   return prelude.resolve_env(m, MODEL_ENV, MODEL_DEFAULT)
 end
 
--- ---------- Ollama NDJSON streaming ----------
 --
 -- Ollama writes one complete JSON object per newline. Tool calls
 -- arrive as already-parsed objects (not fragmented JSON strings
@@ -126,8 +125,6 @@ local function finalize_tool_calls(state)
   return state.tool_calls
 end
 
--- ---------- Provider config ----------
-
 local function make_config(model)
   return {
     provider_name = "ollama",
@@ -190,8 +187,6 @@ local function make_config(model)
     end,
   }
 end
-
--- ---------- Public entry points ----------
 
 -- Local server, no credentials: always authenticated.
 function M.has_auth()

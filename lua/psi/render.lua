@@ -6,8 +6,6 @@ local tool_execution = require("psi.tui_components.tool_execution")
 
 local M = {}
 
--- ---------- hooks ----------
-
 local hooks = {}
 
 -- Event catalog. The keys here are the names the hook-dispatch path
@@ -98,8 +96,6 @@ function M.handle_event_details(event, payload)
   return text, replaced
 end
 
--- ---------- tool frames ----------
-
 local frames = {}
 
 function M.store_frame(id, frame)
@@ -111,8 +107,6 @@ end
 function M.remove_frame(id)
   frames[id] = nil
 end
-
--- ---------- payload helpers ----------
 
 local function payload_tool(p)
   return p.tool
@@ -147,8 +141,6 @@ local function now_ms()
   return nil
 end
 
--- ---------- dispatch ----------
-
 function M.render_tool_call(p)
   local tool = payload_tool(p)
   local id = payload_id(p)
@@ -162,8 +154,6 @@ function M.render_tool_result(p)
   local frame = id and M.lookup_frame(id) or nil
   return tool_execution.render_result(tool, payload_result(p), frame)
 end
-
--- ---------- frame capture/release ----------
 
 function M.capture_frame(p)
   local tool = payload_tool(p)

@@ -66,11 +66,8 @@
 
 #define PSI_VM_RANDOM_BYTES_MAX 1048576
 
-/* ------------------------------------------------------------------
- * Tiny OS-level helpers used by the FFI date/cwd/file_exists primitives
- * and by runtime_info. Returns a fresh heap string the caller must free,
- * or NULL on failure.
- * ------------------------------------------------------------------ */
+/* Date, cwd, and file-existence helpers.
+ * String results belong to the caller; NULL indicates failure. */
 
 static char *psi_vm_current_date(void) {
     char buffer[32];
@@ -365,10 +362,6 @@ static void psi_vm_session_mark_retained(const struct psi_session *session) {
 #endif
 }
 
-/* ------------------------------------------------------------------
- * cJSON <-> Lua table conversion
- * ------------------------------------------------------------------ */
-
 static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx, int depth);
 static char psi_vm_json_null;
 static void psi_vm_push_json_value(lua_State *L, const cJSON *v, int preserve);
@@ -624,10 +617,6 @@ static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx, int depth) {
     }
     return cJSON_CreateNull();
 }
-
-/* ------------------------------------------------------------------
- * TUI host helpers
- * ------------------------------------------------------------------ */
 
 #if PSI_ENABLE_TUI
 
@@ -1272,10 +1261,6 @@ static int psi_vm_tui_normalize_key(
 
 #endif
 
-/* ------------------------------------------------------------------
- * FFI primitive procedures (registered on the `psi` global table)
- * ------------------------------------------------------------------ */
-
 static int lfn_version(lua_State *L) {
     lua_pushstring(L, PSI_VERSION);
     return 1;
@@ -1287,11 +1272,8 @@ static int lfn_log(lua_State *L) {
     return 0;
 }
 
-/* ------------------------------------------------------------------
- * Terminal text primitives. These intentionally do not require TUI mode:
- * no-tui builds still need the same wrapping and width semantics for tests
- * and for any caller rendering terminal text off-screen.
- * ------------------------------------------------------------------ */
+/* Width and wrapping primitives are also available in no-TUI builds
+ * for off-screen rendering. */
 
 #define PSI_VM_TEXT_BUILDER_INITIAL_CAP 64u
 #define PSI_VM_TEXT_ESC_BYTE 0x1bu
@@ -3313,19 +3295,12 @@ static int lfn_process_run_argv(lua_State *L) {
     return 1;
 }
 
-/* ------------------------------------------------------------------
- * Async process (psi.process_begin / _poll / _finish).
+/* Poll from a Lua coroutine through psi.sched.proc_poll so the main thread
+ * can service the TUI between chunks.
  *
- * Mirrors the http_stream_* surface. Callers drive the poll loop
- * from a Lua coroutine via psi.sched.proc_poll; the main thread
- * stays free to service the TUI event loop in between.
- *
- * Handle lifetime: full userdata + __gc, same rationale as
- * http_stream — a coroutine that errors between begin and finish
- * must not leak the fork()ed child + pipe fds. __gc on the
- * userdata will reap a leaked child by SIGTERMing it and running
- * psi_process_finish.
- * ------------------------------------------------------------------ */
+ * The handle is full userdata with __gc. If a coroutine errors between begin
+ * and finish, the finalizer sends SIGTERM and calls psi_process_finish to
+ * reap the child and close its pipes. */
 
 #define PSI_PROCESS_HANDLE_MT "psi.process_handle"
 
@@ -3814,22 +3789,12 @@ static void psi_lua_free_headers(char **headers, size_t count) {
     free((void *)headers);
 }
 
-/* ------------------------------------------------------------------
- * Async streaming HTTP (psi.http_stream_*).
+/* Begin runs curl_easy_perform on a helper thread; poll drains chunks with
+ * a timeout; finish joins the thread and returns the HTTP status.
  *
- * Begin spawns a helper thread that runs curl_easy_perform; poll
- * drains one chunk at a time with a timeout; finish joins the thread
- * and returns the HTTP status code.
- *
- * Ownership: the handle is returned as a FULL userdata with a
- * metatable that has a __gc finaliser. If the Lua caller explicitly
- * calls finish (the normal path), the pointer is nulled out so the
- * finaliser is a no-op. If the coroutine errors between begin and
- * finish (OOM mid-sse_feed, bug in a provider module), the userdata
- * becomes unreachable and __gc reaps the pthread + curl handle +
- * queued chunks. Before this change the handle was light userdata
- * with no GC — errors leaked everything.
- * ------------------------------------------------------------------ */
+ * The handle is full userdata with a __gc finalizer. Explicit finish nulls
+ * the pointer so finalization is a no-op. If the coroutine errors first,
+ * __gc reaps the thread, curl handle, and queued chunks. */
 
 #define PSI_HTTP_STREAM_MT "psi.http_stream"
 
@@ -4887,10 +4852,6 @@ static int lfn_tool_call(lua_State *L) {
     return 1;
 }
 
-/* ------------------------------------------------------------------
- * VM lifecycle
- * ------------------------------------------------------------------ */
-
 /* Install a metatable with a __gc finaliser under `name` in the
  * registry (luaL_newmetatable / luaL_setmetatable convention).
  * Idempotent: re-calling leaves the same metatable in place. */
@@ -5300,10 +5261,6 @@ void psi_vm_set_tui_active(struct psi_vm *vm, int active) {
     vm->tui_active = active ? 1 : 0;
 }
 
-/* ------------------------------------------------------------------
- * Helpers: walk dotted procedure names and coerce results.
- * ------------------------------------------------------------------ */
-
 static int psi_vm_push_dotted(lua_State *L, const char *name) {
     size_t len = strlen(name);
     size_t start = 0;
@@ -5365,18 +5322,8 @@ static int psi_vm_finish_call(lua_State *L, int nargs, int nresults, const char 
     return PSI_STATUS_OK;
 }
 
-/* ------------------------------------------------------------------
- * Public helpers invoked by runtime modes / anthropic / agent / host_ops.
- * ------------------------------------------------------------------ */
-
-/* ------------------------------------------------------------------
- * Observer / abort trampolines for the Lua agent loop.
- *
- * The TUI and other C callers hand us a struct psi_agent_observer
- * whose fields are plain function pointers. The Lua agent code wants
- * a callbacks table instead. We wrap each pointer as a C closure that
- * unpacks the observer from its upvalue and forwards the call.
- * ------------------------------------------------------------------ */
+/* Wrap each psi_agent_observer callback in a C closure for Lua. The closure
+ * retrieves the observer from its upvalue and forwards the call. */
 
 static struct psi_agent_observer *psi_vm_unpack_observer(lua_State *L) {
     return (struct psi_agent_observer *)lua_touserdata(L, lua_upvalueindex(1));

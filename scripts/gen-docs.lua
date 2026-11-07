@@ -17,8 +17,6 @@ local api_registry = require("psi.api_registry")
 
 local M = {}
 
--- ---------------------------------------------------------------- io --
-
 local function read_file(path)
   local fh, err = io.open(path, "rb")
   if not fh then
@@ -55,10 +53,6 @@ local function replace_region(body, name, replacement)
   end
   return replaced
 end
-
--- -------------------------------------------------------- generators --
-
--- ----------------------------------------------------------- C parsing --
 
 local function parse_cli_options(source)
   local opts = {}
@@ -119,8 +113,6 @@ function M.cli_options_table()
   end
   return table.concat(lines, "\n")
 end
-
--- ------------------------------------------------------- man page --
 
 local function man_escape(s)
   return (s:gsub("\\", "\\\\"):gsub("%-", "\\-"))
@@ -219,8 +211,6 @@ function M.man_page()
   emit("portability.md, port-status.md, providers.md.")
   return table.concat(out, "\n") .. "\n"
 end
-
--- ---------------------------------------------------------- driver --
 
 local function update(path, regions)
   local body = read_file(path)

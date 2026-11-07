@@ -1,15 +1,11 @@
-/* Session + message storage primitives. JSONL I/O, compaction, and
- * fork are all implemented in lua/psi/session_manager.lua — this file just
- * keeps the in-memory message array alive and the role enum mapped
- * to its JSON string form. */
+/* In-memory message storage and role serialization.
+ * JSONL persistence, compaction, and forks live in lua/psi/session_manager.lua. */
 
 #include <stdlib.h>
 #include <string.h>
 #include "psi/common.h"
 #include "psi/message.h"
 #include "psi/session.h"
-
-/* ---------- message primitives (formerly message.c) ---------- */
 
 static size_t psi_estimate_tokens(const char *text) {
     size_t len;
@@ -82,8 +78,6 @@ const char *psi_message_role_name(enum psi_message_role role) {
         return "unknown";
     }
 }
-
-/* ---------- session storage ---------- */
 
 static int psi_session_clear_messages(struct psi_session *session) {
     size_t index;

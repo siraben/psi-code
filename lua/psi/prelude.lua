@@ -4,8 +4,6 @@ local M = {}
 local table_create = rawget(table, "create")
 local ARRAY_METATABLE = { __jsontype = "array" }
 
--- ---------- strings ----------
-
 function M.trim(text)
   return (text:gsub("^[ \t]+", ""):gsub("[ \t]+$", ""))
 end
@@ -41,8 +39,6 @@ function M.replace_first(text, old, new)
   end
   return text:sub(1, i - 1) .. new .. text:sub(j + 1)
 end
-
--- ---------- sequences (1-indexed Lua tables) ----------
 
 function M.array(nseq, nrec)
   if table_create then
@@ -119,8 +115,6 @@ function M.each(xs, fn)
   end
 end
 
--- ---------- ids / timestamps ----------
-
 if not (psi and psi.amiga_bridge) then
   math.randomseed((os.time() * 1000003) + (os.clock() * 1e6))
 end
@@ -193,8 +187,6 @@ function M.iso_timestamp()
   end
   return "2026-04-25T00:00:00Z"
 end
-
--- ---------- json / eval / io shims ----------
 
 -- Decode JSON text, returning `fallback` on nil/empty input or parse error.
 function M.safe_json_decode(text, fallback, preserve)
@@ -411,8 +403,6 @@ end
 function M.decode_model_value(value)
   return (decode_value(value, {}))
 end
-
--- ---------- paths ----------
 
 -- Tag a table as a JSON array so it serializes as `[]` even when empty.
 function M.as_array(t)

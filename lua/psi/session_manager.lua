@@ -49,8 +49,6 @@ function M.set_display_name(n)
   end
 end
 
--- ---------- Entry metadata / branch tree ----------
-
 -- C keeps a linear active path. Lua keeps the file's full entry tree and
 -- treats leaf_id as the current cursor; appending creates a child of that
 -- cursor, and branch navigation rebuilds the active C path from parentId
@@ -222,8 +220,6 @@ local append_raw
 function M.append_message(msg)
   append_raw(msg.role, msg.text, msg.data)
 end
-
--- ---------- Append wrappers (pi-shape content builders) ----------
 
 local function text_block(s)
   return { type = "text", text = prelude.decode_utf8_lossy(s or "") }
@@ -608,8 +604,6 @@ function M.current_thinking_level()
   return level
 end
 
--- ---------- JSONL persistence ----------
-
 local function write_line(file, obj)
   file:write(psi.json_encode(obj))
   file:write("\n")
@@ -630,8 +624,6 @@ local function session_header()
   end
   return hdr
 end
-
--- ---------- Session discovery / resume helpers ----------
 
 local function basename(path)
   path = tostring(path or "")
@@ -1269,8 +1261,6 @@ function M.save(path)
   return ok, err
 end
 
--- ---------- Loader: v2 native + v1 upconvert ----------
-
 -- v1 assistant.data was a JSON string of Anthropic content blocks
 -- (type=text|tool_use). Map it into the v2 `message.content` shape.
 local function v1_assistant_data_to_v2(raw, text)
@@ -1866,8 +1856,6 @@ function M.fork(at_count, out_path)
   end
   return write_session_file(out_path, header, messages, at_count)
 end
-
--- ---------- file-op tracking for compaction provenance ----------
 
 local pending_read = {}
 local pending_modified = {}

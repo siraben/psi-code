@@ -1,10 +1,4 @@
-/* Runtime mode dispatcher.
- *
- * Every non-TUI mode (print, eval, repl, system-prompt, agent, compact)
- * is implemented in lua/psi/modes.lua. This file is now just a thin
- * bridge: init VM + session, push the CLI options as a Lua table, call
- * psi.modes.run(opts), return its boolean status. TUI mode uses the same
- * Lua dispatcher but switches the terminal into raw ANSI mode first. */
+/* Initialize the VM/session and dispatch CLI options through psi.modes.run. */
 
 #include <ctype.h>
 #include <signal.h>

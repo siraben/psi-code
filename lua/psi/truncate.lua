@@ -20,10 +20,6 @@ M.DEFAULT_MAX_LINES = 2000
 M.DEFAULT_MAX_BYTES = 50 * 1024 -- 50 KiB
 M.GREP_MAX_LINE_LENGTH = 500
 
--- ---------------------------------------------------------------------------
--- Helpers
--- ---------------------------------------------------------------------------
-
 local function split_lines(text)
   local lines = {}
   text = text or ""
@@ -93,10 +89,6 @@ local function empty_result(content, total_lines, total_bytes, max_lines, max_by
   }
 end
 
--- ---------------------------------------------------------------------------
--- truncate_head: keep first N lines/bytes. Used by read/grep/ls/find.
--- ---------------------------------------------------------------------------
-
 function M.truncate_head(content, options)
   options = options or {}
   local max_lines = options.max_lines or M.DEFAULT_MAX_LINES
@@ -162,11 +154,6 @@ function M.truncate_head(content, options)
     max_bytes = max_bytes,
   }
 end
-
--- ---------------------------------------------------------------------------
--- truncate_tail: keep last N lines/bytes. Used by bash so errors at the
--- end survive truncation.
--- ---------------------------------------------------------------------------
 
 function M.truncate_tail(content, options)
   options = options or {}
@@ -237,10 +224,6 @@ function M.truncate_line(line, max_chars)
   return line:sub(1, max_chars) .. "... [truncated]", true
 end
 
--- ---------------------------------------------------------------------------
--- Back-compat helpers (still used by read.lua + truncate.notice).
--- ---------------------------------------------------------------------------
-
 function M.by_lines(text, offset, limit)
   local lines = split_lines(text)
   local total = #lines
@@ -298,10 +281,6 @@ function M.notice(meta)
   parts[#parts + 1] = "]"
   return table.concat(parts)
 end
-
--- ---------------------------------------------------------------------------
--- Notice builders that work off a `truncate_head` / `truncate_tail` result.
--- ---------------------------------------------------------------------------
 
 -- Notice for head-truncated output (read/grep/ls/find).
 -- `extras` may carry { full_output_path = "/tmp/..." } for a "Full output:"

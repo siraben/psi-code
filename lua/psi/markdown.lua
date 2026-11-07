@@ -31,8 +31,6 @@ local function is_inline_syntax_byte(byte)
     or byte == 126 -- ~
 end
 
--- ---------- inline renderer ----------
-
 local function italic(text)
   return ansi.color("3", text)
 end
@@ -234,8 +232,6 @@ end
 
 M.render_inline = render_inline
 
--- ---------- line-level renderer ----------
-
 local function render_heading(text, level)
   local function apply(value)
     value = ansi.bold(value)
@@ -304,8 +300,6 @@ local function render_line(line, state)
   -- Plain paragraph line
   return render_inline(line)
 end
-
--- ---------- public API ----------
 
 -- Render one plain (non-ANSI) wrapped display line with the given
 -- fence flag. The TUI drawer calls this per wrapped line; fence

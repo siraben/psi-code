@@ -138,8 +138,6 @@ local function api_tool_specs(user_text)
   return out
 end
 
--- ---------- Session -> API messages ----------
-
 local safe_decode = prelude.safe_json_decode
 
 -- Translate the v2 session data body into Anthropic's on-wire content
@@ -334,8 +332,6 @@ local function build_api_messages(session, images_enabled)
   return prelude.as_array(out)
 end
 
--- ---------- Stream-state accumulator ----------
-
 local function new_state()
   return {
     blocks = {}, -- 1-indexed, mirrors Anthropic's 0-based index+1
@@ -461,8 +457,6 @@ local function dispatch_sse(state, event_type, data, observer)
   end
 end
 
--- ---------- Content-block -> session encoding ----------
-
 -- Returns (assistant_content_array_for_session, tool_use_blocks).
 local function finalize_blocks(state)
   local content = prelude.as_array({})
@@ -530,7 +524,6 @@ local function finalize_blocks(state)
   return content, tool_uses
 end
 
--- ---------- Abort / error bookkeeping ----------
 --
 -- Matches pi's shape: the partial assistant is persisted as-is (no
 -- trimming, no synthesis). Request-build time filters these entries out
@@ -562,7 +555,6 @@ local function save_failed_partial(flavor, state, model, stop_reason, error_mess
   session_mod.save()
 end
 
--- ---------- Prompt caching helpers ----------
 --
 -- Anthropic's ephemeral prompt cache lets subsequent requests in the same
 -- session skip re-encoding large prefixes. pi's pattern (ported here):
@@ -646,8 +638,6 @@ local function mark_last_message_cache(messages)
   return messages
 end
 
--- ---------- One-shot completion (non-streaming) ----------
-
 local http_post_text = sched.http_post_text
 
 function M.complete_text(opts, flavor)
@@ -701,8 +691,6 @@ end
 function M.has_auth(flavor)
   return has_api_key(flavor or ANTHROPIC_FLAVOR)
 end
-
--- ---------- Agent turn (streaming + tool loop) ----------
 
 function M.run_turn(opts, flavor)
   flavor = flavor or ANTHROPIC_FLAVOR
