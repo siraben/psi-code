@@ -18,7 +18,7 @@ local DEFINITIONS = {
   {
     id = "tui.input.newLine",
     section = "Editing",
-    default_keys = { "shift-enter" },
+    default_keys = { "shift-enter", "ctrl-j" },
     description = "Insert newline",
   },
   {

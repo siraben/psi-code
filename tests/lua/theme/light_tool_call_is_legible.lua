@@ -14,6 +14,26 @@ ansi.color_enabled = true
 theme.use("pi-light")
 
 local call = te.render_call("bash", { command = "ls -la" })
+local records = require("psi.records")
+local execution = te.new({tool = "edit", input = {path = "example.lua", oldText = "old", newText = "new"},
+  frame = {before_text = "old"}})
+local pending = table.concat(execution:render(40), "\n")
+assert(pending:find("\27[48;2;232;232;240m", 1, true))
+theme.use("pi-dark")
+local dark = table.concat(execution:render(40), "\n")
+assert(dark:find("\27[48;2;40;40;50m", 1, true))
+assert(dark:find("\27[1;38;2;212;212;212m", 1, true))
+assert(not dark:find("\27[38;2;31;35;40m", 1, true))
+execution:set_result(records.new_tool_result(true, "edit", nil, {}), false)
+assert(table.concat(execution:render(40), "\n"):find("\27[48;2;40;50;40m", 1, true))
+execution:set_result(records.new_tool_result(false, "edit", "failure", {}), false)
+assert(table.concat(execution:render(40), "\n"):find("\27[48;2;60;40;40m", 1, true))
+execution:set_result(records.new_tool_result(true, "edit", nil, {}), true)
+assert(table.concat(execution:render(40), "\n"):find("\27[48;2;40;40;50m", 1, true))
+ansi.color_enabled = false
+assert(not table.concat(execution:render(40), "\n"):find("\27[48;", 1, true))
+ansi.color_enabled = true
+theme.use("pi-light")
 return table.concat({
   -- pale pending tint from pi's current light theme
   tostring(call:find("\27[48;2;232;232;240m", 1, true) ~= nil),

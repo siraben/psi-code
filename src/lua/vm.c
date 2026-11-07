@@ -1169,7 +1169,8 @@ static int psi_vm_tui_normalize_key(
         return 1;
     }
     if (ch == '\r' || ch == '\n') {
-        psi_vm_copy_truncated(event->key_name, sizeof(event->key_name), "enter");
+        psi_vm_copy_truncated(
+            event->key_name, sizeof(event->key_name), ch == '\n' ? "ctrl-j" : "enter");
         event->text[0] = (char)ch;
         event->text[1] = '\0';
         return 1;

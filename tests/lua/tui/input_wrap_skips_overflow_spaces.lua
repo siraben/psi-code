@@ -1,5 +1,5 @@
 --[==[psi-test
-expect = ">.hello..\n|.world.\n|.end|3|3|6"
+expect = ">.hello.\n|.world.\n|.end|3|3|6"
 ]==]
 local rt = require("psi.tui_runtime")
 local input = "hello   world end"

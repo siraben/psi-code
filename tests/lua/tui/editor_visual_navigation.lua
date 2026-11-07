@@ -1,5 +1,5 @@
 --[==[psi-test
-expect = "23|100|15|10|11|6|7|7|1|6|3|8"
+expect = "22|100|15|10|11|6|7|7|1|8|3|8"
 ]==]
 local rt = require("psi.tui_runtime")
 

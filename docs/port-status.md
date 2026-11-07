@@ -2,6 +2,10 @@
 
 This file tracks `psi` against the `pi-mono` architecture it ports.
 
+The prompt editor uses unprefixed text, a compact multiline viewport with
+hidden-line indicators, a reverse-video software cursor, and completion rows
+below the editor. Enter submits; Ctrl-J and Shift-Enter insert newlines.
+
 ## Current mapping
 
 | `pi-mono` concept | `pi-mono` reference | `psi` status |

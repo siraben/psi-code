@@ -2,6 +2,7 @@
 
 local ansi = require("psi.ansi")
 local component = require("psi.tui_component")
+local keybindings = require("psi.keybindings")
 local diff = require("psi.diff")
 local diff_component = require("psi.tui_components.diff")
 local text = require("psi.tui_text")
@@ -111,7 +112,22 @@ local function warning_line(value)
   return fg(FG_WARNING, value)
 end
 
-local function preview_head(value, limit)
+local function collapsed_hint(description)
+  local keys = {}
+  for _, key in ipairs(keybindings.keys("app.tools.expand")) do
+    keys[#keys + 1] = keybindings.key_display(key):lower():gsub("%-", "+")
+  end
+  local shortcut = table.concat(keys, "/")
+  if shortcut == "" then
+    return muted_line("... (" .. description .. ")")
+  end
+  return muted_line("... (" .. description .. ",")
+    .. " "
+    .. dim_line(shortcut)
+    .. muted_line(" to expand)")
+end
+
+local function preview_head(value, limit, show_total)
   local src = split_lines(value)
   local out = {}
   local n = math.min(#src, limit)
@@ -119,8 +135,11 @@ local function preview_head(value, limit)
     out[#out + 1] = muted_line(src[i])
   end
   if #src > limit then
-    out[#out + 1] =
-      dim_line("... (" .. tostring(#src - limit) .. " more lines, total " .. tostring(#src) .. ")")
+    local description = tostring(#src - limit) .. " more lines"
+    if show_total then
+      description = description .. ", " .. tostring(#src) .. " total"
+    end
+    out[#out + 1] = collapsed_hint(description)
   end
   return table.concat(out, "\n")
 end
@@ -130,7 +149,7 @@ local function preview_tail(value, limit)
   local out = {}
   local first = math.max(1, #src - limit + 1)
   if first > 1 then
-    out[#out + 1] = dim_line("... (" .. tostring(first - 1) .. " earlier lines)")
+    out[#out + 1] = collapsed_hint(tostring(first - 1) .. " earlier lines")
   end
   for i = first, #src do
     out[#out + 1] = muted_line(src[i])
@@ -261,7 +280,8 @@ local function format_write_call(input, expanded)
   local header = fg(FG_TITLE, "write")
     .. " "
     .. (raw and fg(FG_ACCENT, shorten_path(raw)) or fg(FG_MUTED, "..."))
-  local body = preview_head(input.content or input.text, expanded and math.huge or PREVIEW_WRITE)
+  local body =
+    preview_head(input.content or input.text, expanded and math.huge or PREVIEW_WRITE, true)
   if body == "" then
     return header
   end
@@ -274,7 +294,13 @@ local function edit_preview(input, frame)
   end
   -- Memoized on the frame: the preview diff is deterministic in
   -- (before_text, input), and per-chunk recompute re-runs the whole diff.
-  if frame.preview_cache_input == input and frame.preview_cache_before == frame.before_text then
+  if
+    frame.preview_cache_input == input
+    and frame.preview_cache_before == frame.before_text
+    and frame.preview_cache_style == ansi.generation()
+    and frame.preview_cache_ansi == ansi.enabled
+    and frame.preview_cache_color == ansi.color_enabled
+  then
     return frame.preview_cache_text, frame.preview_cache_bg
   end
   local edits = diff.edits_from_input(input)
@@ -285,6 +311,9 @@ local function edit_preview(input, frame)
   local preview, err = diff.preview_edits(frame.before_text, edits, raw or frame.path or "")
   frame.preview_cache_input = input
   frame.preview_cache_before = frame.before_text
+  frame.preview_cache_style = ansi.generation()
+  frame.preview_cache_ansi = ansi.enabled
+  frame.preview_cache_color = ansi.color_enabled
   if preview then
     frame.preview_diff = preview.diff
     frame.preview_error = nil
@@ -557,9 +586,9 @@ end
 local ToolExecution = {}
 ToolExecution.__index = ToolExecution
 
-local function component_bg_code(self, call_bg)
+local function component_bg_code(self)
   if self.result == nil or self.is_partial then
-    return call_bg or M.BG_PENDING
+    return M.BG_PENDING
   end
   return self.result.ok and M.BG_SUCCESS or M.BG_ERROR
 end
@@ -568,7 +597,7 @@ local function update_display(self)
   -- The call side depends only on (tool, input, frame); cache it so
   -- per-chunk result updates skip reformatting the call preview.
   local cache = self.call_cache
-  local call_text, call_bg
+  local call_text
   if
     cache ~= nil
     and cache.tool == self.tool
@@ -577,9 +606,9 @@ local function update_display(self)
     and cache.before_text == (self.frame and self.frame.before_text or nil)
     and cache.expanded == self.expanded
   then
-    call_text, call_bg = cache.text, cache.bg
+    call_text = cache.text
   else
-    call_text, call_bg = format_call(self.tool, self.input, self.frame, self.expanded)
+    call_text = format_call(self.tool, self.input, self.frame, self.expanded)
     self.call_cache = {
       tool = self.tool,
       input = self.input,
@@ -587,10 +616,9 @@ local function update_display(self)
       before_text = self.frame and self.frame.before_text or nil,
       expanded = self.expanded,
       text = call_text,
-      bg = call_bg,
     }
   end
-  self.box:set_bg_fn(bg_fn(component_bg_code(self, call_bg)))
+  self.box:set_bg_fn(bg_fn(component_bg_code(self)))
   self.call_text:set_text(call_text or "")
   if self.result ~= nil then
     local result_text =
@@ -601,6 +629,10 @@ local function update_display(self)
   else
     self.result_text:set_text("")
   end
+  self.style_generation = ansi.generation()
+  self.style_ansi = ansi.enabled
+  self.style_color = ansi.color_enabled
+  self.expand_keys = keybindings.keys("app.tools.expand")
   self.generation = (self.generation or 0) + 1
 end
 
@@ -627,12 +659,20 @@ function ToolExecution:set_expanded(expanded)
 end
 
 function ToolExecution:render(width)
+  if
+    self.style_generation ~= ansi.generation()
+    or self.style_ansi ~= ansi.enabled
+    or self.style_color ~= ansi.color_enabled
+    or self.expand_keys ~= keybindings.keys("app.tools.expand")
+  then
+    self:invalidate()
+  end
   return self.box:render(width)
 end
 
 function ToolExecution:invalidate()
-  self.generation = (self.generation or 0) + 1
-  self.box:invalidate()
+  self.call_cache = nil
+  update_display(self)
 end
 
 function M.new(opts)
