@@ -10,7 +10,7 @@ local prompt_max_rows_override = nil
 
 local MIN_WIDTH = 40
 local DEFAULT_WIDTH = 80
-local MIN_HEIGHT = 12
+local MIN_HEIGHT = 1
 local DEFAULT_HEIGHT = 24
 local PROMPT_RESERVED_ROWS = 6
 local INPUT_BOX_ROWS = 3

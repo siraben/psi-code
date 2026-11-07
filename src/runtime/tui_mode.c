@@ -217,11 +217,21 @@ void psi_tui_set_alt_screen_active(int active) {
     psi_tui_alt_screen_active = active ? 1 : 0;
 }
 
+static int psi_tui_basic_terminal(void) {
+    const char *term = getenv("TERM");
+    return term != NULL &&
+        (strcmp(term, "linux") == 0 || strncmp(term, "linux-", 6u) == 0 ||
+            (strncmp(term, "vt", 2u) == 0 && term[2] >= '0' && term[2] <= '9') ||
+            strcmp(term, "ansi") == 0);
+}
+
 static void psi_tui_apply_raw_mode(struct termios *attrs) {
-    attrs->c_iflag &= (tcflag_t) ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+    attrs->c_iflag &= (tcflag_t) ~(
+        IGNBRK | BRKINT | PARMRK | ICRNL | INLCR | IGNCR | INPCK | ISTRIP | IXON | IXOFF | IXANY);
     attrs->c_oflag &= (tcflag_t) ~(OPOST);
+    attrs->c_cflag &= (tcflag_t) ~(CSIZE | PARENB);
     attrs->c_cflag |= (tcflag_t)CS8;
-    attrs->c_lflag &= (tcflag_t) ~(ECHO | ICANON | IEXTEN | ISIG);
+    attrs->c_lflag &= (tcflag_t) ~(ECHO | ECHONL | ICANON | IEXTEN | ISIG);
     attrs->c_cc[VMIN] = 0;
     attrs->c_cc[VTIME] = 0;
 }
@@ -273,14 +283,18 @@ static int psi_tui_enter_terminal(void) {
         perror("tcsetattr");
         return PSI_STATUS_ERROR;
     }
-    /* Enabled at the terminal boundary so inline chat mode (no alt screen) is covered. */
-    fputs(PSI_TUI_ENABLE_BRACKETED_PASTE, stdout);
+    /* Kernel consoles do not implement emulator paste negotiation. */
+    if (!psi_tui_basic_terminal()) {
+        fputs(PSI_TUI_ENABLE_BRACKETED_PASTE, stdout);
+    }
     fflush(stdout);
     return PSI_STATUS_OK;
 }
 
 static void psi_tui_leave_terminal(void) {
-    if (psi_tui_alt_screen_active) {
+    if (psi_tui_basic_terminal()) {
+        fputs("\033[0m\033[?25h", stdout);
+    } else if (psi_tui_alt_screen_active) {
         fputs(PSI_TUI_LEAVE_SEQ, stdout);
         psi_tui_alt_screen_active = 0;
     } else {
@@ -295,7 +309,9 @@ static void psi_tui_leave_terminal(void) {
 
 int psi_tui_suspend_terminal(void) {
     psi_tui_stdio_guard_end();
-    if (psi_tui_alt_screen_active) {
+    if (psi_tui_basic_terminal()) {
+        fputs("\033[0m\033[?25h", stdout);
+    } else if (psi_tui_alt_screen_active) {
         fputs(PSI_TUI_LEAVE_SEQ, stdout);
     } else {
         fputs(PSI_TUI_LEAVE_INLINE_SEQ, stdout);
@@ -321,7 +337,7 @@ int psi_tui_resume_terminal(void) {
     }
     if (psi_tui_alt_screen_active) {
         fputs(PSI_TUI_ENTER_SEQ, stdout);
-    } else {
+    } else if (!psi_tui_basic_terminal()) {
         fputs(PSI_TUI_ENABLE_BRACKETED_PASTE, stdout);
     }
     fflush(stdout);
@@ -357,9 +373,27 @@ int psi_run_tui_mode(const struct psi_cli_options *options) {
     struct psi_session session;
     struct psi_abort_signal abort_signal;
     int status;
+    const char *term = getenv("TERM");
+    const char *force_ansi = getenv("PSI_ANSI");
+    const char *os = getenv("OS");
+    int forced_on = force_ansi != NULL &&
+        (strcmp(force_ansi, "1") == 0 || strcmp(force_ansi, "on") == 0 ||
+            strcmp(force_ansi, "true") == 0 || strcmp(force_ansi, "yes") == 0);
+    int forced_off = force_ansi != NULL &&
+        (strcmp(force_ansi, "0") == 0 || strcmp(force_ansi, "off") == 0 ||
+            strcmp(force_ansi, "false") == 0 || strcmp(force_ansi, "no") == 0);
 
     if (!isatty(fileno(stdin)) || !isatty(fileno(stdout))) {
         fprintf(stderr, "TUI mode requires a terminal\n");
+        return PSI_STATUS_ERROR;
+    }
+
+    if (forced_off ||
+        (!forced_on &&
+            (term == NULL || term[0] == '\0' || strcmp(term, "dumb") == 0 ||
+                strcmp(term, "unknown") == 0 || strcmp(term, "vt52") == 0) &&
+            !(os != NULL && strcmp(os, "Windows_NT") == 0))) {
+        fprintf(stderr, "TUI requires ANSI cursor controls; use --repl or --print\n");
         return PSI_STATUS_ERROR;
     }
 

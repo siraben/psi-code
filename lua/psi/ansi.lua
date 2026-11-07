@@ -104,8 +104,74 @@ local function resolve_code(code)
   return resolved
 end
 
+local basic_palette = {
+  { 0, 0, 0 },
+  { 170, 0, 0 },
+  { 0, 170, 0 },
+  { 170, 85, 0 },
+  { 0, 0, 170 },
+  { 170, 0, 170 },
+  { 0, 170, 170 },
+  { 170, 170, 170 },
+}
+local terminal_code_cache = {}
+
+local function basic_color(background, r, g, b)
+  if background == "3" and math.max(r, g, b) - math.min(r, g, b) <= 10 then
+    -- Gray foregrounds collapse onto the background in an eight-color
+    -- palette. Use the theme's text polarity rather than invisible dim text.
+    local tr, tg, tb = resolve_code("37"):match("38;2;(%d+);(%d+);(%d+)")
+    if tr then
+      return tonumber(tr) + tonumber(tg) + tonumber(tb) >= 384 and "37" or "30"
+    end
+  end
+  local best, distance = 0, math.huge
+  for index, rgb in ipairs(basic_palette) do
+    local d = (r - rgb[1]) ^ 2 + (g - rgb[2]) ^ 2 + (b - rgb[3]) ^ 2
+    if d < distance then
+      best, distance = index - 1, d
+    end
+  end
+  return tostring((background == "4" and 40 or 30) + best)
+end
+
+local function terminal_code(code)
+  if platform.terminal_profile().colors ~= 8 then
+    return code
+  end
+  if terminal_code_cache[code] then
+    return terminal_code_cache[code]
+  end
+  local out = code:gsub("([34])8;2;(%d+);(%d+);(%d+)", function(bg, r, g, b)
+    return basic_color(bg, tonumber(r), tonumber(g), tonumber(b))
+  end)
+  out = out:gsub("([34])8;5;(%d+)", function(bg, value)
+    local n = math.min(255, tonumber(value))
+    if n < 8 then
+      return tostring((bg == "4" and 40 or 30) + n)
+    end
+    if n < 16 then
+      return tostring((bg == "4" and 40 or 30) + n - 8)
+    end
+    if n >= 232 then
+      local gray = 8 + (n - 232) * 10
+      return basic_color(bg, gray, gray, gray)
+    end
+    n = n - 16
+    local levels = { 0, 95, 135, 175, 215, 255 }
+    return basic_color(
+      bg,
+      levels[math.floor(n / 36) + 1],
+      levels[math.floor(n / 6) % 6 + 1],
+      levels[n % 6 + 1]
+    )
+  end)
+  terminal_code_cache[code] = out
+  return out
+end
+
 function M.resolve(code)
-  return resolve_code(code)
+  return terminal_code(resolve_code(code))
 end
 
 function M.generation()
@@ -116,6 +182,7 @@ function M.set_code_map(next_map)
   code_map_generation = code_map_generation + 1
   code_map = {}
   resolve_cache = {}
+  terminal_code_cache = {}
   for key, value in pairs(next_map or {}) do
     if value ~= nil then
       code_map[tostring(key)] = tostring(value)
@@ -123,15 +190,25 @@ function M.set_code_map(next_map)
   end
 end
 
-function M.color(code, text)
+function M.sgr(code)
   if not M.enabled then
+    return ""
+  end
+  local resolved = M.resolve(code)
+  if
+    (not M.color_enabled or platform.terminal_profile().colors == 0) and is_color_code(resolved)
+  then
+    return ""
+  end
+  return ESC .. "[" .. resolved .. "m"
+end
+
+function M.color(code, text)
+  local prefix = M.sgr(code)
+  if prefix == "" then
     return text
   end
-  local resolved = resolve_code(code)
-  if not M.color_enabled and is_color_code(resolved) then
-    return text
-  end
-  return ESC .. "[" .. resolved .. "m" .. text .. ESC .. "[0m"
+  return prefix .. text .. ESC .. "[0m"
 end
 function M.bold(text)
   return M.color("1", text)

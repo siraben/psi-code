@@ -91,6 +91,43 @@ function M.windows_ansi_supported()
   return true
 end
 
+-- Conservative profiles for kernel consoles and legacy DEC terminals.
+-- Emulator TERM names retain the existing rich rendering policy.
+local terminal_profile = nil
+function M.terminal_profile()
+  if terminal_profile then
+    return terminal_profile
+  end
+  local term = env_lower("TERM")
+  local console = term == "linux" or term:match("^linux%-") ~= nil
+  local legacy = term:match("^vt%d") ~= nil or term == "ansi"
+  local locale = os.getenv("LC_ALL")
+  if not locale or locale == "" then
+    locale = os.getenv("LC_CTYPE")
+  end
+  if not locale or locale == "" then
+    locale = os.getenv("LANG")
+  end
+  locale = (locale or ""):lower()
+  local ascii = console or legacy or not (locale:find("utf%-?8"))
+  local charset = env_lower("PSI_CHARSET")
+  if charset == "ascii" then
+    ascii = true
+  end
+  if charset == "utf8" or charset == "utf-8" then
+    ascii = false
+  end
+  terminal_profile = {
+    colors = console and 8 or (legacy and 0 or 16777216),
+    ascii = ascii,
+    osc8 = not (console or legacy),
+    osc52 = not (console or legacy),
+    alternate_screen = not (console or legacy),
+    sync = not (console or legacy),
+  }
+  return terminal_profile
+end
+
 function M.to_host_path(path)
   if type(path) ~= "string" then
     return path

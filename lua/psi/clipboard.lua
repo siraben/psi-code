@@ -80,6 +80,9 @@ function M.osc52_sequence(text, env)
 end
 
 function M.write_osc52(text, context)
+  if not require("psi.platform").terminal_profile().osc52 then
+    return false, "terminal does not support OSC clipboard sequences"
+  end
   context = type(context) == "table" and context or {}
   text = tostring(text or "")
   if (not enabled() and not context.force) or text == "" then
