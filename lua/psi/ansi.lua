@@ -13,6 +13,7 @@ local platform = require("psi.platform")
 
 local ESC = string.char(27)
 local code_map = {}
+local code_map_generation = 0
 -- Semantic slots still emit valid SGR when no theme has been installed.
 local semantic_fallbacks = {
   ["md-heading"] = "33",
@@ -107,7 +108,12 @@ function M.resolve(code)
   return resolve_code(code)
 end
 
+function M.generation()
+  return code_map_generation
+end
+
 function M.set_code_map(next_map)
+  code_map_generation = code_map_generation + 1
   code_map = {}
   resolve_cache = {}
   for key, value in pairs(next_map or {}) do

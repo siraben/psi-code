@@ -1533,7 +1533,7 @@ def t_tui_hardware_cursor_uses_input_marker(psi: Psi):
         + '  tostring((d.first_frame or ""):find(marker, 1, true) == nil)\n'
         + '}, "|")'
     )
-    assert_equals(out, "true|9|true", "hardware cursor is positioned from input marker")
+    assert_equals(out, "true|6|true", "hardware cursor is positioned from input marker")
 
 
 @test("tui/show_thinking_config")
@@ -2275,22 +2275,20 @@ def t_tui_legacy_ctrl_minus_undo(psi: Psi):
     )
     raw.assert_clean_exit()
 
-@test("mode/tui_lf_submit")
-def t_tui_lf_submit(psi: Psi):
+@test("mode/tui_ctrl_j_newline")
+def t_tui_ctrl_j_newline(psi: Psi):
+    # LF is Ctrl-J in raw mode; CR submits.
     raw = run_pty(
         [psi.binary, "--tui"],
         [
             (b"", 0.5),
-            (b"/quit\n", 1.0),
+            (b"/quit\nsecond-line", 0.5),
+            (b"\x03/quit\r", 1.0),
         ],
-        env_extra={"XDG_STATE_HOME": str(psi.tmp / "state-tui-lf-submit")},
+        env_extra={"XDG_STATE_HOME": str(psi.tmp / "state-tui-ctrl-j")},
     )
     raw.assert_clean_exit()
-    text = strip_ansi(raw)
-    assert_true(
-        ("repo" in text and "worktree" in text) or ROOT.name in text,
-        "bare LF submits commands and paints workspace context",
-    )
+    assert_contains(strip_ansi(raw), "second-line", "Ctrl-J inserts without submitting")
 
 @test("mode/tui_multiline_prompt")
 def t_tui_multiline_prompt(psi: Psi):

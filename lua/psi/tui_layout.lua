@@ -18,8 +18,9 @@ local TRANSCRIPT_START_ROW = 2
 local SINGLE_ROW = 1
 
 local TITLE = "psi coding agent"
-local PROMPT_PREFIX_FIRST = " › "
-local PROMPT_PREFIX_REST = "   "
+-- Pi's editor has no shell-style prompt marker or default indentation.
+local PROMPT_PREFIX_FIRST = ""
+local PROMPT_PREFIX_REST = ""
 
 local function clamp_prompt_max_rows(rows, height)
   local max_allowed = math.max(SINGLE_ROW, height - PROMPT_RESERVED_ROWS)
@@ -38,7 +39,10 @@ local function clamp_prompt_max_rows(rows, height)
 end
 
 local function default_prompt_max_rows(height)
-  return math.max(SINGLE_ROW, height - PROMPT_RESERVED_ROWS)
+  return math.min(
+    math.max(SINGLE_ROW, height - PROMPT_RESERVED_ROWS),
+    math.max(5, math.floor(height * 0.3))
+  )
 end
 
 local function resolve_prompt_max_rows(configured, height)

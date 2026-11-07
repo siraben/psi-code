@@ -31,6 +31,8 @@ local ls = render.render_tool_result({
   result = { ok = true, output = table.concat(list_lines, "\n") },
 })
 local ls_plain = text.strip_ansi(ls)
+assert(bash_plain:find("2 earlier lines, ctrl+o to expand", 1, true))
+assert(ls_plain:find("5 more lines, ctrl+o to expand", 1, true))
 
 return table.concat({
   tostring(bash_plain:find("exit 0", 1, true) == nil),
@@ -40,5 +42,5 @@ return table.concat({
   tostring(bash_plain:find("line2", 1, true) == nil),
   tostring(ls_plain:find("file20", 1, true) ~= nil),
   tostring(ls_plain:find("file21", 1, true) == nil),
-  tostring(ls_plain:find("5 more lines, total 25", 1, true) ~= nil),
+  tostring(ls_plain:find("5 more lines, ctrl+o to expand", 1, true) ~= nil),
 }, "|")

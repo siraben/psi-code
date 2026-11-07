@@ -1,5 +1,5 @@
 --[==[psi-test
-expect = "2|79|3|2|1"
+expect = "2|78|4|2|2"
 ]==]
 local d = require("psi.tui_runtime")._debug_input_lines(
   string.rep("a", 78), 78, 80, "> ", "| ")

@@ -171,8 +171,8 @@ end
 
 local EMPTY = ""
 local NEWLINE = "\n"
-local FALLBACK_PROMPT_PREFIX_FIRST = "> "
-local FALLBACK_PROMPT_PREFIX_REST = "| "
+local FALLBACK_PROMPT_PREFIX_FIRST = ""
+local FALLBACK_PROMPT_PREFIX_REST = ""
 local strip_ansi = tui_text.strip_ansi
 local display_width = tui_text.visible_width
 
@@ -600,7 +600,10 @@ end
 local function default_input_layout(height)
   height = math.max(MIN_HEIGHT, tonumber(height) or DEFAULT_HEIGHT)
   return {
-    max_rows = math.max(MIN_SIZE, height - PROMPT_RESERVED_ROWS),
+    max_rows = math.min(
+      math.max(MIN_SIZE, height - PROMPT_RESERVED_ROWS),
+      math.max(5, math.floor(height * 0.3))
+    ),
     prefix_first = FALLBACK_PROMPT_PREFIX_FIRST,
     prefix_rest = FALLBACK_PROMPT_PREFIX_REST,
   }
@@ -633,8 +636,12 @@ local function input_max_rows(state)
   return max_rows
 end
 
-local function input_wrap_width(width, prefix)
-  local available = (width - FRAME_WIDTH_MARGIN) - display_width(prefix)
+local function input_wrap_width(width, prefix, reserve_cursor)
+  -- Keep the terminal pending-wrap guard; editable text also reserves a
+  -- cursor cell, as pi does for its unpadded editor. Transcript text does not.
+  local available = (width - FRAME_WIDTH_MARGIN)
+    - display_width(prefix)
+    - (reserve_cursor and 1 or 0)
   if available < MIN_SIZE then
     available = MIN_SIZE
   end
@@ -738,7 +745,7 @@ function chat.wrap_input_spans(state)
           chunk_start = skip_wrapped_input_spaces(input, chunk_start, line_end)
         end
         local prefix = (#lines == 0) and prefix_first or prefix_rest
-        local width = input_wrap_width(state.width, prefix)
+        local width = input_wrap_width(state.width, prefix, true)
         local chunk_end = input_next_chunk_end(state, input, chunk_start, line_end, width)
         lines[#lines + 1] = {
           start = chunk_start,
@@ -2221,17 +2228,25 @@ local function build_render_window(state, first_line, count)
   return lines
 end
 
+-- Preserve the editor viewport while the cursor remains visible. Recomputing
+-- it from row 1 on every keypress makes multiline editing jump unnecessarily.
+function chat.input_viewport(state, line_count, cursor_line)
+  local count = math.max(1, math.min(line_count, input_max_rows(state)))
+  local first = state.input_first_line or 1
+  if cursor_line < first then
+    first = cursor_line
+  elseif cursor_line >= first + count then
+    first = cursor_line - count + 1
+  end
+  first = clamp(first, 1, math.max(1, line_count - count + 1))
+  state.input_first_line = first
+  return count, first
+end
+
 local function layout_rows(state)
   refresh_input_layout(state)
   local input_lines, cursor_line, cursor_col = build_input_lines(state)
-  local input_rows = math.max(1, math.min(#input_lines, input_max_rows(state)))
-  local input_first_line = 1
-  if cursor_line > input_rows then
-    input_first_line = cursor_line - input_rows + 1
-  end
-  if input_first_line + input_rows - 1 > #input_lines then
-    input_first_line = #input_lines - input_rows + 1
-  end
+  local input_rows, input_first_line = chat.input_viewport(state, #input_lines, cursor_line)
   local footer_row = state.height
   local footer_extra_rows = state.footer_extra_rows
   if footer_extra_rows == nil then
@@ -2271,7 +2286,16 @@ local function layout_rows(state)
       math.max(1, #command_completions - command_completion_rows + 1)
     )
   end
-  local command_completion_start = completion_anchor_row - command_completion_rows + 1
+  -- Autocomplete belongs below the editor, not between the transcript and
+  -- prompt. Move the editor/status/queue up to reserve those rows.
+  local command_completion_start = footer_row - footer_extra_rows - command_completion_rows
+  input_start_row = input_start_row - command_completion_rows
+  if status_row then
+    status_row = status_row - command_completion_rows
+  end
+  if pending_start_row then
+    pending_start_row = pending_start_row - command_completion_rows
+  end
   local transcript_end = completion_anchor_row - command_completion_rows
   local transcript_height = math.max(1, transcript_end - transcript_start + 1)
 
@@ -2332,7 +2356,7 @@ local function style_input_text(text)
 end
 
 local function style_input_cursor(text)
-  return ansi.color("4", text == "" and " " or text)
+  return ansi.color("7", text == "" and " " or text)
 end
 
 local function style_input_fill(width)
@@ -2347,14 +2371,21 @@ function chat.current_thinking_level(state)
   )
 end
 
-local function style_input_border(state, width)
-  if state.input and state.input:sub(1, 1) == "!" then
-    return ansi.color("bash-mode", string.rep("─", math.max(0, width)))
+local function style_input_border(state, width, direction, hidden)
+  local border = string.rep("─", math.max(0, width))
+  if (hidden or 0) > 0 then
+    local indicator = "─── " .. direction .. " " .. hidden .. " more "
+    if display_width(indicator) <= width then
+      border = indicator .. string.rep("─", width - display_width(indicator))
+    else
+      local ellipsis = string.rep(".", math.min(3, width))
+      border = tui_text.slice_by_columns(indicator, 0, width - #ellipsis) .. ellipsis
+    end
   end
-  return chat.theme.thinking_border(
-    chat.current_thinking_level(state),
-    string.rep("─", math.max(0, width))
-  )
+  if state.input and state.input:sub(1, 1) == "!" then
+    return ansi.color("bash-mode", border)
+  end
+  return chat.theme.thinking_border(chat.current_thinking_level(state), border)
 end
 
 local function input_box_line(content, width)
@@ -2384,10 +2415,10 @@ local function ensure_frame_components(state)
   frame.root = tui_component.container({
     frame.workspace,
     frame.transcript,
-    frame.completions,
     frame.pending,
     frame.status,
     frame.input,
+    frame.completions,
     frame.footer,
   })
   state.ui:add_child(frame.root)
@@ -2395,9 +2426,9 @@ local function ensure_frame_components(state)
   return frame
 end
 
--- Footer cache: rebuilt only when model/session/count change; never
--- cached while extension status or footer-line hooks are registered
--- (output may vary).
+-- Usage can change without a new session entry (stream completion, replay,
+-- or compaction). Include its revision as well as provider/window metadata;
+-- never cache extension status/footer hooks, whose output may change every redraw.
 function chat.footer_bar_line(state, status_arg, frame_width)
   local hooks_active = (tui.has_status_hooks ~= nil and tui.has_status_hooks())
     or (tui.has_footer_line_hooks ~= nil and tui.has_footer_line_hooks())
@@ -2405,11 +2436,15 @@ function chat.footer_bar_line(state, status_arg, frame_width)
   local message_count = type(psi.session_message_count) == "function"
       and psi.session_message_count()
     or nil
+  local usage = require("psi.context").last_usage()
   local cache = state.footer_bar_cache
   if
     not hooks_active
     and cache ~= nil
     and cache.model == status_arg.model
+    and cache.provider == status_arg.provider
+    and cache.context_window == status_arg.context_window
+    and cache.usage == usage
     and cache.session_id == session_id
     and cache.message_count == message_count
     and cache.width == frame_width
@@ -2422,6 +2457,9 @@ function chat.footer_bar_line(state, status_arg, frame_width)
   else
     state.footer_bar_cache = {
       model = status_arg.model,
+      provider = status_arg.provider,
+      context_window = status_arg.context_window,
+      usage = usage,
       session_id = session_id,
       message_count = message_count,
       width = frame_width,
@@ -2444,7 +2482,38 @@ function chat.footer_extra_lines(state, status_arg)
   return rows
 end
 
+function chat.refresh_render_style(state)
+  local expand_keys = require("psi.keybindings").keys("app.tools.expand")
+  if
+    state.style_generation == ansi.generation()
+    and state.style_ansi == ansi.enabled
+    and state.style_color == ansi.color_enabled
+    and state.style_expand_keys == expand_keys
+  then
+    return
+  end
+  state.style_generation = ansi.generation()
+  state.style_ansi = ansi.enabled
+  state.style_color = ansi.color_enabled
+  state.style_expand_keys = expand_keys
+  for _, entry in ipairs(state.entries or {}) do
+    entry.render_cache_width = nil
+    entry.render_cache_lines = nil
+    entry.stream_cache = nil
+    if entry.component and type(entry.component.invalidate) == "function" then
+      entry.component:invalidate()
+    end
+    if entry.markdown_component then
+      entry.markdown_component:invalidate()
+    end
+  end
+  state.footer_bar_cache = nil
+  state.workspace_bar_cache = nil
+  invalidate_render_totals(state)
+end
+
 local function redraw(state)
+  chat.refresh_render_style(state)
   if type(state.flush_notices) == "function" then
     state.flush_notices()
   end
@@ -2565,14 +2634,14 @@ local function redraw(state)
     )
   end
   if rows.status_visible then
-    frame.status:set_lines({ status_text })
+    frame.status:set_lines({ tui_text.clip_ansi(status_text, frame_width) })
   else
     frame.status:set_lines({})
   end
 
   local input_width = frame_width
   local input_component_lines = {
-    style_input_border(state, input_width),
+    style_input_border(state, input_width, "↑", rows.input_first_line - 1),
   }
   for i = 0, rows.input_rows - 1 do
     local line_index = rows.input_first_line + i
@@ -2598,7 +2667,12 @@ local function redraw(state)
     end
     input_component_lines[#input_component_lines + 1] = input_text
   end
-  input_component_lines[#input_component_lines + 1] = style_input_border(state, input_width)
+  input_component_lines[#input_component_lines + 1] = style_input_border(
+    state,
+    input_width,
+    "↓",
+    #rows.input_lines - (rows.input_first_line + rows.input_rows - 1)
+  )
   frame.input:set_lines(input_component_lines)
 
   local footer_lines = { chat.footer_bar_line(state, status_arg, frame_width) }
@@ -2655,6 +2729,7 @@ end
 -- The "committed" boundary is always all-but-the-last entry: the last
 -- entry may still be streaming, so we keep it in the mutable region.
 function chat.redraw(state)
+  chat.refresh_render_style(state)
   state.width, state.height = current_size()
   state.scroll_offset = 0
   refresh_input_layout(state)
@@ -2773,18 +2848,10 @@ function chat.redraw(state)
   end
 
   local input_lines, cursor_line, cursor_col = build_input_lines(state)
-  local input_max = input_max_rows(state)
-  local input_rows_n = math.max(1, math.min(#input_lines, input_max))
-  local input_first_line = 1
-  if cursor_line > input_rows_n then
-    input_first_line = cursor_line - input_rows_n + 1
-  end
-  if input_first_line + input_rows_n - 1 > #input_lines then
-    input_first_line = #input_lines - input_rows_n + 1
-  end
+  local input_rows_n, input_first_line = chat.input_viewport(state, #input_lines, cursor_line)
   local input_width = frame_width
   local input_box_top_idx = #live_lines + 1
-  live_lines[#live_lines + 1] = style_input_border(state, input_width)
+  live_lines[#live_lines + 1] = style_input_border(state, input_width, "↑", input_first_line - 1)
   for i = 0, input_rows_n - 1 do
     local line_index = input_first_line + i
     local line = input_lines[line_index]
@@ -2809,7 +2876,30 @@ function chat.redraw(state)
     end
     live_lines[#live_lines + 1] = rendered
   end
-  live_lines[#live_lines + 1] = style_input_border(state, input_width)
+  live_lines[#live_lines + 1] = style_input_border(
+    state,
+    input_width,
+    "↓",
+    #input_lines - (input_first_line + input_rows_n - 1)
+  )
+  local completions = active_command_completions(state)
+  local completion_count = math.min(
+    #completions,
+    MAX_COMMAND_COMPLETION_ROWS,
+    math.max(0, state.height - input_rows_n - 4)
+  )
+  local completion_first = clamp(
+    (state.command_completion_index or 1) - completion_count + 1,
+    1,
+    math.max(1, #completions - completion_count + 1)
+  )
+  for i = completion_first, completion_first + completion_count - 1 do
+    live_lines[#live_lines + 1] = format_command_completion(
+      completions[i],
+      i == (state.command_completion_index or 1),
+      frame_width
+    )
+  end
   live_lines[#live_lines + 1] = chat.footer_bar_line(state, status_arg, frame_width)
   for _, row in ipairs(footer_extra) do
     live_lines[#live_lines + 1] = row
@@ -2818,7 +2908,14 @@ function chat.redraw(state)
   -- 4. Emit live region inside synchronized output, then position cursor.
   out[#out + 1] = "\27[?2026h\27[?25l"
   for i, line in ipairs(live_lines) do
-    out[#out + 1] = line
+    -- Chat positions the cursor explicitly below; internal frame markers
+    -- must never escape to the terminal (APC/BEL is not portable).
+    local marker = tui_renderer.cursor_marker()
+    local marker_start, marker_end = line:find(marker, 1, true)
+    if marker_start then
+      line = line:sub(1, marker_start - 1) .. line:sub(marker_end + 1)
+    end
+    out[#out + 1] = tui_text.clip_ansi(line, frame_width)
     out[#out + 1] = "\27[0m"
     if i < #live_lines then
       out[#out + 1] = "\r\n"
@@ -2838,7 +2935,7 @@ function chat.redraw(state)
     out[#out + 1] = "\r"
   end
   out[#out + 1] = "\27[" .. cursor_col_n .. "G"
-  out[#out + 1] = "\27[?25h\27[?2026l"
+  out[#out + 1] = (state.show_hardware_cursor and "\27[?25h" or "\27[?25l") .. "\27[?2026l"
 
   state.chat_live_rows = #live_lines
   state.chat_cursor_offset = math.max(0, cursor_target_idx - 1)
@@ -5455,7 +5552,7 @@ local function handle_key_event(state, event)
       end
       return
     end
-    if event.key == "enter" then
+    if event.key == "enter" or event.key == "ctrl-j" then
       local raw = event.text
       state.paste_chunks[#state.paste_chunks + 1] = raw == "\r" and "\r"
         or (raw == "\n" and "\n" or "\n")
@@ -5502,6 +5599,7 @@ local function handle_key_event(state, event)
 
   local completions = active_command_completions(state)
   if #completions == 0 and event.key == "tab" and not state.busy then
+    state.command_completion_suppressed_input = nil
     state.command_completion_force = true
     state.command_completion_force_input = state.input
     state.command_completion_force_cursor = state.cursor
@@ -6055,8 +6153,8 @@ function M._debug_input_lines(input, cursor, width, prefix_first, prefix_rest)
     height = 24,
     input_layout = {
       max_rows = 5,
-      prefix_first = prefix_first or "> ",
-      prefix_rest = prefix_rest or "| ",
+      prefix_first = prefix_first or FALLBACK_PROMPT_PREFIX_FIRST,
+      prefix_rest = prefix_rest or FALLBACK_PROMPT_PREFIX_REST,
     },
   }
   local lines, cursor_line, cursor_col = build_input_lines(state)
@@ -6768,7 +6866,7 @@ function M._debug_redraw_counts(input, debug_options)
       block_edit = nil,
       force_full_redraw = false,
       reanchor_renderer = false,
-      busy = true,
+      busy = debug_options.busy ~= false,
       busy_label = "working",
       busy_phase = 1,
       busy_tick = 0,
@@ -6802,6 +6900,7 @@ function M._debug_redraw_counts(input, debug_options)
     local rows = layout_rows(state)
     local first_frames = state.renderer and state.renderer.full_redraws or 0
     local first_frame = calls.writes[1] or ""
+    local first_lines = state.renderer and state.renderer.previous_lines or {}
     local first_line_width = 0
     if state.renderer and state.renderer.previous_lines then
       first_line_width = tui_text.visible_width(state.renderer.previous_lines[1] or "")
@@ -6848,6 +6947,8 @@ function M._debug_redraw_counts(input, debug_options)
     return {
       first_frames = first_frames,
       first_frame = first_frame,
+      first_lines = first_lines,
+      first_rows = rows,
       first_line_width = first_line_width,
       first_visible = first_visible,
       first_col = first_col,
@@ -6886,14 +6987,15 @@ end
 -- the bytes psi.tui_write would emit on each step, so smoke tests can verify
 -- that committed transcript lines are written to scrollback exactly once
 -- while the live region is repainted in place.
-function M._debug_chat_redraw_sequence(steps)
+function M._debug_chat_redraw_sequence(steps, options)
   steps = steps or {}
+  options = options or {}
   local saved_size = psi.tui_size
   local saved_write = psi.tui_write
   local saved_set_alt = psi.tui_set_alt_screen_active
   local writes = {}
   psi.tui_size = function()
-    return { width = 80, height = 24 }
+    return { width = options.width or 80, height = options.height or 24 }
   end
   psi.tui_write = function(text)
     writes[#writes + 1] = text or ""
@@ -6903,6 +7005,9 @@ function M._debug_chat_redraw_sequence(steps)
   local ok, result = xpcall(function()
     local state = new_state({ model = "debug", layout_mode = chat.CHAT })
     state.layout_mode = chat.CHAT
+    if options.show_hardware_cursor ~= nil then
+      state.show_hardware_cursor = options.show_hardware_cursor
+    end
     local snapshots = {}
     for _, step in ipairs(steps) do
       if step.kind == "user" then
@@ -6913,8 +7018,15 @@ function M._debug_chat_redraw_sequence(steps)
         add_entry(state, "ansi", step.text or "")
       elseif step.kind == "set_input" then
         state.input = step.text or ""
-        state.cursor = #state.input
+        state.cursor = step.cursor or #state.input
         state.dirty = true
+      elseif step.kind == "key" then
+        handle_key_event(state, step.event)
+      elseif step.kind == "usage" then
+        require("psi.context").record_usage(psi.session_message_count(), step.usage, state.model)
+      elseif step.kind == "resize" then
+        options.width = step.width or options.width
+        options.height = step.height or options.height
       elseif step.kind == "rebuild" then
         rebuild_from_session(state, step.entries or {})
       end
@@ -6926,6 +7038,9 @@ function M._debug_chat_redraw_sequence(steps)
         committed_entries = state.chat_committed_entry_count,
         live_rows = state.chat_live_rows,
         cursor_offset = state.chat_cursor_offset,
+        input_first_line = state.input_first_line,
+        input = state.input,
+        cursor = state.cursor,
         entries = #state.entries,
       }
     end
