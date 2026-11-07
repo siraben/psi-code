@@ -291,6 +291,9 @@ local function provider_selection(auth_type)
 end
 
 local function api_key_login(option, input)
+  if not require("psi.auth_storage").path() then
+    return false, "credential storage unavailable: set HOME or PSI_AUTH_FILE"
+  end
   local invocation = "/login " .. option.provider .. " <api-key-or-reference>"
   if input == "" then
     local lines = {
