@@ -139,7 +139,7 @@
             hostCC = "${pkgs.stdenv.cc}/bin/cc";
           in stdenv.mkDerivation (finalAttrs: {
           pname = "psi";
-          version = "0.1.0";
+          version = "0.2.0";
           src = ./.;
 
           nativeBuildInputs = buildTools ++ extraNativeBuildInputs;

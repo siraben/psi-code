@@ -3,7 +3,7 @@
 
 #include <stddef.h>
 
-#define PSI_VERSION "0.1.0"
+#define PSI_VERSION "0.2.0"
 
 #ifndef PSI_GIT_COMMIT
 #define PSI_GIT_COMMIT "unknown"
