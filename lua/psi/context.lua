@@ -12,6 +12,9 @@
 -- resolved descriptor or both the bare model id and provider name.
 
 local M = {}
+local session = require("psi.session_manager")
+local projection = require("psi.session_projection")
+local estimate_cache, estimate_projection, estimate_usage
 
 local MODEL_CONTEXT_WINDOWS = {
   ["claude-opus-4-8"] = 1000000,
@@ -80,6 +83,7 @@ function M.record_usage(message_index, usage, model, provider)
     output = output,
     cache_read = cr,
     cache_write = cw,
+    entry_id = session.projection().leaf_id,
   }
   if psi.set_usage then
     psi.set_usage(input, output, cr, cw, total, M.context_window(model, provider))
@@ -90,31 +94,86 @@ end
 --   usage_tokens  — measured from last API response
 --   trailing      — char/4 estimate for messages appended after that point
 function M.estimate_context_tokens()
-  local base_index = (last_usage and last_usage.message_index) or 0
-  local base_total = (last_usage and last_usage.total) or 0
-  local count = psi.session_message_count()
-  local trailing = 0
-  if psi.session_token_estimate_from then
-    trailing = psi.session_token_estimate_from(base_total == 0 and 1 or (base_index + 1))
+  local projected = session.projection()
+  if estimate_projection == projected and estimate_usage == last_usage then
+    return estimate_cache
+  end
+  local positions, invalidating = {}, 0
+  for i, entry in ipairs(projected.path) do
+    positions[entry.id] = i
+    if
+      entry.type == "compaction"
+      or entry.type == "context_edit"
+      or (entry.type == "message" and entry.message and entry.message.role == "system")
+    then
+      invalidating = i
+    end
+  end
+  local anchor, base, input = nil, 0, 0
+  if
+    last_usage
+    and (
+      (
+        last_usage.entry_id
+        and positions[last_usage.entry_id]
+        and positions[last_usage.entry_id] >= invalidating
+      ) or (not last_usage.entry_id and #projected.path == 0)
+    )
+  then
+    anchor, base = last_usage.entry_id, last_usage.total
+    input = last_usage.input + last_usage.cache_read + last_usage.cache_write
   else
-    local messages = base_total == 0 and psi.session_messages()
-      or psi.session_messages_from(base_index + 1)
-    for i = 1, #messages do
-      local m = messages[i]
-      trailing = trailing + M.estimate_tokens(m.text)
-      if m.data then
-        trailing = trailing + M.estimate_tokens(m.data)
+    -- Imported/resumed sessions can supply a measured baseline, but a later
+    -- context edit, checkpoint, or compaction makes that measurement stale.
+    for _, entry in ipairs(projected.entries) do
+      if (positions[entry.source_entry.id] or 0) > invalidating then
+        for _, message in ipairs(entry.messages) do
+          local usage = message.usage
+          if
+            message.role == "assistant"
+            and message.stopReason ~= "error"
+            and message.stopReason ~= "aborted"
+            and type(usage) == "table"
+          then
+            local cr, cw = usage.cacheRead or 0, usage.cacheWrite or 0
+            local total = (usage.input or 0) + (usage.output or 0) + cr + cw
+            if total > 0 then
+              anchor, base, input = entry.source_entry.id, total, (usage.input or 0) + cr + cw
+            end
+          end
+        end
       end
     end
   end
-  -- With no measured baseline, `messages` is the whole transcript.
-  return {
-    tokens = base_total + trailing,
-    usage_tokens = base_total,
+  local trailing, after = 0, anchor == nil
+  if base == 0 then
+    local system = projection.system_state(projected.messages)
+    if system then
+      trailing = projection.estimate_tokens(system)
+    end
+  end
+  for _, entry in ipairs(projected.entries) do
+    if after then
+      for _, message in ipairs(entry.messages) do
+        if message.role ~= "system" then
+          trailing = trailing + projection.estimate_tokens(message)
+        end
+      end
+    end
+    if entry.source_entry.id == anchor then
+      after = true
+    end
+  end
+  estimate_cache = {
+    tokens = base + trailing,
+    usage_tokens = base,
     trailing_tokens = trailing,
-    last_usage_index = base_index,
-    message_count = count,
+    last_usage_index = anchor and positions[anchor] or nil,
+    message_count = #projected.messages,
+    usage_input_tokens = input,
   }
+  estimate_projection, estimate_usage = projected, last_usage
+  return estimate_cache
 end
 
 function M.context_window(model, provider)
@@ -256,11 +315,7 @@ function M.is_overflow_error(message)
 end
 
 function M.usage_exceeds_window(model, provider)
-  if not last_usage then
-    return false
-  end
-  local input = (last_usage.input or 0) + (last_usage.cache_read or 0)
-  return input > M.context_window(model, provider)
+  return M.estimate_context_tokens().usage_input_tokens > M.context_window(model, provider)
 end
 
 return M

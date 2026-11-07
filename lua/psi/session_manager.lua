@@ -27,6 +27,7 @@
 local records = require("psi.records")
 local prelude = require("psi.prelude")
 local path_util = require("psi.path_utils")
+local projection = require("psi.session_projection")
 
 local M = {}
 
@@ -60,6 +61,10 @@ local file_entries = {}
 local entry_by_id = {}
 local children_by_parent = {}
 local suppress_tree_tracking = false
+local loaded_header = nil
+local tree_revision = 0
+local projection_cache = nil
+local rebuild_active_path
 local reset_branch_tree
 
 function M.reset_entry_chain()
@@ -508,6 +513,13 @@ function M.append_tool_result(tool_use_id, tool_name, content_text, is_error, co
   append_body("tool-result", content_text, body)
 end
 
+function M.append_bash_execution(message)
+  message = projection.copy(message)
+  message.role, message.timestamp = "bashExecution", message.timestamp or unix_ms()
+  local body = stamp_entry({ message = message })
+  append_body("custom", projection.bash_text(message), body)
+end
+
 function M.append_compaction(summary_text, extra)
   summary_text = prelude.decode_utf8_lossy(summary_text or "")
   local body = { summary = summary_text or "" }
@@ -543,20 +555,36 @@ end
 
 function M.append_custom_message(text, opts)
   opts = opts or {}
+  if opts.exclude_from_context or opts.hidden then
+    return M.append_custom(
+      opts.customType or opts.name or "psi",
+      { content = text, display = opts.display }
+    )
+  end
+  if opts.role == "assistant" then
+    return M.append_assistant(
+      projection.content_text(text),
+      { { type = "text", text = projection.content_text(text) } }
+    )
+  end
+  local content = type(text) == "table" and prelude.decode_model_value(text) or tostring(text or "")
   local body = stamp_entry({
     __entry_type = "custom_message",
-    message = {
-      role = opts.role or "user",
-      content = prelude.as_array({ text_block(text or "") }),
-      timestamp = unix_ms(),
-      hidden = not not opts.hidden,
-    },
+    customType = opts.customType or opts.name or "psi",
+    content = content,
+    display = opts.display ~= false,
+    details = opts.details,
   })
-  append_body("custom", text, body)
+  append_body("custom", projection.content_text(content), body)
 end
 
 function M.append_model_change(model)
-  local body = stamp_entry({ __entry_type = "model_change", model = model or "" })
+  local provider, model_id = tostring(model or ""):match("^([^/]+)/(.+)$")
+  local body = stamp_entry({
+    __entry_type = "model_change",
+    provider = provider,
+    modelId = model_id or model or "",
+  })
   append_body("custom", "", body)
 end
 
@@ -574,15 +602,7 @@ function M.current_thinking_level()
   if thinking_level_known then
     return thinking_level_value
   end
-  local level = nil
-  local msgs = psi.session_messages()
-  for i = #msgs, 1, -1 do
-    local body = prelude.safe_json_decode(msgs[i].data, nil)
-    if type(body) == "table" and body.__entry_type == "thinking_level_change" then
-      level = body.thinkingLevel
-      break
-    end
-  end
+  local level = M.projection().thinking_level
   thinking_level_known = true
   thinking_level_value = level
   return level
@@ -596,13 +616,11 @@ local function write_line(file, obj)
 end
 
 local function session_header()
-  local hdr = {
-    type = "session",
-    version = SESSION_VERSION,
-    id = psi.session_id() or "",
-    timestamp = prelude.iso_timestamp(),
-    cwd = current_cwd(),
-  }
+  local hdr = projection.copy(loaded_header or {})
+  hdr.type, hdr.version, hdr.id = "session", SESSION_VERSION, psi.session_id() or ""
+  hdr.timestamp = hdr.timestamp or prelude.iso_timestamp()
+  hdr.cwd = hdr.cwd or current_cwd()
+  hdr.name = nil
   local parent = psi.session_parent_id()
   if parent and parent ~= "" then
     hdr.parentSession = parent
@@ -630,6 +648,9 @@ local function read_first_json_line(path)
 end
 
 local function concat_text_blocks(content, separator)
+  if type(content) == "string" then
+    return content, 1
+  end
   local parts = prelude.array(type(content) == "table" and #content or 0)
   for _, block in ipairs(type(content) == "table" and content or {}) do
     if type(block) == "table" and block.type == "text" and type(block.text) == "string" then
@@ -982,92 +1003,22 @@ function M.resolve_resume_path(cwd, choose)
   return selected, nil, infos
 end
 
--- Builds a v2 disk entry sharing subtables with `body`; callers treat
--- both as immutable snapshots.
+-- Preserve opaque entry fields when exporting or reconciling raw history.
 local function disk_entry_from_body(role, text, body)
-  if body.__entry_type == "custom" then
-    return {
-      type = "custom",
-      id = body.id,
-      parentId = body.parentId,
-      timestamp = body.timestamp,
-      name = body.name,
-      data = body.data,
-    }
-  end
-  if body.__entry_type == "custom_message" then
-    return {
-      type = "custom_message",
-      id = body.id,
-      parentId = body.parentId,
-      timestamp = body.timestamp,
-      message = body.message,
-    }
-  end
-  if body.__entry_type == "model_change" then
-    return {
-      type = "model_change",
-      id = body.id,
-      parentId = body.parentId,
-      timestamp = body.timestamp,
-      model = body.model,
-    }
-  end
-  if body.__entry_type == "thinking_level_change" then
-    return {
-      type = "thinking_level_change",
-      id = body.id,
-      parentId = body.parentId,
-      timestamp = body.timestamp,
-      thinkingLevel = body.thinkingLevel,
-    }
-  end
-  if role == "compaction-summary" then
-    local out = { type = "compaction" }
-    for _, k in ipairs({
-      "id",
-      "parentId",
-      "timestamp",
-      "summary",
-      "firstKeptEntryId",
-      "tokensBefore",
-      "readFiles",
-      "modifiedFiles",
-      "compactedCount",
-    }) do
-      if body[k] ~= nil then
-        out[k] = body[k]
-      end
-    end
-    if out.summary == nil then
-      out.summary = text or ""
-    end
-    return out
-  end
-  if role == "branch-summary" then
-    local out = { type = "branch_summary" }
-    for _, k in ipairs({
-      "id",
-      "parentId",
-      "timestamp",
-      "summary",
-      "fromId",
-      "readFiles",
-      "modifiedFiles",
-    }) do
-      if body[k] ~= nil then
-        out[k] = body[k]
-      end
-    end
-    if out.summary == nil then
-      out.summary = text or ""
-    end
-    return out
-  end
-  local out = { type = "message" }
-  for _, k in ipairs({ "id", "parentId", "timestamp", "message" }) do
-    if body[k] ~= nil then
-      out[k] = body[k]
+  local out = projection.copy(body)
+  out.type = out.__entry_type
+    or (role == "compaction-summary" and "compaction")
+    or (role == "branch-summary" and "branch_summary")
+    or "message"
+  out.__entry_type = nil
+  out.parentId = out.parentId or psi.json_null
+  if out.type == "custom" then
+    out.customType = out.customType or out.name or "psi"
+    out.name = nil
+  elseif out.type == "compaction" or out.type == "branch_summary" then
+    out.summary = out.summary or text or ""
+    if out.details == nil and (out.readFiles or out.modifiedFiles) then
+      out.details = { readFiles = out.readFiles, modifiedFiles = out.modifiedFiles }
     end
   end
   return out
@@ -1075,7 +1026,7 @@ end
 
 -- Convert an in-memory (role, text, data) record into a v2 disk entry.
 local function to_disk_entry(m)
-  local body = prelude.safe_json_decode(m.data, nil)
+  local body = prelude.safe_json_decode(m.data, nil, true)
   if type(body) ~= "table" then
     -- Legacy record without a structured body: synthesize one inline.
     -- Must NOT stamp_entry here: save()/fork() invoke this formatter, and
@@ -1207,6 +1158,9 @@ local tracked_memory_count = 0
 local register_file_entry
 
 function reset_branch_tree()
+  tree_revision = tree_revision + 1
+  projection_cache = nil
+  loaded_header = nil
   last_entry_id = nil
   leaf_id = nil
   file_entries = {}
@@ -1241,6 +1195,9 @@ local function reconcile_memory_entries()
     end
   end
   tracked_memory_count = memory_count
+  if rebuild_active_path then
+    rebuild_active_path()
+  end
 end
 
 -- Persist the current session to disk.
@@ -1378,16 +1335,15 @@ local function append_v2_message(parsed)
   if type(msg) ~= "table" then
     return
   end
-  local body = {
-    id = parsed.id,
-    parentId = parsed.parentId,
-    timestamp = parsed.timestamp,
-    message = msg,
-  }
+  local body = projection.copy(parsed)
+  body.type = nil
   last_entry_id = body.id or last_entry_id
   leaf_id = body.id or leaf_id
   local role = msg.role
-  local text = concat_text_blocks(msg.content, "")
+  local text = role == "system" and "" or concat_text_blocks(msg.content, "")
+  if role == "bashExecution" then
+    text = projection.bash_text(msg)
+  end
   local in_mem_role = role
   if role == "toolResult" then
     in_mem_role = "tool-result"
@@ -1396,76 +1352,45 @@ local function append_v2_message(parsed)
 end
 
 local function append_v2_compaction(parsed)
-  local body = {}
-  for _, k in ipairs({
-    "id",
-    "parentId",
-    "timestamp",
-    "summary",
-    "firstKeptEntryId",
-    "tokensBefore",
-    "readFiles",
-    "modifiedFiles",
-    "compactedCount",
-  }) do
-    if parsed[k] ~= nil then
-      body[k] = parsed[k]
-    end
-  end
+  local body = projection.copy(parsed)
+  body.type = nil
   last_entry_id = body.id or last_entry_id
   leaf_id = body.id or leaf_id
   append_body("compaction-summary", body.summary, body)
 end
 
 local function append_v3_branch_summary(parsed)
-  local body = {}
-  for _, k in ipairs({
-    "id",
-    "parentId",
-    "timestamp",
-    "summary",
-    "fromId",
-    "readFiles",
-    "modifiedFiles",
-  }) do
-    if parsed[k] ~= nil then
-      body[k] = parsed[k]
-    end
-  end
+  local body = projection.copy(parsed)
+  body.type = nil
   last_entry_id = body.id or last_entry_id
   leaf_id = body.id or leaf_id
   append_body("branch-summary", body.summary, body)
 end
 
 local function append_v3_custom(parsed)
-  local body = {
-    __entry_type = parsed.type,
-    id = parsed.id,
-    parentId = parsed.parentId,
-    timestamp = parsed.timestamp,
-    name = parsed.name,
-    data = parsed.data,
-    message = parsed.message,
-    model = parsed.model,
-    thinkingLevel = parsed.thinkingLevel,
-  }
+  local body = projection.copy(parsed)
+  body.__entry_type, body.type = parsed.type, nil
   last_entry_id = body.id or last_entry_id
   leaf_id = body.id or leaf_id
   local text = ""
-  if parsed.type == "custom_message" and type(parsed.message) == "table" then
-    text = concat_text_blocks(parsed.message.content, "")
+  if parsed.type == "custom_message" then
+    text = projection.content_text(
+      type(parsed.message) == "table" and parsed.message.content or parsed.content
+    )
   end
   append_body("custom", text, body)
 end
 
 local function parent_key(parent_id)
-  return parent_id or ""
+  return type(parent_id) == "string" and parent_id or ""
 end
 
 function register_file_entry(entry)
   if type(entry) ~= "table" then
     return
   end
+  tree_revision = tree_revision + 1
+  projection_cache = nil
   entry.id = entry.id or prelude.uuid_short()
   entry.timestamp = entry.timestamp or prelude.iso_timestamp()
   file_entries[#file_entries + 1] = entry
@@ -1520,17 +1445,89 @@ local function append_disk_entry_to_memory(entry)
     append_v2_compaction(entry)
   elseif entry.type == "branch_summary" then
     append_v3_branch_summary(entry)
-  elseif
-    entry.type == "custom"
-    or entry.type == "custom_message"
-    or entry.type == "model_change"
-    or entry.type == "thinking_level_change"
-  then
+  else
     append_v3_custom(entry)
   end
 end
 
-local function rebuild_active_path()
+function M.projection()
+  reconcile_memory_entries()
+  if
+    projection_cache
+    and projection_cache.revision == tree_revision
+    and projection_cache.leaf_id == leaf_id
+  then
+    return projection_cache
+  end
+  local out = projection.build(active_entries_for_leaf(leaf_id))
+  out.revision, out.leaf_id = tree_revision, leaf_id
+  projection_cache = out
+  return out
+end
+
+function M.context_messages(include_system)
+  local out = {}
+  for _, message in ipairs(projection.records(M.projection())) do
+    if include_system or message.role ~= "system" then
+      out[#out + 1] = message
+    end
+  end
+  return out
+end
+
+function M.current_system()
+  return projection.system_state(M.projection().messages)
+end
+
+function M.append_system(message)
+  local body = stamp_entry({ message = projection.copy(message) })
+  append_body("custom", "", body)
+  return body.id
+end
+
+function M.append_context_edit(target_id, replacement)
+  local target = entry_by_id[target_id]
+  if not target then
+    return false, "context edit target is not in this session"
+  end
+  local active = false
+  for _, entry in ipairs(M.projection().path) do
+    if entry.id == target_id then
+      active = true
+    end
+  end
+  local role = type(target.message) == "table" and target.message.role or nil
+  if
+    not active
+    or not (
+      target.type == "custom_message"
+      or (
+        target.type == "message"
+        and (role == "user" or role == "assistant" or role == "toolResult" or role == "custom")
+      )
+    )
+  then
+    return false, "context edit target must be a context message on the active branch"
+  end
+  if
+    not projection.is_null(replacement)
+    and (
+      type(replacement) ~= "table"
+      or (type(replacement.content) ~= "string" and type(replacement.content) ~= "table")
+    )
+  then
+    return false, "context edit replacement must contain text or content blocks"
+  end
+  local body = stamp_entry({
+    __entry_type = "context_edit",
+    targetId = target_id,
+    replacement = replacement == nil and psi.json_null or projection.copy(replacement),
+  })
+  append_body("custom", "", body)
+  return true, body.id
+end
+
+function rebuild_active_path()
   psi.session_clear()
   last_entry_id = nil
   -- The rebuilt branch may not contain the previously cached
@@ -1538,9 +1535,10 @@ local function rebuild_active_path()
   thinking_level_known = false
   thinking_level_value = nil
   local active = active_entries_for_leaf(leaf_id)
+  local selected = projection.build(active)
   suppress_tree_tracking = true
-  for _, entry in ipairs(active) do
-    append_disk_entry_to_memory(entry)
+  for _, entry in ipairs(selected.entries) do
+    append_disk_entry_to_memory(entry.source_entry)
   end
   suppress_tree_tracking = false
   if active[#active] and active[#active].id then
@@ -1597,52 +1595,6 @@ local function ancestor_set(id)
   return out
 end
 
-local function branch_summary_text(entry)
-  if type(entry) ~= "table" then
-    return ""
-  end
-  if entry.type == "message" and type(entry.message) == "table" then
-    local msg = entry.message
-    if type(msg.content) == "string" then
-      return msg.content
-    end
-    if type(msg.content) == "table" then
-      local parts = {}
-      for _, block in ipairs(msg.content) do
-        if type(block) == "table" then
-          if block.type == "text" and type(block.text) == "string" then
-            parts[#parts + 1] = block.text
-          elseif block.type == "toolCall" then
-            parts[#parts + 1] = "[tool call: " .. tostring(block.name or "?") .. "]"
-          end
-        end
-      end
-      return table.concat(parts, "\n")
-    end
-  elseif entry.type == "compaction" or entry.type == "branch_summary" then
-    return entry.summary or ""
-  elseif entry.type == "custom_message" and type(entry.message) == "table" then
-    return branch_summary_text({ type = "message", message = entry.message })
-  end
-  return ""
-end
-
-local function branch_summary_role(entry)
-  if entry.type == "message" and type(entry.message) == "table" then
-    if entry.message.role == "toolResult" then
-      return "tool-result"
-    end
-    return entry.message.role or "message"
-  end
-  if entry.type == "compaction" then
-    return "compaction-summary"
-  end
-  if entry.type == "branch_summary" then
-    return "branch-summary"
-  end
-  return entry.type or "entry"
-end
-
 function M.branch_entries_to_summarize(target_id_or_prefix)
   local target_id, err = resolve_entry_id(target_id_or_prefix)
   if not target_id then
@@ -1653,7 +1605,6 @@ function M.branch_entries_to_summarize(target_id_or_prefix)
     return {}, target_id, old_leaf, target_id
   end
   local target_ancestors = ancestor_set(target_id)
-  local entries = {}
   local id = old_leaf
   local common = nil
   local seen = {}
@@ -1667,18 +1618,15 @@ function M.branch_entries_to_summarize(target_id_or_prefix)
     if not entry then
       break
     end
-    entries[#entries + 1] = entry
     id = entry.parentId
   end
   local chronological = {}
-  for i = #entries, 1, -1 do
-    local entry = entries[i]
-    chronological[#chronological + 1] = {
-      id = entry.id,
-      role = branch_summary_role(entry),
-      text = branch_summary_text(entry),
-      entry = entry,
-    }
+  for _, record in ipairs(M.context_messages()) do
+    local body = prelude.safe_json_decode(record.data, {}, true)
+    if seen[body.id] then
+      record.id, record.entry = body.id, entry_by_id[body.id]
+      chronological[#chronological + 1] = record
+    end
   end
   return chronological, target_id, old_leaf, common
 end
@@ -1783,9 +1731,10 @@ function M.load(path)
   local version = 1
   local valid_header = false
   for line in f:lines() do
-    local parsed = prelude.safe_json_decode(line)
+    local parsed = prelude.safe_json_decode(line, nil, true)
     if type(parsed) == "table" then
       if parsed.type == "session" then
+        loaded_header = projection.copy(parsed)
         valid_header = type(parsed.id) == "string"
         version = parsed.version or 1
         if parsed.id then
@@ -1807,12 +1756,7 @@ function M.load(path)
         register_file_entry(parsed)
       elseif parsed.type == "branch_summary" then
         register_file_entry(parsed)
-      elseif
-        parsed.type == "custom"
-        or parsed.type == "custom_message"
-        or parsed.type == "model_change"
-        or parsed.type == "thinking_level_change"
-      then
+      elseif type(parsed.type) == "string" and type(parsed.id) == "string" then
         register_file_entry(parsed)
       end
     end
@@ -1893,6 +1837,7 @@ function M.fork(at_count, out_path)
   if not out_path or out_path == "" then
     return false, "no path"
   end
+  reconcile_memory_entries()
   local messages = psi.session_messages()
   if at_count > #messages then
     at_count = #messages
@@ -1910,6 +1855,14 @@ function M.fork(at_count, out_path)
   local parent = psi.session_path() or psi.session_id()
   if parent and parent ~= "" then
     header.parentSession = parent
+  end
+  if at_count == #messages then
+    return write_entry_file(out_path, header, active_entries_for_leaf(leaf_id))
+  end
+  local selected = messages[at_count]
+  local body = selected and prelude.safe_json_decode(selected.data, {}, true)
+  if body and body.id then
+    return write_entry_file(out_path, header, active_entries_for_leaf(body.id))
   end
   return write_session_file(out_path, header, messages, at_count)
 end
@@ -2022,7 +1975,7 @@ end
 -- so boundary repair can never discard unsummarized messages.
 function M.prepare_compaction(opts)
   opts = opts or {}
-  local messages = M.messages()
+  local messages = M.context_messages()
   local total = #messages
   if total == 0 or messages[total].role == "compaction-summary" then
     return nil
@@ -2038,7 +1991,9 @@ function M.prepare_compaction(opts)
     local accumulated = 0
     first_kept = total
     for i = total, 1, -1 do
-      accumulated = accumulated + M.message_token_estimate(messages[i])
+      local body = prelude.safe_json_decode(messages[i].data, {}, true)
+      accumulated = accumulated
+        + projection.estimate_tokens(body.message or { role = "user", content = messages[i].text })
       first_kept = i
       if accumulated >= target then
         break
@@ -2087,8 +2042,9 @@ function M.prepare_compaction(opts)
       local body = prelude.safe_json_decode(entry.data, nil)
       previous_summary = type(body) == "table" and body.summary or entry.text
       if type(body) == "table" then
-        add_paths(read_files, body.readFiles)
-        add_paths(modified_files, body.modifiedFiles)
+        local details = type(body.details) == "table" and body.details or body
+        add_paths(read_files, details.readFiles)
+        add_paths(modified_files, details.modifiedFiles)
       end
     else
       messages_to_summarize[#messages_to_summarize + 1] = entry
@@ -2109,6 +2065,8 @@ function M.prepare_compaction(opts)
     is_split_turn = #turn_prefix > 0,
     tail = copy_range(messages, first_kept, total),
     previous_summary = previous_summary,
+    leaf_id = leaf_id,
+    system_message = M.current_system(),
     read_files = read_list,
     modified_files = modified_list,
   }
@@ -2136,7 +2094,6 @@ function M.do_compact(plan, summary_text)
   if not plan then
     return false, "session is already small enough"
   end
-  local messages = plan.messages
   local total = plan.total
   local compacted_count = plan.compacted_count
   local keep_recent = plan.keep_recent
@@ -2151,45 +2108,33 @@ function M.do_compact(plan, summary_text)
     })
   end
 
+  if plan.leaf_id ~= nil and plan.leaf_id ~= leaf_id then
+    return false, "session changed during compaction"
+  end
   local read_files = plan.read_files or {}
   local modified_files = plan.modified_files or {}
-  local first_kept = tail[1]
-  local first_kept_id
-  if first_kept then
-    local body = prelude.safe_json_decode(first_kept.data, nil)
-    if type(body) == "table" then
-      first_kept_id = body.id
-    end
+  local id = prelude.uuid_short()
+  local first_kept_id = id
+  if tail[1] then
+    local body = prelude.safe_json_decode(tail[1].data, {}, true)
+    first_kept_id = body.id or id
   end
-  local summary_parent_id = nil
-  if compacted_count > 0 and messages[1] then
-    local first_body = prelude.safe_json_decode(messages[1].data, nil)
-    if type(first_body) == "table" then
-      summary_parent_id = first_body.parentId
-    end
-  end
-
-  psi.session_clear()
-  last_entry_id = summary_parent_id
-  leaf_id = summary_parent_id
+  -- Append at the active leaf. Retained messages keep their original IDs and
+  -- parents; the projector, not a copied branch, implements the kept boundary.
   M.append_compaction(summary_text, {
+    id = id,
+    details = {
+      readFiles = prelude.as_array(read_files),
+      modifiedFiles = prelude.as_array(modified_files),
+    },
     readFiles = prelude.as_array(read_files),
     modifiedFiles = prelude.as_array(modified_files),
     compactedCount = compacted_count,
     firstKeptEntryId = first_kept_id,
     tokensBefore = plan.tokens_before,
+    systemMessage = plan.system_message,
   })
-  for _, m in ipairs(tail) do
-    local body = prelude.safe_json_decode(m.data, nil)
-    if type(body) == "table" then
-      body.id = nil
-      body.timestamp = nil
-      body.parentId = last_entry_id
-      append_body(m.role, m.text, stamp_entry(body))
-    else
-      append_raw(m.role, m.text, m.data)
-    end
-  end
+  rebuild_active_path()
   M.reset_file_ops()
 
   if psi.events and psi.events.emit then

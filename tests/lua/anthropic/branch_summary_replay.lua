@@ -10,4 +10,9 @@ local session = {
   },
 }
 local wire = a._test.build_api_messages(session)
-return tostring(wire[1] and wire[1].role == "user" and wire[1].content == "branch context")
+return tostring(
+  wire[1]
+    and wire[1].role == "user"
+    and wire[1].content
+      == "The following is a summary of a branch that this conversation came back from:\n\n<summary>\nbranch context</summary>"
+)

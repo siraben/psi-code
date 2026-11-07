@@ -9,11 +9,15 @@ psi.session_set_path(path)
 s.append_user("root")
 local root = s.leaf_id()
 local root_tree = s.branch_tree_text()
-if not root_tree:find(root:sub(1, 8), 1, true) then return "missing-root" end
-s.append_assistant("first", {{type="text", text="first"}}, {})
+if not root_tree:find(root:sub(1, 8), 1, true) then
+  return "missing-root"
+end
+s.append_assistant("first", { { type = "text", text = "first" } }, {})
 local first = s.leaf_id()
 local ok, err = s.branch(root)
-if not ok then return "branch-root-failed:" .. tostring(err) end
+if not ok then
+  return "branch-root-failed:" .. tostring(err)
+end
 s.append_user("second")
 s.save()
 s.load(path)
@@ -21,15 +25,42 @@ local loaded = psi.session_messages()
 local saw_first = false
 local saw_second = false
 for _, m in ipairs(loaded) do
-  if m.text == "first" then saw_first = true end
-  if m.text == "second" then saw_second = true end
+  if m.text == "first" then
+    saw_first = true
+  end
+  if m.text == "second" then
+    saw_second = true
+  end
 end
 local ok2, err2 = s.branch(first)
-if not ok2 then return "branch-first-failed:" .. tostring(err2) end
+if not ok2 then
+  return "branch-first-failed:" .. tostring(err2)
+end
 local branched = psi.session_messages()
 local body = psi.read_file(path) or ""
 local msg_count = 0
-for _ in body:gmatch([["type":"message"]]) do msg_count = msg_count + 1 end
-return string.format("loaded=%d first=%s second=%s branched=%d leaf=%s|%d",
-  #loaded, tostring(saw_first), tostring(saw_second), #branched,
-  tostring(s.leaf_id() == first), msg_count)
+for _ in body:gmatch([["type":"message"]]) do
+  msg_count = msg_count + 1
+end
+local result = string.format(
+  "loaded=%d first=%s second=%s branched=%d leaf=%s|%d",
+  #loaded,
+  tostring(saw_first),
+  tostring(saw_second),
+  #branched,
+  tostring(s.leaf_id() == first),
+  msg_count
+)
+assert(s.append_context_edit(root, nil))
+assert(#s.projection().messages == 1)
+assert(psi.session_messages()[1].text == "root", "context edits preserve raw history")
+assert(s.branch(first))
+assert(#s.projection().messages == 2, "edits belong to the branch containing them")
+assert(s.append_context_edit(first, { content = "replacement" }))
+local projected = s.projection().messages
+assert(projected[2].role == "assistant" and projected[2].content[1].text == "replacement")
+assert(psi.session_messages()[2].text == "first")
+assert(s.save())
+assert(s.load(path))
+assert(s.projection().messages[2].content[1].text == "replacement")
+return result

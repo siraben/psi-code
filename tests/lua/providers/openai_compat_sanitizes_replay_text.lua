@@ -36,6 +36,13 @@ return table.concat({
   tostring(wire[2].content == ("a" .. repl .. "b")),
   tostring(wire[3].content == ("c" .. repl .. "d")),
   tostring(wire[4].content == ("e" .. repl .. "f")),
-  tostring(wire[5].content == ("g" .. repl .. "h")),
+  tostring(
+    wire[5].content
+      == (
+        "The conversation history before this point was compacted into the following summary:\n\n<summary>\ng"
+        .. repl
+        .. "h\n</summary>"
+      )
+  ),
   tostring(wire[6].content == ("i" .. repl .. "j")),
 }, "|")

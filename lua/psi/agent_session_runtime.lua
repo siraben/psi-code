@@ -169,6 +169,7 @@ function Runtime:turn(user_text, options)
   end
 
   local text = user_text or ""
+  local system_prompt
   if type(options.before_turn) == "function" then
     options.before_turn({ text = text })
   end
@@ -176,6 +177,7 @@ function Runtime:turn(user_text, options)
   local function turn_options()
     return {
       user_text = text,
+      system_prompt = system_prompt,
       model = self.opts.model,
       max_tokens = self.opts.max_tokens,
       thinking_level = self.opts.thinking_level,
@@ -212,6 +214,7 @@ function Runtime:turn(user_text, options)
   end
 
   local ran, ok, reply = xpcall(function()
+    system_prompt = require("psi.prompt").prepare_checkpoint()
     local descriptor = agent.model_descriptor(self.opts.model)
     local over = context.should_compact(descriptor)
     if over then

@@ -242,6 +242,7 @@ local function turn_max_tokens(resolved, requested)
 end
 
 local function drive_turn(opts, append_user)
+  local system_prompt = opts.system_prompt or prompt.prepare_checkpoint()
   if append_user then
     local user_text = opts.user_text or ""
     session.append_user(user_text)
@@ -249,7 +250,6 @@ local function drive_turn(opts, append_user)
   end
   local provider, resolved = pick_provider(M.current_model(opts.model))
   local thinking_level = M.thinking_level_for(resolved, opts.thinking_level, opts.reasoning_effort)
-  local system_prompt = prompt.system_prompt()
   return sched.run(function()
     return provider.run_turn({
       system_prompt = system_prompt,

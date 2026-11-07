@@ -30,7 +30,15 @@ function M.run(request, on_output)
   local status = result.aborted and "Command cancelled"
     or ("Command exited with code " .. tostring(result.status))
   local text = "$ " .. request.command .. "\n" .. (result.output or "") .. "\n" .. status
-  session.append_custom_message(text, { role = "user", hidden = request.hidden })
+  session.append_bash_execution({
+    command = request.command,
+    output = result.output or "",
+    exitCode = result.status,
+    cancelled = not not result.aborted,
+    truncated = not not result.truncated,
+    fullOutputPath = result.temp_file_path,
+    excludeFromContext = request.hidden,
+  })
   local saved, err = session.save()
   result.text = text
   result.save_error = not saved and err or nil

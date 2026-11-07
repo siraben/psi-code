@@ -370,7 +370,8 @@ static void psi_vm_session_mark_retained(const struct psi_session *session) {
  * ------------------------------------------------------------------ */
 
 static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx, int depth);
-static void psi_vm_push_json_value(lua_State *L, const cJSON *v);
+static char psi_vm_json_null;
+static void psi_vm_push_json_value(lua_State *L, const cJSON *v, int preserve);
 
 #if PSI_ENABLE_TUI
 static int psi_vm_require_tui(lua_State *L) {
@@ -392,13 +393,39 @@ static void psi_vm_mark_array(lua_State *L) {
     lua_setmetatable(L, -2);
 }
 
-static void psi_vm_push_json_value(lua_State *L, const cJSON *v) {
+static void psi_vm_push_json_value(lua_State *L, const cJSON *v, int preserve) {
+    if (!lua_checkstack(L, 8)) {
+        luaL_error(L, "JSON nesting exceeds Lua stack capacity");
+        return;
+    }
     if (cJSON_IsObject(v)) {
         const cJSON *item;
+        int object_index;
+        int order_index = 0;
+        int n = 1;
         lua_newtable(L);
+        object_index = lua_gettop(L);
+        if (preserve) {
+            lua_newtable(L);
+            order_index = lua_gettop(L);
+        }
         for (item = v->child; item != NULL; item = item->next) {
-            psi_vm_push_json_value(L, item);
-            lua_setfield(L, -2, item->string ? item->string : "");
+            const char *key = item->string ? item->string : "";
+            psi_vm_push_json_value(L, item, preserve);
+            lua_setfield(L, object_index, key);
+            if (preserve) {
+                lua_pushstring(L, key);
+                lua_rawseti(L, order_index, n++);
+            }
+        }
+        if (preserve) {
+            lua_newtable(L);
+            lua_pushstring(L, "object");
+            lua_setfield(L, -2, "__jsontype");
+            lua_pushvalue(L, order_index);
+            lua_setfield(L, -2, "__jsonorder");
+            lua_setmetatable(L, object_index);
+            lua_pop(L, 1);
         }
         return;
     }
@@ -408,7 +435,7 @@ static void psi_vm_push_json_value(lua_State *L, const cJSON *v) {
         lua_newtable(L);
         psi_vm_mark_array(L);
         for (item = v->child; item != NULL; item = item->next) {
-            psi_vm_push_json_value(L, item);
+            psi_vm_push_json_value(L, item, preserve);
             lua_rawseti(L, -2, idx++);
         }
         return;
@@ -435,7 +462,11 @@ static void psi_vm_push_json_value(lua_State *L, const cJSON *v) {
         }
         return;
     }
-    lua_pushnil(L);
+    if (preserve) {
+        lua_pushlightuserdata(L, (void *)&psi_vm_json_null);
+    } else {
+        lua_pushnil(L);
+    }
 }
 
 static int psi_vm_table_is_array(lua_State *L, int idx) {
@@ -538,12 +569,45 @@ static cJSON *psi_vm_lua_value_to_json(lua_State *L, int idx, int depth) {
             obj = cJSON_CreateObject();
             if (obj == NULL)
                 return NULL;
+            /* Ordered objects preserve prompt-section order and unknown
+             * session fields across read/write cycles. Ordinary tables keep
+             * their existing encoding behavior. */
+            if (lua_getmetatable(L, idx)) {
+                lua_getfield(L, -1, "__jsonorder");
+                if (lua_istable(L, -1)) {
+                    lua_Integer n = (lua_Integer)lua_rawlen(L, -1);
+                    lua_Integer i;
+                    int order_index = lua_gettop(L);
+                    for (i = 1; i <= n; i++) {
+                        const char *key;
+                        lua_rawgeti(L, order_index, i);
+                        key = lua_tostring(L, -1);
+                        if (key != NULL && cJSON_GetObjectItemCaseSensitive(obj, key) == NULL) {
+                            cJSON *item;
+                            lua_getfield(L, idx, key);
+                            if (!lua_isnil(L, -1)) {
+                                item = psi_vm_lua_value_to_json(L, -1, depth - 1);
+                                if (item == NULL) {
+                                    lua_pop(L, 4);
+                                    cJSON_Delete(obj);
+                                    return NULL;
+                                }
+                                cJSON_AddItemToObject(obj, key, item);
+                            }
+                            lua_pop(L, 1);
+                        }
+                        lua_pop(L, 1);
+                    }
+                }
+                lua_pop(L, 2);
+            }
             lua_pushnil(L);
             while (lua_next(L, idx) != 0) {
                 /* skip metadata-ish keys, and non-string keys */
                 if (lua_type(L, -2) == LUA_TSTRING) {
                     const char *key = lua_tostring(L, -2);
-                    if (key && strcmp(key, "__kind") != 0 && strcmp(key, "__jsontype") != 0) {
+                    if (key && strcmp(key, "__kind") != 0 && strcmp(key, "__jsontype") != 0 &&
+                        cJSON_GetObjectItemCaseSensitive(obj, key) == NULL) {
                         cJSON *item = psi_vm_lua_value_to_json(L, -1, depth - 1);
                         if (item == NULL) {
                             lua_pop(L, 2);
@@ -3653,7 +3717,7 @@ static int lfn_json_decode(lua_State *L) {
     if (value == NULL) {
         return luaL_error(L, "invalid JSON");
     }
-    psi_vm_push_json_value(L, value);
+    psi_vm_push_json_value(L, value, lua_toboolean(L, 2));
     cJSON_Delete(value);
     return 1;
 }
@@ -4845,6 +4909,8 @@ static void psi_vm_register_psi(lua_State *L) {
     psi_vm_register_gc_mt(L, PSI_PROCESS_HANDLE_MT, lfn_process_gc);
 
     lua_newtable(L); /* psi */
+    lua_pushlightuserdata(L, (void *)&psi_vm_json_null);
+    lua_setfield(L, -2, "json_null");
 
     /* Sub-table for host-primitive docstrings: psi.__doc_host[name] = doc.
      * lua/psi/doc.lua harvests these at boot into psi.doc. Kept as a
@@ -4984,7 +5050,8 @@ static void psi_vm_register_psi(lua_State *L) {
         "Encode a Lua value as JSON. Tables with string keys become objects; numeric become "
         "arrays.");
     PSI_REG_DOC("json_decode", lfn_json_decode,
-        "Decode a JSON string into Lua values. Returns nil + error on parse failure.");
+        "Decode JSON. Optional true preserves null as psi.json_null and object order. Invalid JSON "
+        "raises an error.");
     PSI_REG("http_post", lfn_http_post);
     PSI_REG("http_get", lfn_http_get);
     PSI_REG("http_stream_begin", lfn_http_stream_begin);

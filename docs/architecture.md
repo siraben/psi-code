@@ -92,7 +92,8 @@ Lua owns the runtime model:
 
 - top-level mode dispatch in `lua/psi/modes.lua`
 - shared frontend lifecycle in `lua/psi/agent_session_runtime.lua`
-- session loading, saving, projection, and metadata in `lua/psi/session_manager.lua`
+- session loading, saving, and metadata in `lua/psi/session_manager.lua`
+- canonical model-context projection in `lua/psi/session_projection.lua`
 - provider loops in `lua/psi/providers/anthropic.lua`,
   `lua/psi/providers/openai_compat.lua`, `lua/psi/providers/openrouter.lua`,
   `lua/psi/providers/openai_codex.lua`, and `lua/psi/providers/ollama.lua`
@@ -402,6 +403,23 @@ tools, filesystem persistence, or embedded-asset compression.
 Sessions are append-only JSONL logs with typed records. The runtime uses them
 as the durable source of truth for conversation state, tool activity,
 compaction summaries, and session metadata.
+
+`session_projection.lua` reduces the active leaf path using Pi 1.4's compaction,
+context-edit, and system-section semantics. Raw tree entries retain their IDs,
+unknown fields, and explicit JSON nulls. Provider replay, compaction inputs, and
+context estimates consume the projected context. Usage baselines are anchored to
+entry IDs and invalidated by later edits, checkpoints, and compaction boundaries.
+
+`prompt.lua` assembles ordered preamble, tools, rules, docs, addendum, project
+context, skills, and cwd sections; Windows also supplies host context. It writes
+full local section/tool declarations when their state changes and folds imported
+section/tool deltas. Managed sections refresh from local resources and trust
+policy; foreign sections and base system content are retained. Foreign tool
+declarations are transcript data, not executable registrations. Compaction stores
+the folded system checkpoint and a pointer to the retained history.
+
+Provider request encoding remains adapter-specific. Pi extensions, packages, credentials, model
+selection, graphical selectors, and full lifecycle hooks are outside this layer.
 
 Lifecycle guarantees:
 
