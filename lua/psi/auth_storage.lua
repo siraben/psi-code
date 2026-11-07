@@ -24,7 +24,9 @@ local function config_dir()
   if home and home ~= "" then
     return prelude.path_join(prelude.path_join(home, ".config"), "psi")
   end
-  return ".psi"
+  -- Never reinterpret a repository's .psi directory as global credential
+  -- storage when HOME is unavailable: auth entries can execute !commands.
+  return nil
 end
 
 function M.path()
@@ -32,7 +34,8 @@ function M.path()
   if override and override ~= "" then
     return override
   end
-  return prelude.path_join(config_dir(), "auth.json")
+  local dir = config_dir()
+  return dir and prelude.path_join(dir, "auth.json") or nil
 end
 
 -- Credential files copied from backups or other machines can arrive
@@ -67,7 +70,7 @@ end
 
 local function read_all()
   local path = M.path()
-  if not psi.file_exists(path) then
+  if not path or not psi.file_exists(path) then
     return {}
   end
   check_permissions(path)
@@ -89,6 +92,9 @@ end
 
 local function write_all(data)
   local path = M.path()
+  if not path then
+    return false, "credential storage unavailable: set HOME or PSI_AUTH_FILE"
+  end
   if not psi.mkdir_parent(path) then
     return false, "could not create auth directory"
   end

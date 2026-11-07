@@ -204,7 +204,11 @@ is removed.
   retains the manual-paste completion path so OAuth works on small and headless
   hosts without a local callback server. Credentials are stored in
   `~/.config/psi/auth.json` with mode `0600`.
-- `PSI_AUTH_FILE`: override the credential file path.
+- `PSI_AUTH_FILE`: override the credential file path. If `HOME` is unset or
+  empty and there is no explicit `PSI_AUTH_FILE`, file-backed credential storage
+  is disabled; provider environment keys still work. psi never falls back to
+  a repository's `.psi/auth.json`. Login that needs storage reports how to
+  configure a path rather than writing credentials into the workspace.
 - `PSI_OPENAI_CODEX_MODEL`: default model when none is passed (default
   `gpt-5.5`).
 - `PSI_OPENAI_CODEX_BASE_URL`: override the ChatGPT backend host.
