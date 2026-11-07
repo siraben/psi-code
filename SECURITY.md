@@ -41,7 +41,7 @@ psi inside an operating-system security boundary.
 ## Reporting a vulnerability
 
 Report suspected vulnerabilities privately through
-[GitHub Security Advisories](https://github.com/siraben/psi-code/security/advisories/new).
+[GitHub Security Advisories](https://github.com/siraben/psi/security/advisories/new).
 Include the impact, reproduction steps or a proof of concept, the affected
 version or commit, and any known mitigations. Do not open a public issue for a
 security-sensitive report.

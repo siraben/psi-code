@@ -45,7 +45,7 @@
 
         psiMeta = {
           description = "psi coding agent";
-          homepage = "https://github.com/siraben/psi-coding-agent";
+          homepage = "https://github.com/siraben/psi";
           license = lib.licenses.mit;
           maintainers = with lib.maintainers; [ siraben ];
           platforms = lib.platforms.unix;

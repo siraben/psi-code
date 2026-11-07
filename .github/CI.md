@@ -9,7 +9,7 @@ To upload newly built Nix packages and dependencies, configure a Cachix write
 token for `siraben` as the repository secret `CACHIX_AUTH_TOKEN`:
 
 ```sh
-gh secret set CACHIX_AUTH_TOKEN --repo siraben/psi-code
+gh secret set CACHIX_AUTH_TOKEN --repo siraben/psi
 ```
 
 Enter the token at the prompt. The Cachix action uploads packages as they are

@@ -31,7 +31,7 @@ Features we *don't* implement:
 ## Running psi
 
 ```console
-$ nix run github:siraben/psi-code
+$ nix run github:siraben/psi
 ```
 
 For local development:
