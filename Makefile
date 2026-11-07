@@ -1,6 +1,5 @@
 # psi build. Designed for GNU make 3.81+.
 
-# ---- Install paths ----
 PREFIX     ?= /usr/local
 BINDIR      = $(PREFIX)/bin
 INCLUDEDIR  = $(PREFIX)/include
@@ -8,7 +7,6 @@ SHAREDIR    = $(PREFIX)/share/psi
 MANDIR     ?= $(PREFIX)/share/man
 MAN1DIR     = $(MANDIR)/man1
 
-# ---- Toolchain ----
 CC              ?= cc
 HOST_CC         ?= $(CC)
 PKG_CONFIG      ?= pkg-config
@@ -25,7 +23,6 @@ SCAN_BUILD_CC   ?= gcc
 SCAN_BUILD_ANALYZER ?= clang
 STYLUA          ?= stylua
 
-# ---- Feature gates ----
 TUI           ?= 1
 ANSI          ?= 1
 COLOR         ?= 1
@@ -38,7 +35,6 @@ ifeq ($(ANSI),0)
 override TUI := 0
 endif
 
-# ---- User-facing flags ----
 CFLAGS        ?= -O2
 CPPFLAGS      ?=
 LDFLAGS       ?=
@@ -59,7 +55,6 @@ BASE_CFLAGS    = $(STRICT_CFLAGS)
 # header-driven rebuild tracking; the build itself still works.
 DEPFLAGS ?= -MMD -MP
 
-# ---- Build outputs ----
 BUILD_DIR      = build
 TARGET         = $(BUILD_DIR)/psi
 # Packagers that ship lua/ on disk can bake its boot path here (e.g.
@@ -91,8 +86,6 @@ endif
 CA_BUNDLE_CPPFLAGS = $(if $(CA_BUNDLE_FILE),-DPSI_CA_BUNDLE_FILE=\"$(CA_BUNDLE_FILE)\")
 DEPS       := $(OBJECTS:.o=.d) $(GEN_OBJECTS:.o=.d)
 
-# ---- Dependencies via pkg-config ----
-#
 # Set PSI_CFLAGS_<DEP>= / PSI_LIBS_<DEP>= in the environment to skip
 # pkg-config for a particular package — useful on hosts where the
 # package is named differently (lua5.5 vs lua55 vs lua) or where
@@ -138,7 +131,6 @@ LOCAL_LDFLAGS += $(if $(PSI_LIBS_PTHREAD),$(PSI_LIBS_PTHREAD),-lpthread)
 comma := ,
 LOCAL_RPATH_LDFLAGS := $(patsubst -L%,-Wl$(comma)-rpath$(comma)%,$(filter -L%,$(LOCAL_LDFLAGS)))
 
-# ---- Hardening ----
 # Each flag is probe-tested against $(CC) so non-ELF or minimal
 # toolchains (pcc, cosmocc, musl-cross) degrade gracefully instead of
 # failing the build. HARDENING=0 skips the probes entirely.
@@ -161,11 +153,9 @@ endif
 HOST_CFLAGS_ZLIB ?= $(shell $(HOST_PKG_CONFIG) --cflags zlib)
 HOST_LIBS_ZLIB   ?= $(shell $(HOST_PKG_CONFIG) --libs zlib)
 
-# ---- Default target ----
 .DEFAULT_GOAL := all
 all: $(TARGET)
 
-# ---- Pattern rules ----
 $(OBJECTS): $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
@@ -177,7 +167,6 @@ $(GEN_OBJECTS): $(BUILD_DIR)/%.o: $(BUILD_DIR)/%.c
 
 -include $(DEPS)
 
-# ---- Embed helper ----
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
@@ -193,7 +182,6 @@ $(EMBED_DOCS): $(EMBED_TOOL) $(DOC_SOURCES)
 $(EMBED_CA): $(EMBED_TOOL) $(EMBED_CA_FILE)
 	$(EMBED_TOOL) --table=psi_embedded_ca_table --key=$(EMBED_CA_KEY) $(EMBED_CA_FILE) > $@
 
-# ---- Link ----
 .PHONY: check-curl-ca
 check-curl-ca:
 	@if printf '%s\n' "$(CURL_SSL_BACKENDS)" | grep -qi 'mbedTLS' && [ -z "$(CA_BUNDLE_FILE)" ] && [ -z "$(EMBED_CA_FILE)" ]; then \
@@ -206,7 +194,6 @@ check-curl-ca:
 $(TARGET): $(OBJECTS) $(GEN_OBJECTS) | check-curl-ca $(BUILD_DIR)
 	$(CC) $(LDFLAGS) $(RPATH_LDFLAGS) -o $@ $(OBJECTS) $(GEN_OBJECTS) $(LOCAL_LDFLAGS)
 
-# ---- Install / clean ----
 install: $(TARGET)
 	$(INSTALL_DIR) $(DESTDIR)$(BINDIR) $(DESTDIR)$(INCLUDEDIR)/psi $(DESTDIR)$(SHAREDIR)/psi $(DESTDIR)$(MAN1DIR)
 	$(INSTALL_PROGRAM) $(TARGET) $(DESTDIR)$(BINDIR)/psi
@@ -219,7 +206,6 @@ install: $(TARGET)
 clean:
 	rm -rf $(BUILD_DIR)
 
-# ---- Lint / static analysis ----
 lint-lua:
 	$(STYLUA) --check lua
 	$(LUACHECK) lua

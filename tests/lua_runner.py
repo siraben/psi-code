@@ -247,11 +247,6 @@ def assert_output(case: LuaCase, output: str) -> None:
                 )
 
 
-# ---------------------------------------------------------------------------
-# helpers
-# ---------------------------------------------------------------------------
-
-
 def _split_meta(text: str) -> tuple[str, str]:
     if not text.startswith(META_OPEN):
         return "", text

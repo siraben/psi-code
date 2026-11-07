@@ -82,7 +82,6 @@ local function headers()
   return hdrs
 end
 
--- ---------- OpenAI-compat SSE streaming ----------
 --
 -- Wire format (one logical event per blank-line-terminated data):
 --   data: {"id":"…","choices":[{"delta":{"content":"hi"}}]}
@@ -228,8 +227,6 @@ local function finalize_tool_calls(state)
   return out
 end
 
--- ---------- Provider config ----------
-
 local function make_config(model)
   return {
     provider_name = "openrouter",
@@ -302,8 +299,6 @@ M._debug = {
   parser_new = stream_parser.sse_parser,
   parser_push = parser_push,
 }
-
--- ---------- Public entry points ----------
 
 local function check_api_key()
   local key = resolve_key()

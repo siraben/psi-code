@@ -138,13 +138,8 @@ static int psi_process_append_bytes(
     return PSI_STATUS_OK;
 }
 
-/* ------------------------------------------------------------------
- * Async handle.
- *
- * Lua-driven callers use this through begin/poll/finish. The
- * blocking psi_process_run_shell is a thin wrapper that drives the
- * same state machine in a tight loop.
- * ------------------------------------------------------------------ */
+/* Lua callers drive begin/poll/finish; blocking shell calls use the same
+ * state machine. */
 
 #ifndef _WIN32
 
@@ -1536,11 +1531,6 @@ int psi_process_finish(
 }
 
 #endif
-
-/* ------------------------------------------------------------------
- * Blocking wrapper — drives the async state machine in a tight
- * loop. Keeps the existing progress-callback contract intact.
- * ------------------------------------------------------------------ */
 
 int psi_process_run_shell(const char *command, char **output_text, int *exit_status, int *truncated,
     psi_process_progress_cb on_chunk, void *userdata, const struct psi_abort_signal *abort_signal) {

@@ -84,8 +84,6 @@ function M.apropos(pattern)
   return hits
 end
 
--- ---------------------------------------------------------- bootstrap --
-
 local function safe_call(fn)
   if type(fn) ~= "function" then
     return nil

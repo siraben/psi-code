@@ -15,8 +15,6 @@ local function make_class(tag)
   return class
 end
 
--- ---------- Message ----------
-
 local Message = make_class("Message")
 M.Message = Message
 
@@ -35,8 +33,6 @@ function M.messages_from_alists(xs)
   end
   return out
 end
-
--- ---------- Tool ----------
 
 local Tool = make_class("Tool")
 M.Tool = Tool
@@ -66,8 +62,6 @@ function M.tool_to_alist(tool)
     execution_mode = tool.execution_mode,
   }
 end
-
--- ---------- ToolResult ----------
 
 local ToolResult = make_class("ToolResult")
 M.ToolResult = ToolResult
@@ -124,8 +118,6 @@ function M.tool_result_from_alist(t)
   return M.new_tool_result(t.ok and t.ok ~= false, t.tool or "unknown", t.error, extras)
 end
 
--- ---------- ToolFrame ----------
-
 local ToolFrame = make_class("ToolFrame")
 M.ToolFrame = ToolFrame
 
@@ -137,8 +129,6 @@ function M.new_tool_frame(tool, input, path, before_text)
     before_text = before_text,
   }, ToolFrame)
 end
-
--- ---------- ProcessResult ----------
 
 local ProcessResult = make_class("ProcessResult")
 M.ProcessResult = ProcessResult
@@ -159,16 +149,12 @@ function ProcessResult:ok()
   return self.status == 0
 end
 
--- ---------- ContextFile ----------
-
 local ContextFile = make_class("ContextFile")
 M.ContextFile = ContextFile
 
 function M.new_context_file(path, content)
   return setmetatable({ path = path, content = content }, ContextFile)
 end
-
--- ---------- CommandAction ----------
 
 local CommandAction = make_class("CommandAction")
 M.CommandAction = CommandAction

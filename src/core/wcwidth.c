@@ -38,7 +38,7 @@ struct psi_wcwidth_range {
 };
 
 /*
- * --- BEGIN data lifted from widecharwidth/widechar_width.h --------
+ * Data lifted from widecharwidth/widechar_width.h.
  *
  * The only edits made to this section are:
  *   - struct rename: widechar_range -> psi_wcwidth_range
@@ -1541,7 +1541,7 @@ static const struct psi_wcwidth_range widechar_widened_table[] = {
 };
 /* clang-format on */
 
-/* --- END data lifted from widecharwidth ----------------------------- */
+/* End of data lifted from widecharwidth. */
 
 static int psi_wcwidth_in_table(const struct psi_wcwidth_range *table, int len, int cp) {
     int lo;

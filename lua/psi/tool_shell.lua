@@ -8,13 +8,8 @@ local prelude = require("psi.prelude")
 
 local M = {}
 
--- ---------------------------------------------------------------------------
--- Streaming runner. Drives process_begin / process_poll / process_finish
--- from inside a coroutine and accumulates chunks in Lua so we can do
--- tail-truncation that matches pi-mono. When total bytes exceed the
--- in-memory threshold we additionally spill the full output to a temp
--- file (mirroring pi's fs.createWriteStream path), so the model can
--- read the rest with the `read` tool.
+-- Stream a process through begin/poll/finish, truncating captured output.
+-- Spill full output to a temporary file above the in-memory threshold.
 --
 -- Returns: { output=<string>, status=<int>, truncated=<bool>,
 --            temp_file_path=<string|nil>, total_bytes=<int>,
@@ -31,14 +26,10 @@ local M = {}
 --   notice         : "tail" or "head"; append the corresponding notice
 --                    when truncate_final truncates output
 --
--- Outside a coroutine (scripts, tests) we fall back to a blocking
--- psi.process_run / psi.process_run_argv. We then mimic the same
--- truncation logic on the returned text.
--- ---------------------------------------------------------------------------
+-- Outside a coroutine, process_run / process_run_argv runs synchronously
+-- with the same truncation policy.
 
 local function blocking_poll(handle, ms)
-  -- Outside a coroutine we can't yield. Just call the C primitive
-  -- directly; it blocks for up to `ms` ms waiting for output.
   return psi.process_poll(handle, ms or 50)
 end
 

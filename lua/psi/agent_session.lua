@@ -17,8 +17,6 @@ local providers = require("psi.api_registry")
 
 local M = {}
 
--- ---------- Provider routing ----------
---
 -- Selection rules, in priority:
 --   1. Explicit model prefix: "ollama/<name>", "anthropic/<name>",
 --      or "openrouter/<provider>/<name>" strips the first path

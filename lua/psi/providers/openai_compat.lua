@@ -70,7 +70,6 @@ end
 
 local safe_decode = prelude.safe_json_decode
 
--- ---------- HTTP error classification ----------
 --
 -- When a provider returns a non-2xx status, the response body is
 -- typically a JSON error envelope. Common shapes:
@@ -129,8 +128,6 @@ function M.classify_http_error(status, body, provider_name)
   return table.concat(parts, " ")
 end
 
--- ---------- Tool specs (identical across both providers) ----------
-
 function M.api_tool_specs(user_text)
   local full = tools.select_specs(user_text or "")
   local out = prelude.as_array({})
@@ -147,7 +144,6 @@ function M.api_tool_specs(user_text)
   return out
 end
 
--- ---------- Session -> OpenAI-style messages ----------
 --
 -- Chronological, no coalescing. Aborted/error assistants are skipped
 -- (matches pi's transform-messages). Orphan tool_use blocks are
@@ -275,8 +271,6 @@ function M.build_api_messages(session, system_prompt, cfg)
   return prelude.as_array(out)
 end
 
--- ---------- Persist assistant + tool_calls in v2 session shape ----------
-
 function M.persist_assistant(state, model, _content, tool_calls, cfg, stop_override, error_message)
   local blocks = prelude.array(#tool_calls + 2)
   -- Reasoning-model thinking (Qwen3, DeepSeek-R1, …) arrives via a
@@ -314,7 +308,6 @@ function M.persist_assistant(state, model, _content, tool_calls, cfg, stop_overr
   session_mod.append_assistant(text, blocks, meta)
 end
 
--- ---------- Streaming agent turn ----------
 --
 -- Generic against the OpenAI-compat request/response flow. Providers
 -- own the URL + headers + request body shape + stream parser +
@@ -341,8 +334,6 @@ function M.run_turn(opts, cfg)
   cfg.after_iteration = cfg.after_iteration or function() end
   return provider_loop.run_turn(opts, cfg)
 end
-
--- ---------- Non-streaming one-shot completion ----------
 
 local http_post_text = sched.http_post_text
 

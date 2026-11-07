@@ -41,8 +41,6 @@
         isLinux = pkgs.stdenv.hostPlatform.isLinux;
         cosmoBase = if isLinux then import nixpkgs-cosmo { inherit system; } else null;
 
-        # ---- Common metadata --------------------------------------------
-
         psiMeta = {
           description = "psi coding agent";
           homepage = "https://github.com/siraben/psi";
@@ -53,8 +51,6 @@
         };
 
         isX86_64Linux = system == "x86_64-linux";
-
-        # ---- curl with mbedTLS ------------------------------------------
 
         mbedtlsLibOnly = p: p.mbedtls.overrideAttrs (old: {
           cmakeFlags = (old.cmakeFlags or []) ++ [
@@ -95,8 +91,6 @@
           '';
         });
 
-        # ---- Shared dependency sets -------------------------------------
-
         buildDeps = { p, curlPkg ? curlWithMbedtls p, luaPkg ? luaFor p }: [
           p.argtable
           p.cjson
@@ -114,8 +108,6 @@
           export HOST_LIBS_ZLIB="-L${pkgs.zlib.out}/lib -lz"
         '';
 
-        # ---- Helpers ----------------------------------------------------
-
         mkApp = { name, description, extraInputs ? [], text }: let
           script = pkgs.writeShellApplication {
             inherit name text;
@@ -126,8 +118,6 @@
           program = "${script}/bin/${name}";
           meta.description = description;
         };
-
-        # ---- Package builder --------------------------------------------
 
         mkPsi = { p, stdenv ? p.stdenv, static ? false, extraMakeFlags ? [],
                    extraNativeBuildInputs ? [],
@@ -194,8 +184,6 @@
           meta = psiMeta // extraMeta;
         });
 
-        # ---- cosmocc helper ---------------------------------------------
-
         mkCosmoVariant = { pkgsCosmo, stripDebug ? true }:
           let
             cosmoHardening = [ "fortify" "fortify3" "stackprotector" "pic" ];
@@ -259,8 +247,6 @@
             inherit stripDebug;
           };
 
-        # ---- Optional Linux-only variants -----------------------------
-
         linuxOnlyPackages = lib.optionalAttrs isLinux {
           psi-static = let p = pkgs.pkgsStatic; in
             mkPsi {
@@ -285,8 +271,6 @@
             stripDebug = false;
           };
         };
-
-        # ---- Optional x86-only variants -------------------------------
 
         x86OnlyPackages = lib.optionalAttrs isX86_64Linux (let
           gcc46 = pkgs.wrapCCWith {
@@ -390,8 +374,6 @@
 
       in {
 
-        # ---- Packages ---------------------------------------------------
-
         packages = {
           psi = mkPsi { p = pkgs; };
           default = self.packages.${system}.psi;
@@ -406,8 +388,6 @@
             stdenv = pkgs.clangStdenv;
           };
         } // linuxOnlyPackages // x86OnlyPackages;
-
-        # ---- Apps -------------------------------------------------------
 
         apps = lib.optionalAttrs isLinux {
           valgrind = let
@@ -590,8 +570,6 @@
             '';
           };
         };
-
-        # ---- Dev shells -------------------------------------------------
 
         devShells = (lib.optionalAttrs isLinux {
           compcert = pkgs.mkShell {

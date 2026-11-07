@@ -1,9 +1,5 @@
-/* HTTP primitives. The agent turn loop used to live here; it's now in
- * provider modules under lua/psi/providers. This file is intentionally minimal — just
- * libcurl plumbing for the HTTP operations Lua needs: a streamed POST
- * (for SSE Messages endpoint), buffered POST (one-shot completion),
- * and buffered GET (metadata refresh). The abort_signal hook is wired via curl's transfer-info
- * callback so UI cancellation bypasses any network stall. */
+/* Buffered HTTP requests and synchronous streaming wrappers.
+ * curl's transfer-info callback observes abort_signal during network stalls. */
 
 #include <stdlib.h>
 #include <string.h>

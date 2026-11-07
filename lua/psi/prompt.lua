@@ -13,8 +13,6 @@ function M.find_context_files()
   return resources.context_files()
 end
 
--- ---------- system prompt ----------
---
 -- Structure ported from pi-mono (MIT, (c) 2025 Mario Zechner) with the
 -- harness name changed to "psi". See
 -- pi-mono/packages/coding-agent/src/core/system-prompt.ts.
@@ -287,8 +285,6 @@ function M.prepare_checkpoint()
   return projection.system_text(session.current_system())
 end
 
--- ---------- compaction request ----------
---
 -- Prompts ported verbatim from pi-mono
 -- (packages/coding-agent/src/core/compaction/{utils,compaction}.ts)
 -- under MIT (c) 2025 Mario Zechner.
@@ -491,8 +487,6 @@ function M.branch_summary_request(messages, custom_instructions)
   local user_prompt = "<conversation>\n" .. text .. "\n</conversation>\n\n" .. instructions
   return { COMPACTION_SYSTEM, user_prompt, BRANCH_SUMMARY_PREAMBLE }
 end
-
--- ---------- runtime summary and help ----------
 
 function M.runtime_summary()
   local info = psi.runtime_info()

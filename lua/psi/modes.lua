@@ -1,8 +1,6 @@
 -- psi.modes: top-level runtime mode implementations.
 --
--- Each mode used to live as its own C function in src/runtime/print_mode.c.
--- The C host now only inits the VM + session and delegates here; this
--- module owns the REPL loop, rendering policy, and command dispatch.
+-- Owns the REPL loop, rendering policy, and command dispatch.
 -- Shared session lifecycle and observer composition live in
 -- psi.agent_session_runtime.
 
@@ -14,8 +12,6 @@ local render = require("psi.render")
 local session = require("psi.session_manager")
 
 local M = {}
-
--- ---------- rendering helpers ----------
 
 local function fire(event, payload)
   local text = render.handle_event(event, payload or {})
@@ -102,8 +98,6 @@ local function run_agent_turn(runtime, user_text)
     after_turn = fire_after_turn,
   })
 end
-
--- ---------- mode handlers ----------
 
 function M.run_print(opts)
   local runtime, loaded, load_err = bootstrap_runtime(opts)
@@ -311,8 +305,6 @@ local function handle_slash_command(runtime, line)
     print("thinking set to " .. tostring(level))
     return true, false
   end
-  -- "new-session" / "reload" are now handled inside slash_commands.lua and
-  -- come back as "print" actions; no REPL-specific arms needed.
   if kind == "resume" then
     local path = action.payload
     local ok, err = runtime:switch_session(path)
@@ -414,8 +406,6 @@ end
 function M.run_tui(opts)
   return require("psi.tui_runtime").run(opts)
 end
-
--- ---------- dispatcher ----------
 
 local DISPATCH = {
   print = M.run_print,

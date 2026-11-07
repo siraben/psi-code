@@ -19,8 +19,7 @@ int psi_process_run_shell(const char *command, char **output_text, int *exit_sta
 int psi_process_run_argv(char *const argv[], char **output_text, int *exit_status, int *truncated,
     const struct psi_abort_signal *abort_signal);
 
-/* ------------------------------------------------------------------
- * Async shell execution.
+/* Async shell execution.
  *
  * Lua coroutines in the TUI must not block the main thread on shell
  * execution, so exec gets a begin/poll/finish split. begin forks
@@ -38,7 +37,7 @@ int psi_process_run_argv(char *const argv[], char **output_text, int *exit_statu
  *     if done then break end
  *   end
  *   local result = psi.process_finish(h)  -- table
- * ------------------------------------------------------------------ */
+ */
 
 struct psi_process_handle;
 
